@@ -1,12 +1,8 @@
+import { useEffect } from "react";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
-import { Heading, Picker, PickerItem, Link, Button } from "@react-spectrum/s2";
+import { Heading, Picker, PickerItem, Button } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-
-const podOptions = [
-  { id: "pod-checkout-redesign", name: "Checkout Redesign" },
-  { id: "pod-auth-revamp", name: "User Auth Revamp" },
-  { id: "pod-search-infra", name: "Search Infra v2" },
-];
+import { useOrgStore } from "../stores/orgStore";
 
 const topBar = style({
   display: "flex",
@@ -29,6 +25,12 @@ const contentArea = style({
 export function AppLayout() {
   const navigate = useNavigate();
   const { podId } = useParams();
+  const pods = useOrgStore((s) => s.pods);
+  const loadOrg = useOrgStore((s) => s.loadOrg);
+
+  useEffect(() => {
+    loadOrg();
+  }, [loadOrg]);
 
   return (
     <div className={appContainer}>
@@ -45,8 +47,8 @@ export function AppLayout() {
             if (key) navigate(`/pod/${key}`);
           }}
         >
-          {podOptions.map((p) => (
-            <PickerItem key={p.id} id={p.id}>
+          {pods.map((p) => (
+            <PickerItem key={p.pod_id} id={p.pod_id}>
               {p.name}
             </PickerItem>
           ))}

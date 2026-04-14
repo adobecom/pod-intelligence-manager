@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Pod, Conflict, ContextUpdate, Tunnel } from "@council/shared";
 import * as api from "../services/api";
+import type { ContextUpdateInput, SubmitResult } from "../services/api";
 
 interface PodStore {
   pod: Pod | null;
@@ -14,6 +15,9 @@ interface PodStore {
     conflictId: string,
     resolution: string,
   ) => Promise<void>;
+  submitContextUpdate: (
+    input: ContextUpdateInput,
+  ) => Promise<SubmitResult | null>;
 }
 
 export const usePodStore = create<PodStore>((set, get) => ({
@@ -50,5 +54,13 @@ export const usePodStore = create<PodStore>((set, get) => ({
         ),
       });
     }
+  },
+
+  submitContextUpdate: async (input: ContextUpdateInput) => {
+    const { pod, contextUpdates } = get();
+    if (!pod) return null;
+    const result = await api.submitContextUpdate(pod.pod_id, input);
+    set({ contextUpdates: [result.update, ...contextUpdates] });
+    return result;
   },
 }));

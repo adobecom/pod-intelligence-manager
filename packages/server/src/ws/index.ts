@@ -5,9 +5,11 @@ export interface WSEvent {
     | "context_update_added"
     | "conflict_created"
     | "conflict_resolved"
+    | "conflict_escalated"
     | "pressure_changed"
     | "living_doc_updated"
-    | "tunnel_status_changed";
+    | "tunnel_status_changed"
+    | "lint_completed";
   podId: string;
   payload: unknown;
 }

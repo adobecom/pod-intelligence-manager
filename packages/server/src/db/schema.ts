@@ -50,7 +50,8 @@ export function createTables() {
       impact_json TEXT NOT NULL DEFAULT '[]',
       resolved_by TEXT,
       resolution TEXT,
-      resolution_date TEXT
+      resolution_date TEXT,
+      escalation_level INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS pending_work (
@@ -97,6 +98,17 @@ export function createTables() {
       completed_date TEXT NOT NULL,
       duration_days INTEGER NOT NULL,
       final_pressure REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS lint_findings (
+      id TEXT PRIMARY KEY,
+      pod_id TEXT NOT NULL REFERENCES pods(pod_id),
+      timestamp TEXT NOT NULL,
+      type TEXT NOT NULL,
+      severity TEXT NOT NULL DEFAULT 'info',
+      summary TEXT NOT NULL,
+      area TEXT,
+      suggestion TEXT
     );
 
     CREATE TABLE IF NOT EXISTS living_docs (

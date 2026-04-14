@@ -3,6 +3,7 @@ import { classifyUpdate, type Classification } from "./classifier.js";
 import { deterministicMerge, llmMerge } from "./agents/merge.js";
 import { createConflict } from "./agents/conflict.js";
 import { regenerateLivingDoc } from "./agents/summary.js";
+import { detectOverlaps } from "./agents/cross-pod.js";
 import { isLLMAvailable } from "./llm.js";
 
 export interface CouncilResult {
@@ -65,6 +66,13 @@ export async function processUpdate(update: ContextUpdate): Promise<CouncilResul
 
   // 3. Regenerate the living doc from current DB state
   regenerateLivingDoc(update.pod_id);
+
+  // 4. Detect cross-pod overlaps (lightweight, runs on every update)
+  try {
+    detectOverlaps();
+  } catch {
+    // Non-critical — don't block the update pipeline
+  }
 
   return { classification, merged, conflictCreated, conflictId, note };
 }

@@ -8,6 +8,7 @@ import { StatusByArea } from "./StatusByArea";
 import { OpenConflictsList } from "./OpenConflictsList";
 import { ActiveTunnelsSummary } from "./ActiveTunnelsSummary";
 import { RecentActivity } from "./RecentActivity";
+import { LintFindings } from "./LintFindings";
 
 const column = style({
   display: "flex",
@@ -64,6 +65,8 @@ export function PodDashboard() {
       </div>
 
       <RecentActivity />
+
+      <LintFindings />
     </div>
   );
 }

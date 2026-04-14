@@ -10,6 +10,9 @@ import livingDocRoutes from "./routes/living-doc.js";
 import orgRoutes from "./routes/org.js";
 import pendingWorkRoutes from "./routes/pending-work.js";
 import wsRoutes from "./routes/ws.js";
+import { checkEscalations } from "./services/escalation.js";
+import { runLintPass } from "./council/agents/lint.js";
+import db from "./db/connection.js";
 
 const app = Fastify({ logger: true });
 
@@ -34,10 +37,36 @@ app.register(wsRoutes);
 app.get("/api/health", async () => ({ status: "ok" }));
 
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
+const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
+const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
     app.log.error(err);
     process.exit(1);
   }
+
+  // Periodic escalation checks
+  setInterval(() => {
+    try {
+      checkEscalations();
+    } catch (e) {
+      app.log.error(e, "Escalation check failed");
+    }
+  }, ESCALATION_INTERVAL_MS);
+
+  // Periodic lint pass across all active pods
+  setInterval(() => {
+    try {
+      const pods = db.prepare("SELECT pod_id FROM org_pod_summaries").all() as { pod_id: string }[];
+      for (const { pod_id } of pods) {
+        runLintPass(pod_id);
+      }
+    } catch (e) {
+      app.log.error(e, "Lint pass failed");
+    }
+  }, LINT_INTERVAL_MS);
+
+  app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
+  app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
 });

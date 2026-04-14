@@ -82,3 +82,85 @@ export async function getCrossPodOverlaps(): Promise<CrossPodOverlap[]> {
 export async function getArchivedPods(): Promise<ArchivedPod[]> {
   return fetchJSON<ArchivedPod[]>("/api/org/archived");
 }
+
+export async function createPod(input: {
+  name: string;
+  sprint_days?: number;
+  milestone_name?: string;
+}): Promise<Pod> {
+  return fetchJSON<Pod>("/api/pods", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function archivePod(podId: string): Promise<ArchivedPod> {
+  return fetchJSON<ArchivedPod>(`/api/pods/${podId}/archive`, {
+    method: "POST",
+  });
+}
+
+export interface LintFinding {
+  id: string;
+  pod_id: string;
+  timestamp: string;
+  type: string;
+  severity: string;
+  summary: string;
+  area: string | null;
+  suggestion: string | null;
+}
+
+export async function getLintFindings(podId: string): Promise<LintFinding[]> {
+  return fetchJSON<LintFinding[]>(`/api/pods/${podId}/lint-findings`);
+}
+
+export async function triggerLintPass(podId: string): Promise<{ findings: LintFinding[] }> {
+  return fetchJSON<{ findings: LintFinding[] }>(`/api/pods/${podId}/lint`, {
+    method: "POST",
+  });
+}
+
+export interface ContextUpdateInput {
+  agent_id?: string;
+  type: "progress" | "blocker" | "spec_change" | "question" | "decision";
+  scope: "frontend" | "backend" | "design" | "qa" | "infra" | "pm";
+  summary: string;
+  details: string;
+  status: "completed" | "in_progress" | "blocked";
+}
+
+export interface SubmitResult {
+  id: string;
+  update: ContextUpdate;
+  council: {
+    classification: string;
+    merged: boolean;
+    conflictCreated: boolean;
+    conflictId?: string;
+    note?: string;
+  };
+}
+
+export async function submitContextUpdate(
+  podId: string,
+  input: ContextUpdateInput,
+): Promise<SubmitResult> {
+  return fetchJSON<SubmitResult>(`/api/pods/${podId}/context-updates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      agent_id: input.agent_id ?? "human-user",
+      type: input.type,
+      scope: input.scope,
+      summary: input.summary,
+      details: input.details,
+      status: input.status,
+      artifacts: [],
+      blocks: [],
+      blocked_by: [],
+      needs_input_from: [],
+    }),
+  });
+}
