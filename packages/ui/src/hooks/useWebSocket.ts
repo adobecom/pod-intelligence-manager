@@ -12,6 +12,8 @@ export function useWebSocket(
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
 
   useEffect(() => {
     if (!podId) return;
@@ -28,7 +30,7 @@ export function useWebSocket(
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data) as WSEvent;
-          onEvent(data);
+          onEventRef.current(data);
         } catch {
           // ignore malformed messages
         }
@@ -53,5 +55,5 @@ export function useWebSocket(
       clearTimeout(reconnectTimeout.current);
       wsRef.current?.close();
     };
-  }, [podId, onEvent]);
+  }, [podId]);
 }

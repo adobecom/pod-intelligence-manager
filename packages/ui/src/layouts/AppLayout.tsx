@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, useParams } from "react-router-dom";
-import { Heading, Picker, PickerItem, Link } from "@react-spectrum/s2";
+import { Heading, Picker, PickerItem, Link, Button } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 
 const podOptions = [
@@ -12,12 +12,7 @@ const topBar = style({
   display: "flex",
   alignItems: "center",
   gap: 16,
-  paddingX: 16,
-  paddingY: 8,
-  borderBottomWidth: 1,
-  borderStyle: "solid",
-  borderColor: "gray-300",
-  backgroundColor: "layer-1",
+  padding: 24,
 });
 
 const appContainer = style({
@@ -58,9 +53,9 @@ export function AppLayout() {
         </Picker>
 
         <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end" })}>
-          <Link onPress={() => navigate("/org")}>
+          <Button onPress={() => navigate("/org")}>
             Org Dashboard
-          </Link>
+          </Button>
         </div>
       </div>
 

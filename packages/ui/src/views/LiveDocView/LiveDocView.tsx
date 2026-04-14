@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { Heading, ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import * as api from "../../services/api";
 
 const column = style({ display: "flex", flexDirection: "column", gap: 16 });
@@ -45,7 +46,7 @@ export function LiveDocView() {
           fontSize: 14,
         }}
       >
-        <Markdown>{doc}</Markdown>
+        <Markdown remarkPlugins={[remarkGfm]}>{doc}</Markdown>
       </div>
     </div>
   );

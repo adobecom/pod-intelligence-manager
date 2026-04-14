@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Heading, Text, ActionButton } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useNavigate, useParams } from "react-router-dom";
@@ -42,8 +43,10 @@ const idRow = style({
 });
 
 export function OpenConflictsList() {
-  const conflicts = usePodStore((s) =>
-    s.conflicts.filter((c) => c.status !== "resolved"),
+  const allConflicts = usePodStore((s) => s.conflicts);
+  const conflicts = useMemo(
+    () => allConflicts.filter((c) => c.status !== "resolved"),
+    [allConflicts],
   );
   const navigate = useNavigate();
   const { podId } = useParams();

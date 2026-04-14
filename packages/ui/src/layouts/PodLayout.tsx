@@ -5,6 +5,8 @@ import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../stores/podStore";
 import { useWebSocket } from "../hooks/useWebSocket";
 
+const loadPod = usePodStore.getState().loadPod;
+
 const navItems = [
   { path: "", label: "Dashboard", end: true },
   { path: "conflicts", label: "Conflicts" },
@@ -20,10 +22,6 @@ const layoutContainer = style({
 
 const sidebar = style({
   width: 192,
-  backgroundColor: "layer-1",
-  borderEndWidth: 1,
-  borderStyle: "solid",
-  borderColor: "gray-300",
   paddingY: 12,
   flexShrink: 0,
 });
@@ -43,17 +41,18 @@ const loadingContainer = style({
 
 export function PodLayout() {
   const { podId } = useParams<{ podId: string }>();
-  const { loadPod, loading, pod } = usePodStore();
+  const loading = usePodStore((s) => s.loading);
+  const pod = usePodStore((s) => s.pod);
   const location = useLocation();
 
   useEffect(() => {
     if (podId) loadPod(podId);
-  }, [podId, loadPod]);
+  }, [podId]);
 
   const handleWSEvent = useCallback(() => {
     // On any WebSocket event, reload the pod data
     if (podId) loadPod(podId);
-  }, [podId, loadPod]);
+  }, [podId]);
 
   useWebSocket(podId, handleWSEvent);
 
