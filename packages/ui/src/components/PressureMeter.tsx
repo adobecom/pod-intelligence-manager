@@ -28,7 +28,7 @@ const container = style({
 
 const labelText = style({
   font: "body-2xs",
-  color: "gray-600",
+  color: "neutral-subdued",
 });
 
 interface PressureMeterProps {

@@ -12,7 +12,7 @@ const column = style({
 });
 
 const card = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   padding: 12,
   borderRadius: "default",
   borderWidth: 1,
@@ -54,7 +54,7 @@ export function OpenConflictsList() {
         Open Conflicts ({conflicts.length})
       </Heading>
       {conflicts.length === 0 ? (
-        <Text styles={style({ color: "gray-600" })}>
+        <Text styles={style({ color: "neutral-subdued" })}>
           No open conflicts
         </Text>
       ) : (
@@ -70,7 +70,7 @@ export function OpenConflictsList() {
                     <SeverityBadge severity={conflict.severity} />
                   </div>
                   <Text>{conflict.summary}</Text>
-                  <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+                  <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
                     Opened <RelativeTime timestamp={conflict.created_at} />
                     {" · "}
                     {conflict.sides.map((s) => s.contributor).join(" vs ")}

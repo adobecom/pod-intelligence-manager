@@ -28,7 +28,7 @@ const column = style({ display: "flex", flexDirection: "column", gap: 20 });
 const row = style({ display: "flex", gap: 12, flexWrap: "wrap" });
 const headerRow = style({ display: "flex", alignItems: "center", gap: 12 });
 const positionCard = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   borderRadius: "default",
   padding: 16,
   borderWidth: 1,
@@ -41,7 +41,7 @@ const positionCard = style({
 const positionContent = style({ display: "flex", flexDirection: "column", gap: 8 });
 const positionMeta = style({ display: "flex", alignItems: "center", gap: 8 });
 const well = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   borderRadius: "default",
   padding: 16,
   borderWidth: 1,
@@ -100,7 +100,7 @@ export function ConflictDetail() {
         {isResolved && <Badge variant="positive">Resolved</Badge>}
       </div>
 
-      <Text styles={style({ color: "gray-600" })}>
+      <Text styles={style({ color: "neutral-subdued" })}>
         Opened <RelativeTime timestamp={conflict.created_at} />
       </Text>
 
@@ -119,7 +119,7 @@ export function ConflictDetail() {
                 </Text>
               </div>
               <Text>{side.position}</Text>
-              <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+              <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
                 Submitted <RelativeTime timestamp={side.timestamp} />
                 {" · "}Ref: {side.context_update_id}
               </Text>
@@ -227,7 +227,7 @@ export function ConflictDetail() {
           <div className={well}>
             <Text>{conflict.resolution}</Text>
             <br />
-            <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+            <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
               Resolved by {conflict.resolved_by}{" "}
               <RelativeTime timestamp={conflict.resolution_date} />
             </Text>

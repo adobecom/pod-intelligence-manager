@@ -7,7 +7,7 @@ import { App } from "./App";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Provider colorScheme="light">
+    <Provider>
       <App />
     </Provider>
   </StrictMode>,

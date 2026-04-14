@@ -4,3 +4,77 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Sidebar navigation links — use Spectrum CSS vars so they adapt to color scheme */
+.nav-link {
+  display: block;
+  padding: 8px 16px;
+  text-decoration: none;
+  font-size: 14px;
+  color: var(--spectrum-neutral-subdued-content-color-default, var(--spectrum-gray-800));
+  background-color: transparent;
+  border-left: 3px solid transparent;
+}
+
+.nav-link[data-active="true"] {
+  color: var(--spectrum-accent-content-color-default, var(--spectrum-accent-color-900));
+  background-color: var(--spectrum-accent-background-color-default-alpha, var(--spectrum-accent-color-100));
+  border-left-color: var(--spectrum-accent-content-color-default, var(--spectrum-accent-color-900));
+}
+
+/* Markdown rendered content — inherits from Spectrum color scheme */
+.living-doc h1 {
+  font-size: 24px;
+  margin: 16px 0 8px;
+}
+
+.living-doc h2 {
+  font-size: 20px;
+  margin: 14px 0 6px;
+  border-bottom: 1px solid var(--spectrum-gray-300);
+  padding-bottom: 4px;
+}
+
+.living-doc h3 {
+  font-size: 16px;
+  margin: 12px 0 4px;
+}
+
+.living-doc p {
+  margin: 8px 0;
+}
+
+.living-doc table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.living-doc th {
+  text-align: left;
+  padding: 6px 12px;
+  border-bottom: 2px solid var(--spectrum-gray-400);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.living-doc td {
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--spectrum-gray-200);
+  font-size: 13px;
+}
+
+.living-doc ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+.living-doc li {
+  margin: 2px 0;
+}
+
+.living-doc hr {
+  border: none;
+  border-top: 1px solid var(--spectrum-gray-300);
+  margin: 12px 0;
+}

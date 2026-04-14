@@ -22,7 +22,7 @@ export function PodHeader({ pod }: PodHeaderProps) {
       <Badge variant="informative">
         Day {pod.day_number} of {pod.total_days}
       </Badge>
-      <Text styles={style({ color: "gray-600" })}>
+      <Text styles={style({ color: "neutral-subdued" })}>
         Sprint: {pod.sprint_start} — {pod.sprint_end}
       </Text>
     </div>

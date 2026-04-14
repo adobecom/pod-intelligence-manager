@@ -38,92 +38,14 @@ export function LiveDocView() {
         Living Doc
       </Heading>
       <div
+        className="living-doc"
         style={{
           maxWidth: 720,
           lineHeight: 1.6,
           fontSize: 14,
         }}
       >
-        <Markdown
-          components={{
-            h1: ({ children }) => (
-              <h1 style={{ fontSize: 24, margin: "16px 0 8px" }}>{children}</h1>
-            ),
-            h2: ({ children }) => (
-              <h2
-                style={{
-                  fontSize: 20,
-                  margin: "14px 0 6px",
-                  borderBottom: "1px solid var(--spectrum-gray-300)",
-                  paddingBottom: 4,
-                }}
-              >
-                {children}
-              </h2>
-            ),
-            h3: ({ children }) => (
-              <h3 style={{ fontSize: 16, margin: "12px 0 4px" }}>
-                {children}
-              </h3>
-            ),
-            p: ({ children }) => (
-              <p style={{ margin: "8px 0" }}>{children}</p>
-            ),
-            table: ({ children }) => (
-              <table
-                style={{
-                  borderCollapse: "collapse",
-                  width: "100%",
-                  margin: "8px 0",
-                }}
-              >
-                {children}
-              </table>
-            ),
-            th: ({ children }) => (
-              <th
-                style={{
-                  textAlign: "left",
-                  padding: "6px 12px",
-                  borderBottom: "2px solid var(--spectrum-gray-400)",
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                {children}
-              </th>
-            ),
-            td: ({ children }) => (
-              <td
-                style={{
-                  padding: "4px 12px",
-                  borderBottom: "1px solid var(--spectrum-gray-200)",
-                  fontSize: 13,
-                }}
-              >
-                {children}
-              </td>
-            ),
-            ul: ({ children }) => (
-              <ul style={{ margin: "4px 0", paddingLeft: 20 }}>{children}</ul>
-            ),
-            li: ({ children }) => (
-              <li style={{ margin: "2px 0" }}>{children}</li>
-            ),
-            hr: () => (
-              <hr
-                style={{
-                  border: "none",
-                  borderTop: "1px solid var(--spectrum-gray-300)",
-                  margin: "12px 0",
-                }}
-              />
-            ),
-            strong: ({ children }) => <strong>{children}</strong>,
-          }}
-        >
-          {doc}
-        </Markdown>
+        <Markdown>{doc}</Markdown>
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ const filterRow = style({ display: "flex", gap: 12, alignItems: "end", flexWrap:
 const feedColumn = style({ display: "flex", flexDirection: "column", gap: 8 });
 
 const card = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   padding: 16,
   borderRadius: "default",
   borderWidth: 1,
@@ -29,7 +29,7 @@ const card = style({
 const cardContent = style({ display: "flex", flexDirection: "column", gap: 8 });
 const tagRow = style({ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" });
 const detailWell = style({
-  backgroundColor: "gray-100",
+  backgroundColor: "layer-2",
   borderRadius: "default",
   padding: 12,
   marginTop: 4,
@@ -132,7 +132,7 @@ export function ContextFeed() {
           />
         ))}
         {filtered.length === 0 && (
-          <Text styles={style({ color: "gray-600" })}>
+          <Text styles={style({ color: "neutral-subdued" })}>
             No updates match your filters.
           </Text>
         )}
@@ -189,7 +189,7 @@ function FeedItem({
               </div>
             )}
             {update.blocked_by.length > 0 && (
-              <Text styles={style({ font: "body-2xs" })} UNSAFE_style={{ marginTop: 8 }}>
+              <Text styles={style({ font: "body-2xs", marginTop: 8 })}>
                 Blocked by: {update.blocked_by.join(", ")}
               </Text>
             )}

@@ -19,7 +19,7 @@ const podGrid = style({ display: "flex", gap: 16, flexWrap: "wrap" });
 
 const podCard = style({
   width: "[320px]",
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   padding: 20,
   borderRadius: "default",
   borderWidth: 1,
@@ -34,7 +34,7 @@ const overlapColumn = style({ display: "flex", flexDirection: "column", gap: 12 
 const archiveColumn = style({ display: "flex", flexDirection: "column", gap: 8 });
 
 const archiveCard = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   borderRadius: "default",
   padding: 16,
   borderWidth: 1,
@@ -132,7 +132,7 @@ export function OrgDashboard() {
                       <Text styles={style({ fontWeight: "bold" })}>
                         {pod.name}
                       </Text>
-                      <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+                      <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
                         Completed: {pod.completed_date} · {pod.duration_days}{" "}
                         days · Final pressure: {pod.final_pressure.toFixed(2)}
                       </Text>

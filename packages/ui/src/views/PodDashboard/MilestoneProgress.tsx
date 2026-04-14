@@ -3,7 +3,7 @@ import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import type { Milestone } from "@council/shared";
 
 const well = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   borderRadius: "default",
   padding: 16,
   borderWidth: 1,
@@ -32,7 +32,7 @@ export function MilestoneProgress({ milestone }: MilestoneProgressProps) {
           label={milestone.name}
           value={milestone.percent_complete}
         />
-        <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+        <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
           Target: {milestone.target_date}
         </Text>
       </div>

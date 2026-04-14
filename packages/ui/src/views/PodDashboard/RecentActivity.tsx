@@ -23,7 +23,7 @@ const activityRow = style({
   paddingX: 12,
   paddingY: 8,
   borderRadius: "default",
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
 });
 
 export function RecentActivity() {
@@ -49,7 +49,7 @@ export function RecentActivity() {
       <div className={column}>
         {recent.map((update) => (
           <div key={update.id} className={activityRow}>
-            <Text styles={style({ font: "body-2xs", color: "gray-600", whiteSpace: "nowrap" })}>
+            <Text styles={style({ font: "body-2xs", color: "neutral-subdued", whiteSpace: "nowrap" })}>
               <RelativeTime timestamp={update.timestamp} />
             </Text>
             <Text styles={style({ font: "body-xs", fontWeight: "bold" })}>

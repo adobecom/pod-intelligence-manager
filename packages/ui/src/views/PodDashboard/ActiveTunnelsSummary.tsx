@@ -10,7 +10,7 @@ const column = style({
 });
 
 const card = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   padding: 12,
   borderRadius: "default",
   borderWidth: 1,
@@ -40,7 +40,7 @@ export function ActiveTunnelsSummary() {
         Active Tunnels ({tunnels.length})
       </Heading>
       {tunnels.length === 0 ? (
-        <Text styles={style({ color: "gray-600" })}>
+        <Text styles={style({ color: "neutral-subdued" })}>
           No active tunnels
         </Text>
       ) : (
@@ -53,7 +53,7 @@ export function ActiveTunnelsSummary() {
                   <Text styles={style({ font: "body-sm", fontWeight: "bold" })}>
                     {tunnel.dev_name}
                   </Text>
-                  <Text styles={style({ font: "body-2xs", color: "gray-600" })}>
+                  <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
                     {tunnel.branch}
                   </Text>
                 </div>

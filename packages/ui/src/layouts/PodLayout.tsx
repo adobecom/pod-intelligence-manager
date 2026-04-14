@@ -20,7 +20,7 @@ const layoutContainer = style({
 
 const sidebar = style({
   width: 192,
-  backgroundColor: "gray-50",
+  backgroundColor: "layer-1",
   borderEndWidth: 1,
   borderStyle: "solid",
   borderColor: "gray-300",
@@ -79,21 +79,8 @@ export function PodLayout() {
                 key={path}
                 to={to}
                 end={end}
-                style={{
-                  display: "block",
-                  padding: "8px 16px",
-                  textDecoration: "none",
-                  fontSize: 14,
-                  color: isActive
-                    ? "var(--spectrum-accent-color-900)"
-                    : "var(--spectrum-gray-800)",
-                  backgroundColor: isActive
-                    ? "var(--spectrum-accent-color-100)"
-                    : "transparent",
-                  borderLeft: isActive
-                    ? "3px solid var(--spectrum-accent-color-900)"
-                    : "3px solid transparent",
-                }}
+                className="nav-link"
+                data-active={isActive || undefined}
               >
                 {label}
               </NavLink>

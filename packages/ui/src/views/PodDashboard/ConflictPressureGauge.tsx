@@ -3,7 +3,7 @@ import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { PressureMeter } from "../../components/PressureMeter";
 
 const well = style({
-  backgroundColor: "gray-75",
+  backgroundColor: "layer-1",
   borderRadius: "default",
   padding: 16,
   borderWidth: 1,
