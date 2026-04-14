@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import { createTables } from "./db/schema.js";
 import { seedDatabase } from "./db/seed.js";
+import { seedKnowledgeGraph } from "./db/seed-knowledge.js";
 import podRoutes from "./routes/pods.js";
 import conflictRoutes from "./routes/conflicts.js";
 import contextUpdateRoutes from "./routes/context-updates.js";
@@ -24,6 +25,7 @@ seedDatabase();
 
 // Initialize knowledge graph (load from disk into memory)
 initializeKnowledgeGraph("default");
+seedKnowledgeGraph();
 
 // Register WebSocket support
 await app.register(websocket);
