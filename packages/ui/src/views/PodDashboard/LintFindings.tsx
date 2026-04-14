@@ -47,14 +47,16 @@ export function LintFindings() {
   return (
     <div className={column}>
       <div className={headerRow}>
-        <Heading level={3} styles={style({ marginY: 0 })}>
-          Lint Findings
+        <div className={style({ display: "flex", alignItems: "center", gap: 8 })}>
+          <Heading level={3} styles={style({ marginY: 0 })}>
+            Lint Findings
+          </Heading>
           {findings.length > 0 && (
-            <Badge variant="notice" styles={style({ marginStart: 8 })}>
+            <Badge variant="notice">
               {findings.length}
             </Badge>
           )}
-        </Heading>
+        </div>
         <ActionButton onPress={runLint} isDisabled={running}>
           {running ? "Running..." : "Run Lint"}
         </ActionButton>

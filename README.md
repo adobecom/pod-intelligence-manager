@@ -8,6 +8,24 @@ Three pillars:
 2. **Council UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
 3. **FE Tunneling** -- Expo-style localhost tunneling (planned; not yet implemented).
 
+## Quick Demo
+
+Run these three commands in separate terminals to see everything working:
+
+```bash
+pnpm install
+pnpm --filter @council/server dev      # Terminal 1 — backend on :4000
+pnpm --filter @council/ui dev          # Terminal 2 — UI on :5173
+```
+
+Then run the guided demo (creates a pod, submits updates, triggers a conflict, resolves it):
+
+```bash
+npx tsx examples/demo-full.ts
+```
+
+Open **http://localhost:5173** and watch the Org Dashboard, Pod Dashboard, Conflict Center, and Living Doc update in real time as the demo runs.
+
 ## Prerequisites
 
 - **Node.js** >= 20
@@ -173,6 +191,48 @@ const conflicts = await council.getConflicts();
 const updates = await council.getUpdates();
 ```
 
+### `@council/cli`
+
+Command-line interface for pod management, context submission, and tunnel control. Run via `npx tsx packages/cli/src/index.ts` (or `council` after building).
+
+**Pod management:**
+
+```bash
+council pod create --name "My Sprint"        # Create a new pod
+council pod list                              # List active pods
+council pod status pod-my-sprint              # Show pod details
+council pod archive pod-my-sprint             # Archive a completed pod
+```
+
+**Context updates:**
+
+```bash
+council report \
+  --pod pod-my-sprint \
+  --type progress \
+  --scope frontend \
+  --summary "Built the hero section" \
+  --details "Responsive layout with animated gradient." \
+  --status completed
+```
+
+**Living doc and lint:**
+
+```bash
+council doc pod-my-sprint                     # Print the living doc
+council lint pod-my-sprint                    # Run a lint pass
+```
+
+**Tunnel management:**
+
+```bash
+council tunnel start --pod pod-my-sprint --port 3000 --dev alice
+council tunnel list --pod pod-my-sprint
+council tunnel stop --pod pod-my-sprint --tunnel <tunnelId>
+```
+
+All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `COUNCIL_SERVER_URL`.
+
 ## Running the Demo Agent
 
 With the server running:
@@ -182,6 +242,36 @@ npx tsx examples/demo-agent.ts
 ```
 
 This creates two agents (frontend + backend), submits various update types (progress, decision, blocker), fetches the regenerated living doc, and prints the Council's classification for each update.
+
+## Running the Full Demo
+
+The full demo walks through the complete lifecycle — pod creation, updates, conflicts, resolution, and lint:
+
+```bash
+npx tsx examples/demo-full.ts
+```
+
+Or use the CLI-based demo:
+
+```bash
+bash examples/demo-cli.sh
+```
+
+## What You'll See
+
+With the server and UI running, here's what each view shows:
+
+| View | URL | What to Look For |
+|------|-----|------------------|
+| **Org Dashboard** | `/org` | All pods with pressure gauges, conflict counts, and tunnel activity |
+| **Pod Dashboard** | `/pod/:id` | Health banner, milestone progress, area status grid, lint findings |
+| **Conflict Center** | `/pod/:id/conflicts` | Open vs. resolved conflicts, severity badges, jump to detail |
+| **Conflict Detail** | `/pod/:id/conflict/:cid` | Side-by-side positions, Council Master analysis, resolution buttons |
+| **Living Doc** | `/pod/:id/doc` | Auto-generated markdown with health, decisions, context stream |
+| **Context Feed** | `/pod/:id/feed` | Filterable stream of all updates + submission form at the top |
+| **Tunnel Dashboard** | `/pod/:id/tunnels` | Active tunnels with status lights, dev names, branches, URLs |
+
+Everything updates in real time via WebSocket. Submit a context update and watch the Living Doc regenerate instantly.
 
 ## Scripts
 
@@ -271,10 +361,9 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 | Real-time | WebSocket (native, via `@fastify/websocket`) |
 | TypeScript | Strict mode, ES2022 target |
 
-## Not Yet Implemented
+## Not Yet Implemented (Deferred to AWS Deployment)
 
-- **CLI** (`packages/cli`) -- `npx council tunnel start`, `npx council pod create`
-- **FE Tunneling** -- Outbound WebSocket tunnels for exposing local dev servers
+- **FE Tunneling** -- Real outbound WebSocket tunnels with proxy (localhost stub works via CLI)
 - **AWS Infrastructure** (`packages/infra`) -- CDK stack for API Gateway, Lambda, DynamoDB, S3, Route 53
 - **Adobe IMS auth** -- Currently no authentication
 - **Slack integration** -- Conflict notifications and emoji-based resolution

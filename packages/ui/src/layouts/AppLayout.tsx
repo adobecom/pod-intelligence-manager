@@ -1,8 +1,10 @@
-import { useEffect } from "react";
-import { Outlet, useNavigate, useParams } from "react-router-dom";
-import { Heading, Picker, PickerItem, Button } from "@react-spectrum/s2";
+import { useEffect, useCallback } from "react";
+import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
+import { Heading, Picker, PickerItem, Button, StatusLight } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useOrgStore } from "../stores/orgStore";
+import { usePodStore } from "../stores/podStore";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 const topBar = style({
   display: "flex",
@@ -25,12 +27,24 @@ const contentArea = style({
 export function AppLayout() {
   const navigate = useNavigate();
   const { podId } = useParams();
+  const location = useLocation();
   const pods = useOrgStore((s) => s.pods);
   const loadOrg = useOrgStore((s) => s.loadOrg);
+  const loadPod = usePodStore((s) => s.loadPod);
+
+  const isOrgPage = location.pathname === "/org";
 
   useEffect(() => {
     loadOrg();
   }, [loadOrg]);
+
+  const handleWSEvent = useCallback(() => {
+    if (podId) loadPod(podId);
+  }, [podId, loadPod]);
+
+  const wsStatus = useWebSocket(podId, handleWSEvent);
+  const wsVariant = wsStatus === "connected" ? "positive" : wsStatus === "connecting" ? "notice" : "negative";
+  const wsLabel = wsStatus === "connected" ? "Live" : wsStatus === "connecting" ? "Connecting" : "Disconnected";
 
   return (
     <div className={appContainer}>
@@ -54,11 +68,15 @@ export function AppLayout() {
           ))}
         </Picker>
 
-        <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end" })}>
-          <Button onPress={() => navigate("/org")}>
-            Org Dashboard
-          </Button>
-        </div>
+        {podId && <StatusLight variant={wsVariant}>{wsLabel}</StatusLight>}
+
+        {!isOrgPage && (
+          <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end" })}>
+            <Button onPress={() => navigate("/org")}>
+              Org Dashboard
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className={contentArea}>

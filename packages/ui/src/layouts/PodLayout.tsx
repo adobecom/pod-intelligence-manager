@@ -1,9 +1,8 @@
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 import { Outlet, useParams, NavLink, useLocation } from "react-router-dom";
-import { ProgressCircle, StatusLight } from "@react-spectrum/s2";
+import { ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../stores/podStore";
-import { useWebSocket } from "../hooks/useWebSocket";
 
 const loadPod = usePodStore.getState().loadPod;
 
@@ -49,15 +48,6 @@ export function PodLayout() {
     if (podId) loadPod(podId);
   }, [podId]);
 
-  const handleWSEvent = useCallback(() => {
-    // On any WebSocket event, reload the pod data
-    if (podId) loadPod(podId);
-  }, [podId]);
-
-  const wsStatus = useWebSocket(podId, handleWSEvent);
-  const wsVariant = wsStatus === "connected" ? "positive" : wsStatus === "connecting" ? "notice" : "negative";
-  const wsLabel = wsStatus === "connected" ? "Live" : wsStatus === "connecting" ? "Connecting" : "Disconnected";
-
   if (loading || !pod) {
     return (
       <div className={loadingContainer}>
@@ -69,9 +59,6 @@ export function PodLayout() {
   return (
     <div className={layoutContainer}>
       <div className={sidebar}>
-        <div style={{ padding: "0 12px 8px", borderBottom: "1px solid var(--spectrum-gray-300)" }}>
-          <StatusLight variant={wsVariant}>{wsLabel}</StatusLight>
-        </div>
         <nav>
           {navItems.map(({ path, label, end }) => {
             const to = `/pod/${podId}${path ? `/${path}` : ""}`;
