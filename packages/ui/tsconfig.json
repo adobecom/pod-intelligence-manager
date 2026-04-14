@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "noEmit": true,
+    "paths": {
+      "@council/shared": ["../shared/src"]
+    }
+  },
+  "include": ["src"],
+  "references": [{ "path": "../shared" }]
+}
