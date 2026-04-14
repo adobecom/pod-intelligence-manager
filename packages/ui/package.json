@@ -17,6 +17,8 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.5.0",
     "remark-gfm": "^4.0.1",
+    "vis-data": "^7.1.9",
+    "vis-network": "^9.1.9",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

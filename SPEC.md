@@ -579,25 +579,51 @@ knowledge_extraction:
       source_context: "ctx-0042 through ctx-0067"
 ```
 
-**Where learnings live:**
-- Stored in DynamoDB under the **org knowledge base** (new table, separate from pod state).
-- Tagged by domain so the Cross-Pod Agent can surface relevant learnings to new pods.
+**Where learnings live — the Knowledge Graph:**
+
+Learnings are stored as a **persistent knowledge graph** — a connected structure of nodes (learnings) and edges (semantic relationships). This graph is the org's accumulated intelligence, queryable by agents with token budgets to minimize context window bloat.
+
+- **Storage layer (production target):** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries (GSIs on domain, type, confidence, source pod). The graph is loaded into memory on server start for fast traversal.
+- **Storage layer (local dev):** Filesystem at `.data/knowledge-graph/{org_id}/graph-latest.json` with versioned snapshots. The interface is designed so swapping to S3 requires re-implementing 3 functions.
+- **Graph structure:**
+  - **Nodes** (types: `decision`, `pattern`, `anti_pattern`, `resolved_conflict`, `scope_insight`) — each tagged by domain, confidence level (`extracted` from DB vs `inferred` by LLM), and source pod.
+  - **Edges** (types: `relates_to`, `supersedes`, `contradicts`, `builds_on`, `resolved_by`) — computed via keyword overlap + type-specific rules, optionally enriched by LLM.
+  - **Communities** — clusters of related learnings detected via label propagation algorithm.
+  - **Hubs** — high-degree nodes representing key organizational patterns.
+- **Confidence levels** (inspired by graphify): `extracted` = deterministic from DB data (0.9 confidence), `inferred` = LLM-generated insights (0.4–0.85 depending on model confidence).
+
+**How agents query the graph (token-budgeted):**
+
+The critical design principle: agents never see the full graph. They request context with a token budget, and the server returns the highest-value subset that fits.
+
+```typescript
+// SDK usage — an agent gets relevant learnings in 1 line
+const learnings = await agent.getRelevantLearnings(2000); // 2000 token budget
+
+// Server-side: filter by domain → rank by relevance → truncate to budget
+// Relevance = domain overlap (0.4) + keyword match (0.3) + confidence (0.15) + recency (0.1) + hub bonus (0.05)
+```
+
+API endpoints:
+- `POST /api/knowledge/query` — token-budgeted query with filters (domains, types, confidence min, text search)
+- `GET /api/knowledge/relevant?scopes=frontend&maxTokens=2000` — convenience for agents
+- `GET /api/knowledge/precedents?conflict=<summary>&maxTokens=1000` — conflict precedent lookup
+- `POST /api/knowledge/nodes/:id/curate` — human approval/rejection/editing of learnings
 
 **How learnings are used:**
-- When a new pod is created with `npx council pod create`, the Council Master checks the org knowledge base for learnings that match the pod's scope tags.
-- Relevant learnings are included in the pod's initial living doc as a "Prior Org Knowledge" section:
-  ```
-  ## Prior Org Knowledge (from completed pods)
-  - Zustand preferred over Redux for sprint-scoped state (from: Checkout Redesign pod)
-  - Formalize API contracts before parallel FE/BE work (from: Checkout Redesign pod)
-  - Discount/promo logic typically needs 1.5x estimated time (from: Checkout Redesign pod)
-  ```
-- These are advisory — the new pod can override any prior learning. But they prevent the org from repeating the same mistakes or re-debating settled questions.
+- **New pod seeding:** When `npx council pod create` runs, the server queries the knowledge graph for learnings matching the pod's scopes (3000 token budget) and appends a "Historical Knowledge Context" section to the initial living doc.
+- **Living doc enrichment:** The Summary Agent includes a "Knowledge Context" section in every living doc regeneration (1500 token budget, confidence >= 0.6). This evolves as the pod's scopes and conflicts narrow.
+- **Conflict precedents:** When the Conflict Agent creates a conflict, it queries `getPrecedents()` and includes historical resolutions in its LLM analysis prompt, enabling it to say: "A similar conflict in the Onboarding pod was resolved by adopting approach X."
+- **Cross-pod historical enrichment:** The Cross-Pod Agent enriches overlap advisories with historical learnings from the knowledge graph, connecting current inter-pod overlaps to organizational memory.
+- These are advisory — new pods can override any prior learning. But they prevent the org from repeating the same mistakes or re-debating settled questions.
 
 **The compounding effect:**
-After 10 pods, the org knowledge base has a rich set of patterns, anti-patterns, and scope insights. New pods start with increasingly useful context. The Cross-Pod Agent gets smarter at detecting potential issues because it's seen how similar situations resolved in the past. The org builds institutional memory that survives individual team turnover.
+After 10 pods, the knowledge graph has a rich network of patterns, anti-patterns, and scope insights with semantic relationships between them. Community detection groups related learnings, hub identification highlights the most interconnected organizational patterns. New pods start with increasingly useful context. The Cross-Pod Agent gets smarter because it draws on historical data, not just active pod overlap.
 
-**Cost:** One Knowledge Extraction Agent call per completed pod (Sonnet-class, needs to reason about patterns). ~$0.10 per pod. Over 50 pods/year, that's $5 for an ever-growing institutional knowledge base.
+**Human curation:**
+The Knowledge Graph UI (`/knowledge` route in the Council UI) lets humans inspect, approve, reject, and edit extracted learnings before they become trusted organizational memory. Uncurated learnings are still queryable but can be filtered out with `curated_only: true`.
+
+**Cost:** One Knowledge Extraction Agent call per completed pod (Sonnet for LLM extraction + Haiku for edge inference). ~$0.05–0.15 per pod. Deterministic extraction (from DB) is free. The system gracefully degrades: no API key = deterministic-only extraction, which still provides useful knowledge.
 
 ### 3.12 Key Design Decisions (Resolved)
 

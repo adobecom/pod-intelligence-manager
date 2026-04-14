@@ -70,13 +70,19 @@ export function AppLayout() {
 
         {podId && <StatusLight variant={wsVariant}>{wsLabel}</StatusLight>}
 
-        {!isOrgPage && (
-          <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end" })}>
+        <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end", gap: 8 })}>
+          {!isOrgPage && (
             <Button onPress={() => navigate("/org")}>
               Org Dashboard
             </Button>
-          </div>
-        )}
+          )}
+          <Button
+            variant={location.pathname === "/knowledge" ? "accent" : "secondary"}
+            onPress={() => navigate("/knowledge")}
+          >
+            Knowledge
+          </Button>
+        </div>
       </div>
 
       <div className={contentArea}>

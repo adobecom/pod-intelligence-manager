@@ -115,5 +115,20 @@ export function createTables() {
       pod_id TEXT PRIMARY KEY,
       markdown TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_nodes (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT NOT NULL,
+      source_pod_id TEXT NOT NULL,
+      source_pod_name TEXT NOT NULL,
+      domains_json TEXT NOT NULL DEFAULT '[]',
+      confidence TEXT NOT NULL,
+      confidence_score REAL NOT NULL,
+      created_at TEXT NOT NULL,
+      curated INTEGER NOT NULL DEFAULT 0,
+      community_id TEXT
+    );
   `);
 }

@@ -9,9 +9,11 @@ import tunnelRoutes from "./routes/tunnels.js";
 import livingDocRoutes from "./routes/living-doc.js";
 import orgRoutes from "./routes/org.js";
 import pendingWorkRoutes from "./routes/pending-work.js";
+import graphRoutes from "./routes/graph.js";
 import wsRoutes from "./routes/ws.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./council/agents/lint.js";
+import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
 import db from "./db/connection.js";
 
 const app = Fastify({ logger: true });
@@ -19,6 +21,9 @@ const app = Fastify({ logger: true });
 // Initialize database
 createTables();
 seedDatabase();
+
+// Initialize knowledge graph (load from disk into memory)
+initializeKnowledgeGraph("default");
 
 // Register WebSocket support
 await app.register(websocket);
@@ -31,6 +36,7 @@ app.register(tunnelRoutes);
 app.register(livingDocRoutes);
 app.register(orgRoutes);
 app.register(pendingWorkRoutes);
+app.register(graphRoutes);
 app.register(wsRoutes);
 
 // Health check
@@ -39,6 +45,7 @@ app.get("/api/health", async () => ({ status: "ok" }));
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
+const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -67,6 +74,16 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }
   }, LINT_INTERVAL_MS);
 
+  // Periodic knowledge graph community detection refresh
+  setInterval(() => {
+    try {
+      refreshAnalysis();
+    } catch (e) {
+      app.log.error(e, "Knowledge graph refresh failed");
+    }
+  }, GRAPH_REFRESH_INTERVAL_MS);
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
+  app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import db from "../../db/connection.js";
+import { getRelevantLearnings } from "../../services/knowledge-graph.js";
 
 interface UpdateRow {
   pod_id: string;
@@ -74,12 +75,25 @@ export function detectOverlaps(): void {
       const shared = [...kwA].filter((kw) => kwB.has(kw));
       if (shared.length >= 5) {
         const topTerms = shared.slice(0, 5).join(", ");
+
+        // Enrich with historical knowledge
+        let advisory = `Both pods are working on related concepts (${topTerms}). Coordinate to avoid conflicting approaches.`;
+        try {
+          const historicalLearnings = getRelevantLearnings(shared.slice(0, 3), [], 500);
+          if (historicalLearnings.nodes.length > 0) {
+            const relevantNote = historicalLearnings.nodes[0];
+            advisory += ` Historical note: "${relevantNote.summary}" (from ${relevantNote.source_pod_name}).`;
+          }
+        } catch {
+          // Knowledge graph may not be initialized — skip silently
+        }
+
         insert.run(
           `overlap-${randomUUID().slice(0, 8)}`,
           podA.name,
           podB.name,
           `Shared context: ${topTerms}`,
-          `Both pods are working on related concepts (${topTerms}). Coordinate to avoid conflicting approaches.`,
+          advisory,
         );
       }
     }

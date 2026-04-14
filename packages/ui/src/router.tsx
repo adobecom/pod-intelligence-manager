@@ -8,6 +8,7 @@ import { ConflictDetail } from "./views/ConflictCenter/ConflictDetail";
 import { LiveDocView } from "./views/LiveDocView/LiveDocView";
 import { ContextFeed } from "./views/ContextFeed/ContextFeed";
 import { TunnelDashboard } from "./views/TunnelDashboard/TunnelDashboard";
+import { KnowledgeGraphView } from "./views/KnowledgeGraph/KnowledgeGraph";
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <Navigate to="/org" replace /> },
       { path: "/org", element: <OrgDashboard /> },
+      { path: "/knowledge", element: <KnowledgeGraphView /> },
       {
         path: "/pod/:podId",
         element: <PodLayout />,

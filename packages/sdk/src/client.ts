@@ -7,6 +7,8 @@ import type {
   Scope,
   Artifact,
   InputRequest,
+  KnowledgeQueryOptions,
+  KnowledgeQueryResult,
 } from "@council/shared";
 
 export interface CouncilClientConfig {
@@ -95,5 +97,30 @@ export class CouncilClient {
   // Fetch context updates for the pod
   async getUpdates(): Promise<ContextUpdate[]> {
     return fetchJSON<ContextUpdate[]>(this.url(`/api/pods/${this.config.podId}/context-updates`));
+  }
+
+  // Query the organizational knowledge graph with token budget
+  async queryKnowledge(options: KnowledgeQueryOptions): Promise<KnowledgeQueryResult> {
+    return fetchJSON<KnowledgeQueryResult>(this.url("/api/knowledge/query"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options),
+    });
+  }
+
+  // Get relevant learnings for this agent's scope with a token budget
+  async getRelevantLearnings(maxTokens: number = 2000): Promise<KnowledgeQueryResult> {
+    const scopes = encodeURIComponent(this.config.scope);
+    return fetchJSON<KnowledgeQueryResult>(
+      this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}`),
+    );
+  }
+
+  // Look up historical precedents for a conflict
+  async getPrecedents(conflictSummary: string, maxTokens: number = 1000): Promise<KnowledgeQueryResult> {
+    const conflict = encodeURIComponent(conflictSummary);
+    return fetchJSON<KnowledgeQueryResult>(
+      this.url(`/api/knowledge/precedents?conflict=${conflict}&maxTokens=${maxTokens}`),
+    );
   }
 }

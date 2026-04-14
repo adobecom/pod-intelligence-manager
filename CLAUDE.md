@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-This is a **pre-implementation repository**. The full spec lives in `SPEC.md`. No code exists yet. All architectural decisions referenced below are sourced from that spec.
+Active implementation. Core backend (Fastify server, SQLite, WebSocket), Council Master, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. Running locally on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.
 
 ## What This Is
 
@@ -48,12 +48,12 @@ council/
 - Does NOT do feature work; delegates reasoning to Committee agents
 - Enforces role-based permissions for spec changes and conflict resolutions
 
-### Committee Agents (Claude/Bedrock)
+### Committee Agents (Claude API — Anthropic SDK)
 - **Merge Agent** — Haiku model; handles additive, non-overlapping updates without LLM when possible
-- **Conflict Agent** — Sonnet model; detects contradictions, creates conflict records
-- **Summary Agent** — Renders living doc `.md` from DynamoDB state to S3; runs periodic lint pass every 2 hours
-- **Cross-Pod Agent** — Inter-pod advisory (read-only, non-blocking)
-- **Knowledge Extraction Agent** — Distills learnings when a pod completes
+- **Conflict Agent** — Sonnet model; detects contradictions, creates conflict records; queries knowledge graph for historical precedents
+- **Summary Agent** — Renders living doc `.md` from DB state; runs periodic lint pass every 2 hours; includes "Knowledge Context" section from org memory
+- **Cross-Pod Agent** — Inter-pod advisory (read-only, non-blocking); enriches advisories with historical learnings from the knowledge graph
+- **Knowledge Extraction Agent** — Distills learnings when a pod is archived; deterministic base (decisions, resolved conflicts, blockers from DB) + optional LLM-enhanced extraction (Sonnet). Outputs `EnhancedPodLearning[]` with confidence levels and domain tags.
 
 ### Living Doc
 - **Read-only output** assembled from DynamoDB state — never edited directly
@@ -77,10 +77,21 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 2. LLM system prompts: explicit instruction to never output secrets
 3. Summary Agent: pattern scan before every S3 write
 
+### Knowledge Graph (Persistent Org Memory)
+- **Purpose:** The AI Council is the org's persistent knowledge base. Learnings accumulate across all pod lifecycles. Agents in new pods query it with token budgets to get relevant historical context without context window bloat.
+- **Storage:** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries. Local dev uses filesystem at `.data/knowledge-graph/`. The storage interface is 3 functions — swapping to S3 is a single-file change.
+- **Graph structure:** Nodes (decision, pattern, anti_pattern, resolved_conflict, scope_insight) + Edges (relates_to, supersedes, contradicts, builds_on, resolved_by) + Communities (label propagation clustering) + Hubs (high-degree nodes).
+- **Confidence levels:** `extracted` (deterministic from DB, score 0.9) vs `inferred` (LLM-generated, score 0.4–0.85). Inspired by graphify's approach.
+- **Token-budgeted queries:** Agents call `getRelevantLearnings(2000)` — server filters by domain, ranks by relevance, truncates to budget. Never dumps the full graph.
+- **Extraction trigger:** Pod archival (`POST /api/pods/:podId/archive`) → `extractKnowledgeEnhanced()` → `addLearningsToGraph()` → community detection → persist.
+- **Human curation:** UI at `/knowledge` lets humans approve/reject/edit learnings.
+- **Key files:** `packages/server/src/services/knowledge-graph.ts` (core), `graph-storage.ts` (S3 abstraction), `graph-analysis.ts` (algorithms), `packages/shared/src/types/graph.ts` (types)
+
 ### Cost Optimization
 - Additive updates (~60%) → deterministic merge, no LLM call
 - Routine merges (~30%) → Haiku
 - Conflict analysis (~10%) → Sonnet
+- Knowledge extraction → once per pod lifecycle (Sonnet + Haiku for edges), ~$0.05–0.15
 - Target: ~$5–8 per 5-day pod with 5 agents
 
 ## AWS Service Map
@@ -92,6 +103,8 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 | Compute | Lambda |
 | AI reasoning | Bedrock (Claude) or Claude API |
 | Living doc storage | S3 (versioned) |
+| Knowledge graph snapshots | S3 (versioned JSON) |
+| Knowledge graph queries | DynamoDB (GSIs on domain, type, confidence) |
 | State & metadata | DynamoDB |
 | Auth | Adobe IMS |
 | DNS | Route 53 |

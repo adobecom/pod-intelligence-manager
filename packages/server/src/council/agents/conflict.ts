@@ -4,6 +4,7 @@ import { isLLMAvailable, callLLMJSON } from "../llm.js";
 import type { ContextUpdate, Conflict } from "@council/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
+import { getPrecedents } from "../../services/knowledge-graph.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -50,6 +51,22 @@ export async function createConflict(
   let masterAnalysis = `Detected potential conflict between ${update.agent_id} and ${conflicting.agent_id} in ${update.scope} scope. Both agents have recent work that may overlap. Manual review recommended.`;
   let impact = [`May affect ${update.scope} deliverables`, "Review recommended before proceeding"];
 
+  // Look up historical precedents for this conflict
+  let precedentsContext = "";
+  try {
+    const conflictDesc = `${update.summary} vs ${conflicting.summary} in ${update.scope}`;
+    const precedents = getPrecedents(conflictDesc, 500);
+    if (precedents.nodes.length > 0) {
+      precedentsContext = "\n\n## Historical Precedents\n";
+      for (const p of precedents.nodes.slice(0, 3)) {
+        precedentsContext += `- ${p.summary} (from ${p.source_pod_name}, confidence: ${p.confidence_score.toFixed(1)})\n`;
+        if (p.details) precedentsContext += `  Details: ${p.details}\n`;
+      }
+    }
+  } catch {
+    // Knowledge graph may not be initialized — skip silently
+  }
+
   if (isLLMAvailable()) {
     const pod = db.prepare("SELECT name, day_number, total_days, conflict_pressure, milestone_json FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
     const openConflictCount = (db.prepare("SELECT COUNT(*) as count FROM conflicts WHERE pod_id = ? AND status != 'resolved'").get(podId) as { count: number }).count;
@@ -73,7 +90,7 @@ export async function createConflict(
 - Day ${pod?.day_number ?? "?"} of ${pod?.total_days ?? "?"}
 - Current conflict pressure: ${pod?.conflict_pressure ?? 0}
 - Open conflicts: ${openConflictCount}
-- Milestone: ${pod ? JSON.parse(pod.milestone_json).name : "Unknown"}`;
+- Milestone: ${pod ? JSON.parse(pod.milestone_json).name : "Unknown"}${precedentsContext}`;
 
     try {
       const response = await callLLMJSON<LLMConflictResponse>({

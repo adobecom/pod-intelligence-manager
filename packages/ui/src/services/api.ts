@@ -7,6 +7,11 @@ import type {
   CrossPodOverlap,
   ArchivedPod,
   PendingWork,
+  KnowledgeGraph,
+  KnowledgeStats,
+  KnowledgeQueryOptions,
+  KnowledgeQueryResult,
+  CurationRequest,
 } from "@council/shared";
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -119,6 +124,35 @@ export async function getLintFindings(podId: string): Promise<LintFinding[]> {
 export async function triggerLintPass(podId: string): Promise<{ findings: LintFinding[] }> {
   return fetchJSON<{ findings: LintFinding[] }>(`/api/pods/${podId}/lint`, {
     method: "POST",
+  });
+}
+
+// --- Knowledge Graph API ---
+
+export async function getKnowledgeGraph(): Promise<KnowledgeGraph> {
+  return fetchJSON<KnowledgeGraph>("/api/knowledge/graph");
+}
+
+export async function getKnowledgeStats(): Promise<KnowledgeStats> {
+  return fetchJSON<KnowledgeStats>("/api/knowledge/stats");
+}
+
+export async function queryKnowledge(options: KnowledgeQueryOptions): Promise<KnowledgeQueryResult> {
+  return fetchJSON<KnowledgeQueryResult>("/api/knowledge/query", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+  });
+}
+
+export async function curateKnowledgeNode(
+  nodeId: string,
+  request: CurationRequest,
+): Promise<void> {
+  await fetchJSON<{ ok: boolean }>(`/api/knowledge/nodes/${nodeId}/curate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
   });
 }
 

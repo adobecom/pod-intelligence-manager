@@ -25,6 +25,23 @@ export type {
 export type { Tunnel, TunnelStatus } from "./types/tunnel";
 
 export type {
+  KnowledgeNodeType,
+  ConfidenceLevel,
+  KnowledgeNode,
+  KnowledgeEdgeType,
+  KnowledgeEdge,
+  CommunitySummary,
+  KnowledgeGraph,
+  KnowledgeQueryFilters,
+  KnowledgeQueryOptions,
+  KnowledgeQueryResult,
+  KnowledgeStats,
+  EnhancedPodLearning,
+  CurationAction,
+  CurationRequest,
+} from "./types/graph";
+
+export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,

@@ -3,6 +3,7 @@ import db from "../db/connection.js";
 import type { Pod, PodArea, Milestone } from "@council/shared";
 import { regenerateLivingDoc } from "../council/agents/summary.js";
 import { runLintPass } from "../council/agents/lint.js";
+import { getRelevantLearnings } from "../services/knowledge-graph.js";
 
 interface PodRow {
   pod_id: string;
@@ -109,6 +110,48 @@ export default async function podRoutes(app: FastifyInstance) {
 
     // Generate initial living doc
     regenerateLivingDoc(podId);
+
+    // Seed with knowledge from past pods
+    try {
+      const allScopes = [...SCOPES];
+      const learnings = getRelevantLearnings(allScopes, [], 3000);
+      if (learnings.nodes.length > 0) {
+        let knowledgeSection = "\n## Historical Knowledge Context\n\n";
+        knowledgeSection += "The following learnings from past pods may be relevant:\n\n";
+
+        const byType = new Map<string, typeof learnings.nodes>();
+        for (const node of learnings.nodes) {
+          const existing = byType.get(node.type) ?? [];
+          existing.push(node);
+          byType.set(node.type, existing);
+        }
+
+        const typeLabels: Record<string, string> = {
+          pattern: "Patterns", anti_pattern: "Anti-Patterns to Avoid",
+          resolved_conflict: "Relevant Precedents", decision: "Past Decisions",
+          scope_insight: "Scope Insights",
+        };
+
+        for (const [type, nodes] of byType) {
+          knowledgeSection += `### ${typeLabels[type] ?? type}\n`;
+          for (const n of nodes) {
+            const conf = n.confidence_score >= 0.8 ? "high" : n.confidence_score >= 0.5 ? "medium" : "low";
+            knowledgeSection += `- [${conf}] ${n.summary} *(from: ${n.source_pod_name})*\n`;
+          }
+          knowledgeSection += "\n";
+        }
+
+        // Append to living doc
+        const existing = db.prepare("SELECT markdown FROM living_docs WHERE pod_id = ?").get(podId) as { markdown: string } | undefined;
+        if (existing) {
+          db.prepare("UPDATE living_docs SET markdown = ? WHERE pod_id = ?").run(
+            existing.markdown + knowledgeSection, podId,
+          );
+        }
+      }
+    } catch (err) {
+      app.log.error(err, "Knowledge seeding for new pod failed (non-blocking)");
+    }
 
     // Return the created pod
     const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];

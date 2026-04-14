@@ -1,6 +1,7 @@
 import db from "../../db/connection.js";
 import { getPressureLabel, getPressureLevel } from "@council/shared";
 import { broadcast } from "../../ws/index.js";
+import { getRelevantLearnings } from "../../services/knowledge-graph.js";
 
 interface PodRow {
   pod_id: string;
@@ -121,6 +122,27 @@ export function regenerateLivingDoc(podId: string): string {
       md += `- ${t.dev_name}: ${t.branch} → ${t.url}${statusIcon}\n`;
     }
     md += `\n`;
+  }
+
+  // Add knowledge context from org memory (token-budgeted)
+  try {
+    const activeScopes = areas.map(a => a.scope);
+    const conflictSummaries = openConflicts.map(c => c.summary);
+    const knowledgeResult = getRelevantLearnings(activeScopes, conflictSummaries, 1500);
+    if (knowledgeResult.nodes.length > 0) {
+      md += `## Knowledge Context\n\n`;
+      md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
+      for (const node of knowledgeResult.nodes.slice(0, 8)) {
+        const icon = node.type === "anti_pattern" ? "⚠" : node.type === "pattern" ? "✓" : "•";
+        md += `- ${icon} ${node.summary} *(${node.source_pod_name})*\n`;
+      }
+      if (knowledgeResult.truncated) {
+        md += `\n*${knowledgeResult.total_matching - knowledgeResult.nodes.length} more learnings available — query the knowledge graph for details.*\n`;
+      }
+      md += `\n`;
+    }
+  } catch {
+    // Knowledge graph may not be initialized yet — skip silently
   }
 
   // Write to database

@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
 import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "@council/shared";
+import { extractKnowledgeEnhanced } from "../council/agents/knowledge-extraction.js";
+import { addLearningsToGraph } from "../services/knowledge-graph.js";
+import { broadcastToAll } from "../ws/index.js";
 
 interface PodRow {
   pod_id: string;
@@ -45,6 +48,20 @@ export default async function orgRoutes(app: FastifyInstance) {
     db.prepare("DELETE FROM org_pod_summaries WHERE pod_id = ?").run(podId);
 
     const archived = db.prepare("SELECT * FROM archived_pods WHERE pod_id = ?").get(podId) as ArchivedPod;
-    return archived;
+
+    // Extract knowledge and add to the persistent graph
+    let learningsExtracted = 0;
+    try {
+      const learnings = await extractKnowledgeEnhanced(podId);
+      if (learnings.length > 0) {
+        const result = addLearningsToGraph(learnings, podId, pod.name);
+        learningsExtracted = result.nodesAdded;
+        broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
+      }
+    } catch (err) {
+      app.log.error(err, "Knowledge extraction failed during archival (non-blocking)");
+    }
+
+    return { ...archived, learnings_extracted: learningsExtracted };
   });
 }
