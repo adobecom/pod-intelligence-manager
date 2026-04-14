@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { Outlet, useParams, NavLink, useLocation } from "react-router-dom";
 import { ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../stores/podStore";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 const navItems = [
   { path: "", label: "Dashboard", end: true },
@@ -48,6 +49,13 @@ export function PodLayout() {
   useEffect(() => {
     if (podId) loadPod(podId);
   }, [podId, loadPod]);
+
+  const handleWSEvent = useCallback(() => {
+    // On any WebSocket event, reload the pod data
+    if (podId) loadPod(podId);
+  }, [podId, loadPod]);
+
+  useWebSocket(podId, handleWSEvent);
 
   if (loading || !pod) {
     return (

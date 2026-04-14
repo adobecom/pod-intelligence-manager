@@ -8,54 +8,51 @@ import type {
   ArchivedPod,
   PendingWork,
 } from "@council/shared";
-import {
-  pods,
-  conflicts,
-  contextUpdates,
-  tunnels,
-  orgPods,
-  crossPodOverlaps,
-  archivedPods,
-  livingDocs,
-  pendingWork,
-} from "../mocks/fixtures";
 
-// Swap this file's internals for real API calls when a backend exists.
+async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    if (res.status === 404) return null as T;
+    throw new Error(`API error: ${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export async function getPod(podId: string): Promise<Pod | null> {
-  return pods[podId] ?? null;
+  return fetchJSON<Pod | null>(`/api/pods/${podId}`);
 }
 
 export async function getConflicts(podId: string): Promise<Conflict[]> {
-  return conflicts[podId] ?? [];
+  return fetchJSON<Conflict[]>(`/api/pods/${podId}/conflicts`);
 }
 
 export async function getContextUpdates(
   podId: string,
 ): Promise<ContextUpdate[]> {
-  return contextUpdates[podId] ?? [];
+  return fetchJSON<ContextUpdate[]>(`/api/pods/${podId}/context-updates`);
 }
 
 export async function getTunnels(podId: string): Promise<Tunnel[]> {
-  return tunnels[podId] ?? [];
+  return fetchJSON<Tunnel[]>(`/api/pods/${podId}/tunnels`);
 }
 
 export async function getLivingDoc(podId: string): Promise<string> {
-  return livingDocs[podId] ?? "# No living doc available for this pod.";
+  const res = await fetch(`/api/pods/${podId}/living-doc`);
+  if (!res.ok) return "# No living doc available for this pod.";
+  return res.text();
 }
 
 export async function getPendingWork(
   conflictId: string,
 ): Promise<PendingWork[]> {
-  return pendingWork[conflictId] ?? [];
+  return fetchJSON<PendingWork[]>(`/api/conflicts/${conflictId}/pending-work`);
 }
 
 export async function getConflict(
   podId: string,
   conflictId: string,
 ): Promise<Conflict | null> {
-  const podConflicts = conflicts[podId] ?? [];
-  return podConflicts.find((c) => c.id === conflictId) ?? null;
+  return fetchJSON<Conflict | null>(`/api/pods/${podId}/conflicts/${conflictId}`);
 }
 
 export async function resolveConflict(
@@ -64,25 +61,24 @@ export async function resolveConflict(
   resolution: string,
   resolvedBy: string,
 ): Promise<Conflict | null> {
-  const podConflicts = conflicts[podId];
-  if (!podConflicts) return null;
-  const conflict = podConflicts.find((c) => c.id === conflictId);
-  if (!conflict) return null;
-  conflict.status = "resolved";
-  conflict.resolution = resolution;
-  conflict.resolved_by = resolvedBy;
-  conflict.resolution_date = new Date().toISOString();
-  return { ...conflict };
+  return fetchJSON<Conflict | null>(
+    `/api/pods/${podId}/conflicts/${conflictId}/resolve`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolution, resolved_by: resolvedBy }),
+    },
+  );
 }
 
 export async function getOrgPods(): Promise<OrgPodSummary[]> {
-  return orgPods;
+  return fetchJSON<OrgPodSummary[]>("/api/org/pods");
 }
 
 export async function getCrossPodOverlaps(): Promise<CrossPodOverlap[]> {
-  return crossPodOverlaps;
+  return fetchJSON<CrossPodOverlap[]>("/api/org/overlaps");
 }
 
 export async function getArchivedPods(): Promise<ArchivedPod[]> {
-  return archivedPods;
+  return fetchJSON<ArchivedPod[]>("/api/org/archived");
 }

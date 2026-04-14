@@ -1,0 +1,135 @@
+import db from "../../db/connection.js";
+import { getPressureLabel, getPressureLevel } from "@council/shared";
+import { broadcast } from "../../ws/index.js";
+
+interface PodRow {
+  pod_id: string;
+  name: string;
+  sprint_start: string;
+  sprint_end: string;
+  day_number: number;
+  total_days: number;
+  conflict_pressure: number;
+  milestone_json: string;
+}
+
+interface AreaRow {
+  scope: string;
+  owner: string;
+  status: string;
+  last_activity: string | null;
+}
+
+interface ConflictRow {
+  id: string;
+  summary: string;
+  severity: string;
+  status: string;
+}
+
+interface ContextUpdateRow {
+  agent_id: string;
+  timestamp: string;
+  type: string;
+  summary: string;
+}
+
+interface TunnelRow {
+  dev_name: string;
+  branch: string;
+  url: string;
+  status: string;
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+}
+
+function capitalizeStatus(status: string): string {
+  return status.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Template-based living doc generation from database state
+export function regenerateLivingDoc(podId: string): string {
+  const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+  if (!pod) return `# Pod not found: ${podId}`;
+
+  const milestone = JSON.parse(pod.milestone_json) as { name: string; target_date: string; percent_complete: number };
+  const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
+  const conflicts = db.prepare("SELECT id, summary, severity, status FROM conflicts WHERE pod_id = ? ORDER BY created_at DESC").all(podId) as ConflictRow[];
+  const openConflicts = conflicts.filter(c => c.status !== "resolved");
+  const updates = db.prepare("SELECT agent_id, timestamp, type, summary FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC LIMIT 10").all(podId) as ContextUpdateRow[];
+  const decisions = db.prepare("SELECT agent_id, timestamp, summary FROM context_updates WHERE pod_id = ? AND type = 'decision' ORDER BY timestamp DESC").all(podId) as ContextUpdateRow[];
+  const tunnels = db.prepare("SELECT dev_name, branch, url, status FROM tunnels WHERE pod_id = ?").all(podId) as TunnelRow[];
+
+  const pressureLevel = getPressureLevel(pod.conflict_pressure);
+  const pressureLabel = getPressureLabel(pressureLevel);
+  const sprintStart = formatDate(pod.sprint_start);
+  const sprintEnd = formatDate(pod.sprint_end);
+
+  let md = `# Pod: ${pod.name} — Living Doc\n\n`;
+  md += `## Pod Health\n`;
+  md += `**Conflict Pressure:** ${pod.conflict_pressure.toFixed(2)} (${pressureLabel}) | **Day ${pod.day_number} of ${pod.total_days}** | Sprint: ${sprintStart}–${sprintEnd}\n\n`;
+
+  md += `## Active Milestone\n`;
+  md += `**${milestone.name}** (Target: ${formatDate(milestone.target_date)}) — ${milestone.percent_complete}% complete\n\n`;
+
+  md += `## Current Status\n\n`;
+  md += `| Area | Owner | Status | Last Update |\n`;
+  md += `|------|-------|--------|-------------|\n`;
+  for (const area of areas) {
+    const lastUpdate = area.last_activity ? formatDate(area.last_activity) : "—";
+    md += `| ${capitalizeStatus(area.scope)} | ${area.owner} | ${capitalizeStatus(area.status)} | ${lastUpdate} |\n`;
+  }
+  md += `\n`;
+
+  md += `## Open Conflicts\n\n`;
+  if (openConflicts.length === 0) {
+    md += `None\n\n`;
+  } else {
+    for (const c of openConflicts) {
+      const sevLabel = c.severity === "blocking" ? "**BLOCKING**" : "non-blocking";
+      md += `- **${c.id}:** ${c.summary} — ${sevLabel}\n`;
+    }
+    md += `\n`;
+  }
+
+  if (decisions.length > 0) {
+    md += `## Decisions Log\n\n`;
+    for (const d of decisions) {
+      md += `- **[${formatDate(d.timestamp)}]** ${d.summary} (${d.agent_id})\n`;
+    }
+    md += `\n`;
+  }
+
+  md += `## Context Stream (Recent)\n\n`;
+  for (const u of updates.slice(0, 8)) {
+    md += `- **[${formatDateTime(u.timestamp)}]** ${u.agent_id}: ${u.summary}\n`;
+  }
+  md += `\n`;
+
+  if (tunnels.length > 0) {
+    md += `## Active Tunnels\n\n`;
+    for (const t of tunnels) {
+      const statusIcon = t.status === "active" ? "" : t.status === "idle" ? " (idle)" : " (disconnected)";
+      md += `- ${t.dev_name}: ${t.branch} → ${t.url}${statusIcon}\n`;
+    }
+    md += `\n`;
+  }
+
+  // Write to database
+  db.prepare(
+    "INSERT OR REPLACE INTO living_docs (pod_id, markdown) VALUES (?, ?)"
+  ).run(podId, md);
+
+  // Broadcast update
+  broadcast({ type: "living_doc_updated", podId, payload: { markdown: md } });
+
+  return md;
+}

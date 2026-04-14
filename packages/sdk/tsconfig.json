@@ -1,10 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "paths": {
-      "@council/shared": ["../shared/src"]
-    }
+    "outDir": "./dist",
+    "rootDir": "./src"
   },
   "include": ["src"]
 }

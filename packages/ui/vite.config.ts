@@ -13,4 +13,13 @@ export default defineConfig({
       "@council/shared": path.resolve(__dirname, "../shared/src"),
     },
   },
+  server: {
+    proxy: {
+      "/api": "http://localhost:4000",
+      "/ws": {
+        target: "ws://localhost:4000",
+        ws: true,
+      },
+    },
+  },
 });

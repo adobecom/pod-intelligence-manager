@@ -1,0 +1,55 @@
+import type { FastifyInstance } from "fastify";
+import db from "../db/connection.js";
+import type { ContextUpdate, Artifact, InputRequest } from "@council/shared";
+import { ingestContextUpdate } from "../services/ingestion.js";
+
+interface ContextUpdateRow {
+  id: string;
+  agent_id: string;
+  timestamp: string;
+  pod_id: string;
+  type: string;
+  scope: string;
+  summary: string;
+  details: string;
+  artifacts_json: string;
+  status: string;
+  blocks_json: string;
+  blocked_by_json: string;
+  needs_input_from_json: string;
+}
+
+function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
+  return {
+    id: row.id,
+    agent_id: row.agent_id,
+    timestamp: row.timestamp,
+    pod_id: row.pod_id,
+    type: row.type as ContextUpdate["type"],
+    scope: row.scope as ContextUpdate["scope"],
+    summary: row.summary,
+    details: row.details,
+    artifacts: JSON.parse(row.artifacts_json) as Artifact[],
+    status: row.status as ContextUpdate["status"],
+    blocks: JSON.parse(row.blocks_json) as string[],
+    blocked_by: JSON.parse(row.blocked_by_json) as string[],
+    needs_input_from: JSON.parse(row.needs_input_from_json) as InputRequest[],
+  };
+}
+
+export default async function contextUpdateRoutes(app: FastifyInstance) {
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/context-updates", async (req) => {
+    const rows = db.prepare("SELECT * FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC").all(req.params.podId) as ContextUpdateRow[];
+    return rows.map(rowToContextUpdate);
+  });
+
+  app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", async (req, reply) => {
+    const result = await ingestContextUpdate(req.params.podId, req.body);
+    if (!result.success) {
+      reply.code(result.secretFindings ? 422 : 400);
+      return { error: result.error, secretFindings: result.secretFindings };
+    }
+    reply.code(201);
+    return { id: result.update!.id, update: result.update, council: result.council };
+  });
+}
