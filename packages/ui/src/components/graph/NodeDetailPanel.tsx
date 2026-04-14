@@ -109,7 +109,13 @@ export function NodeDetailPanel({ node, graph, onCurate, onClose }: NodeDetailPa
               return (
                 <li key={i} style={{ padding: "2px 0" }}>
                   {EDGE_TYPE_LABELS[edge.type] ?? edge.type} ({direction}){" "}
-                  <strong>{otherNode?.summary?.slice(0, 50) ?? otherId}</strong>
+                  <strong title={otherNode?.summary ?? otherId}>
+                    {otherNode?.summary
+                      ? otherNode.summary.length > 50
+                        ? otherNode.summary.slice(0, 47) + "..."
+                        : otherNode.summary
+                      : otherId}
+                  </strong>
                 </li>
               );
             })}

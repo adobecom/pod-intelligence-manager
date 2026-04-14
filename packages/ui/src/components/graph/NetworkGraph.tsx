@@ -54,6 +54,8 @@ export function NetworkGraph({
 }: NetworkGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
+  const nodesDataSetRef = useRef<DataSet<any> | null>(null);
+  const prevSelectedRef = useRef<string | null>(null);
 
   const filterNode = useCallback(
     (node: KnowledgeNode): boolean => {
@@ -86,16 +88,17 @@ export function NetworkGraph({
         title: `${n.type.replace("_", " ")} | ${n.summary}\n${n.domains.join(", ")} | ${n.source_pod_name}\nConfidence: ${(n.confidence_score * 100).toFixed(0)}%`,
         color: {
           background: NODE_COLORS[n.type] ?? "#999",
-          border: selectedNodeId === n.id ? "#000000" : NODE_COLORS[n.type] ?? "#999",
+          border: NODE_COLORS[n.type] ?? "#999",
           highlight: { background: NODE_COLORS[n.type] ?? "#999", border: "#000000" },
         },
         shape: NODE_SHAPES[n.type] ?? "dot",
         size: 10 + n.confidence_score * 20,
-        borderWidth: selectedNodeId === n.id ? 3 : 1,
+        borderWidth: 1,
         font: { size: 11, color: "#333" },
         group: n.community_id,
       })),
     );
+    nodesDataSetRef.current = nodes;
 
     const edges = new DataSet(
       graph.edges
@@ -133,6 +136,7 @@ export function NetworkGraph({
 
     const network = new Network(containerRef.current, { nodes, edges }, options);
     networkRef.current = network;
+    prevSelectedRef.current = null;
 
     network.on("click", (params) => {
       if (params.nodes.length > 0) {
@@ -144,13 +148,37 @@ export function NetworkGraph({
 
     network.once("stabilizationIterationsDone", () => {
       network.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
+      network.setOptions({ physics: { enabled: false } });
     });
 
     return () => {
       network.destroy();
       networkRef.current = null;
+      nodesDataSetRef.current = null;
     };
-  }, [graph, filters, selectedNodeId, filterNode, onNodeClick]);
+  }, [graph, filters, filterNode, onNodeClick]);
+
+  // Update node selection styling in-place without recreating the network
+  useEffect(() => {
+    const nodesDs = nodesDataSetRef.current;
+    if (!nodesDs) return;
+
+    const prev = prevSelectedRef.current;
+
+    // Reset previously selected node to default styling
+    if (prev !== null && nodesDs.get(prev) !== null) {
+      const prevNode = graph.nodes.find((n) => n.id === prev);
+      const defaultColor = prevNode ? (NODE_COLORS[prevNode.type] ?? "#999") : "#999";
+      nodesDs.update({ id: prev, color: { border: defaultColor }, borderWidth: 1 });
+    }
+
+    // Apply selection styling to newly selected node
+    if (selectedNodeId !== null && nodesDs.get(selectedNodeId) !== null) {
+      nodesDs.update({ id: selectedNodeId, color: { border: "#000000" }, borderWidth: 3 });
+    }
+
+    prevSelectedRef.current = selectedNodeId;
+  }, [selectedNodeId, graph.nodes]);
 
   return (
     <div
