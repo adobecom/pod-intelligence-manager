@@ -1,5 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+// Centralized model IDs — change here to upgrade across all agents
+export const MODELS = {
+  fast: "claude-haiku-4-5-20251001",
+  smart: "claude-sonnet-4-5-20250514",
+} as const;
+
+export type ModelId = (typeof MODELS)[keyof typeof MODELS];
+
 let client: Anthropic | null = null;
 
 export function isLLMAvailable(): boolean {
@@ -14,7 +22,7 @@ function getClient(): Anthropic {
 }
 
 export async function callLLM(opts: {
-  model: "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250514";
+  model: ModelId;
   system: string;
   prompt: string;
   maxTokens?: number;
@@ -36,7 +44,7 @@ export async function callLLM(opts: {
 }
 
 export async function callLLMJSON<T>(opts: {
-  model: "claude-haiku-4-5-20251001" | "claude-sonnet-4-5-20250514";
+  model: ModelId;
   system: string;
   prompt: string;
   maxTokens?: number;

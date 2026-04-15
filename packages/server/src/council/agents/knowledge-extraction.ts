@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db from "../../db/connection.js";
-import { callLLM, isLLMAvailable } from "../llm.js";
+import { callLLM, isLLMAvailable, MODELS } from "../llm.js";
 import type { EnhancedPodLearning, KnowledgeNodeType } from "@council/shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -194,7 +194,7 @@ export async function extractKnowledgeEnhanced(
     const prompt = `## Pod Summary\n${podStateText}\n\n## Decisions Log\n${decisionsText}\n\n## Conflicts\n${conflictsText}\n\n## All Context Updates (${updates.length} total)\n${updates.slice(-20).map((u) => `- [${u.type}/${u.scope}/${u.status}] ${u.summary}`).join("\n")}`;
 
     const raw = await callLLM({
-      model: "claude-sonnet-4-5-20250514",
+      model: MODELS.smart,
       system: getSystemPrompt(),
       prompt,
       maxTokens: 2048,

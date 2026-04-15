@@ -1,5 +1,5 @@
 import db from "../../db/connection.js";
-import { isLLMAvailable, callLLMJSON } from "../llm.js";
+import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
 import type { ContextUpdate } from "@council/shared";
 import fs from "fs";
 import path from "path";
@@ -74,7 +74,7 @@ ${recentUpdates.map(u => `- [${u.timestamp}] ${u.agent_id}: ${u.summary}\n  Deta
 
   try {
     const response = await callLLMJSON<LLMMergeResponse>({
-      model: "claude-haiku-4-5-20251001",
+      model: MODELS.fast,
       system: systemPrompt,
       prompt,
     });

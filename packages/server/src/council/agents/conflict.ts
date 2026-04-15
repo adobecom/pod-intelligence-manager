@@ -1,6 +1,6 @@
 import db from "../../db/connection.js";
 import { randomUUID } from "crypto";
-import { isLLMAvailable, callLLMJSON } from "../llm.js";
+import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
 import type { ContextUpdate, Conflict } from "@council/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
@@ -95,7 +95,7 @@ export async function createConflict(
 
     try {
       const response = await callLLMJSON<LLMConflictResponse>({
-        model: "claude-sonnet-4-5-20250514",
+        model: MODELS.smart,
         system: systemPrompt,
         prompt,
       });
@@ -139,20 +139,26 @@ export async function createConflict(
     resolution_date: null,
   };
 
-  // Write to database
-  db.prepare(
-    `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
-    conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
-    conflict.master_analysis, JSON.stringify(conflict.impact),
-    conflict.resolved_by, conflict.resolution, conflict.resolution_date,
-  );
-
-  // Recalculate pressure and broadcast
+  // Write to database atomically: conflict insert + pressure recalculation
   const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
-  const newPressure = recalculatePressure(podId);
+
+  const insertAndRecalculate = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
+      conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
+      conflict.master_analysis, JSON.stringify(conflict.impact),
+      conflict.resolved_by, conflict.resolution, conflict.resolution_date,
+    );
+
+    return recalculatePressure(podId);
+  });
+
+  const newPressure = insertAndRecalculate();
+
+  // Broadcast and notify (outside transaction — side effects should not roll back)
   broadcast({ type: "conflict_created", podId, payload: conflict });
   broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
 

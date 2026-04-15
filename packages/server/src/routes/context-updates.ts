@@ -44,6 +44,16 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", async (req, reply) => {
+    // Gate: reject ingestion when pod is in critical conflict state (pressure >= 0.8)
+    const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(req.params.podId) as { conflict_pressure: number } | undefined;
+    if (pod && pod.conflict_pressure >= 0.8) {
+      reply.code(423);
+      return {
+        error: "Pod is in critical conflict state — ingestion paused. Resolve blocking conflicts first.",
+        conflict_pressure: pod.conflict_pressure,
+      };
+    }
+
     const result = await ingestContextUpdate(req.params.podId, req.body);
     if (!result.success) {
       reply.code(result.secretFindings ? 422 : 400);
