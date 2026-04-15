@@ -41,8 +41,22 @@ app.register(pendingWorkRoutes);
 app.register(graphRoutes);
 app.register(wsRoutes);
 
-// Health check
-app.get("/api/health", async () => ({ status: "ok" }));
+// Health check — verifies DB connectivity, returns uptime and pod count
+const serverStartedAt = new Date().toISOString();
+app.get("/api/health", async (_req, reply) => {
+  try {
+    const row = db.prepare("SELECT COUNT(*) as count FROM pods").get() as { count: number };
+    return {
+      status: "ok",
+      started_at: serverStartedAt,
+      uptime_seconds: Math.floor(process.uptime()),
+      db: { connected: true, active_pods: row.count },
+    };
+  } catch {
+    reply.code(503);
+    return { status: "degraded", error: "Database unreachable" };
+  }
+});
 
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min

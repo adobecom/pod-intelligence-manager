@@ -1,9 +1,16 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import db from "../db/connection.js";
 import type { Conflict, ConflictSide } from "@council/shared";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "../services/pressure.js";
 import { notifyConflictResolved } from "../services/slack.js";
+import { validateBody } from "../middleware/validation.js";
+
+const ResolveConflictSchema = z.object({
+  resolution: z.string().min(1, "resolution is required"),
+  resolved_by: z.string().min(1, "resolved_by is required"),
+});
 
 interface ConflictRow {
   id: string;
@@ -54,8 +61,8 @@ export default async function conflictRoutes(app: FastifyInstance) {
 
   app.post<{
     Params: { podId: string; conflictId: string };
-    Body: { resolution: string; resolved_by: string };
-  }>("/api/pods/:podId/conflicts/:conflictId/resolve", async (req, reply) => {
+    Body: z.infer<typeof ResolveConflictSchema>;
+  }>("/api/pods/:podId/conflicts/:conflictId/resolve", { preHandler: validateBody(ResolveConflictSchema) }, async (req, reply) => {
     const { podId, conflictId } = req.params;
     const { resolution, resolved_by } = req.body;
     const now = new Date().toISOString();

@@ -1,7 +1,15 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import db from "../db/connection.js";
 import type { Tunnel } from "@council/shared";
 import { broadcast } from "../ws/index.js";
+import { validateBody } from "../middleware/validation.js";
+
+const CreateTunnelSchema = z.object({
+  dev_name: z.string().min(1, "dev_name is required"),
+  branch: z.string().min(1, "branch is required"),
+  port: z.number().int().min(1).max(65535),
+});
 
 interface TunnelRow {
   tunnel_id: string;
@@ -33,8 +41,8 @@ export default async function tunnelRoutes(app: FastifyInstance) {
 
   app.post<{
     Params: { podId: string };
-    Body: { dev_name: string; branch: string; port: number };
-  }>("/api/pods/:podId/tunnels", async (req, reply) => {
+    Body: z.infer<typeof CreateTunnelSchema>;
+  }>("/api/pods/:podId/tunnels", { preHandler: validateBody(CreateTunnelSchema) }, async (req, reply) => {
     const { podId } = req.params;
     const { dev_name, branch, port } = req.body;
     const tunnel_id = `tunnel-${dev_name}-${Date.now()}`;

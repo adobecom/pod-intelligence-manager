@@ -1,6 +1,12 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
+import { validateBody } from "../middleware/validation.js";
+
+const RecordViewSchema = z.object({
+  viewer_id: z.string().min(1, "viewer_id is required"),
+});
 
 interface LivingDocRow {
   pod_id: string;
@@ -29,16 +35,12 @@ export default async function livingDocRoutes(app: FastifyInstance) {
   });
 
   // Record a living doc view
-  app.post<{ Params: { podId: string }; Body: { viewer_id: string } }>(
+  app.post<{ Params: { podId: string }; Body: z.infer<typeof RecordViewSchema> }>(
     "/api/pods/:podId/living-doc/views",
+    { preHandler: validateBody(RecordViewSchema) },
     async (req, reply) => {
       const { podId } = req.params;
-      const viewerId = req.body?.viewer_id;
-
-      if (!viewerId || typeof viewerId !== "string") {
-        reply.code(400);
-        return { error: "viewer_id is required" };
-      }
+      const { viewer_id: viewerId } = req.body;
 
       const now = new Date().toISOString();
 

@@ -1,9 +1,17 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import db from "../db/connection.js";
 import type { Pod, PodArea, Milestone } from "@council/shared";
 import { regenerateLivingDoc } from "../council/agents/summary.js";
 import { runLintPass } from "../council/agents/lint.js";
 import { getRelevantLearnings } from "../services/knowledge-graph.js";
+import { validateBody } from "../middleware/validation.js";
+
+const CreatePodSchema = z.object({
+  name: z.string().min(1, "name is required").transform(s => s.trim()),
+  sprint_days: z.number().int().min(1).max(30).default(5),
+  milestone_name: z.string().min(1).default("Sprint Goal"),
+});
 
 interface PodRow {
   pod_id: string;
@@ -55,13 +63,9 @@ export default async function podRoutes(app: FastifyInstance) {
   });
 
   app.post<{
-    Body: { name: string; sprint_days?: number; milestone_name?: string };
-  }>("/api/pods", async (req, reply) => {
-    const { name, sprint_days = 5, milestone_name = "Sprint Goal" } = req.body;
-    if (!name || typeof name !== "string" || !name.trim()) {
-      reply.code(400);
-      return { error: "name is required" };
-    }
+    Body: z.infer<typeof CreatePodSchema>;
+  }>("/api/pods", { preHandler: validateBody(CreatePodSchema) }, async (req, reply) => {
+    const { name, sprint_days, milestone_name } = req.body;
 
     const podId = `pod-${slugify(name)}`;
 
