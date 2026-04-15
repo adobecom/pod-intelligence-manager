@@ -47,6 +47,44 @@ export async function getLivingDoc(podId: string): Promise<string> {
   return res.text();
 }
 
+export async function recordLivingDocView(podId: string, viewerId: string): Promise<void> {
+  await fetch(`/api/pods/${podId}/living-doc/views`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ viewer_id: viewerId }),
+  });
+}
+
+export interface LivingDocViewerStat {
+  viewer_id: string;
+  last_viewed_at: string;
+  view_count: number;
+  regens_since_last_view: number;
+}
+
+export interface LivingDocStats {
+  pod_id: string;
+  last_regenerated_at: string | null;
+  regen_count: number;
+  viewers: LivingDocViewerStat[];
+}
+
+export async function getLivingDocStats(podId: string): Promise<LivingDocStats> {
+  return fetchJSON<LivingDocStats>(`/api/pods/${podId}/living-doc/stats`);
+}
+
+export interface AgentQualityStat {
+  agent_id: string;
+  update_count: number;
+  avg_quality: number;
+  min_quality: number;
+  max_quality: number;
+}
+
+export async function getQualityStats(podId: string): Promise<AgentQualityStat[]> {
+  return fetchJSON<AgentQualityStat[]>(`/api/pods/${podId}/quality-stats`);
+}
+
 export async function getPendingWork(
   conflictId: string,
 ): Promise<PendingWork[]> {

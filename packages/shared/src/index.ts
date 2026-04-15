@@ -47,6 +47,11 @@ export type {
   ArchivedPod,
 } from "./types/org";
 
+export type {
+  LivingDocViewerStat,
+  LivingDocStats,
+} from "./types/living-doc";
+
 export {
   PRESSURE_THRESHOLDS,
   getPressureLevel,

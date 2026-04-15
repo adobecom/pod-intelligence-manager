@@ -14,6 +14,7 @@ interface ContextUpdateRow {
   details: string;
   artifacts_json: string;
   status: string;
+  quality_score: number;
   blocks_json: string;
   blocked_by_json: string;
   needs_input_from_json: string;
@@ -31,6 +32,7 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
     details: row.details,
     artifacts: JSON.parse(row.artifacts_json) as Artifact[],
     status: row.status as ContextUpdate["status"],
+    quality_score: row.quality_score ?? 0,
     blocks: JSON.parse(row.blocks_json) as string[],
     blocked_by: JSON.parse(row.blocked_by_json) as string[],
     needs_input_from: JSON.parse(row.needs_input_from_json) as InputRequest[],
@@ -41,6 +43,21 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/context-updates", async (req) => {
     const rows = db.prepare("SELECT * FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC").all(req.params.podId) as ContextUpdateRow[];
     return rows.map(rowToContextUpdate);
+  });
+
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/quality-stats", async (req) => {
+    const rows = db.prepare(`
+      SELECT agent_id,
+             COUNT(*) as update_count,
+             AVG(quality_score) as avg_quality,
+             MIN(quality_score) as min_quality,
+             MAX(quality_score) as max_quality
+      FROM context_updates
+      WHERE pod_id = ?
+      GROUP BY agent_id
+      ORDER BY avg_quality DESC
+    `).all(req.params.podId);
+    return rows;
   });
 
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", async (req, reply) => {

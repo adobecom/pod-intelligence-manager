@@ -10,7 +10,8 @@ export interface WSEvent {
     | "living_doc_updated"
     | "tunnel_status_changed"
     | "lint_completed"
-    | "knowledge_updated";
+    | "knowledge_updated"
+    | "living_doc_viewed";
   podId: string;
   payload: unknown;
 }

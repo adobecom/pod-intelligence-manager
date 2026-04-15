@@ -33,6 +33,7 @@ export function createTables() {
       details TEXT NOT NULL,
       artifacts_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
+      quality_score REAL NOT NULL DEFAULT 0.0,
       blocks_json TEXT NOT NULL DEFAULT '[]',
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
       needs_input_from_json TEXT NOT NULL DEFAULT '[]'
@@ -113,7 +114,18 @@ export function createTables() {
 
     CREATE TABLE IF NOT EXISTS living_docs (
       pod_id TEXT PRIMARY KEY,
-      markdown TEXT NOT NULL
+      markdown TEXT NOT NULL,
+      last_regenerated_at TEXT,
+      regen_count INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS living_doc_views (
+      pod_id TEXT NOT NULL REFERENCES pods(pod_id),
+      viewer_id TEXT NOT NULL,
+      last_viewed_at TEXT NOT NULL,
+      view_count INTEGER NOT NULL DEFAULT 1,
+      last_viewed_regen_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (pod_id, viewer_id)
     );
 
     CREATE TABLE IF NOT EXISTS knowledge_nodes (
@@ -131,4 +143,9 @@ export function createTables() {
       community_id TEXT
     );
   `);
+
+  // Migration guards for existing databases
+  try { db.exec("ALTER TABLE living_docs ADD COLUMN last_regenerated_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE living_docs ADD COLUMN regen_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_score REAL NOT NULL DEFAULT 0.0"); } catch { /* already exists */ }
 }

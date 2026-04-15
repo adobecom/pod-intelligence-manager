@@ -299,7 +299,7 @@ export function seedDatabase() {
     "INSERT INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure) VALUES (?, ?, ?, ?, ?)"
   );
   const insertLivingDoc = db.prepare(
-    "INSERT INTO living_docs (pod_id, markdown) VALUES (?, ?)"
+    "INSERT INTO living_docs (pod_id, markdown, last_regenerated_at, regen_count) VALUES (?, ?, ?, ?)"
   );
 
   const transaction = db.transaction(() => {
@@ -352,7 +352,7 @@ export function seedDatabase() {
 
     // Living docs
     for (const [podId, markdown] of Object.entries(livingDocs)) {
-      insertLivingDoc.run(podId, markdown);
+      insertLivingDoc.run(podId, markdown, "2026-04-09T10:00:00Z", 1);
     }
   });
 

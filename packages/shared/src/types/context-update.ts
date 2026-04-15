@@ -14,6 +14,7 @@ export interface ContextUpdate {
   blocks: string[];
   blocked_by: string[];
   needs_input_from: InputRequest[];
+  quality_score?: number;
 }
 
 export type ContextUpdateType =

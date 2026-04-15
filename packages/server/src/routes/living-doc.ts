@@ -1,9 +1,22 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
+import { broadcast } from "../ws/index.js";
 
 interface LivingDocRow {
   pod_id: string;
   markdown: string;
+}
+
+interface LivingDocMetaRow {
+  last_regenerated_at: string | null;
+  regen_count: number;
+}
+
+interface ViewRow {
+  viewer_id: string;
+  last_viewed_at: string;
+  view_count: number;
+  last_viewed_regen_count: number;
 }
 
 export default async function livingDocRoutes(app: FastifyInstance) {
@@ -13,5 +26,62 @@ export default async function livingDocRoutes(app: FastifyInstance) {
       return "# No living doc available for this pod.";
     }
     return row.markdown;
+  });
+
+  // Record a living doc view
+  app.post<{ Params: { podId: string }; Body: { viewer_id: string } }>(
+    "/api/pods/:podId/living-doc/views",
+    async (req, reply) => {
+      const { podId } = req.params;
+      const viewerId = req.body?.viewer_id;
+
+      if (!viewerId || typeof viewerId !== "string") {
+        reply.code(400);
+        return { error: "viewer_id is required" };
+      }
+
+      const now = new Date().toISOString();
+
+      // Atomic upsert: snapshot current regen_count via subquery to avoid race with regenerateLivingDoc
+      db.prepare(`
+        INSERT INTO living_doc_views (pod_id, viewer_id, last_viewed_at, view_count, last_viewed_regen_count)
+        VALUES (?, ?, ?, 1, COALESCE((SELECT regen_count FROM living_docs WHERE pod_id = ?), 0))
+        ON CONFLICT(pod_id, viewer_id) DO UPDATE SET
+          last_viewed_at = excluded.last_viewed_at,
+          view_count = living_doc_views.view_count + 1,
+          last_viewed_regen_count = excluded.last_viewed_regen_count
+      `).run(podId, viewerId, now, podId);
+
+      broadcast({ type: "living_doc_viewed", podId, payload: { viewer_id: viewerId, viewed_at: now } });
+
+      return { ok: true, viewer_id: viewerId, viewed_at: now };
+    },
+  );
+
+  // Get living doc consumption stats
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc/stats", async (req) => {
+    const { podId } = req.params;
+
+    const doc = db.prepare(
+      "SELECT last_regenerated_at, regen_count FROM living_docs WHERE pod_id = ?"
+    ).get(podId) as LivingDocMetaRow | undefined;
+
+    const viewers = db.prepare(
+      "SELECT viewer_id, last_viewed_at, view_count, last_viewed_regen_count FROM living_doc_views WHERE pod_id = ?"
+    ).all(podId) as ViewRow[];
+
+    const regenCount = doc?.regen_count ?? 0;
+
+    return {
+      pod_id: podId,
+      last_regenerated_at: doc?.last_regenerated_at ?? null,
+      regen_count: regenCount,
+      viewers: viewers.map(v => ({
+        viewer_id: v.viewer_id,
+        last_viewed_at: v.last_viewed_at,
+        view_count: v.view_count,
+        regens_since_last_view: regenCount - v.last_viewed_regen_count,
+      })),
+    };
   });
 }

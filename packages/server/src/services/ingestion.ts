@@ -2,6 +2,7 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import db from "../db/connection.js";
 import { scanForSecrets } from "./secret-scan.js";
+import { scoreUpdate } from "./quality-scoring.js";
 import { broadcast } from "../ws/index.js";
 import { processUpdate, type CouncilResult } from "../council/master.js";
 import type { ContextUpdate } from "@council/shared";
@@ -66,7 +67,10 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     };
   }
 
-  // 4. Create the update record
+  // 4. Quality scoring
+  const quality = scoreUpdate(data, podId);
+
+  // 5. Create the update record
   const id = `ctx-${randomUUID().slice(0, 8)}`;
   const timestamp = new Date().toISOString();
 
@@ -84,28 +88,29 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     blocks: data.blocks,
     blocked_by: data.blocked_by,
     needs_input_from: data.needs_input_from as ContextUpdate["needs_input_from"],
+    quality_score: quality.total,
   };
 
-  // 5. Write to database
+  // 6. Write to database
   db.prepare(
-    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, blocks_json, blocked_by_json, needs_input_from_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     update.id, update.agent_id, update.timestamp, update.pod_id,
     update.type, update.scope, update.summary, update.details,
-    JSON.stringify(update.artifacts), update.status,
+    JSON.stringify(update.artifacts), update.status, update.quality_score,
     JSON.stringify(update.blocks), JSON.stringify(update.blocked_by),
     JSON.stringify(update.needs_input_from),
   );
 
-  // 6. Broadcast via WebSocket
+  // 7. Broadcast via WebSocket
   broadcast({
     type: "context_update_added",
     podId,
     payload: update,
   });
 
-  // 7. Run through Council Master (classify, route, regenerate living doc)
+  // 8. Run through Council Master (classify, route, regenerate living doc)
   const councilResult = await processUpdate(update);
 
   return { success: true, update, council: councilResult };

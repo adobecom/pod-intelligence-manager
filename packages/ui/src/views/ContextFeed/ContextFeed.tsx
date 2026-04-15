@@ -18,6 +18,7 @@ import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import type { ContextUpdate } from "@council/shared";
 import { usePodStore } from "../../stores/podStore";
 import { RelativeTime } from "../../components/RelativeTime";
+import { QualityBadge } from "../../components/QualityBadge";
 
 const column = style({ display: "flex", flexDirection: "column", gap: 20 });
 const headerRow = style({ display: "flex", alignItems: "center", justifyContent: "space-between" });
@@ -283,6 +284,9 @@ function FeedItem({
             {update.type.replace("_", " ")}
           </Badge>
           <Badge variant="neutral">{update.scope}</Badge>
+          {update.quality_score != null && update.quality_score > 0 && (
+            <QualityBadge score={update.quality_score} />
+          )}
           <StatusLight variant={statusVariant[update.status] ?? "neutral"}>
             {update.status.replace("_", " ")}
           </StatusLight>

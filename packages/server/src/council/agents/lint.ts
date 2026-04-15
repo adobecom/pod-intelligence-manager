@@ -6,7 +6,7 @@ export interface LintFinding {
   id: string;
   pod_id: string;
   timestamp: string;
-  type: "staleness" | "coverage_gap" | "dependency_risk" | "unresolved_conflict";
+  type: "staleness" | "coverage_gap" | "dependency_risk" | "unresolved_conflict" | "doc_not_read";
   severity: "info" | "warning" | "critical";
   summary: string;
   area: string | null;
@@ -37,6 +37,7 @@ interface ConflictRow {
   created_at: string;
   severity: string;
   summary: string;
+  sides_json: string;
 }
 
 const STALENESS_HOURS = 8;
@@ -58,7 +59,7 @@ export function runLintPass(podId: string): LintFinding[] {
   ).all(podId) as UpdateRow[];
 
   const openConflicts = db.prepare(
-    "SELECT id, created_at, severity, summary FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
+    "SELECT id, created_at, severity, summary, sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
   ).all(podId) as ConflictRow[];
 
   // 1. Staleness: areas with no update in STALENESS_HOURS (only check active areas)
@@ -156,6 +157,38 @@ export function runLintPass(podId: string): LintFinding[] {
         area: null,
         suggestion: `Resolve or escalate this conflict`,
       });
+    }
+  }
+
+  // 5. Doc-not-read: agents in open conflicts who haven't viewed the living doc since last regen
+  const livingDoc = db.prepare(
+    "SELECT last_regenerated_at, regen_count FROM living_docs WHERE pod_id = ?"
+  ).get(podId) as { last_regenerated_at: string | null; regen_count: number } | undefined;
+
+  if (livingDoc?.last_regenerated_at) {
+    for (const conflict of openConflicts) {
+      const sides = JSON.parse(conflict.sides_json) as Array<{ contributor: string }>;
+      for (const side of sides) {
+        const viewRow = db.prepare(
+          "SELECT last_viewed_regen_count FROM living_doc_views WHERE pod_id = ? AND viewer_id = ?"
+        ).get(podId, side.contributor) as { last_viewed_regen_count: number } | undefined;
+
+        const neverViewed = !viewRow;
+        const staleView = viewRow && viewRow.last_viewed_regen_count < livingDoc.regen_count;
+
+        if (neverViewed || staleView) {
+          findings.push({
+            id: `lint-${randomUUID().slice(0, 8)}`,
+            pod_id: podId,
+            timestamp,
+            type: "doc_not_read",
+            severity: "warning",
+            summary: `${side.contributor} is in conflict ${conflict.id} but hasn't viewed the living doc since last regeneration`,
+            area: null,
+            suggestion: `${side.contributor} should review the living doc for current context`,
+          });
+        }
+      }
     }
   }
 
