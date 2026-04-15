@@ -10,7 +10,7 @@ vi.mock("../../db/connection.js", () => ({
   },
 }));
 
-import { scoreUpdate, type QualityBreakdown } from "../quality-scoring.js";
+import { scoreUpdate } from "../quality-scoring.js";
 import type { ContextUpdateInput } from "../ingestion.js";
 import db from "../../db/connection.js";
 

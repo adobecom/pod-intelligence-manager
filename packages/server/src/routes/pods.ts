@@ -91,7 +91,7 @@ export default async function podRoutes(app: FastifyInstance) {
        VALUES (?, ?, ?, ?, 1, ?, 0.0, ?)`,
     ).run(
       podId,
-      name.trim(),
+      name,
       now.toISOString().split("T")[0],
       sprintEnd.toISOString().split("T")[0],
       sprint_days,
@@ -110,7 +110,7 @@ export default async function podRoutes(app: FastifyInstance) {
     db.prepare(
       `INSERT INTO org_pod_summaries (pod_id, name, day_number, total_days, conflict_pressure, open_conflicts, active_tunnels, agent_count)
        VALUES (?, ?, 1, ?, 0.0, 0, 0, 0)`,
-    ).run(podId, name.trim(), sprint_days);
+    ).run(podId, name, sprint_days);
 
     // Generate initial living doc
     regenerateLivingDoc(podId);
