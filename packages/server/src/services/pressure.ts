@@ -6,14 +6,28 @@ interface ConflictRow {
   created_at: string;
 }
 
+/** Persist conflict pressure on `pods` and `org_pod_summaries` (open conflict count from DB). */
+export function setPodPressure(podId: string, pressure: number): void {
+  const row = db.prepare(
+    "SELECT COUNT(*) as count FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
+  ).get(podId) as { count: number };
+  db.prepare("UPDATE pods SET conflict_pressure = ? WHERE pod_id = ?").run(pressure, podId);
+  db.prepare(
+    "UPDATE org_pod_summaries SET conflict_pressure = ?, open_conflicts = ? WHERE pod_id = ?",
+  ).run(pressure, row.count, podId);
+}
+
 // Recalculate conflict pressure for a pod based on open conflicts
 // Formula: base score per conflict + age bonus + severity weight
 export function recalculatePressure(podId: string): number {
   const openConflicts = db.prepare(
-    "SELECT id, severity, created_at FROM conflicts WHERE pod_id = ? AND status != 'resolved'"
+    "SELECT id, severity, created_at FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
   ).all(podId) as ConflictRow[];
 
-  if (openConflicts.length === 0) return 0;
+  if (openConflicts.length === 0) {
+    setPodPressure(podId, 0);
+    return 0;
+  }
 
   const now = Date.now();
   let pressure = 0;
@@ -32,10 +46,6 @@ export function recalculatePressure(podId: string): number {
   // Clamp to [0, 1]
   pressure = Math.min(Math.max(pressure, 0), 1);
 
-  // Update pod and org summary
-  db.prepare("UPDATE pods SET conflict_pressure = ? WHERE pod_id = ?").run(pressure, podId);
-  db.prepare("UPDATE org_pod_summaries SET conflict_pressure = ?, open_conflicts = ? WHERE pod_id = ?")
-    .run(pressure, openConflicts.length, podId);
-
+  setPodPressure(podId, pressure);
   return pressure;
 }

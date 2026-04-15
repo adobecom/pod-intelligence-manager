@@ -17,6 +17,22 @@ function hoursAgo(h: number): string {
   return new Date(NOW - h * HOUR_MS).toISOString();
 }
 
+/** Mocks list query + COUNT for setPodPressure. */
+function mockPrepareForConflicts(
+  rows: { id: string; severity: string; created_at: string }[],
+  runMock: ReturnType<typeof vi.fn>,
+): void {
+  (db.prepare as Mock).mockImplementation((sql: string) => {
+    if (sql.includes("COUNT(*)")) {
+      return { get: vi.fn().mockReturnValue({ count: rows.length }) };
+    }
+    if (sql.includes("id, severity, created_at")) {
+      return { all: vi.fn().mockReturnValue(rows) };
+    }
+    return { run: runMock };
+  });
+}
+
 describe("recalculatePressure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -25,28 +41,18 @@ describe("recalculatePressure", () => {
 
   it("returns 0 when no open conflicts exist", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return { all: vi.fn().mockReturnValue([]) };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts([], runMock);
 
     expect(recalculatePressure("pod-1")).toBe(0);
+    expect(runMock).toHaveBeenCalledTimes(2);
   });
 
   it("returns ~0.15 for a single new blocking conflict", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return {
-          all: vi.fn().mockReturnValue([
-            { id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() },
-          ]),
-        };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(
+      [{ id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() }],
+      runMock,
+    );
 
     const pressure = recalculatePressure("pod-1");
     expect(pressure).toBeGreaterThanOrEqual(0.15);
@@ -55,16 +61,10 @@ describe("recalculatePressure", () => {
 
   it("returns ~0.08 for a single new non-blocking conflict", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return {
-          all: vi.fn().mockReturnValue([
-            { id: "c1", severity: "non_blocking", created_at: new Date(NOW).toISOString() },
-          ]),
-        };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(
+      [{ id: "c1", severity: "non_blocking", created_at: new Date(NOW).toISOString() }],
+      runMock,
+    );
 
     const pressure = recalculatePressure("pod-1");
     expect(pressure).toBeGreaterThanOrEqual(0.08);
@@ -73,17 +73,13 @@ describe("recalculatePressure", () => {
 
   it("accumulates pressure across multiple conflicts", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return {
-          all: vi.fn().mockReturnValue([
-            { id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() },
-            { id: "c2", severity: "non_blocking", created_at: new Date(NOW).toISOString() },
-          ]),
-        };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(
+      [
+        { id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() },
+        { id: "c2", severity: "non_blocking", created_at: new Date(NOW).toISOString() },
+      ],
+      runMock,
+    );
 
     const pressure = recalculatePressure("pod-1");
     expect(pressure).toBeCloseTo(0.23, 1); // 0.15 + 0.08
@@ -91,16 +87,10 @@ describe("recalculatePressure", () => {
 
   it("adds age bonus for old conflicts (capped at 0.1)", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return {
-          all: vi.fn().mockReturnValue([
-            { id: "c1", severity: "blocking", created_at: hoursAgo(48) },
-          ]),
-        };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(
+      [{ id: "c1", severity: "blocking", created_at: hoursAgo(48) }],
+      runMock,
+    );
 
     const pressure = recalculatePressure("pod-1");
     // 0.15 base + 0.1 max age bonus = 0.25
@@ -115,12 +105,7 @@ describe("recalculatePressure", () => {
       created_at: hoursAgo(96),
     }));
 
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return { all: vi.fn().mockReturnValue(manyConflicts) };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(manyConflicts, runMock);
 
     const pressure = recalculatePressure("pod-1");
     expect(pressure).toBe(1);
@@ -128,20 +113,13 @@ describe("recalculatePressure", () => {
 
   it("updates both pods and org_pod_summaries tables", () => {
     const runMock = vi.fn();
-    (db.prepare as Mock).mockImplementation((sql: string) => {
-      if (sql.includes("SELECT")) {
-        return {
-          all: vi.fn().mockReturnValue([
-            { id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() },
-          ]),
-        };
-      }
-      return { run: runMock };
-    });
+    mockPrepareForConflicts(
+      [{ id: "c1", severity: "blocking", created_at: new Date(NOW).toISOString() }],
+      runMock,
+    );
 
     recalculatePressure("pod-1");
 
-    // Should call run() twice: once for pods, once for org_pod_summaries
     expect(runMock).toHaveBeenCalledTimes(2);
   });
 });
