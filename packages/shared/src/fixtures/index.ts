@@ -1,4 +1,4 @@
-/** Re-export demo seed data from `@council/shared` (single source of truth). */
+/** Demo / local-dev seed data — single source for UI re-exports and server `seedDatabase()`. */
 export {
   pods,
   conflicts,
@@ -9,4 +9,4 @@ export {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "@council/shared";
+} from "./demo-seed";
