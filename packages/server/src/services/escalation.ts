@@ -1,6 +1,6 @@
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
-import { recalculatePressure } from "./pressure.js";
+import { recalculatePressure, setPodPressure } from "./pressure.js";
 import { notifyConflictEscalated, notifyPressureThreshold } from "./slack.js";
 
 interface OpenConflictRow {
@@ -39,11 +39,9 @@ export function checkEscalations(): void {
         // Snapshot previous pressure before recalculation
         const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(conflict.pod_id) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
 
-        // At level 4 (24h), force pressure to 1.0
+        // At level 4 (24h), force pressure to 1.0 (pods + org_pod_summaries)
         if (threshold.level === 4) {
-          db.prepare("UPDATE pods SET conflict_pressure = 1.0 WHERE pod_id = ?").run(
-            conflict.pod_id,
-          );
+          setPodPressure(conflict.pod_id, 1.0);
           broadcast({
             type: "pressure_changed",
             podId: conflict.pod_id,
