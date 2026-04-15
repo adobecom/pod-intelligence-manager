@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { Outlet, useParams, NavLink, useLocation } from "react-router-dom";
-import { ProgressCircle } from "@react-spectrum/s2";
+import { Button, Content, Heading, IllustratedMessage, ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../stores/podStore";
 
@@ -38,15 +38,39 @@ const loadingContainer = style({
   height: "full",
 });
 
+const errorColumn = style({
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 16,
+});
+
 export function PodLayout() {
   const { podId } = useParams<{ podId: string }>();
   const loading = usePodStore((s) => s.loading);
   const pod = usePodStore((s) => s.pod);
+  const error = usePodStore((s) => s.error);
   const location = useLocation();
 
   useEffect(() => {
     if (podId) loadPod(podId);
   }, [podId]);
+
+  if (error && !loading) {
+    return (
+      <div className={loadingContainer}>
+        <div className={errorColumn}>
+          <IllustratedMessage>
+            <Heading>Failed to load pod</Heading>
+            <Content>{error}</Content>
+          </IllustratedMessage>
+          <Button variant="primary" onPress={() => podId && loadPod(podId)}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading || !pod) {
     return (

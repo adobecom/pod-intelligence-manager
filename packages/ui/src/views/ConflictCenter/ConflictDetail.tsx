@@ -189,14 +189,14 @@ export function ConflictDetail() {
                   )
                 }
               >
-                Accept {String.fromCharCode(65 + i)}: {side.contributor}
+                <Text>Accept {String.fromCharCode(65 + i)}: {side.contributor}</Text>
               </Button>
             ))}
             <Button
               variant="secondary"
               onPress={() => setShowCustom(!showCustom)}
             >
-              Custom Resolution
+              <Text>Custom Resolution</Text>
             </Button>
           </div>
 
@@ -212,7 +212,7 @@ export function ConflictDetail() {
                 isDisabled={!customResolution.trim()}
                 onPress={() => handleResolve(customResolution)}
               >
-                Submit Resolution
+                <Text>Submit Resolution</Text>
               </Button>
             </div>
           )}

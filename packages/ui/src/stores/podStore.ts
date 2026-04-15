@@ -9,6 +9,7 @@ interface PodStore {
   contextUpdates: ContextUpdate[];
   tunnels: Tunnel[];
   loading: boolean;
+  error: string | null;
 
   loadPod: (podId: string) => Promise<void>;
   resolveConflict: (
@@ -26,16 +27,21 @@ export const usePodStore = create<PodStore>((set, get) => ({
   contextUpdates: [],
   tunnels: [],
   loading: false,
+  error: null,
 
   loadPod: async (podId: string) => {
-    set({ loading: true });
-    const [pod, conflicts, contextUpdates, tunnels] = await Promise.all([
-      api.getPod(podId),
-      api.getConflicts(podId),
-      api.getContextUpdates(podId),
-      api.getTunnels(podId),
-    ]);
-    set({ pod, conflicts, contextUpdates, tunnels, loading: false });
+    set({ loading: true, error: null });
+    try {
+      const [pod, conflicts, contextUpdates, tunnels] = await Promise.all([
+        api.getPod(podId),
+        api.getConflicts(podId),
+        api.getContextUpdates(podId),
+        api.getTunnels(podId),
+      ]);
+      set({ pod, conflicts, contextUpdates, tunnels, loading: false });
+    } catch (err) {
+      set({ loading: false, error: err instanceof Error ? err.message : "Failed to load pod" });
+    }
   },
 
   resolveConflict: async (conflictId: string, resolution: string) => {
