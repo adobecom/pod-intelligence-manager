@@ -4,14 +4,59 @@ This guide is for anyone working in the `ado-mcp` repo who wants to add AI Counc
 
 ## What AI Council MCP provides
 
-Two tools:
+The MCP server is stdio-based and connects to a running Council Fastify server over HTTP. It has one configuration value: the Council server URL.
+
+### Tools (12)
+
+Full CRUD for pod-scoped operations:
 
 | Tool | Input | Output |
 |------|-------|--------|
 | `list_pods` | (none) | JSON array of active pods with IDs, names, pressure scores, conflict counts |
-| `render_pod_dashboard` | `{ pod_id: string }` | A complete single-file React component (36KB) that Claude renders as an artifact — interactive pod dashboard with 4 tabs |
+| `render_pod_dashboard` | `pod_id` | Single-file React component (~36KB) rendered as a Claude artifact |
+| `create_pod` | `name`, `sprint_days?`, `milestone_name?` | Created pod with generated ID and default areas |
+| `archive_pod` | `pod_id` | Archived pod record + knowledge learnings extracted count |
+| `submit_context_update` | `pod_id`, `agent_id`, `type`, `scope`, `summary`, `details`, `status`, ... | Created update + Council analysis |
+| `get_conflict_details` | `pod_id`, `conflict_id` | Conflict details + downstream pending work |
+| `resolve_conflict` | `pod_id`, `conflict_id`, `resolution`, `resolved_by` | Updated conflict record |
+| `create_tunnel` | `pod_id`, `dev_name`, `branch`, `port` | Created tunnel record |
+| `disconnect_tunnel` | `pod_id`, `tunnel_id` | Disconnected tunnel record |
+| `query_knowledge` | `domains?`, `types?`, `text_search?`, `max_tokens?`, ... | Token-budgeted knowledge graph results |
+| `curate_knowledge_node` | `node_id`, `action`, `edits?` | Curation confirmation |
+| `trigger_lint` | `pod_id` | Lint findings array |
 
-The MCP server is stdio-based and connects to a running Council Fastify server over HTTP. It has one configuration value: the Council server URL.
+### Resources (11)
+
+URI-addressable read-only data that MCP clients can attach to conversations:
+
+| URI | Description |
+|-----|-------------|
+| `council://org/pods` | All active pod summaries |
+| `council://org/overlaps` | Cross-pod overlap advisories |
+| `council://org/archived` | Archived pod history |
+| `council://knowledge/stats` | Knowledge graph statistics |
+| `council://knowledge/graph` | Full knowledge graph (may be large) |
+| `council://pods/{pod_id}` | Pod metadata, areas, milestone, pressure |
+| `council://pods/{pod_id}/living-doc` | Living document markdown |
+| `council://pods/{pod_id}/conflicts` | All conflicts for a pod |
+| `council://pods/{pod_id}/context-updates` | Context update feed |
+| `council://pods/{pod_id}/tunnels` | Active dev tunnels |
+| `council://pods/{pod_id}/lint-findings` | Lint findings |
+
+Pod-scoped templates support listing — MCP clients can enumerate available pods automatically.
+
+### Prompts (6)
+
+Reusable workflow templates that fetch relevant data and construct structured prompts:
+
+| Prompt | Arguments | Purpose |
+|--------|-----------|---------|
+| `standup_report` | `pod_id` | Standup from recent activity, conflicts, pressure |
+| `conflict_resolution_guide` | `pod_id`, `conflict_id` | Resolution walkthrough with pending work + precedents |
+| `pod_health_check` | `pod_id` | Health assessment with blocked areas, lint, recommendations |
+| `knowledge_search` | `query`, `domains?` | Search org knowledge graph for learnings |
+| `sprint_kickoff` | `name`, `sprint_days?`, `focus_areas?` | Kickoff briefing from org history |
+| `pod_retrospective` | `pod_id` | Retrospective before archival |
 
 ## Architecture
 
@@ -79,7 +124,7 @@ Add this entry to `src/setup/tool-registry.json`:
 {
   "id": "ai-council",
   "name": "AI Council",
-  "description": "View pod dashboards, conflicts, and living docs as Claude artifacts. Connects to a running AI Council server.",
+  "description": "Full pod management: create/archive pods, submit updates, resolve conflicts, manage tunnels, search org knowledge, and view dashboards as Claude artifacts.",
   "status": "available",
   "vendorPath": "vendor/ai-council/dist/index.js",
   "sidecarPort": 3105,
@@ -207,10 +252,16 @@ This calls the Council MCP's `render_pod_dashboard` tool with a pod ID from the 
 
 Once the sidecar is running, users can ask Claude things like:
 
-- *"List all active pods"* — Claude calls `list_pods` via ADO
-- *"Show me the dashboard for pod Auth Revamp"* — Claude calls `render_pod_dashboard`, gets back React code, renders it as an artifact in the side panel
+- *"List all active pods"* — calls `list_pods`
+- *"Show me the dashboard for pod Auth Revamp"* — calls `render_pod_dashboard`, renders React artifact
+- *"Create a new pod called Payment Flow Rebuild"* — calls `create_pod`
+- *"Submit a progress update for the frontend scope"* — calls `submit_context_update`
+- *"Resolve conflict conf-123 on pod-auth"* — calls `resolve_conflict`
+- *"Search org knowledge for auth patterns"* — calls `query_knowledge`
+- *"Run a health check on pod-checkout"* — invokes the `pod_health_check` prompt
+- *"Generate a retro for pod-auth before archiving"* — invokes `pod_retrospective` prompt then `archive_pod`
 
-Claude sees the tools through ADO's `list_mcp_tools` output and routes calls through the `ClientRegistry`.
+Claude sees tools, resources, and prompts through ADO's `list_mcp_tools` output and routes calls through the `ClientRegistry`.
 
 ## Distribution considerations
 
