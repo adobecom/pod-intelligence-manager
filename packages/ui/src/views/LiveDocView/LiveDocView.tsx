@@ -51,8 +51,14 @@ export function LiveDocView() {
     api.recordLivingDocView(podId, "human-user");
   }
 
+  const lastStatsRefresh = useRef(0);
+  const STATS_THROTTLE_MS = 10_000;
+
   function refreshStats() {
     if (!podId) return;
+    const now = Date.now();
+    if (now - lastStatsRefresh.current < STATS_THROTTLE_MS) return;
+    lastStatsRefresh.current = now;
     api.getLivingDocStats(podId).then(setStats).catch(() => {});
   }
 
@@ -68,7 +74,6 @@ export function LiveDocView() {
     if (event.type === "living_doc_updated") {
       const payload = event.payload as { markdown: string };
       setDoc(payload.markdown);
-      recordView();
       refreshStats();
     }
     if (event.type === "living_doc_viewed") {

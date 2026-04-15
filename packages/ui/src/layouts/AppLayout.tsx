@@ -1,10 +1,24 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
 import { Heading, Picker, PickerItem, Button, StatusLight } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useOrgStore } from "../stores/orgStore";
 import { usePodStore } from "../stores/podStore";
 import { useWebSocket } from "../hooks/useWebSocket";
+
+const loadOrg = useOrgStore.getState().loadOrg;
+const loadPod = usePodStore.getState().loadPod;
+
+/** Events that change pod data and warrant a re-fetch. */
+const DATA_EVENTS = new Set([
+  "context_update_added",
+  "conflict_created",
+  "conflict_resolved",
+  "pressure_changed",
+  "tunnel_status_changed",
+]);
+
+const THROTTLE_MS = 5_000;
 
 const topBar = style({
   display: "flex",
@@ -29,18 +43,21 @@ export function AppLayout() {
   const { podId } = useParams();
   const location = useLocation();
   const pods = useOrgStore((s) => s.pods);
-  const loadOrg = useOrgStore((s) => s.loadOrg);
-  const loadPod = usePodStore((s) => s.loadPod);
+  const lastReload = useRef(0);
 
   const isOrgPage = location.pathname === "/org";
 
   useEffect(() => {
     loadOrg();
-  }, [loadOrg]);
+  }, []);
 
-  const handleWSEvent = useCallback(() => {
-    if (podId) loadPod(podId);
-  }, [podId, loadPod]);
+  const handleWSEvent = useCallback((event: { type: string }) => {
+    if (!podId || !DATA_EVENTS.has(event.type)) return;
+    const now = Date.now();
+    if (now - lastReload.current < THROTTLE_MS) return;
+    lastReload.current = now;
+    loadPod(podId);
+  }, [podId]);
 
   const wsStatus = useWebSocket(podId, handleWSEvent);
   const wsVariant = wsStatus === "connected" ? "positive" : wsStatus === "connecting" ? "notice" : "negative";
