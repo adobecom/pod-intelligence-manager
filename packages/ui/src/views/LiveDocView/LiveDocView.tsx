@@ -53,12 +53,12 @@ export function LiveDocView() {
 
   function refreshStats() {
     if (!podId) return;
-    api.getLivingDocStats(podId).then(setStats);
+    api.getLivingDocStats(podId).then(setStats).catch(() => {});
   }
 
   useEffect(() => {
     if (podId) {
-      api.getLivingDoc(podId).then(setDoc);
+      api.getLivingDoc(podId).then(setDoc).catch(() => {});
       refreshStats();
       recordView();
     }
