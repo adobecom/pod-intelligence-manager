@@ -1,6 +1,7 @@
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "./pressure.js";
+import { notifyConflictEscalated, notifyPressureThreshold } from "./slack.js";
 
 interface OpenConflictRow {
   id: string;
@@ -35,6 +36,9 @@ export function checkEscalations(): void {
           conflict.id,
         );
 
+        // Snapshot previous pressure before recalculation
+        const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(conflict.pod_id) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
+
         // At level 4 (24h), force pressure to 1.0
         if (threshold.level === 4) {
           db.prepare("UPDATE pods SET conflict_pressure = 1.0 WHERE pod_id = ?").run(
@@ -45,6 +49,7 @@ export function checkEscalations(): void {
             podId: conflict.pod_id,
             payload: { pressure: 1.0 },
           });
+          notifyPressureThreshold(conflict.pod_id, 1.0, previousPressure);
         } else {
           // Recalculate pressure normally
           const newPressure = recalculatePressure(conflict.pod_id);
@@ -53,6 +58,7 @@ export function checkEscalations(): void {
             podId: conflict.pod_id,
             payload: { pressure: newPressure },
           });
+          notifyPressureThreshold(conflict.pod_id, newPressure, previousPressure);
         }
 
         // Broadcast escalation event
@@ -66,6 +72,15 @@ export function checkEscalations(): void {
             ageHours: Math.round(ageHours),
           },
         });
+
+        // Slack escalation notification
+        notifyConflictEscalated(
+          conflict.pod_id,
+          conflict.id,
+          threshold.level,
+          threshold.message,
+          Math.round(ageHours),
+        );
 
         break; // Only escalate one level at a time
       }

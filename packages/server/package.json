@@ -9,10 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@council/shared": "workspace:*",
-    "better-sqlite3": "^11.9.1",
-    "@fastify/websocket": "^11.2.0",
     "@anthropic-ai/sdk": "^0.39.0",
+    "@council/shared": "workspace:*",
+    "@fastify/websocket": "^11.2.0",
+    "@slack/web-api": "^7.15.1",
+    "better-sqlite3": "^11.9.1",
     "fastify": "^5.3.3",
     "zod": "^3.24.4"
   },

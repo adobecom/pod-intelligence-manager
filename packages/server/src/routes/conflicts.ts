@@ -3,6 +3,7 @@ import db from "../db/connection.js";
 import type { Conflict, ConflictSide } from "@council/shared";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "../services/pressure.js";
+import { notifyConflictResolved } from "../services/slack.js";
 
 interface ConflictRow {
   id: string;
@@ -75,6 +76,9 @@ export default async function conflictRoutes(app: FastifyInstance) {
     const newPressure = recalculatePressure(podId);
     broadcast({ type: "conflict_resolved", podId, payload: resolved });
     broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
+
+    // Slack notification
+    notifyConflictResolved(resolved);
 
     return resolved;
   });

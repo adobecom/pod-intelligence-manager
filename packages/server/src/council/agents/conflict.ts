@@ -5,6 +5,7 @@ import type { ContextUpdate, Conflict } from "@council/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";
+import { notifyConflictCreated, notifyPressureThreshold } from "../../services/slack.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -150,9 +151,14 @@ export async function createConflict(
   );
 
   // Recalculate pressure and broadcast
+  const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
   const newPressure = recalculatePressure(podId);
   broadcast({ type: "conflict_created", podId, payload: conflict });
   broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
+
+  // Slack notifications
+  notifyConflictCreated(conflict);
+  notifyPressureThreshold(podId, newPressure, previousPressure);
 
   return conflict;
 }
