@@ -9,17 +9,19 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@council/sdk": "workspace:*",
     "@council/shared": "workspace:*",
-    "commander": "^13.1.0",
-    "chalk": "^5.4.1"
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "tsx": "^4.19.4",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.4"
   }
 }

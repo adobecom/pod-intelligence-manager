@@ -14,91 +14,28 @@ These were completed and can be used as reference for patterns.
 
 ---
 
-## Tier 2 — Production Readiness
+## Tier 2 — Production Readiness [DONE]
 
-### 2a. Global Error Handler
-**Scope:** `packages/server/src/index.ts`
-**What:** Add a Fastify `setErrorHandler` that catches unhandled throws across all routes. Currently, unhandled errors return raw stack traces to the client.
-**How:**
-```ts
-app.setErrorHandler((error, request, reply) => {
-  request.log.error(error);
-  reply.code(error.statusCode ?? 500).send({
-    error: error.message ?? "Internal server error",
-  });
-});
-```
-**Watch out for:** Don't swallow validation errors from the Zod middleware — those already send 400 via `reply.send()` before the error handler runs.
-
-### 2b. Auth Middleware Skeleton
-**Scope:** New file `packages/server/src/middleware/auth.ts`, wire into `index.ts`
-**What:** A pluggable `authenticate` preHandler hook that reads a bearer token from `Authorization` header and attaches `req.user`. For now, implement a "trust all" mode that sets a default user. The seam should make it trivial to swap in Adobe IMS JWT verification later.
-**How:** Export a `createAuthHook(mode: "trust" | "ims")` factory. In trust mode, always set `req.user = { id: "anonymous", roles: ["admin"] }`. Register as a global preHandler on the Fastify instance. Protect write routes (POST/PUT/DELETE) only — leave GETs open.
-**Spec reference:** SPEC.md mentions Adobe IMS for auth. The IMS verification itself is out of scope — just build the hook shape.
-
-### 2c. CORS Configuration
-**Scope:** `packages/server/src/index.ts`
-**What:** Install `@fastify/cors` and register it. In dev, allow `localhost:5173`. In production, allow the deployed domain only.
-**How:**
-```
-pnpm add @fastify/cors --filter @council/server
-```
-```ts
-import cors from "@fastify/cors";
-app.register(cors, {
-  origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-});
-```
-
-### 2d. Rate Limiting
-**Scope:** `packages/server/src/index.ts`
-**What:** Install `@fastify/rate-limit`. Apply a global 100 req/min limit. Apply a stricter 20 req/min limit to `POST /api/pods/:podId/context-updates` to prevent runaway agents from flooding the ingestion pipeline.
-**How:**
-```
-pnpm add @fastify/rate-limit --filter @council/server
-```
+- [x] **Global error handler** — `app.setErrorHandler` in `packages/server/src/index.ts`. Catches unhandled throws, logs via request.log.error, returns structured `{ error }` without stack traces. 5xx hides message, 4xx exposes it. Guards against double-send via `reply.sent` check. Zod validation errors (from `validateBody`) send 400 directly and never reach the handler.
+- [x] **Auth middleware skeleton** — `packages/server/src/middleware/auth.ts` exports `createAuthHook(mode: "trust" | "ims")`. Trust mode sets `req.user = { id: "anonymous", roles: ["admin"] }`. IMS mode checks `Authorization: Bearer` header (IMS JWT verification is TODO). Registered as global `onRequest` hook gated on `POST/PUT/DELETE/PATCH` methods. GETs remain open. Controlled via `AUTH_MODE` env var.
+- [x] **CORS configuration** — `@fastify/cors` registered in `index.ts`. Origin from `CORS_ORIGIN` env var, defaults to `http://localhost:5173`.
+- [x] **Rate limiting** — `@fastify/rate-limit` registered in `index.ts`. Global 100 req/min. Route-level 20 req/min on `POST /api/pods/:podId/context-updates` via `config.rateLimit` in `packages/server/src/routes/context-updates.ts`.
 
 ---
 
-## Tier 3 — Testing & Demo Polish
+## Tier 3 — Testing & Demo Polish [DONE]
 
-### 3a. Expand Test Coverage
-**Scope:** `packages/server/src/services/__tests__/`, `packages/server/src/council/agents/__tests__/`
-**What:** Add tests for:
-- `ingestion.ts` — mock db + broadcast + processUpdate, test Zod validation, secret rejection, quality score attachment
-- `pressure.ts` — test pressure recalculation formula
-- `merge.ts` + `classifier.ts` — test deterministic classification and merge logic
-- `conflict.ts` — test conflict creation with mocked LLM
-- `summary.ts` — test living doc regeneration, regen_count increment
-
-**Pattern to follow:** See `quality-scoring.test.ts` for db mocking. See `lint.test.ts` for sequential mock setup.
-
-### 3b. SDK + CLI Tests
-**Scope:** `packages/sdk/`, `packages/cli/`
-**What:** Add vitest to both packages. The SDK client methods are thin wrappers over fetch — test with mocked fetch. The CLI commands parse args and call SDK methods — test arg parsing and output formatting.
-**How:** Same vitest setup pattern as `packages/server/vitest.config.ts`. Copy the config, add vitest to devDependencies.
-
-### 3c. Integration / E2E Tests
-**Scope:** New `packages/server/src/__tests__/` directory
-**What:** Spin up a real Fastify instance with in-memory SQLite, hit actual endpoints, verify the full pipeline (submit update -> council routes -> living doc regenerated -> WS event).
-**How:** Use Fastify's `inject()` method for in-process HTTP testing. Override the db connection to use `:memory:`. This avoids port conflicts and is fast.
-
-### 3d. Infra Package — CDK Stacks
-**Scope:** `packages/infra/`
-**What:** Define basic CDK stacks for:
-- API Gateway (REST + WebSocket)
-- Lambda functions (one per route group)
-- DynamoDB tables (matching current SQLite schema)
-- S3 buckets (living docs, knowledge graph snapshots)
-- CloudFront + S3 for UI hosting
-**Spec reference:** See the AWS Service Map in CLAUDE.md for the full target architecture.
-
-### 3e. CI/CD Pipeline
-**Scope:** `.github/workflows/`
-**What:** GitHub Actions workflow:
-- On PR: typecheck, test, build
-- On merge to main: deploy to staging
-**How:** Use `pnpm` + turbo caching for fast CI. The monorepo test command is `pnpm test`.
+- [x] **Expanded test coverage (3a)** — 6 new test files, 63 new tests:
+  - `services/__tests__/ingestion.test.ts` (10 tests) — Zod validation, pod lookup, secret rejection, quality scoring, DB write, WS broadcast, council processing
+  - `services/__tests__/pressure.test.ts` (7 tests) — formula: base per conflict (0.15 blocking, 0.08 non-blocking) + age bonus (capped 0.1), clamp to [0,1], table updates
+  - `council/__tests__/classifier.test.ts` (8 tests) — additive/overlapping/contradictory classification, keyword overlap threshold (3+), pressure gate (>0.6)
+  - `council/agents/__tests__/merge.test.ts` (8 tests) — deterministic merge, LLM merge with auto_merge/merge_with_note/escalate_conflict, fallback on error/null
+  - `council/agents/__tests__/conflict.test.ts` (7 tests) — null when no conflicting update, deterministic summary, id format, DB transaction, broadcast x2, Slack notifications
+  - `council/agents/__tests__/summary.test.ts` (12 tests) — not-found pod, markdown sections (health, milestone, conflicts, decisions, context stream, tunnels, knowledge), DB upsert, broadcast
+- [x] **SDK + CLI tests (3b)** — vitest added to both packages with configs. `packages/sdk/src/__tests__/client.test.ts` (11 tests) mocks `globalThis.fetch`, tests all CouncilClient methods. `packages/cli/src/__tests__/commands.test.ts` (7 tests) tests command registration and required options.
+- [x] **Integration tests (3c)** — `packages/server/src/__tests__/integration.test.ts` (11 tests). Uses Fastify `inject()` with in-memory SQLite via `vi.hoisted()`. Tests: pod CRUD, context-update ingestion, validation rejection, living doc generation, conflict list, overlapping classification.
+- [x] **CDK stacks (3d)** — `packages/infra/lib/council-stack.ts`. Defines: 7 DynamoDB tables with GSIs, 3 S3 buckets (versioned living-docs + knowledge-graph, static UI), 6 Lambda functions, REST + WebSocket API Gateways, CloudFront distribution (SPA + API), EventBridge scheduled rules (escalation 5min, lint 2hr).
+- [x] **CI/CD pipeline (3e)** — `.github/workflows/ci.yml`. On PR: typecheck → test → build. On merge to main: deploy staging via CDK with OIDC AWS credentials.
 
 ---
 

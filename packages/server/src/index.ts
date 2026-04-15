@@ -1,5 +1,7 @@
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import { createTables } from "./db/schema.js";
 import { seedDatabase } from "./db/seed.js";
 import { seedKnowledgeGraph } from "./db/seed-knowledge.js";
@@ -15,9 +17,20 @@ import wsRoutes from "./routes/ws.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./council/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
+import { createAuthHook } from "./middleware/auth.js";
 import db from "./db/connection.js";
 
 const app = Fastify({ logger: true });
+
+// Global error handler — structured errors, no stack traces to clients
+app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
+  request.log.error(error);
+  if (reply.sent) return;
+  const statusCode = error.statusCode ?? 500;
+  reply.code(statusCode).send({
+    error: statusCode >= 500 ? "Internal server error" : error.message,
+  });
+});
 
 // Initialize database
 createTables();
@@ -29,6 +42,26 @@ seedKnowledgeGraph();
 
 // Register WebSocket support
 await app.register(websocket);
+
+// CORS — allow UI origin in dev, configurable for production
+await app.register(cors, {
+  origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+});
+
+// Rate limiting — global 100 req/min, route-level overrides via config.rateLimit
+await app.register(rateLimit, {
+  max: 100,
+  timeWindow: "1 minute",
+});
+
+// Auth — protect write routes (POST/PUT/DELETE/PATCH)
+const authMode = (process.env.AUTH_MODE ?? "trust") as "trust" | "ims";
+const authenticate = createAuthHook(authMode);
+app.addHook("onRequest", async (req, reply) => {
+  if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+    await authenticate(req, reply);
+  }
+});
 
 // Register routes
 app.register(podRoutes);

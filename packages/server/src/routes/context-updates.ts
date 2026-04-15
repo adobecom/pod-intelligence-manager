@@ -60,7 +60,9 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     return rows;
   });
 
-  app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", async (req, reply) => {
+  app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", {
+    config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
+  }, async (req, reply) => {
     // Gate: reject ingestion when pod is in critical conflict state (pressure >= 0.8)
     const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(req.params.podId) as { conflict_pressure: number } | undefined;
     if (pod && pod.conflict_pressure >= 0.8) {
