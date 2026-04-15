@@ -38,6 +38,13 @@ const loadingContainer = style({
   height: "full",
 });
 
+const errorColumn = style({
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 16,
+});
+
 export function PodLayout() {
   const { podId } = useParams<{ podId: string }>();
   const loading = usePodStore((s) => s.loading);
@@ -52,13 +59,15 @@ export function PodLayout() {
   if (error && !loading) {
     return (
       <div className={loadingContainer}>
-        <IllustratedMessage>
-          <Heading>Failed to load pod</Heading>
-          <Content>{error}</Content>
+        <div className={errorColumn}>
+          <IllustratedMessage>
+            <Heading>Failed to load pod</Heading>
+            <Content>{error}</Content>
+          </IllustratedMessage>
           <Button variant="primary" onPress={() => podId && loadPod(podId)}>
             Retry
           </Button>
-        </IllustratedMessage>
+        </div>
       </div>
     );
   }
