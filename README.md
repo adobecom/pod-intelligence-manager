@@ -59,6 +59,7 @@ ai-council/
 │   ├── server/          # Fastify backend + Council Master + Committee agents
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
 │   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
+│   ├── mcp-server/      # MCP server for Claude.ai artifact integration
 │   ├── cli/             # (scaffolded, not yet implemented)
 │   └── infra/           # (scaffolded, not yet implemented -- AWS CDK)
 ├── examples/
@@ -191,6 +192,53 @@ const conflicts = await council.getConflicts();
 const updates = await council.getUpdates();
 ```
 
+### `@council/mcp-server`
+
+MCP (Model Context Protocol) server that exposes Council data to Claude.ai. When connected, Claude can render an interactive pod dashboard as an artifact in the side panel.
+
+**Tools:**
+
+| Tool | Input | Description |
+|------|-------|-------------|
+| `list_pods` | (none) | List all active pods with IDs, names, pressure, and conflict counts |
+| `render_pod_dashboard` | `pod_id` | Fetch all pod data and return a self-contained React component for rendering as a Claude.ai artifact |
+
+The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, the living doc, tunnels, and lint findings, then embeds them as inline JSON into a single-file React component with a dark Spectrum-inspired theme. The artifact has four tabs: Dashboard, Conflicts, Feed, and Live Doc.
+
+**Setup:**
+
+1. Build the package:
+
+```bash
+pnpm --filter @council/mcp-server build
+```
+
+2. Add to your Claude Desktop or Claude.ai MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "ai-council": {
+      "command": "node",
+      "args": ["/absolute/path/to/ai-council/packages/mcp-server/dist/index.js"],
+      "env": {
+        "COUNCIL_API_URL": "http://localhost:4000"
+      }
+    }
+  }
+}
+```
+
+3. Start the Council server (`pnpm --filter @council/server dev`), then ask Claude: *"Show me pod Auth Revamp's dashboard"*
+
+The artifact renders a read-only snapshot — no network requests from the artifact itself. To refresh, ask Claude to show it again.
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COUNCIL_API_URL` | `http://localhost:4000` | Base URL of the Council Fastify server |
+
 ### `@council/cli`
 
 Command-line interface for pod management, context submission, and tunnel control. Run via `npx tsx packages/cli/src/index.ts` (or `council` after building).
@@ -295,6 +343,7 @@ pnpm --filter @council/ui typecheck
 | `ANTHROPIC_API_KEY` | (none) | Enables LLM features (Haiku for merges, Sonnet for conflicts) |
 | `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
 | `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
+| `COUNCIL_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the Council server |
 
 ## Architecture
 
@@ -359,6 +408,7 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 | Routing | React Router v7 |
 | Markdown | react-markdown + remark-gfm |
 | Real-time | WebSocket (native, via `@fastify/websocket`) |
+| Claude integration | MCP server (`@modelcontextprotocol/sdk`) |
 | TypeScript | Strict mode, ES2022 target |
 
 ## Not Yet Implemented (Deferred to AWS Deployment)
