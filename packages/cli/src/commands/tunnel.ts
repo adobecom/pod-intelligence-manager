@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import type { Tunnel } from "@council/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
+import { TunnelClient } from "../tunnel/client.js";
 
 export function registerTunnelCommands(program: Command) {
   const tunnel = program.command("tunnel").description("Manage dev tunnels");
@@ -32,9 +33,22 @@ export function registerTunnelCommands(program: Command) {
       console.log(`  Pod:    ${opts.pod}`);
       console.log(`  Branch: ${opts.branch}`);
       console.log(`  ID:     ${tunnel.tunnel_id}`);
-      console.log(chalk.dim("\n  Sending heartbeats every 60s. Press Ctrl+C to disconnect.\n"));
 
-      // Heartbeat loop
+      // Connect the WebSocket tunnel client for request proxying
+      const wsBase = base.replace(/^http/, "ws");
+      const client = new TunnelClient(`${wsBase}/ws/tunnel`, tunnel.tunnel_id, port);
+
+      try {
+        await client.connect();
+        console.log(chalk.dim("  WebSocket tunnel connected — proxying requests."));
+      } catch (err) {
+        console.log(chalk.yellow(`  Warning: WebSocket tunnel failed to connect (${err instanceof Error ? err.message : "unknown"})`));
+        console.log(chalk.yellow("  Falling back to heartbeat-only mode."));
+      }
+
+      console.log(chalk.dim("\n  Press Ctrl+C to disconnect.\n"));
+
+      // HTTP heartbeat loop (keeps DB last_activity updated)
       const heartbeat = setInterval(async () => {
         try {
           await fetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/heartbeat`, {
@@ -48,6 +62,7 @@ export function registerTunnelCommands(program: Command) {
       // Graceful shutdown
       const cleanup = async () => {
         clearInterval(heartbeat);
+        client.disconnect();
         try {
           await fetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/disconnect`, {
             method: "PUT",

@@ -4,6 +4,7 @@ import db from "../db/connection.js";
 import type { Tunnel } from "@council/shared";
 import { broadcast } from "../ws/index.js";
 import { validateBody } from "../middleware/validation.js";
+import { ingestContextUpdate } from "../services/ingestion.js";
 
 const CreateTunnelSchema = z.object({
   dev_name: z.string().min(1, "dev_name is required"),
@@ -46,7 +47,8 @@ export default async function tunnelRoutes(app: FastifyInstance) {
     const { podId } = req.params;
     const { dev_name, branch, port } = req.body;
     const tunnel_id = `tunnel-${dev_name}-${Date.now()}`;
-    const url = `http://localhost:${port}`;
+    const serverBase = process.env.TUNNEL_BASE_URL ?? `http://localhost:${process.env.PORT ?? "4000"}`;
+    const url = `${serverBase}/tunnel/${tunnel_id}`;
     const now = new Date().toISOString();
 
     db.prepare(
@@ -62,6 +64,17 @@ export default async function tunnelRoutes(app: FastifyInstance) {
     const tunnel = rowToTunnel(row);
 
     broadcast({ type: "tunnel_status_changed", podId, payload: tunnel });
+
+    // Log tunnel activation as a context update (fire-and-forget)
+    ingestContextUpdate(podId, {
+      agent_id: `tunnel:${dev_name}`,
+      type: "progress",
+      scope: "infra",
+      summary: `Tunnel active: ${dev_name} on branch ${branch}`,
+      details: `Dev tunnel registered at ${url}. Local port ${port}.`,
+      status: "in_progress",
+    }).catch(() => {});
+
     reply.code(201);
     return tunnel;
   });
@@ -107,6 +120,17 @@ export default async function tunnelRoutes(app: FastifyInstance) {
     const tunnel = rowToTunnel(row);
 
     broadcast({ type: "tunnel_status_changed", podId, payload: tunnel });
+
+    // Log tunnel disconnection as a context update (fire-and-forget)
+    ingestContextUpdate(podId, {
+      agent_id: `tunnel:${tunnel.dev_name}`,
+      type: "progress",
+      scope: "infra",
+      summary: `Tunnel disconnected: ${tunnel.dev_name}`,
+      details: `Dev tunnel ${tunnelId} disconnected.`,
+      status: "completed",
+    }).catch(() => {});
+
     return tunnel;
   });
 }

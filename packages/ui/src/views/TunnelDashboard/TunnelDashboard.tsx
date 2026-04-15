@@ -44,7 +44,7 @@ export function TunnelDashboard() {
               <Cell><Text>{tunnel.branch}</Text></Cell>
               <Cell>
                 <Link
-                  href={`https://${tunnel.url}`}
+                  href={tunnel.url}
                   target="_blank"
                 >
                   {tunnel.url}

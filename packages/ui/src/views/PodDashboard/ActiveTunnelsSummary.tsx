@@ -58,7 +58,7 @@ export function ActiveTunnelsSummary() {
                   </Text>
                 </div>
                 <Link
-                  href={`https://${tunnel.url}`}
+                  href={tunnel.url}
                   target="_blank"
                 >
                   {tunnel.url}

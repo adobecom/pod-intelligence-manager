@@ -14,6 +14,8 @@ import orgRoutes from "./routes/org.js";
 import pendingWorkRoutes from "./routes/pending-work.js";
 import graphRoutes from "./routes/graph.js";
 import wsRoutes from "./routes/ws.js";
+import wsTunnelRoutes from "./routes/ws-tunnel.js";
+import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./council/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
@@ -73,6 +75,8 @@ app.register(orgRoutes);
 app.register(pendingWorkRoutes);
 app.register(graphRoutes);
 app.register(wsRoutes);
+app.register(wsTunnelRoutes);
+app.register(tunnelProxyRoutes);
 
 // Health check — verifies DB connectivity, returns uptime and pod count
 const serverStartedAt = new Date().toISOString();

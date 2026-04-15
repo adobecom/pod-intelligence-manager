@@ -25,6 +25,22 @@ export type {
 export type { Tunnel, TunnelStatus } from "./types/tunnel";
 
 export type {
+  TunnelRequest,
+  TunnelResponse,
+  TunnelResponseChunk,
+  TunnelHeartbeat,
+  TunnelHeartbeatAck,
+  TunnelError,
+  TunnelMessage,
+} from "./types/tunnel-protocol";
+
+export {
+  TUNNEL_CHUNK_THRESHOLD,
+  TUNNEL_REQUEST_TIMEOUT_MS,
+  TUNNEL_WS_HEARTBEAT_MS,
+} from "./types/tunnel-protocol";
+
+export type {
   KnowledgeNodeType,
   ConfidenceLevel,
   KnowledgeNode,
