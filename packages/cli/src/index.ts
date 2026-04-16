@@ -6,6 +6,9 @@ import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";
 import { registerTunnelCommands } from "./commands/tunnel.js";
 import { registerLintCommand } from "./commands/lint.js";
+import { registerHooksCommand } from "./commands/hooks.js";
+import { registerContextCommand } from "./commands/context.js";
+import { registerInitCommand } from "./commands/init.js";
 
 const program = new Command();
 
@@ -20,5 +23,8 @@ registerReportCommand(program);
 registerDocCommand(program);
 registerTunnelCommands(program);
 registerLintCommand(program);
+registerHooksCommand(program);
+registerContextCommand(program);
+registerInitCommand(program);
 
 program.parse();

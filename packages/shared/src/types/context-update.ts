@@ -1,5 +1,12 @@
 import type { Scope } from "./pod";
 
+export type ContextUpdateSource =
+  | "manual"
+  | "git-hook"
+  | "claude-code-hook"
+  | "mcp"
+  | "sdk";
+
 export interface ContextUpdate {
   id: string;
   agent_id: string;
@@ -15,6 +22,7 @@ export interface ContextUpdate {
   blocked_by: string[];
   needs_input_from: InputRequest[];
   quality_score?: number;
+  source?: ContextUpdateSource;
 }
 
 export type ContextUpdateType =

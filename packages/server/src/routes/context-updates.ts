@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
-import type { ContextUpdate, Artifact, InputRequest } from "@council/shared";
+import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@council/shared";
 import { ingestContextUpdate } from "../services/ingestion.js";
 
 interface ContextUpdateRow {
@@ -18,6 +18,7 @@ interface ContextUpdateRow {
   blocks_json: string;
   blocked_by_json: string;
   needs_input_from_json: string;
+  source: string;
 }
 
 function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
@@ -36,6 +37,7 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
     blocks: JSON.parse(row.blocks_json) as string[],
     blocked_by: JSON.parse(row.blocked_by_json) as string[],
     needs_input_from: JSON.parse(row.needs_input_from_json) as InputRequest[],
+    source: (row.source ?? "manual") as ContextUpdateSource,
   };
 }
 
@@ -77,6 +79,10 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     if (!result.success) {
       reply.code(result.secretFindings ? 422 : 400);
       return { error: result.error, secretFindings: result.secretFindings };
+    }
+    if (result.deduplicated) {
+      reply.code(200);
+      return { deduplicated: true, message: "Commit already reported by another source" };
     }
     reply.code(201);
     return { id: result.update!.id, update: result.update, council: result.council };

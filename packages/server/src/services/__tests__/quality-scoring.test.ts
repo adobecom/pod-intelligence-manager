@@ -26,6 +26,7 @@ function makeInput(overrides: Partial<ContextUpdateInput> = {}): ContextUpdateIn
     blocks: [],
     blocked_by: [],
     needs_input_from: [],
+    source: "manual",
     ...overrides,
   };
 }

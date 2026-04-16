@@ -36,7 +36,9 @@ export function createTables() {
       quality_score REAL NOT NULL DEFAULT 0.0,
       blocks_json TEXT NOT NULL DEFAULT '[]',
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
-      needs_input_from_json TEXT NOT NULL DEFAULT '[]'
+      needs_input_from_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'manual',
+      commit_sha TEXT
     );
 
     CREATE TABLE IF NOT EXISTS conflicts (
@@ -148,4 +150,7 @@ export function createTables() {
   try { db.exec("ALTER TABLE living_docs ADD COLUMN last_regenerated_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE living_docs ADD COLUMN regen_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_score REAL NOT NULL DEFAULT 0.0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN commit_sha TEXT"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
 }

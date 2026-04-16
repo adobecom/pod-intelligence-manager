@@ -9,6 +9,7 @@ export type {
 export type {
   ContextUpdate,
   ContextUpdateType,
+  ContextUpdateSource,
   WorkStatus,
   Artifact,
   InputRequest,
