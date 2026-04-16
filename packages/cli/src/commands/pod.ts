@@ -56,7 +56,7 @@ export function registerPodCommands(program: Command) {
           p.conflict_pressure >= 0.3 ? chalk.yellow :
           chalk.green;
 
-        console.log(`  ${chalk.bold(p.name)}`);
+        console.log(`  ${chalk.bold(p.name)}  ${chalk.dim(`(${p.pod_id})`)}`);
         console.log(`    Day ${p.day_number}/${p.total_days}  |  Pressure: ${pressureColor(`${p.conflict_pressure.toFixed(2)} ${level}`)}  |  Conflicts: ${p.open_conflicts}  |  Tunnels: ${p.active_tunnels}`);
         console.log();
       }
