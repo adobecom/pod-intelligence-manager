@@ -11,6 +11,20 @@ import type {
   KnowledgeQueryResult,
 } from "@council/shared";
 
+export interface SessionContextOptions {
+  learningsMaxTokens?: number;
+  recentUpdateLimit?: number;
+}
+
+export interface SessionContext {
+  pulledAt: string;
+  pod: Pod;
+  livingDocMarkdown: string;
+  conflicts: Conflict[];
+  relevantLearnings: KnowledgeQueryResult;
+  recentUpdates: ContextUpdate[];
+}
+
 export interface CouncilClientConfig {
   baseUrl: string;
   podId: string;
@@ -122,5 +136,40 @@ export class CouncilClient {
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/precedents?conflict=${conflict}&maxTokens=${maxTokens}`),
     );
+  }
+
+  // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)
+  async pullSessionContext(opts?: SessionContextOptions): Promise<SessionContext> {
+    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const recentLimit = opts?.recentUpdateLimit ?? 20;
+
+    const results = await Promise.allSettled([
+      this.getPod(),
+      this.getContext(),
+      this.getConflicts(),
+      this.getRelevantLearnings(maxTokens),
+      this.getUpdates(),
+    ]);
+
+    const pod = results[0].status === "fulfilled" ? results[0].value : null;
+    if (!pod) {
+      throw new Error(`Failed to fetch pod: ${results[0].status === "rejected" ? results[0].reason : "unknown"}`);
+    }
+
+    const livingDocMarkdown = results[1].status === "fulfilled" ? results[1].value : "(unavailable)";
+    const conflicts = results[2].status === "fulfilled" ? results[2].value : [];
+    const relevantLearnings: KnowledgeQueryResult = results[3].status === "fulfilled"
+      ? results[3].value
+      : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
+    const allUpdates = results[4].status === "fulfilled" ? results[4].value : [];
+
+    return {
+      pulledAt: new Date().toISOString(),
+      pod,
+      livingDocMarkdown,
+      conflicts,
+      relevantLearnings,
+      recentUpdates: allUpdates.slice(0, recentLimit),
+    };
   }
 }

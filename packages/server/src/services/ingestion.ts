@@ -11,6 +11,8 @@ const ScopeSchema = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
 const WorkStatusSchema = z.enum(["completed", "in_progress", "blocked"]);
 
+const SourceSchema = z.enum(["manual", "git-hook", "claude-code-hook", "mcp", "sdk"]);
+
 const ContextUpdateInputSchema = z.object({
   agent_id: z.string().min(1),
   type: UpdateTypeSchema,
@@ -21,6 +23,7 @@ const ContextUpdateInputSchema = z.object({
     type: z.string(),
     path: z.string().optional(),
     url: z.string().optional(),
+    sha: z.string().optional(),
   })).default([]),
   status: WorkStatusSchema,
   blocks: z.array(z.string()).default([]),
@@ -29,6 +32,7 @@ const ContextUpdateInputSchema = z.object({
     role: ScopeSchema,
     question: z.string(),
   })).default([]),
+  source: SourceSchema.optional().default("manual"),
 });
 
 export type ContextUpdateInput = z.infer<typeof ContextUpdateInputSchema>;
@@ -39,6 +43,7 @@ export interface IngestionResult {
   council?: CouncilResult;
   error?: string;
   secretFindings?: string[];
+  deduplicated?: boolean;
 }
 
 export async function ingestContextUpdate(podId: string, input: unknown): Promise<IngestionResult> {
@@ -70,6 +75,22 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   // 4. Quality scoring
   const quality = scoreUpdate(data, podId);
 
+  // 4.5 Extract commit SHA for deduplication
+  const commitArtifact = data.artifacts.find(a => a.type === "commit" && a.sha);
+  const commitSha = commitArtifact?.sha ?? null;
+
+  // 4.6 Deduplicate: if another source already reported this commit within 60s, skip
+  if (commitSha) {
+    const recent = db.prepare(
+      `SELECT id FROM context_updates
+       WHERE pod_id = ? AND commit_sha = ?
+       AND timestamp > datetime('now', '-60 seconds')`
+    ).get(podId, commitSha) as { id: string } | undefined;
+    if (recent) {
+      return { success: true, update: undefined, council: undefined, deduplicated: true };
+    }
+  }
+
   // 5. Create the update record
   const id = `ctx-${randomUUID().slice(0, 8)}`;
   const timestamp = new Date().toISOString();
@@ -89,18 +110,20 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     blocked_by: data.blocked_by,
     needs_input_from: data.needs_input_from as ContextUpdate["needs_input_from"],
     quality_score: quality.total,
+    source: data.source,
   };
 
   // 6. Write to database
   db.prepare(
-    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     update.id, update.agent_id, update.timestamp, update.pod_id,
     update.type, update.scope, update.summary, update.details,
     JSON.stringify(update.artifacts), update.status, update.quality_score,
     JSON.stringify(update.blocks), JSON.stringify(update.blocked_by),
     JSON.stringify(update.needs_input_from),
+    update.source ?? "manual", commitSha,
   );
 
   // 7. Broadcast via WebSocket

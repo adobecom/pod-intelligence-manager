@@ -233,6 +233,68 @@ Synthesize these learnings into actionable guidance. Highlight:
     },
   );
 
+  // ── session context (bidirectional pull) ──────────────────────────
+
+  server.prompt(
+    "session_context",
+    "Pull bundled session context for an agent starting work. Returns living doc, pod state, open conflicts, recent activity, and relevant org learnings. Use this at the start of every work session.",
+    {
+      pod_id: z.string().describe("Pod ID"),
+      scope: z.string().optional().describe("Agent scope (frontend|backend|design|qa|infra|pm) for filtered learnings"),
+    },
+    async ({ pod_id, scope }) => {
+      const scopeParam = scope ? `&scopes=${encodeURIComponent(scope)}` : "";
+      const [pod, livingDoc, conflicts, updates, learnings] = await Promise.all([
+        apiFetch<Pod>(`/api/pods/${pod_id}`),
+        apiFetchText(`/api/pods/${pod_id}/living-doc`),
+        apiFetch<Conflict[]>(`/api/pods/${pod_id}/conflicts`),
+        apiFetch<ContextUpdate[]>(`/api/pods/${pod_id}/context-updates`),
+        apiFetch<KnowledgeQueryResult>(`/api/knowledge/relevant?maxTokens=2000${scopeParam}`),
+      ]);
+
+      const openConflicts = conflicts.filter((c) => c.status !== "resolved");
+      const recent = updates.slice(0, 20);
+
+      const pressureWarning =
+        pod.conflict_pressure >= 0.8
+          ? "\n\n**CRITICAL: Conflict pressure >= 0.8 — ingestion is HALTED. Resolve conflicts before submitting updates.**"
+          : pod.conflict_pressure >= 0.6
+            ? "\n\n**WARNING: Conflict pressure >= 0.6 — contested areas are held. Review open conflicts before proceeding.**"
+            : "";
+
+      return userMsg(`You are starting a work session on pod "${pod.name}". Review this context before doing any work.
+
+## Pod State
+- Day ${pod.day_number} of ${pod.total_days}
+- Conflict pressure: ${pod.conflict_pressure}${pressureWarning}
+- Milestone: ${pod.milestone.name} (${pod.milestone.percent_complete}% complete, target ${pod.milestone.target_date})
+
+## Areas
+${pod.areas.map((a) => `- **${a.scope}** (${a.owner}): ${a.status}${a.last_activity ? ` — last active ${a.last_activity}` : ""}`).join("\n")}
+
+## Living Document
+${livingDoc.slice(0, 3000)}${livingDoc.length > 3000 ? "\n\n... (truncated — use get_context for full doc)" : ""}
+
+## Open Conflicts (${openConflicts.length})
+${openConflicts.length === 0 ? "None — clear to proceed." : openConflicts.map((c) => `- [${c.severity}] **${c.id}**: ${c.summary}\n  Analysis: ${c.master_analysis}`).join("\n")}
+
+## Recent Activity (last ${recent.length} updates)
+${recent.map((u) => `- [${u.type}/${u.scope}] ${u.summary} (${u.agent_id}, ${u.status})`).join("\n")}
+
+## Relevant Org Knowledge (${learnings.total_matching} items${learnings.truncated ? ", truncated" : ""})
+${learnings.nodes.length === 0 ? "No relevant learnings found." : learnings.nodes.map((n) => `- [${n.type}] ${n.summary}`).join("\n")}
+
+## Your Responsibilities
+${scope ? `Your scope is **${scope}**. Focus on updates and conflicts relevant to this area.` : "Scope not specified — review all areas."}
+
+Based on this context:
+1. Identify any open conflicts or blockers that affect your work
+2. Note recent updates from other agents that you should be aware of
+3. Check if any org learnings are relevant to your planned work
+4. Proceed with your task, knowing that commits will auto-report to the Council`);
+    },
+  );
+
   // ── sprint kickoff ───────────────────────────────────────────────
 
   server.prompt(

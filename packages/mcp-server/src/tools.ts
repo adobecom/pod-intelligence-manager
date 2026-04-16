@@ -119,7 +119,7 @@ export function registerTools(server: McpServer) {
         .describe("Input requests from other roles"),
     },
     async ({ pod_id, ...body }) => {
-      const result = await apiPost(`/api/pods/${pod_id}/context-updates`, body);
+      const result = await apiPost(`/api/pods/${pod_id}/context-updates`, { ...body, source: "mcp" });
       return json(result);
     },
   );
