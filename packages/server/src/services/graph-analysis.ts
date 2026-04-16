@@ -39,6 +39,13 @@ function extractKeywords(text: string): Set<string> {
   );
 }
 
+/** Tokenize and de-duplicate text for query-time scoring (stop words stripped). */
+export function keywordsFromTexts(texts: string[], maxTerms = 40): string[] {
+  const blob = texts.filter(Boolean).join(" ");
+  if (!blob.trim()) return [];
+  return [...extractKeywords(blob)].slice(0, maxTerms);
+}
+
 function keywordOverlap(a: string, b: string): number {
   const kwA = extractKeywords(a);
   const kwB = extractKeywords(b);
@@ -293,7 +300,7 @@ export function scoreRelevance(
       : 0;
 
   // Keyword match (0.3 weight)
-  const nodeKw = extractKeywords(node.summary);
+  const nodeKw = extractKeywords(`${node.summary} ${node.details}`);
   let kwMatch = 0;
   for (const kw of context.keywords) {
     if (nodeKw.has(kw.toLowerCase())) kwMatch++;

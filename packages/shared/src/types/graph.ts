@@ -71,7 +71,13 @@ export interface KnowledgeQueryFilters {
   source_pod_ids?: string[];
   confidence_min?: number;
   curated_only?: boolean;
+  /** Substring filter on summary + details (unchanged behavior). */
   text_search?: string;
+  /**
+   * Terms for relevance scoring only (does not filter candidates).
+   * Merged with tokens derived from `text_search` for ranking.
+   */
+  keywords?: string[];
 }
 
 export interface KnowledgeQueryOptions {
