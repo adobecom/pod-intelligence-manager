@@ -27,6 +27,7 @@ const KnowledgeQuerySchema = z.object({
     confidence_min: z.number().min(0).max(1).optional(),
     curated_only: z.boolean().optional(),
     text_search: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
   }),
   max_tokens: z.number().int().positive().optional(),
   include_details: z.boolean().optional(),

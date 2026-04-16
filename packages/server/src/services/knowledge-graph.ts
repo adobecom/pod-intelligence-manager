@@ -24,6 +24,7 @@ import {
   buildEdges,
   detectCommunities,
   identifyHubs,
+  keywordsFromTexts,
   scoreRelevance,
 } from "./graph-analysis.js";
 
@@ -123,6 +124,25 @@ export function addLearningsToGraph(
 
 // --- Query Knowledge ---
 
+function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string[] {
+  const fromExplicit =
+    filters.keywords?.map((k) => k.toLowerCase().trim()).filter((k) => k.length > 2) ?? [];
+  const fromTextSearch = filters.text_search
+    ? filters.text_search
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+        .map((w) => w.toLowerCase())
+    : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const w of [...fromExplicit, ...fromTextSearch]) {
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+  }
+  return out;
+}
+
 export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryResult {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
@@ -158,9 +178,7 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
 
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
-  const keywords = filters.text_search
-    ? filters.text_search.split(/\s+/).filter((w) => w.length > 2)
-    : [];
+  const keywords = mergeScoringKeywords(filters);
 
   const scored = candidates.map((node) => ({
     node,
@@ -216,14 +234,12 @@ export function getRelevantLearnings(
   activeConflictSummaries: string[],
   maxTokens: number,
 ): KnowledgeQueryResult {
-  // Extract keywords from conflict summaries for keyword matching
-  const keywords = activeConflictSummaries
-    .flatMap((s) => s.split(/\s+/))
-    .filter((w) => w.length > 3);
+  const keywords = keywordsFromTexts(activeConflictSummaries, 40);
 
   return queryKnowledge({
     filters: {
       domains: scopes,
+      ...(keywords.length > 0 ? { keywords } : {}),
     },
     max_tokens: maxTokens,
     include_details: false,
