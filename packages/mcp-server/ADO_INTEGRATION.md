@@ -85,6 +85,21 @@ ADO's `SidecarManager` wraps the stdio-based Council MCP with `mcp-proxy`, which
   pnpm --filter @council/server dev   # port 4000
   ```
 
+### Evergreen local development (no manual `vendor/` copy)
+
+ADO resolves the AI Council MCP entry in this order:
+
+1. **`COUNCIL_MCP_ENTRY`** — absolute path to `packages/mcp-server/dist/index.js`
+2. **`AI_COUNCIL_ROOT`** — absolute path to the `ai-council` repo root; uses `packages/mcp-server/dist/index.js` if that file exists (after you run `pnpm --filter @council/mcp-server build`)
+3. **`node_modules/@council/mcp-server/dist/index.js`** — if you `npm link` / `pnpm link` the package or add a `file:` dependency
+4. **`vendor/ai-council/dist/index.js`** — fallback for distribution
+
+Set `AI_COUNCIL_ROOT` in the environment where Claude spawns ADO (e.g. `ado-mcp/.env` loaded by `dotenv`, or your shell profile). Rebuild the MCP after Council changes:
+
+```bash
+pnpm --filter @council/mcp-server build
+```
+
 ## Integration steps
 
 ### 1. Create the vendor package
