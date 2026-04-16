@@ -241,7 +241,16 @@ The artifact renders a read-only snapshot — no network requests from the artif
 
 ### `@council/cli`
 
-Command-line interface for pod management, context submission, and tunnel control. Run via `npx tsx packages/cli/src/index.ts` (or `council` after building).
+Command-line interface for pod management, context submission, and tunnel control.
+
+**From this clone (pick one):**
+
+| Command | When to use |
+|---------|-------------|
+| `pnpm install && pnpm link --global` | Installs the `council` command on your PATH (points at this repo; keep the clone, or run `pnpm unlink --global` before deleting it). |
+| `pnpm council <args>` | No global install; run only from the monorepo root (example: `pnpm council pod list`). |
+
+You can still run the entry file directly with `npx tsx packages/cli/src/index.ts`.
 
 **Pod management:**
 
