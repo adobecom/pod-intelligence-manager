@@ -6,11 +6,11 @@ Three pillars:
 
 1. **AI Council (Brain)** -- A context bus: agents submit updates, a Council Master routes to Committee agents (Merge, Conflict, Summary), and a living `.md` doc is assembled from the current state.
 2. **Council UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
-3. **FE Tunneling** -- Expo-style localhost tunneling (planned; not yet implemented).
+3. **FE Tunneling** -- Expo-style localhost tunneling (**prototype implemented**: CLI + server routes for WebSocket request proxying).
 
 ## Quick Demo
 
-Run these three commands in separate terminals to see everything working:
+Run these commands in separate terminals to see everything working:
 
 ```bash
 pnpm install
@@ -60,8 +60,8 @@ ai-council/
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
 │   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # (scaffolded, not yet implemented)
-│   └── infra/           # (scaffolded, not yet implemented -- AWS CDK)
+│   ├── cli/             # CLI for pod management, reporting, tunnels, and hooks
+│   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
 ├── examples/
 │   └── demo-agent.ts    # End-to-end demo exercising the SDK
 ├── prompts/             # Version-controlled LLM system prompts
@@ -413,10 +413,33 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 
 ## Not Yet Implemented (Deferred to AWS Deployment)
 
-- **FE Tunneling** -- Real outbound WebSocket tunnels with proxy (localhost stub works via CLI)
-- **AWS Infrastructure** (`packages/infra`) -- CDK stack for API Gateway, Lambda, DynamoDB, S3, Route 53
+- **Production FE tunneling** — The local tunnel prototype (CLI + server routes + WS proxying) exists, but the hosted “stable URL” deployment story (custom domains, edge, auth) is still a deployment milestone.
+- **Production deployment** — `packages/infra` contains an AWS CDK stack; the remaining work is deploying and operationalizing it for real org environments (accounts, domains/certs, secrets, observability, runbooks).
 - **Adobe IMS auth** -- Currently no authentication
 - **Slack integration** -- Conflict notifications and emoji-based resolution
 - **Notification system** -- In-app, email, Slack DM per-user preferences
 
 See `SPEC.md` for the full specification and implementation milestones.
+
+## Hardening checklist (consolidated)
+
+This is a lightweight “production readiness” checklist that used to live in `HARDENING.md`. Items marked **[DONE]** are already implemented; they’re kept as a quick map of what exists and where.
+
+### Tier 1 — Credibility **[DONE]**
+
+- **Unit tests** — vitest set up in `packages/server` with broad coverage of core services. Run: `pnpm test`.
+- **Request validation** — Zod schemas + `validateBody()` middleware on POST routes (`packages/server/src/middleware/validation.ts`).
+- **Health check** — `GET /api/health` in `packages/server/src/index.ts` validates DB connectivity.
+
+### Tier 2 — Production readiness (local) **[DONE]**
+
+- **Global error handler** — `app.setErrorHandler` in `packages/server/src/index.ts` returns structured errors and avoids leaking stacks.
+- **Auth middleware skeleton** — `packages/server/src/middleware/auth.ts` (`AUTH_MODE=trust|ims`, IMS verification is TODO).
+- **CORS** — `@fastify/cors` in `packages/server/src/index.ts` (config via `CORS_ORIGIN`).
+- **Rate limiting** — `@fastify/rate-limit` in `packages/server/src/index.ts` plus route-level limits where needed.
+
+### Tier 3 — Testing & demo polish **[DONE]**
+
+- **Expanded unit/integration tests** — Includes ingestion, pressure, classification, merge/conflict/summary agents, and Fastify `inject()` integration tests.
+- **SDK + CLI tests** — vitest coverage for client methods + command registration.
+- **CDK stack** — present in `packages/infra/lib/council-stack.ts` (see note above about production deployment/ops).
