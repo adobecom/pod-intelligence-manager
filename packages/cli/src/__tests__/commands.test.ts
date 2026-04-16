@@ -10,6 +10,14 @@ vi.mock("@council/sdk", () => ({
     getPod: vi.fn().mockResolvedValue({ pod_id: "pod-1" }),
     getConflicts: vi.fn().mockResolvedValue([]),
     getUpdates: vi.fn().mockResolvedValue([]),
+    pullSessionContext: vi.fn().mockResolvedValue({
+      livingDocMarkdown: "# Doc",
+      pod: { pod_id: "pod-1", name: "P", conflict_pressure: 0 },
+      conflicts: [],
+      relevantLearnings: { nodes: [], total_matching: 0, truncated: false },
+      recentUpdates: [],
+      pulledAt: new Date().toISOString(),
+    }),
   })),
 }));
 
@@ -85,5 +93,24 @@ describe("CLI command registration", () => {
 
     const lintCmd = program.commands.find(c => c.name() === "lint");
     expect(lintCmd).toBeDefined();
+  });
+
+  it("context command is registered", async () => {
+    const { registerContextCommand } = await import("../commands/context.js");
+    registerContextCommand(program);
+
+    const ctxCmd = program.commands.find(c => c.name() === "context");
+    expect(ctxCmd).toBeDefined();
+  });
+
+  it("hooks command is registered with install and uninstall", async () => {
+    const { registerHooksCommand } = await import("../commands/hooks.js");
+    registerHooksCommand(program);
+
+    const hooksCmd = program.commands.find(c => c.name() === "hooks");
+    expect(hooksCmd).toBeDefined();
+    const sub = hooksCmd!.commands.map(c => c.name());
+    expect(sub).toContain("install");
+    expect(sub).toContain("uninstall");
   });
 });

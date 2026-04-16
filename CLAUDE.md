@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Pod agent requirement
+
+When working **in a Council pod** (yours or a consumer repo using `@council/sdk`), you **must**:
+
+1. **Pull session context before substantive work** — use `CouncilClient.pullSessionContext()`, the MCP tool `get_agent_session_context`, or `council context` (see `docs/POD_AGENT_PROTOCOL.md`).
+2. **Report to the Council after lock-in** — commits, reverts, or equivalent; use `report()`, `council report`, MCP `submit_context_update`, or install git hooks with `council hooks install`.
+
+Full normative text: [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md).
+
 ## Project Status
 
 Active implementation. Core backend (Fastify server, SQLite, WebSocket), Council Master, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. Running locally on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.

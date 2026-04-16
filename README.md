@@ -60,7 +60,7 @@ ai-council/
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
 │   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # (scaffolded, not yet implemented)
+│   ├── cli/             # council CLI — pods, context, hooks, tunnel
 │   └── infra/           # (scaffolded, not yet implemented -- AWS CDK)
 ├── examples/
 │   └── demo-agent.ts    # End-to-end demo exercising the SDK
@@ -262,6 +262,14 @@ council report \
   --summary "Built the hero section" \
   --details "Responsive layout with animated gradient." \
   --status completed
+```
+
+**Pod agent protocol** (pull before work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
+
+```bash
+# Set COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (and COUNCIL_SERVER_URL if needed)
+council context --write .council/last-context.md    # Bundled living doc, conflicts, learnings, recent updates
+council hooks install                               # Optional: post-commit / post-rewrite → Council API
 ```
 
 **Living doc and lint:**

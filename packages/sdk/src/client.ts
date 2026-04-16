@@ -41,6 +41,16 @@ export interface ReportResult {
   };
 }
 
+/** Bundled snapshot for session start (pod agent protocol). */
+export interface SessionContext {
+  livingDocMarkdown: string;
+  pod: Pod;
+  conflicts: Conflict[];
+  relevantLearnings: KnowledgeQueryResult;
+  recentUpdates: ContextUpdate[];
+  pulledAt: string;
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -97,6 +107,34 @@ export class CouncilClient {
   // Fetch context updates for the pod
   async getUpdates(): Promise<ContextUpdate[]> {
     return fetchJSON<ContextUpdate[]>(this.url(`/api/pods/${this.config.podId}/context-updates`));
+  }
+
+  /**
+   * Pull everything needed before substantive work (pod agent protocol).
+   * Parallel-fetches living doc, pod, conflicts, relevant learnings, and recent updates.
+   */
+  async pullSessionContext(options?: { learningsMaxTokens?: number; recentUpdateLimit?: number }): Promise<SessionContext> {
+    const learningsMaxTokens = options?.learningsMaxTokens ?? 2000;
+    const recentLimit = options?.recentUpdateLimit ?? 20;
+
+    const [livingDocMarkdown, pod, conflicts, relevantLearnings, allUpdates] = await Promise.all([
+      this.getContext(),
+      this.getPod(),
+      this.getConflicts(),
+      this.getRelevantLearnings(learningsMaxTokens),
+      this.getUpdates(),
+    ]);
+
+    const recentUpdates = allUpdates.slice(0, recentLimit);
+
+    return {
+      livingDocMarkdown,
+      pod,
+      conflicts,
+      relevantLearnings,
+      recentUpdates,
+      pulledAt: new Date().toISOString(),
+    };
   }
 
   // Query the organizational knowledge graph with token budget

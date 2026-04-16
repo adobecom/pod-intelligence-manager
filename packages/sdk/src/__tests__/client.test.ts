@@ -193,4 +193,56 @@ describe("CouncilClient", () => {
       );
     });
   });
+
+  describe("pullSessionContext", () => {
+    it("parallel-fetches living doc, pod, conflicts, learnings, updates", async () => {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/living-doc")) {
+          return Promise.resolve({
+            ok: true,
+            text: () => Promise.resolve("# Living"),
+          });
+        }
+        if (url.includes("/conflicts")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+        }
+        if (url.includes("/context-updates")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+        }
+        if (url.includes("/knowledge/relevant")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ nodes: [], total_matching: 0, truncated: false }),
+          });
+        }
+        if (url.includes("/api/pods/pod-1")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                pod_id: "pod-1",
+                name: "Alpha",
+                sprint_start: "",
+                sprint_end: "",
+                day_number: 1,
+                total_days: 5,
+                conflict_pressure: 0,
+                milestone: { name: "M", target_date: "", percent_complete: 0 },
+                areas: [],
+              }),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("") });
+      });
+
+      const client = makeClient();
+      const ctx = await client.pullSessionContext({ recentUpdateLimit: 3 });
+
+      expect(ctx.livingDocMarkdown).toBe("# Living");
+      expect(ctx.pod.name).toBe("Alpha");
+      expect(ctx.recentUpdates).toEqual([]);
+      expect(ctx.pulledAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(mockFetch).toHaveBeenCalled();
+    });
+  });
 });
