@@ -33,7 +33,7 @@ Open **http://localhost:5173** and watch the Org Dashboard, Pod Dashboard, Confl
 
 Optional:
 
-- **`ANTHROPIC_API_KEY`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet). The system works fully without it using deterministic classification and merging.
+- **`AWS_BEARER_TOKEN_BEDROCK`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet) via AWS Bedrock. Set `AWS_REGION` (defaults to `us-west-2`) and optionally override `BEDROCK_MODEL_FAST` / `BEDROCK_MODEL_SMART`. The system works fully without it using deterministic classification and merging.
 
 ## Quick Start
 
@@ -340,7 +340,10 @@ pnpm --filter @council/ui typecheck
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `4000` | Server port |
-| `ANTHROPIC_API_KEY` | (none) | Enables LLM features (Haiku for merges, Sonnet for conflicts) |
+| `AWS_BEARER_TOKEN_BEDROCK` | (none) | Enables LLM features via Bedrock (Haiku for merges, Sonnet for conflicts) |
+| `AWS_REGION` | `us-west-2` | AWS region for Bedrock Converse endpoint |
+| `BEDROCK_MODEL_FAST` | `us.anthropic.claude-3-5-haiku-20241022-v1:0` | Bedrock model ID for fast/merge agent |
+| `BEDROCK_MODEL_SMART` | `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | Bedrock model ID for smart/conflict agent |
 | `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
 | `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
 | `COUNCIL_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the Council server |

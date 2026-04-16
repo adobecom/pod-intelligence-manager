@@ -1,24 +1,26 @@
-import Anthropic from "@anthropic-ai/sdk";
+// Bedrock Converse API client — uses Claude via AWS Bedrock with Bearer token auth.
+// Configure via env: AWS_REGION, AWS_BEARER_TOKEN_BEDROCK, BEDROCK_MODEL_FAST, BEDROCK_MODEL_SMART.
 
-// Centralized model IDs — change here to upgrade across all agents
+const DEFAULT_FAST = "us.anthropic.claude-3-5-haiku-20241022-v1:0";
+const DEFAULT_SMART = "us.anthropic.claude-3-5-sonnet-20241022-v2:0";
+
 export const MODELS = {
-  fast: "claude-haiku-4-5-20251001",
-  smart: "claude-sonnet-4-5-20250514",
-} as const;
+  get fast() {
+    return process.env.BEDROCK_MODEL_FAST || DEFAULT_FAST;
+  },
+  get smart() {
+    return process.env.BEDROCK_MODEL_SMART || DEFAULT_SMART;
+  },
+};
 
-export type ModelId = (typeof MODELS)[keyof typeof MODELS];
-
-let client: Anthropic | null = null;
+export type ModelId = string;
 
 export function isLLMAvailable(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY;
+  return !!process.env.AWS_BEARER_TOKEN_BEDROCK;
 }
 
-function getClient(): Anthropic {
-  if (!client) {
-    client = new Anthropic();
-  }
-  return client;
+interface ConverseResponse {
+  output?: { message?: { content?: Array<{ text?: string }> } };
 }
 
 export async function callLLM(opts: {
@@ -27,20 +29,34 @@ export async function callLLM(opts: {
   prompt: string;
   maxTokens?: number;
 }): Promise<string> {
-  const anthropic = getClient();
+  const token = process.env.AWS_BEARER_TOKEN_BEDROCK;
+  if (!token) throw new Error("AWS_BEARER_TOKEN_BEDROCK is not set");
 
-  const message = await anthropic.messages.create({
-    model: opts.model,
-    max_tokens: opts.maxTokens ?? 2048,
-    system: opts.system,
-    messages: [{ role: "user", content: opts.prompt }],
+  const region = process.env.AWS_REGION || "us-west-2";
+  const url = `https://bedrock-runtime.${region}.amazonaws.com/model/${opts.model}/converse`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      system: [{ text: opts.system }],
+      messages: [{ role: "user", content: [{ text: opts.prompt }] }],
+      inferenceConfig: { maxTokens: opts.maxTokens ?? 2048 },
+    }),
   });
 
-  const block = message.content[0];
-  if (block.type === "text") {
-    return block.text;
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `Bedrock Converse failed: ${response.status} ${response.statusText} — ${body}`,
+    );
   }
-  return "";
+
+  const data = (await response.json()) as ConverseResponse;
+  return data.output?.message?.content?.[0]?.text ?? "";
 }
 
 export async function callLLMJSON<T>(opts: {
