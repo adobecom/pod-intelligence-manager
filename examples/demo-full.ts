@@ -10,7 +10,7 @@
  *   2. Optionally start the UI: pnpm --filter @council/ui dev
  *   3. Run this script: npx tsx examples/demo-full.ts
  *
- * Note: Without ANTHROPIC_API_KEY, updates are merged deterministically (no LLM).
+ * Note: Without AWS_BEARER_TOKEN_BEDROCK, updates are merged deterministically (no LLM).
  * The seeded pods have pre-existing conflicts to demonstrate the full conflict flow.
  */
 
