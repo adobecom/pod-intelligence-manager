@@ -6,7 +6,7 @@ import { regenerateLivingDoc } from "../pim/agents/summary.js";
 import { runLintPass } from "../pim/agents/lint.js";
 import { getRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
-import { POD_SCOPES } from "../services/pod-snapshot.js";
+import { getOrgScopeIdsOrdered } from "../services/org-settings.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 
 const CreatePodSchema = z.object({
@@ -170,7 +170,7 @@ export default async function podRoutes(app: FastifyInstance) {
     const insertArea = db.prepare(
       "INSERT INTO pod_areas (pod_id, scope, owner, status) VALUES (?, ?, 'unassigned', 'waiting')",
     );
-    for (const scope of POD_SCOPES) {
+    for (const scope of getOrgScopeIdsOrdered()) {
       insertArea.run(podId, scope);
     }
 
@@ -185,7 +185,7 @@ export default async function podRoutes(app: FastifyInstance) {
 
     // Seed with knowledge from past pods
     try {
-      const allScopes = [...POD_SCOPES];
+      const allScopes = getOrgScopeIdsOrdered();
       const learnings = getRelevantLearnings(allScopes, [], 3000, project_id ?? null);
       if (learnings.nodes.length > 0) {
         let knowledgeSection = "\n## Historical Knowledge Context\n\n";

@@ -1,9 +1,6 @@
 import db from "../db/connection.js";
 import type { Milestone } from "@pim/shared";
 
-/** Six scopes; must match `pod_areas` rows created for each pod. */
-export const POD_SCOPES = ["frontend", "backend", "design", "qa", "infra", "pm"] as const;
-
 interface LatestRow {
   agent_id: string;
   timestamp: string;
@@ -37,7 +34,7 @@ export function resolveAreaStatus(updateType: string, workStatus: string): "done
 /**
  * Recompute denormalized pod snapshot from `context_updates`:
  * - `pod_areas`: latest update per scope (or waiting if none)
- * - `pods.milestone_json.percent_complete`: sprint health proxy = round(done_scopes / 6 * 100)
+ * - `pods.milestone_json.percent_complete`: sprint health proxy = round(done_scopes / area_count * 100)
  * - `org_pod_summaries.agent_count`: distinct agents who posted updates
  *
  * The milestone % is a lightweight proxy, not PM-level planning truth.
@@ -61,7 +58,11 @@ export function refreshPodSnapshotFromContext(podId: string): void {
     `UPDATE pod_areas SET owner = ?, status = ?, last_activity = ? WHERE pod_id = ? AND scope = ?`,
   );
 
-  for (const scope of POD_SCOPES) {
+  const podScopes = db
+    .prepare("SELECT scope FROM pod_areas WHERE pod_id = ? ORDER BY id ASC")
+    .all(podId) as { scope: string }[];
+
+  for (const { scope } of podScopes) {
     const row = byScope.get(scope);
     if (!row) {
       updateArea.run("unassigned", "waiting", null, podId, scope);
@@ -75,7 +76,8 @@ export function refreshPodSnapshotFromContext(podId: string): void {
     db.prepare("SELECT COUNT(*) AS c FROM pod_areas WHERE pod_id = ? AND status = 'done'").get(podId) as { c: number }
   ).c;
 
-  const percentComplete = Math.round((doneCount / POD_SCOPES.length) * 100);
+  const areaCount = podScopes.length;
+  const percentComplete = areaCount > 0 ? Math.round((doneCount / areaCount) * 100) : 0;
 
   const podRow = db.prepare("SELECT milestone_json FROM pods WHERE pod_id = ?").get(podId) as
     | { milestone_json: string }

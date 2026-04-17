@@ -31,3 +31,13 @@ export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
   if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
 }
+
+export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: body != null ? { "Content-Type": "application/json" } : {},
+    body: body != null ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+  return res.json() as Promise<T>;
+}

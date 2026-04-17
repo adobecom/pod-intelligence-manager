@@ -1,7 +1,15 @@
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import db from "./connection.js";
+
+export const ORG_CONFIG_ROW_KEY = "org_config";
 
 export function createTables() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS org_settings (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       project_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -110,6 +118,15 @@ export function createTables() {
       completed_date TEXT NOT NULL,
       duration_days INTEGER NOT NULL,
       final_pressure REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS archived_projects (
+      project_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      anatomy_json TEXT NOT NULL,
+      archived_date TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS lint_findings (
@@ -225,4 +242,26 @@ export function createTables() {
       "CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time ON project_context_updates(project_id, timestamp DESC)",
     );
   } catch { /* already exists */ }
+
+  try {
+    db.exec("ALTER TABLE projects ADD COLUMN anatomy_json TEXT");
+  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archived_projects (
+        project_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        anatomy_json TEXT NOT NULL,
+        archived_date TEXT NOT NULL
+      )
+    `);
+  } catch { /* already exists */ }
+
+  db.prepare("INSERT OR IGNORE INTO org_settings (key, value_json) VALUES (?, ?)").run(
+    ORG_CONFIG_ROW_KEY,
+    JSON.stringify(DEFAULT_ORG_CONFIG),
+  );
 }

@@ -27,10 +27,5 @@ export interface PodArea {
 
 export type AreaStatus = "done" | "in_progress" | "waiting" | "blocked";
 
-export type Scope =
-  | "frontend"
-  | "backend"
-  | "design"
-  | "qa"
-  | "infra"
-  | "pm";
+/** Org-defined scope id (see `OrgConfig.scopes`); stored on pod areas and context updates. */
+export type Scope = string;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildArtifact } from "./artifact-template.js";
-import { apiFetch, apiFetchText, apiPost, apiPut } from "./api.js";
+import { apiFetch, apiFetchText, apiPatch, apiPost, apiPut } from "./api.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -17,13 +17,123 @@ const json = (data: unknown) => ({
 
 const PodId = z.string().describe("Pod ID (e.g. 'pod-checkout-redesign')");
 const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
-const Scope = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
+const Scope = z
+  .string()
+  .min(1)
+  .describe("Org-defined scope id (must match a scopes[].id from GET /api/org/config on the PIM server)");
+
+const OrgScopeEntrySchema = z.object({
+  id: z.string().min(1).describe("Stable scope id (e.g. frontend, security-review)"),
+  label: z.string().min(1).describe("Human-readable label for UIs and reports"),
+});
+
+const ProjectAnatomySchema = z.object({
+  internal: z
+    .array(z.object({ scope_id: Scope }))
+    .describe("Internal initiative slots; each scope_id must exist in org config scopes"),
+  external: z.array(
+    z.object({
+      name: z.string().min(1).describe("Team or group name"),
+      role: z.string().min(1).describe("Free-text relationship or capacity (not an org scope id)"),
+      notes: z.string().optional(),
+    }),
+  ),
+});
 
 /* ------------------------------------------------------------------ */
 /*  Registration                                                      */
 /* ------------------------------------------------------------------ */
 
 export function registerTools(server: McpServer) {
+  // ── org config & projects ───────────────────────────────────────
+
+  server.tool(
+    "get_org_config",
+    "Read the org-wide scope list (ids + labels). Scope ids drive pod areas, context updates, and project anatomy internal slots. Call this before pick_scope-dependent tools or when validating scope strings.",
+    {},
+    async () => {
+      const config = await apiFetch("/api/org/config");
+      return json(config);
+    },
+  );
+
+  server.tool(
+    "update_org_config",
+    "Replace the entire org scope list (PATCH /api/org/config). Must include at least one scope with non-empty id and label; ids must be unique. Affects new pods and validation of future context updates — existing pod_areas rows are unchanged.",
+    {
+      scopes: z
+        .array(OrgScopeEntrySchema)
+        .min(1)
+        .describe("Complete new scope list (full replacement, not a diff)"),
+    },
+    async ({ scopes }) => {
+      const config = await apiPatch("/api/org/config", { scopes });
+      return json(config);
+    },
+  );
+
+  server.tool(
+    "list_projects",
+    "List all long-lived projects (initiatives). Each includes project_id, name, description, created_at, and anatomy.",
+    {},
+    async () => {
+      const projects = await apiFetch<unknown[]>("/api/projects");
+      return json(projects);
+    },
+  );
+
+  server.tool(
+    "create_project",
+    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy.",
+    {
+      name: z.string().min(1).describe("Project display name"),
+      description: z.string().optional().describe("Optional description"),
+    },
+    async ({ name, description }) => {
+      const project = await apiPost("/api/projects", { name, description });
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "get_project",
+    "Fetch a single project by ID including anatomy (internal scope slots and external collaborator rows).",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const project = await apiFetch(`/api/projects/${encodeURIComponent(project_id)}`);
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "update_project",
+    "PATCH a project: update name, description, and/or anatomy. At least one field must be provided. Anatomy internal.scope_id values must exist in org config scopes (use get_org_config).",
+    {
+      project_id: ProjectId,
+      name: z.string().min(1).optional().describe("New project display name"),
+      description: z.union([z.string(), z.null()]).optional().describe("Set or clear (null) description"),
+      anatomy: ProjectAnatomySchema.optional().describe("Replace project anatomy (internal + external)"),
+    },
+    async ({ project_id, ...patch }) => {
+      const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+      if (Object.keys(body).length === 0) {
+        throw new Error("Provide at least one of: name, description, anatomy");
+      }
+      const project = await apiPatch(`/api/projects/${encodeURIComponent(project_id)}`, body);
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "archive_project",
+    "Archive a long-lived project: deletes project-level context updates, detaches linked pods (project_id cleared), stores a snapshot in archived_projects, and removes the active project row. Does not run pod knowledge extraction.",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const result = await apiPost(`/api/projects/${encodeURIComponent(project_id)}/archive`);
+      return json(result);
+    },
+  );
+
   // ── existing read tools ──────────────────────────────────────────
 
   server.tool(
@@ -166,7 +276,7 @@ export function registerTools(server: McpServer) {
       needs_input_from: z
         .array(z.object({ role: Scope, question: z.string() }))
         .optional()
-        .describe("Input requests from other roles"),
+        .describe("Input requests targeting another org scope"),
     },
     async ({ pod_id, ...body }) => {
       const result = await apiPost(`/api/pods/${pod_id}/context-updates`, { ...body, source: "mcp" });

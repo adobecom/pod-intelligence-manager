@@ -8,8 +8,6 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-const SCOPES = new Set(["frontend", "backend", "design", "qa", "infra", "pm"]);
-
 export interface PimConfig {
   /** Exactly one of pod or project mode is active. */
   mode: "pod" | "project";
@@ -65,7 +63,6 @@ export function resolveConfig(): PimConfig | null {
   const agentId = process.env.PIM_AGENT_ID?.trim() || json?.agentId || gitUserName();
 
   if (!agentId || !scope) return null;
-  if (!SCOPES.has(scope)) return null;
 
   if (podId) {
     return { mode: "pod", podId, agentId, scope, serverUrl };

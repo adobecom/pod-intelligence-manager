@@ -3,11 +3,14 @@ import type {
   Conflict,
   ContextUpdate,
   Project,
+  ProjectAnatomy,
+  OrgConfig,
   ProjectContextUpdate,
   Tunnel,
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  ArchivedProject,
   PendingWork,
   KnowledgeGraph,
   KnowledgeStats,
@@ -141,6 +144,28 @@ export async function getArchivedPods(): Promise<ArchivedPod[]> {
   return fetchJSON<ArchivedPod[]>("/api/org/archived");
 }
 
+export async function getArchivedProjects(): Promise<ArchivedProject[]> {
+  return fetchJSON<ArchivedProject[]>("/api/org/archived-projects");
+}
+
+export async function archiveProject(projectId: string): Promise<ArchivedProject> {
+  return fetchJSON<ArchivedProject>(`/api/projects/${encodeURIComponent(projectId)}/archive`, {
+    method: "POST",
+  });
+}
+
+export async function getOrgConfig(): Promise<OrgConfig> {
+  return fetchJSON<OrgConfig>("/api/org/config");
+}
+
+export async function patchOrgConfig(body: OrgConfig): Promise<OrgConfig> {
+  return fetchJSON<OrgConfig>("/api/org/config", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createPod(input: {
   name: string;
   sprint_days?: number;
@@ -177,7 +202,7 @@ export async function createProject(input: {
 
 export async function patchProject(
   projectId: string,
-  input: { name?: string; description?: string | null },
+  input: { name?: string; description?: string | null; anatomy?: ProjectAnatomy },
 ): Promise<Project> {
   return fetchJSON<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
@@ -262,7 +287,7 @@ export async function curateKnowledgeNode(
 export interface ContextUpdateInput {
   agent_id?: string;
   type: "progress" | "blocker" | "spec_change" | "question" | "decision";
-  scope: "frontend" | "backend" | "design" | "qa" | "infra" | "pm";
+  scope: string;
   summary: string;
   details: string;
   status: "completed" | "in_progress" | "blocked";

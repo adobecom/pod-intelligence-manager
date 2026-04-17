@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Heading,
   Picker,
@@ -12,6 +12,7 @@ import {
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useProjectStore } from "../../stores/projectStore";
+import { useOrgStore } from "../../stores/orgStore";
 import { FeedItem } from "../ContextFeed/FeedItem";
 import { MarkdownDetailsEditor } from "../../components/MarkdownDetailsEditor";
 
@@ -34,18 +35,26 @@ const formActions = style({ display: "flex", gap: 12, justifyContent: "end" });
 export function ProjectContextFeed() {
   const contextUpdates = useProjectStore((s) => s.contextUpdates);
   const submitProjectContextUpdate = useProjectStore((s) => s.submitProjectContextUpdate);
+  const orgConfig = useOrgStore((s) => s.orgConfig);
   const [scopeFilter, setScopeFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
   const [formType, setFormType] = useState<string>("progress");
-  const [formScope, setFormScope] = useState<string>("frontend");
+  const [formScope, setFormScope] = useState<string>("");
   const [formSummary, setFormSummary] = useState("");
   const [formDetails, setFormDetails] = useState("");
   const [formStatus, setFormStatus] = useState<string>("in_progress");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const first = orgConfig?.scopes[0]?.id;
+    if (first && !formScope) {
+      setFormScope(first);
+    }
+  }, [orgConfig, formScope]);
 
   async function handleSubmit() {
     if (!formSummary.trim()) return;
@@ -54,7 +63,7 @@ export function ProjectContextFeed() {
     try {
       await submitProjectContextUpdate({
         type: formType as "progress" | "blocker" | "spec_change" | "question" | "decision",
-        scope: formScope as "frontend" | "backend" | "design" | "qa" | "infra" | "pm",
+        scope: formScope,
         summary: formSummary,
         details: formDetails,
         status: formStatus as "completed" | "in_progress" | "blocked",
@@ -132,15 +141,14 @@ export function ProjectContextFeed() {
               </Picker>
               <Picker
                 label="Scope"
-                selectedKey={formScope}
+                selectedKey={formScope || undefined}
                 onSelectionChange={(k) => setFormScope(k as string)}
               >
-                <PickerItem id="frontend">Frontend</PickerItem>
-                <PickerItem id="backend">Backend</PickerItem>
-                <PickerItem id="design">Design</PickerItem>
-                <PickerItem id="qa">QA</PickerItem>
-                <PickerItem id="infra">Infra</PickerItem>
-                <PickerItem id="pm">PM</PickerItem>
+                {(orgConfig?.scopes ?? []).map((s) => (
+                  <PickerItem key={s.id} id={s.id}>
+                    {s.label}
+                  </PickerItem>
+                ))}
               </Picker>
               <Picker
                 label="Status"
@@ -167,7 +175,7 @@ export function ProjectContextFeed() {
               <Button
                 variant="accent"
                 onPress={handleSubmit}
-                isDisabled={!formSummary.trim() || submitting}
+                isDisabled={!formSummary.trim() || !formScope || submitting}
                 isPending={submitting}
               >
                 Submit Update
@@ -184,12 +192,11 @@ export function ProjectContextFeed() {
           onSelectionChange={(k) => setScopeFilter(k as string)}
         >
           <PickerItem id="all">All Scopes</PickerItem>
-          <PickerItem id="frontend">Frontend</PickerItem>
-          <PickerItem id="backend">Backend</PickerItem>
-          <PickerItem id="design">Design</PickerItem>
-          <PickerItem id="qa">QA</PickerItem>
-          <PickerItem id="infra">Infra</PickerItem>
-          <PickerItem id="pm">PM</PickerItem>
+          {(orgConfig?.scopes ?? []).map((s) => (
+            <PickerItem key={s.id} id={s.id}>
+              {s.label}
+            </PickerItem>
+          ))}
         </Picker>
         <Picker
           label="Type"

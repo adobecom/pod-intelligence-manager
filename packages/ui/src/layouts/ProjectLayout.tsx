@@ -3,8 +3,10 @@ import { Outlet, useParams, NavLink, useLocation } from "react-router-dom";
 import { Button, Content, Heading, IllustratedMessage, ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useProjectStore } from "../stores/projectStore";
+import { useOrgStore } from "../stores/orgStore";
 
 const loadProject = useProjectStore.getState().loadProject;
+const loadOrgConfig = useOrgStore.getState().loadOrgConfig;
 
 const navItems = [
   { path: "", label: "Overview", end: true },
@@ -48,6 +50,10 @@ export function ProjectLayout() {
   const project = useProjectStore((s) => s.project);
   const error = useProjectStore((s) => s.error);
   const location = useLocation();
+
+  useEffect(() => {
+    void loadOrgConfig();
+  }, []);
 
   useEffect(() => {
     if (projectId) loadProject(projectId);

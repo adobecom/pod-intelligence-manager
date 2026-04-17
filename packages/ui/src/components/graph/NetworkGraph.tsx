@@ -116,13 +116,31 @@ export function NetworkGraph({
     );
 
     const options: Options = {
+      edges: {
+        smooth: {
+          enabled: true,
+          type: "dynamic",
+          roundness: 0.45,
+        },
+      },
       physics: {
         solver: "forceAtlas2Based",
-        forceAtlas2Based: { gravitationalConstant: -40, springLength: 120 },
-        stabilization: { iterations: 100 },
+        forceAtlas2Based: {
+          gravitationalConstant: -42,
+          centralGravity: 0.012,
+          springLength: 125,
+          springConstant: 0.065,
+          damping: 0.55,
+          avoidOverlap: 0.35,
+        },
+        stabilization: { iterations: 120 },
+        minVelocity: 0.4,
+        maxVelocity: 28,
+        timestep: 0.45,
       },
       interaction: {
         hover: true,
+        hoverConnectedEdges: true,
         tooltipDelay: 200,
         zoomView: true,
         dragView: true,
@@ -138,6 +156,9 @@ export function NetworkGraph({
     networkRef.current = network;
     prevSelectedRef.current = null;
 
+    let cancelled = false;
+    let physicsSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
     network.on("click", (params) => {
       if (params.nodes.length > 0) {
         onNodeClick(params.nodes[0] as string);
@@ -147,11 +168,20 @@ export function NetworkGraph({
     });
 
     network.once("stabilizationIterationsDone", () => {
-      network.fit({ animation: { duration: 300, easingFunction: "easeInOutQuad" } });
-      network.setOptions({ physics: { enabled: false } });
+      if (cancelled) return;
+      network.fit({ animation: { duration: 520, easingFunction: "easeInOutCubic" } });
+      // Let force-directed physics run briefly after layout so the graph can drift and
+      // gently rotate as a whole (same feel as before physics was disabled immediately).
+      physicsSettleTimer = setTimeout(() => {
+        physicsSettleTimer = null;
+        if (cancelled || networkRef.current !== network) return;
+        network.setOptions({ physics: { enabled: false } });
+      }, 2600);
     });
 
     return () => {
+      cancelled = true;
+      if (physicsSettleTimer) clearTimeout(physicsSettleTimer);
       network.destroy();
       networkRef.current = null;
       nodesDataSetRef.current = null;
@@ -183,7 +213,7 @@ export function NetworkGraph({
   return (
     <div
       ref={containerRef}
-      className={container}
+      className={`${container} network-graph-intro`}
       style={{ height, minHeight: "300px" }}
     />
   );

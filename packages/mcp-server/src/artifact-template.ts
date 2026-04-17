@@ -129,14 +129,21 @@ function getTypeColor(type) {
 }
 
 function getScopeLabel(scope) {
-  return {
+  const known = {
     frontend: "Frontend",
     backend: "Backend",
     design: "Design",
     qa: "QA",
     infra: "Infra",
     pm: "PM",
-  }[scope] ?? scope;
+  }[scope];
+  if (known) return known;
+  if (typeof scope === "string" && scope.length > 0) {
+    return scope
+      .replace(/[-_]/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+  return scope;
 }
 
 function getScopeBadgeColor(scope) {

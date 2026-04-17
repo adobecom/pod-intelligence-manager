@@ -43,6 +43,7 @@ import conflictRoutes from "../routes/conflicts.js";
 import contextUpdateRoutes from "../routes/context-updates.js";
 import livingDocRoutes from "../routes/living-doc.js";
 import projectRoutes from "../routes/projects.js";
+import orgRoutes from "../routes/org.js";
 
 let app: FastifyInstance;
 
@@ -69,6 +70,7 @@ beforeAll(async () => {
 
   app.register(podRoutes);
   app.register(projectRoutes);
+  app.register(orgRoutes);
   app.register(conflictRoutes);
   app.register(contextUpdateRoutes);
   app.register(livingDocRoutes);
@@ -296,9 +298,10 @@ describe("Integration: API endpoints", () => {
       payload: { name: "Integration Project Alpha" },
     });
     expect(res.statusCode).toBe(201);
-    const body = res.json() as { project_id: string; name: string };
+    const body = res.json() as { project_id: string; name: string; anatomy: { internal: unknown[] } };
     expect(body.project_id).toMatch(/^project-integration-project-alpha-[a-f0-9]{6}$/);
     expect(body.name).toBe("Integration Project Alpha");
+    expect(body.anatomy.internal).toEqual([]);
   });
 
   it("POST /api/pods accepts optional project_id", async () => {
@@ -386,5 +389,108 @@ describe("Integration: API endpoints", () => {
     const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/context-updates` });
     expect(list.statusCode).toBe(200);
     expect((list.json() as { agent_id: string }[])[0].agent_id).toBe("agent-proj");
+  });
+
+  it("GET /api/org/config returns scopes", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/org/config" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { scopes: { id: string }[] };
+    expect(body.scopes.length).toBeGreaterThan(0);
+    expect("roles" in body).toBe(false);
+  });
+
+  it("PATCH /api/projects/:id updates anatomy", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Anatomy Integration Project" },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${projectId}`,
+      payload: {
+        anatomy: {
+          internal: [{ scope_id: "frontend" }],
+          external: [{ name: "Legal", role: "Reviewer", notes: "Async" }],
+        },
+      },
+    });
+    expect(patch.statusCode).toBe(200);
+    const body = patch.json() as {
+      anatomy: { internal: { scope_id: string }[]; external: { name: string; role: string; notes?: string }[] };
+    };
+    expect(body.anatomy.internal).toHaveLength(1);
+    expect(body.anatomy.internal[0].scope_id).toBe("frontend");
+    expect(body.anatomy.external[0].name).toBe("Legal");
+    expect(body.anatomy.external[0].role).toBe("Reviewer");
+  });
+
+  it("POST /api/projects/:id/archive detaches pods, clears context stream, and lists in archived-projects", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Archive Me Project", description: "tmp" },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const podRes = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Attached To Archive Proj", project_id: projectId },
+    });
+    expect(podRes.statusCode).toBe(201);
+    const podId = (podRes.json() as { pod_id: string }).pod_id;
+
+    const cu = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/context-updates`,
+      payload: {
+        agent_id: "agent-arch",
+        type: "progress",
+        scope: "frontend",
+        summary: "Note",
+        details: "Body",
+        artifacts: [],
+        status: "in_progress",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(cu.statusCode).toBe(201);
+
+    const arch = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/archive`,
+    });
+    expect(arch.statusCode).toBe(200);
+    const archived = arch.json() as { project_id: string; name: string; description: string; archived_date: string };
+    expect(archived.project_id).toBe(projectId);
+    expect(archived.name).toBe("Archive Me Project");
+    expect(archived.description).toBe("tmp");
+    expect(archived.archived_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const gone = await app.inject({ method: "GET", url: `/api/projects/${projectId}` });
+    expect(gone.statusCode).toBe(404);
+
+    const listActive = await app.inject({ method: "GET", url: "/api/projects" });
+    expect(listActive.statusCode).toBe(200);
+    expect((listActive.json() as { project_id: string }[]).some((p) => p.project_id === projectId)).toBe(false);
+
+    const archivedList = await app.inject({ method: "GET", url: "/api/org/archived-projects" });
+    expect(archivedList.statusCode).toBe(200);
+    const rows = archivedList.json() as { project_id: string }[];
+    expect(rows.some((r) => r.project_id === projectId)).toBe(true);
+
+    const podAfter = await app.inject({ method: "GET", url: `/api/pods/${podId}` });
+    expect(podAfter.statusCode).toBe(200);
+    expect((podAfter.json() as { project_id?: string }).project_id).toBeUndefined();
+
+    const ctxAfter = await app.inject({ method: "GET", url: `/api/projects/${projectId}/context-updates` });
+    expect(ctxAfter.statusCode).toBe(404);
   });
 });

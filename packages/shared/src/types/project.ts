@@ -7,11 +7,34 @@ import type {
 } from "./context-update";
 import type { Scope } from "./pod";
 
+/** Internal initiative owners; each row references an org scope id. */
+export interface ProjectAnatomyInternalSlot {
+  scope_id: string;
+}
+
+/** External dependency or collaborator team; role is free text. */
+export interface ProjectAnatomyExternalTeam {
+  name: string;
+  role: string;
+  notes?: string;
+}
+
+export interface ProjectAnatomy {
+  internal: ProjectAnatomyInternalSlot[];
+  external: ProjectAnatomyExternalTeam[];
+}
+
+export const EMPTY_PROJECT_ANATOMY: ProjectAnatomy = {
+  internal: [],
+  external: [],
+};
+
 export interface Project {
   project_id: string;
   name: string;
   description: string | null;
   created_at: string;
+  anatomy: ProjectAnatomy;
 }
 
 /** Project-scoped context stream (no active pod). */
