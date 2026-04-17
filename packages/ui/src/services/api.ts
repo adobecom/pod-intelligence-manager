@@ -14,6 +14,8 @@ import type {
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
   CurationRequest,
+  ContextSearchRequest,
+  ContextSearchResult,
 } from "@council/shared";
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -309,6 +311,18 @@ export interface ProjectSubmitResult {
     conflictCreated: boolean;
     note?: string;
   };
+}
+
+// --- Context Search ---
+
+export async function searchContext(
+  request: ContextSearchRequest,
+): Promise<ContextSearchResult> {
+  return fetchJSON<ContextSearchResult>("/api/context-search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
 }
 
 export async function submitProjectContextUpdate(

@@ -95,26 +95,34 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled Council context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled Council context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
       learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
       recent_updates_limit: z.number().optional().describe("Max recent context updates to return (default 20)"),
+      external_query: z
+        .string()
+        .optional()
+        .describe("Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup."),
     },
-    async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit }) => {
+    async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
       const maxTok = learnings_max_tokens ?? 2000;
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
 
-      const [living_doc_markdown, pod, conflicts, relevant_learnings, context_updates] = await Promise.all([
-        apiFetchText(`/api/pods/${pod_id}/living-doc`),
-        apiFetch(`/api/pods/${pod_id}`),
-        apiFetch(`/api/pods/${pod_id}/conflicts`),
-        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}`),
-        apiFetch(`/api/pods/${pod_id}/context-updates`),
-      ]);
+      const [living_doc_markdown, pod, conflicts, relevant_learnings, context_updates, external_context] =
+        await Promise.all([
+          apiFetchText(`/api/pods/${pod_id}/living-doc`),
+          apiFetch(`/api/pods/${pod_id}`),
+          apiFetch(`/api/pods/${pod_id}/conflicts`),
+          apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}`),
+          apiFetch(`/api/pods/${pod_id}/context-updates`),
+          external_query
+            ? apiPost("/api/context-search", { query: external_query, pod_id }).catch(() => null)
+            : Promise.resolve(null),
+        ]);
 
       const recent_updates = Array.isArray(context_updates)
         ? (context_updates as unknown[]).slice(0, recentLimit)
@@ -129,6 +137,7 @@ export function registerTools(server: McpServer) {
         conflicts,
         relevant_learnings,
         recent_updates,
+        ...(external_context ? { external_context } : {}),
       });
     },
   );
@@ -295,6 +304,32 @@ export function registerTools(server: McpServer) {
         include_details,
         limit,
       });
+      return json(result);
+    },
+  );
+
+  // ── context search (cross-source external context) ──────────────
+
+  server.tool(
+    "context_search",
+    "Search Adobe-internal context across Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
+    {
+      query: z.string().describe("Natural-language query or keywords"),
+      sources: z
+        .array(z.enum(["slack", "fluffyjaws", "jira", "confluence", "github", "git"]))
+        .optional()
+        .describe("Restrict to a subset of sources. Default: all configured."),
+      pod_id: z
+        .string()
+        .optional()
+        .describe("Optional — enables local git search for the pod's repo and biases ranking"),
+      time_window_days: z.number().optional().describe("Default 90"),
+      max_hits_per_source: z.number().optional().describe("Default 10"),
+      synthesize: z.boolean().optional().describe("Default true. Set false to skip LLM summarization."),
+      use_cache: z.boolean().optional().describe("Default true. Set false to force a fresh fan-out."),
+    },
+    async (input) => {
+      const result = await apiPost("/api/context-search", input);
       return json(result);
     },
   );

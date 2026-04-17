@@ -10,6 +10,7 @@ import { registerContextCommand } from "./commands/context.js";
 import { registerHooksCommand } from "./commands/hooks.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerLeaveCommand } from "./commands/leave.js";
+import { registerSearchCommand } from "./commands/search.js";
 
 const program = new Command();
 
@@ -26,6 +27,7 @@ registerTunnelCommands(program);
 registerLintCommand(program);
 registerHooksCommand(program);
 registerContextCommand(program);
+registerSearchCommand(program);
 registerInitCommand(program);
 registerLeaveCommand(program);
 

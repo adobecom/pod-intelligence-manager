@@ -27,3 +27,19 @@ export function scanForSecrets(text: string): SecretScanResult {
     findings,
   };
 }
+
+// Same patterns, applied as replacements. Uses global variants so every match
+// in the input is redacted, not just the first. Returns the redacted text plus
+// the list of pattern names that fired (for logging / diagnostics).
+export function redactSecrets(text: string): { text: string; findings: string[] } {
+  if (!text) return { text, findings: [] };
+  let out = text;
+  const findings: string[] = [];
+  for (const { name, pattern } of SECRET_PATTERNS) {
+    const globalPattern = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
+    if (globalPattern.test(out)) findings.push(name);
+    globalPattern.lastIndex = 0;
+    out = out.replace(globalPattern, `[REDACTED:${name}]`);
+  }
+  return { text: out, findings };
+}
