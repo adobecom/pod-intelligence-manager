@@ -5,6 +5,8 @@ import {
   ActionButton,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ContextUpdate, ProjectContextUpdate } from "@council/shared";
 import { RelativeTime } from "../../components/RelativeTime";
 import { QualityBadge } from "../../components/QualityBadge";
@@ -80,7 +82,11 @@ export function FeedItem({
 
         {isExpanded && (
           <div className={detailWell}>
-            {update.details && <Text>{update.details}</Text>}
+            {update.details && (
+              <div style={{ fontSize: 14, maxWidth: "100%" }}>
+                <Markdown remarkPlugins={[remarkGfm]}>{update.details}</Markdown>
+              </div>
+            )}
             {update.artifacts.length > 0 && (
               <div className={detailColumn} style={{ marginTop: 8 }}>
                 <Text styles={style({ fontWeight: "bold", font: "body-2xs" })}>

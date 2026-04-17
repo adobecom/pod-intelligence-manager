@@ -22,9 +22,33 @@ export function registerLintCommand(program: Command) {
       const base = getBaseUrl(program);
 
       console.log(chalk.dim("\n  Running lint pass...\n"));
-      const result = await fetchJSON<{ findings: LintFinding[] }>(`${base}/api/pods/${podId}/lint`, {
+      const result = await fetchJSON<{
+        findings: LintFinding[];
+        meta: {
+          bedrock_configured: boolean;
+          llm_ok: boolean;
+          llm_model: string | null;
+          llm_extra_findings: number;
+          llm_error: string | null;
+        };
+      }>(`${base}/api/pods/${podId}/lint`, {
         method: "POST",
       });
+
+      const { meta } = result;
+      if (meta.bedrock_configured) {
+        if (meta.llm_ok) {
+          console.log(
+            chalk.dim(
+              `  LLM (fast) ${meta.llm_model ?? "model"}: +${meta.llm_extra_findings} finding(s)\n`,
+            ),
+          );
+        } else {
+          console.log(chalk.yellow(`  LLM supplement failed: ${meta.llm_error ?? "unknown"}\n`));
+        }
+      } else {
+        console.log(chalk.dim("  LLM supplement skipped (AWS_BEARER_TOKEN_BEDROCK not set on server).\n"));
+      }
 
       if (result.findings.length === 0) {
         console.log(chalk.green("  No issues found.\n"));

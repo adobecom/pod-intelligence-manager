@@ -7,13 +7,13 @@ import {
   Text,
   Button,
   TextField,
-  TextArea,
   InlineAlert,
   Content,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useProjectStore } from "../../stores/projectStore";
 import { FeedItem } from "../ContextFeed/FeedItem";
+import { MarkdownDetailsEditor } from "../../components/MarkdownDetailsEditor";
 
 const column = style({ display: "flex", flexDirection: "column", gap: 20 });
 const headerRow = style({ display: "flex", alignItems: "center", justifyContent: "space-between" });
@@ -77,12 +77,13 @@ export function ProjectContextFeed() {
   const filtered = sorted.filter((u) => {
     if (scopeFilter !== "all" && u.scope !== scopeFilter) return false;
     if (typeFilter !== "all" && u.type !== typeFilter) return false;
-    if (
-      search &&
-      !u.summary.toLowerCase().includes(search.toLowerCase()) &&
-      !u.agent_id.toLowerCase().includes(search.toLowerCase())
-    )
-      return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const inSummary = u.summary.toLowerCase().includes(q);
+      const inAgent = u.agent_id.toLowerCase().includes(q);
+      const inDetails = (u.details ?? "").toLowerCase().includes(q);
+      if (!inSummary && !inAgent && !inDetails) return false;
+    }
     return true;
   });
 
@@ -157,7 +158,7 @@ export function ProjectContextFeed() {
               onChange={setFormSummary}
               isRequired
             />
-            <TextArea
+            <MarkdownDetailsEditor
               label="Details"
               value={formDetails}
               onChange={setFormDetails}

@@ -238,7 +238,7 @@ export default async function podRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/lint", async (req) => {
-    const findings = runLintPass(req.params.podId);
-    return { findings };
+    const { findings, meta } = await runLintPass(req.params.podId);
+    return { findings, meta };
   });
 }

@@ -1,12 +1,32 @@
 import { randomUUID } from "crypto";
 import db from "../../db/connection.js";
 import { broadcast } from "../../ws/index.js";
+import { callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
+
+/** Returned with POST /api/pods/:podId/lint so clients can see if the fast (Haiku) supplement ran. */
+export interface LintPassMeta {
+  bedrock_configured: boolean;
+  /** True when Bedrock was called and the supplement finished without throwing. */
+  llm_ok: boolean;
+  /** Model id when `llm_ok` (e.g. Haiku via `BEDROCK_MODEL_FAST`). */
+  llm_model: string | null;
+  /** Count of findings added by the LLM (types such as implicit_assumption, spec_drift). */
+  llm_extra_findings: number;
+  llm_error: string | null;
+}
 
 export interface LintFinding {
   id: string;
   pod_id: string;
   timestamp: string;
-  type: "staleness" | "coverage_gap" | "dependency_risk" | "unresolved_conflict" | "doc_not_read";
+  type:
+    | "staleness"
+    | "coverage_gap"
+    | "dependency_risk"
+    | "unresolved_conflict"
+    | "doc_not_read"
+    | "implicit_assumption"
+    | "spec_drift";
   severity: "info" | "warning" | "critical";
   summary: string;
   area: string | null;
@@ -32,6 +52,11 @@ interface UpdateRow {
   summary: string;
 }
 
+interface UpdateRowWithDetails extends UpdateRow {
+  details: string | null;
+  type: string;
+}
+
 interface ConflictRow {
   id: string;
   created_at: string;
@@ -41,10 +66,19 @@ interface ConflictRow {
 }
 
 const STALENESS_HOURS = 8;
+const LIVING_DOC_MAX_CHARS = 10_000;
+const UPDATE_DETAILS_MAX_CHARS = 800;
+const MAX_LLM_FINDINGS = 8;
 
-export function runLintPass(podId: string): LintFinding[] {
+const LLM_ALLOWED_TYPES = new Set<LintFinding["type"]>(["implicit_assumption", "spec_drift"]);
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
+
+function collectDeterministicLintFindings(podId: string, timestamp: string): LintFinding[] {
   const now = Date.now();
-  const timestamp = new Date().toISOString();
   const findings: LintFinding[] = [];
 
   const pod = db.prepare("SELECT pod_id, day_number FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
@@ -62,7 +96,6 @@ export function runLintPass(podId: string): LintFinding[] {
     "SELECT id, created_at, severity, summary, sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
   ).all(podId) as ConflictRow[];
 
-  // 1. Staleness: areas with no update in STALENESS_HOURS (only check active areas)
   for (const area of areas) {
     if (area.status === "done" || area.status === "waiting") continue;
     const areaUpdates = recentUpdates.filter((u) => u.scope === area.scope);
@@ -83,7 +116,6 @@ export function runLintPass(podId: string): LintFinding[] {
         });
       }
     } else if (pod.day_number > 1) {
-      // Active area but no updates at all past day 1
       findings.push({
         id: `lint-${randomUUID().slice(0, 8)}`,
         pod_id: podId,
@@ -97,7 +129,6 @@ export function runLintPass(podId: string): LintFinding[] {
     }
   }
 
-  // 2. Coverage gap: areas still "waiting" past day 2
   if (pod.day_number > 2) {
     for (const area of areas) {
       if (area.status === "waiting") {
@@ -115,7 +146,6 @@ export function runLintPass(podId: string): LintFinding[] {
     }
   }
 
-  // 3. Dependency risk: multiple agents in same scope without coordination
   const scopeAgents = new Map<string, Set<string>>();
   for (const update of recentUpdates) {
     if (!scopeAgents.has(update.scope)) scopeAgents.set(update.scope, new Set());
@@ -123,7 +153,6 @@ export function runLintPass(podId: string): LintFinding[] {
   }
   for (const [scope, agents] of scopeAgents) {
     if (agents.size > 1) {
-      // Check if there's a coordination decision for this scope
       const coordDecisions = recentUpdates.filter(
         (u) => u.scope === scope && u.summary.toLowerCase().includes("coordinat"),
       );
@@ -142,7 +171,6 @@ export function runLintPass(podId: string): LintFinding[] {
     }
   }
 
-  // 4. Unresolved conflicts aging
   for (const conflict of openConflicts) {
     const ageMs = now - new Date(conflict.created_at).getTime();
     const ageHours = ageMs / (1000 * 60 * 60);
@@ -160,9 +188,8 @@ export function runLintPass(podId: string): LintFinding[] {
     }
   }
 
-  // 5. Doc-not-read: agents in open conflicts who haven't viewed the living doc since last regen
   const livingDoc = db.prepare(
-    "SELECT last_regenerated_at, regen_count FROM living_docs WHERE pod_id = ?"
+    "SELECT last_regenerated_at, regen_count FROM living_docs WHERE pod_id = ?",
   ).get(podId) as { last_regenerated_at: string | null; regen_count: number } | undefined;
 
   if (livingDoc?.last_regenerated_at) {
@@ -170,7 +197,7 @@ export function runLintPass(podId: string): LintFinding[] {
       const sides = JSON.parse(conflict.sides_json) as Array<{ contributor: string }>;
       for (const side of sides) {
         const viewRow = db.prepare(
-          "SELECT last_viewed_regen_count FROM living_doc_views WHERE pod_id = ? AND viewer_id = ?"
+          "SELECT last_viewed_regen_count FROM living_doc_views WHERE pod_id = ? AND viewer_id = ?",
         ).get(podId, side.contributor) as { last_viewed_regen_count: number } | undefined;
 
         const neverViewed = !viewRow;
@@ -192,7 +219,130 @@ export function runLintPass(podId: string): LintFinding[] {
     }
   }
 
-  // Persist findings (replace old ones for this pod)
+  return findings;
+}
+
+interface LLMFindingRow {
+  type: string;
+  severity: string;
+  summary: string;
+  area?: string | null;
+  suggestion?: string | null;
+}
+
+function normalizeLLMFindings(
+  podId: string,
+  timestamp: string,
+  rows: LLMFindingRow[] | undefined,
+): LintFinding[] {
+  if (!rows?.length) return [];
+  const out: LintFinding[] = [];
+  const severities = new Set(["info", "warning", "critical"]);
+
+  for (const row of rows) {
+    if (out.length >= MAX_LLM_FINDINGS) break;
+    if (!row.summary?.trim() || !row.type) continue;
+    if (!LLM_ALLOWED_TYPES.has(row.type as LintFinding["type"])) continue;
+    const sev = row.severity as LintFinding["severity"];
+    if (!severities.has(sev)) continue;
+
+    out.push({
+      id: `lint-llm-${randomUUID().slice(0, 8)}`,
+      pod_id: podId,
+      timestamp,
+      type: row.type as LintFinding["type"],
+      severity: sev,
+      summary: row.summary.trim().slice(0, 500),
+      area: row.area?.trim() ? row.area.trim().slice(0, 120) : null,
+      suggestion: row.suggestion?.trim() ? row.suggestion.trim().slice(0, 500) : null,
+    });
+  }
+
+  return out;
+}
+
+function buildLintLLMContext(podId: string, deterministicSummary: string): string {
+  const pod = db.prepare("SELECT pod_id, day_number FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+  if (!pod) return "";
+
+  const areas = db.prepare(
+    "SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?",
+  ).all(podId) as AreaRow[];
+
+  const updates = db.prepare(
+    `SELECT agent_id, scope, timestamp, type, summary, details FROM context_updates
+     WHERE pod_id = ? ORDER BY timestamp DESC LIMIT 30`,
+  ).all(podId) as UpdateRowWithDetails[];
+
+  const livingDocRow = db.prepare("SELECT markdown FROM living_docs WHERE pod_id = ?").get(podId) as
+    | { markdown: string }
+    | undefined;
+
+  const lines: string[] = [];
+  lines.push(`Pod: ${pod.pod_id}, sprint day: ${pod.day_number}`);
+  lines.push("");
+  lines.push("## Areas");
+  lines.push(areas.length ? areas.map((a) => `- ${a.scope}: owner=${a.owner}, status=${a.status}`).join("\n") : "(none)");
+  lines.push("");
+  lines.push("## Recent context updates (newest first, details may be Markdown)");
+  for (const u of updates) {
+    const det = u.details ? truncate(u.details, UPDATE_DETAILS_MAX_CHARS) : "";
+    lines.push(
+      `- [${u.timestamp}] ${u.agent_id} | ${u.type} | ${u.scope} | ${u.summary}${det ? `\n  Details:\n  ${det.replace(/\n/g, "\n  ")}` : ""}`,
+    );
+  }
+  lines.push("");
+  lines.push("## Living doc excerpt (Markdown)");
+  lines.push(
+    livingDocRow?.markdown
+      ? truncate(livingDocRow.markdown, LIVING_DOC_MAX_CHARS)
+      : "(no living doc in store)",
+  );
+  lines.push("");
+  lines.push("## Deterministic lint pass (already recorded separately)");
+  lines.push(deterministicSummary || "(none)");
+
+  return lines.join("\n");
+}
+
+async function runLLMIntelligenceLint(
+  podId: string,
+  deterministicFindings: LintFinding[],
+  timestamp: string,
+): Promise<LintFinding[]> {
+  const podExists = db.prepare("SELECT 1 FROM pods WHERE pod_id = ?").get(podId);
+  if (!podExists) return [];
+
+  const detSummary = deterministicFindings
+    .map((f) => `- [${f.type}] ${f.severity}: ${f.summary}`)
+    .join("\n");
+
+  const context = buildLintLLMContext(podId, detSummary);
+  if (!context) return [];
+
+  const system = `You are the AI Council lint assistant. Given pod state (areas, recent Markdown context updates, living doc excerpt) and a list of findings already produced by deterministic rules, add ONLY new advisory findings of types:
+- implicit_assumption — work depends on something not formally decided or documented.
+- spec_drift — agent updates reference behaviors or terms not reflected in the living doc / spec.
+
+Rules:
+- Output valid JSON only, no markdown fences, no commentary.
+- At most ${MAX_LLM_FINDINGS} findings. Skip issues already covered by the deterministic list.
+- Each finding: type (implicit_assumption | spec_drift only), severity (info | warning | critical), summary (one sentence), area (scope string or empty), suggestion (actionable, or empty).
+- Never include secrets, credentials, or PII. If nothing useful, return {"findings":[]}.`;
+
+  const prompt = `Context:\n${context}\n\nReturn JSON: {"findings":[{"type":"implicit_assumption","severity":"warning","summary":"...","area":"frontend","suggestion":"..."}]}`;
+
+  const parsed = await callLLMJSON<{ findings?: LLMFindingRow[] }>({
+    model: MODELS.fast,
+    system,
+    prompt,
+    maxTokens: 2048,
+  });
+
+  return normalizeLLMFindings(podId, timestamp, parsed?.findings);
+}
+
+function persistLintFindings(podId: string, findings: LintFinding[]): void {
   db.prepare("DELETE FROM lint_findings WHERE pod_id = ?").run(podId);
   const insert = db.prepare(
     `INSERT INTO lint_findings (id, pod_id, timestamp, type, severity, summary, area, suggestion)
@@ -201,9 +351,38 @@ export function runLintPass(podId: string): LintFinding[] {
   for (const f of findings) {
     insert.run(f.id, f.pod_id, f.timestamp, f.type, f.severity, f.summary, f.area, f.suggestion);
   }
+}
 
-  // Broadcast
-  broadcast({ type: "lint_completed", podId, payload: { findings } });
+export async function runLintPass(
+  podId: string,
+): Promise<{ findings: LintFinding[]; meta: LintPassMeta }> {
+  const timestamp = new Date().toISOString();
+  const findings = collectDeterministicLintFindings(podId, timestamp);
 
-  return findings;
+  const meta: LintPassMeta = {
+    bedrock_configured: isLLMAvailable(),
+    llm_ok: false,
+    llm_model: null,
+    llm_extra_findings: 0,
+    llm_error: null,
+  };
+
+  if (meta.bedrock_configured) {
+    try {
+      const llmExtra = await runLLMIntelligenceLint(podId, findings, timestamp);
+      meta.llm_ok = true;
+      meta.llm_model = MODELS.fast;
+      meta.llm_extra_findings = llmExtra.length;
+      findings.push(...llmExtra);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      meta.llm_error = message;
+      console.warn("[lint] LLM supplement failed:", err);
+    }
+  }
+
+  persistLintFindings(podId, findings);
+  broadcast({ type: "lint_completed", podId, payload: { findings, meta } });
+
+  return { findings, meta };
 }

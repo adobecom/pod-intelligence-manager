@@ -1,3 +1,4 @@
+import "./load-env.js";
 import Fastify from "fastify";
 import websocket from "@fastify/websocket";
 import cors from "@fastify/cors";
@@ -119,14 +120,18 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
 
   // Periodic lint pass across all active pods
   setInterval(() => {
-    try {
-      const pods = db.prepare("SELECT pod_id FROM org_pod_summaries").all() as { pod_id: string }[];
-      for (const { pod_id } of pods) {
-        runLintPass(pod_id);
+    void (async () => {
+      try {
+        const pods = db.prepare("SELECT pod_id FROM org_pod_summaries").all() as { pod_id: string }[];
+        for (const { pod_id } of pods) {
+          await runLintPass(pod_id).catch((e) => {
+            app.log.error(e, "Lint pass failed for pod");
+          });
+        }
+      } catch (e) {
+        app.log.error(e, "Lint pass failed");
       }
-    } catch (e) {
-      app.log.error(e, "Lint pass failed");
-    }
+    })();
   }, LINT_INTERVAL_MS);
 
   // Periodic knowledge graph community detection refresh

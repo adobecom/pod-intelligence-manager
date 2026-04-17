@@ -1,0 +1,53 @@
+/* Quill Snow places `.ql-toolbar` as a sibling before `.ql-container`; teardown must clear the wrapper, not only the container. */
+
+.markdown-details-quill {
+  --md-details-min: 220px;
+  /* Match OS / browser theme; Quill defaults assume a light canvas */
+  --md-quill-surface: light-dark(#ffffff, #1b1b1b);
+  --md-quill-text: light-dark(#222222, #eaeaea);
+  --md-quill-placeholder: light-dark(#6e6e6e, #a3a3a3);
+  --md-quill-toolbar-bg: light-dark(#f5f5f5, #2a2a2a);
+  --md-quill-toolbar-border: light-dark(#e0e0e0, #3d3d3d);
+}
+
+.markdown-details-quill .ql-container,
+.markdown-details-quill .ql-editor {
+  min-height: var(--md-details-min);
+}
+
+.markdown-details-quill .ql-toolbar {
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: 1px solid var(--md-quill-toolbar-border);
+  background-color: var(--md-quill-toolbar-bg);
+}
+
+.markdown-details-quill .ql-toolbar .ql-stroke {
+  stroke: var(--md-quill-text);
+}
+
+.markdown-details-quill .ql-toolbar .ql-fill {
+  fill: var(--md-quill-text);
+}
+
+.markdown-details-quill .ql-toolbar .ql-picker-label {
+  color: var(--md-quill-text);
+}
+
+.markdown-details-quill .ql-container {
+  border: none;
+  font-size: 14px;
+  background-color: var(--md-quill-surface);
+}
+
+.markdown-details-quill .ql-editor {
+  color: var(--md-quill-text);
+}
+
+/* Placeholder (::before) — default Quill color fails on dark backgrounds */
+.markdown-details-quill .ql-editor.ql-blank::before {
+  color: var(--md-quill-placeholder);
+  opacity: 1;
+  font-style: normal;
+}
