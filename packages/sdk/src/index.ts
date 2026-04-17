@@ -1,4 +1,4 @@
-export { CouncilClient } from "./client.js";
+export { CouncilClient, searchContext } from "./client.js";
 export type {
   CouncilClientConfig,
   ReportInput,

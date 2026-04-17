@@ -67,6 +67,16 @@ export type {
 } from "./types/org";
 
 export type {
+  ContextSource,
+  ContextSearchRequest,
+  ContextSearchHit,
+  ContextSearchMissingSource,
+  ContextSearchResult,
+} from "./types/context-search";
+
+export { CONTEXT_SOURCES } from "./types/context-search";
+
+export type {
   LivingDocViewerStat,
   LivingDocStats,
 } from "./types/living-doc";

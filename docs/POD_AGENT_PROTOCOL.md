@@ -22,6 +22,8 @@ Every agent and human contributor working in a **pod** overseen by AI Council mu
 
 **If conflict pressure is critical (≥ 0.8)** or ingestion is halted: stop and surface open conflicts; do not proceed with changes that add contested context until humans resolve blocking items.
 
+**Optional — external context:** `pullSessionContext({ externalQuery })` (SDK) or the `external_query` argument on the MCP `get_agent_session_context` tool adds a cross-source lookup (Slack, Jira, Confluence, GitHub, Fluffyjaws, local git) to the same bundle. Use this when the work depends on context that is not yet in the living doc — e.g. "pay endpoint failing" or the name of a feature you are picking up mid-stream. See [Context Search](#5-context-search-on-demand) below.
+
 ## 2. Report after meaningful lock-in
 
 **When:** After work is **locked in**—not after every keystroke.
@@ -57,3 +59,13 @@ Amend and interactive rebase can produce multiple hook invocations; that is expe
 | `COUNCIL_SCOPE` | One of `frontend`, `backend`, `design`, `qa`, `infra`, `pm` |
 
 See `.env.example` in the repo root.
+
+## 5. Context search (on demand)
+
+External context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git) is available any time via:
+
+- **SDK:** `CouncilClient.searchContext(query, opts?)` or the pod-less `searchContext(baseUrl, request)` helper.
+- **CLI:** `council search "query"` (no pod id required).
+- **MCP:** `context_search` tool.
+
+All calls hit `POST /api/context-search` on the Council server. Sources without credentials configured are silently skipped and listed under `missing_sources`. Results are cached (default 1h TTL, keyed by normalized query + filters) and run through secret redaction before being returned or synthesized.

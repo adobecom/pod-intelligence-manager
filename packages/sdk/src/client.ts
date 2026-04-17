@@ -11,11 +11,14 @@ import type {
   InputRequest,
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
+  ContextSearchRequest,
+  ContextSearchResult,
 } from "@council/shared";
 
 export interface SessionContextOptions {
   learningsMaxTokens?: number;
   recentUpdateLimit?: number;
+  externalQuery?: string;
 }
 
 export interface SessionContext {
@@ -25,6 +28,20 @@ export interface SessionContext {
   conflicts: Conflict[];
   relevantLearnings: KnowledgeQueryResult;
   recentUpdates: ContextUpdate[];
+  externalContext?: ContextSearchResult;
+}
+
+// Pod-agnostic helper for callers that don't need a full CouncilClient.
+// Used by the `council search` CLI (which should not require COUNCIL_POD_ID).
+export async function searchContext(
+  baseUrl: string,
+  request: ContextSearchRequest,
+): Promise<ContextSearchResult> {
+  return fetchJSON<ContextSearchResult>(`${baseUrl}/api/context-search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
 }
 
 export type CouncilClientConfig =
@@ -162,6 +179,21 @@ export class CouncilClient {
     );
   }
 
+  // Cross-source external context search (Slack, Fluffyjaws, Jira, Confluence,
+  // GitHub, git). Pod-agnostic — pod_id is included from the client config only
+  // when the client is pod-scoped, which enables local git search.
+  async searchContext(
+    query: string,
+    opts?: Omit<ContextSearchRequest, "query">,
+  ): Promise<ContextSearchResult> {
+    const body: ContextSearchRequest = {
+      query,
+      ...opts,
+      pod_id: opts?.pod_id ?? this.config.podId,
+    };
+    return searchContext(this.config.baseUrl, body);
+  }
+
   // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)
   async pullSessionContext(opts?: SessionContextOptions): Promise<SessionContext> {
     if (!this.isPodMode()) {
@@ -172,25 +204,35 @@ export class CouncilClient {
     const maxTokens = opts?.learningsMaxTokens ?? 2000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
-    const results = await Promise.allSettled([
+    const baseFetches = [
       this.getPod(),
       this.getContext(),
       this.getConflicts(),
       this.getRelevantLearnings(maxTokens),
       this.getUpdates(),
-    ]);
+    ] as const;
 
-    const pod = results[0].status === "fulfilled" ? results[0].value : null;
+    const externalFetch = opts?.externalQuery
+      ? this.searchContext(opts.externalQuery)
+      : null;
+
+    const results = await Promise.allSettled([...baseFetches, externalFetch]);
+
+    const pod = results[0].status === "fulfilled" ? (results[0].value as Pod) : null;
     if (!pod) {
       throw new Error(`Failed to fetch pod: ${results[0].status === "rejected" ? results[0].reason : "unknown"}`);
     }
 
-    const livingDocMarkdown = results[1].status === "fulfilled" ? results[1].value : "(unavailable)";
-    const conflicts = results[2].status === "fulfilled" ? results[2].value : [];
+    const livingDocMarkdown = results[1].status === "fulfilled" ? (results[1].value as string) : "(unavailable)";
+    const conflicts = results[2].status === "fulfilled" ? (results[2].value as Conflict[]) : [];
     const relevantLearnings: KnowledgeQueryResult = results[3].status === "fulfilled"
-      ? results[3].value
+      ? (results[3].value as KnowledgeQueryResult)
       : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
-    const allUpdates = results[4].status === "fulfilled" ? results[4].value : [];
+    const allUpdates = results[4].status === "fulfilled" ? (results[4].value as ContextUpdate[]) : [];
+    const externalContext =
+      externalFetch && results[5].status === "fulfilled"
+        ? (results[5].value as ContextSearchResult)
+        : undefined;
 
     return {
       pulledAt: new Date().toISOString(),
@@ -199,6 +241,7 @@ export class CouncilClient {
       conflicts,
       relevantLearnings,
       recentUpdates: allUpdates.slice(0, recentLimit),
+      ...(externalContext ? { externalContext } : {}),
     };
   }
 }
