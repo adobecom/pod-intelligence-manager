@@ -2,14 +2,18 @@ import { useEffect, useRef, useState } from "react";
 
 interface WSEvent {
   type: string;
-  podId: string;
-  payload: unknown;
+  podId?: string;
+  payload?: unknown;
 }
 
 export type WSStatus = "connecting" | "connected" | "disconnected";
 
+/**
+ * Subscribe to real-time council events. The server multiplexes rooms by `podId` query param;
+ * use roomId `"global"` for org-wide broadcasts (e.g. project context updates).
+ */
 export function useWebSocket(
-  podId: string | undefined,
+  roomId: string | undefined,
   onEvent: (event: WSEvent) => void,
 ): WSStatus {
   const wsRef = useRef<WebSocket | null>(null);
@@ -19,11 +23,12 @@ export function useWebSocket(
   const [status, setStatus] = useState<WSStatus>("disconnected");
 
   useEffect(() => {
-    if (!podId) {
+    if (!roomId) {
       setStatus("disconnected");
       return;
     }
 
+    const stableRoomId = roomId;
     let closed = false;
 
     function connect() {
@@ -31,7 +36,7 @@ export function useWebSocket(
 
       setStatus("connecting");
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws?podId=${podId}`);
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws?podId=${encodeURIComponent(stableRoomId)}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -68,7 +73,7 @@ export function useWebSocket(
       clearTimeout(reconnectTimeout.current);
       wsRef.current?.close();
     };
-  }, [podId]);
+  }, [roomId]);
 
   return status;
 }

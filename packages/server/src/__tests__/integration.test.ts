@@ -308,6 +308,40 @@ describe("Integration: API endpoints", () => {
     expect((res.json() as { project_id?: string }).project_id).toBe(projectId);
   });
 
+  it("PATCH /api/pods/:podId links and unlinks project_id", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Retro Project" },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Retro Link Pod" },
+    });
+    expect(created.statusCode).toBe(201);
+    const podId = (created.json() as { pod_id: string }).pod_id;
+
+    const link = await app.inject({
+      method: "PATCH",
+      url: `/api/pods/${podId}`,
+      payload: { project_id: projectId },
+    });
+    expect(link.statusCode).toBe(200);
+    expect((link.json() as { project_id?: string }).project_id).toBe(projectId);
+
+    const unlinked = await app.inject({
+      method: "PATCH",
+      url: `/api/pods/${podId}`,
+      payload: { project_id: null },
+    });
+    expect(unlinked.statusCode).toBe(200);
+    expect((unlinked.json() as { project_id?: string }).project_id).toBeUndefined();
+  });
+
   it("POST /api/projects/:id/context-updates ingests project context", async () => {
     const pr = await app.inject({
       method: "POST",

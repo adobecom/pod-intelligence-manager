@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   Pod,
+  Project,
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
@@ -9,6 +10,7 @@ import * as api from "../services/api";
 
 interface OrgStore {
   pods: OrgPodSummary[];
+  projects: Project[];
   overlaps: CrossPodOverlap[];
   archivedPods: ArchivedPod[];
   loading: boolean;
@@ -18,46 +20,52 @@ interface OrgStore {
     name: string;
     sprint_days?: number;
     milestone_name?: string;
+    project_id?: string;
   }) => Promise<Pod>;
+  createProject: (input: { name: string; description?: string }) => Promise<Project>;
   archivePod: (podId: string) => Promise<void>;
+}
+
+async function fetchOrgSnapshot() {
+  const [pods, overlaps, archivedPods, projects] = await Promise.all([
+    api.getOrgPods(),
+    api.getCrossPodOverlaps(),
+    api.getArchivedPods(),
+    api.getProjects(),
+  ]);
+  return { pods, overlaps, archivedPods, projects };
 }
 
 export const useOrgStore = create<OrgStore>((set) => ({
   pods: [],
+  projects: [],
   overlaps: [],
   archivedPods: [],
   loading: false,
 
   loadOrg: async () => {
     set({ loading: true });
-    const [pods, overlaps, archivedPods] = await Promise.all([
-      api.getOrgPods(),
-      api.getCrossPodOverlaps(),
-      api.getArchivedPods(),
-    ]);
-    set({ pods, overlaps, archivedPods, loading: false });
+    const snapshot = await fetchOrgSnapshot();
+    set({ ...snapshot, loading: false });
   },
 
   createPod: async (input) => {
     const pod = await api.createPod(input);
-    // Reload org data to pick up the new pod
-    const [pods, overlaps, archivedPods] = await Promise.all([
-      api.getOrgPods(),
-      api.getCrossPodOverlaps(),
-      api.getArchivedPods(),
-    ]);
-    set({ pods, overlaps, archivedPods });
+    const snapshot = await fetchOrgSnapshot();
+    set(snapshot);
     return pod;
+  },
+
+  createProject: async (input) => {
+    const project = await api.createProject(input);
+    const snapshot = await fetchOrgSnapshot();
+    set(snapshot);
+    return project;
   },
 
   archivePod: async (podId) => {
     await api.archivePod(podId);
-    // Reload org data
-    const [pods, overlaps, archivedPods] = await Promise.all([
-      api.getOrgPods(),
-      api.getCrossPodOverlaps(),
-      api.getArchivedPods(),
-    ]);
-    set({ pods, overlaps, archivedPods });
+    const snapshot = await fetchOrgSnapshot();
+    set(snapshot);
   },
 }));

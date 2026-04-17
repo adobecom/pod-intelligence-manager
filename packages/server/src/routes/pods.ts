@@ -26,6 +26,11 @@ const PatchMilestoneSchema = z
     { message: "Provide at least one of name, target_date, percent_complete" },
   );
 
+const PatchPodSchema = z.object({
+  /** Set to a project id to link, or `null` to clear. */
+  project_id: z.union([z.string().min(1), z.null()]),
+});
+
 interface PodRow {
   pod_id: string;
   name: string;
@@ -73,6 +78,34 @@ export default async function podRoutes(app: FastifyInstance) {
     }
     const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(row.pod_id) as AreaRow[];
     return rowToPod(row, areas);
+  });
+
+  app.patch<{
+    Params: { podId: string };
+    Body: z.infer<typeof PatchPodSchema>;
+  }>("/api/pods/:podId", { preHandler: validateBody(PatchPodSchema) }, async (req, reply) => {
+    const { podId } = req.params;
+    const { project_id } = req.body;
+
+    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: `Pod not found: ${podId}` };
+    }
+
+    if (project_id !== null) {
+      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(project_id);
+      if (!proj) {
+        reply.code(400);
+        return { error: `Project not found: ${project_id}` };
+      }
+    }
+
+    db.prepare("UPDATE pods SET project_id = ? WHERE pod_id = ?").run(project_id, podId);
+
+    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
+    const updated = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow;
+    return rowToPod(updated, areas);
   });
 
   app.patch<{

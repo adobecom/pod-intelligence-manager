@@ -2,6 +2,8 @@ import type {
   Pod,
   Conflict,
   ContextUpdate,
+  Project,
+  ProjectContextUpdate,
   Tunnel,
   OrgPodSummary,
   CrossPodOverlap,
@@ -25,6 +27,17 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function getPod(podId: string): Promise<Pod | null> {
   return fetchJSON<Pod | null>(`/api/pods/${podId}`);
+}
+
+export async function patchPod(
+  podId: string,
+  input: { project_id: string | null },
+): Promise<Pod> {
+  return fetchJSON<Pod>(`/api/pods/${encodeURIComponent(podId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function getConflicts(podId: string): Promise<Conflict[]> {
@@ -130,12 +143,51 @@ export async function createPod(input: {
   name: string;
   sprint_days?: number;
   milestone_name?: string;
+  project_id?: string;
 }): Promise<Pod> {
   return fetchJSON<Pod>("/api/pods", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+// --- Projects (long-lived layer; off-pod context stream) ---
+
+export async function getProjects(): Promise<Project[]> {
+  return fetchJSON<Project[]>("/api/projects");
+}
+
+export async function getProject(projectId: string): Promise<Project | null> {
+  return fetchJSON<Project | null>(`/api/projects/${encodeURIComponent(projectId)}`);
+}
+
+export async function createProject(input: {
+  name: string;
+  description?: string;
+}): Promise<Project> {
+  return fetchJSON<Project>("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function patchProject(
+  projectId: string,
+  input: { name?: string; description?: string | null },
+): Promise<Project> {
+  return fetchJSON<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getProjectContextUpdates(projectId: string): Promise<ProjectContextUpdate[]> {
+  return fetchJSON<ProjectContextUpdate[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/context-updates`,
+  );
 }
 
 export async function archivePod(podId: string): Promise<ArchivedPod> {
@@ -235,4 +287,40 @@ export async function submitContextUpdate(
       needs_input_from: [],
     }),
   });
+}
+
+export interface ProjectSubmitResult {
+  id: string;
+  update: ProjectContextUpdate;
+  council: {
+    classification: string;
+    merged: boolean;
+    conflictCreated: boolean;
+    note?: string;
+  };
+}
+
+export async function submitProjectContextUpdate(
+  projectId: string,
+  input: ContextUpdateInput,
+): Promise<ProjectSubmitResult> {
+  return fetchJSON<ProjectSubmitResult>(
+    `/api/projects/${encodeURIComponent(projectId)}/context-updates`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: input.agent_id ?? "human-user",
+        type: input.type,
+        scope: input.scope,
+        summary: input.summary,
+        details: input.details,
+        status: input.status,
+        artifacts: [],
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      }),
+    },
+  );
 }
