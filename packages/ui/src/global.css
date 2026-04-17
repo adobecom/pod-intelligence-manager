@@ -79,3 +79,19 @@ body {
   border-top: 1px solid var(--spectrum-gray-300);
   margin: 12px 0;
 }
+
+/* Knowledge / memory graph — soft entrance; pairs with vis-network physics intro */
+@keyframes network-graph-intro {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.network-graph-intro {
+  animation: network-graph-intro 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
