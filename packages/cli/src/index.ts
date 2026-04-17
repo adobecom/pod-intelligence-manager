@@ -6,8 +6,8 @@ import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";
 import { registerTunnelCommands } from "./commands/tunnel.js";
 import { registerLintCommand } from "./commands/lint.js";
-import { registerHooksCommand } from "./commands/hooks.js";
 import { registerContextCommand } from "./commands/context.js";
+import { registerHooksCommand } from "./commands/hooks.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerLeaveCommand } from "./commands/leave.js";
 

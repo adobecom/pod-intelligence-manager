@@ -94,8 +94,48 @@ export function registerTools(server: McpServer) {
   // ── context updates ──────────────────────────────────────────────
 
   server.tool(
+    "get_agent_session_context",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled Council context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    {
+      pod_id: PodId,
+      agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
+      scope: Scope,
+      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
+      recent_updates_limit: z.number().optional().describe("Max recent context updates to return (default 20)"),
+    },
+    async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit }) => {
+      const maxTok = learnings_max_tokens ?? 2000;
+      const recentLimit = recent_updates_limit ?? 20;
+      const scopes = encodeURIComponent(scope);
+
+      const [living_doc_markdown, pod, conflicts, relevant_learnings, context_updates] = await Promise.all([
+        apiFetchText(`/api/pods/${pod_id}/living-doc`),
+        apiFetch(`/api/pods/${pod_id}`),
+        apiFetch(`/api/pods/${pod_id}/conflicts`),
+        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}`),
+        apiFetch(`/api/pods/${pod_id}/context-updates`),
+      ]);
+
+      const recent_updates = Array.isArray(context_updates)
+        ? (context_updates as unknown[]).slice(0, recentLimit)
+        : [];
+
+      return json({
+        pulled_at: new Date().toISOString(),
+        agent_id,
+        scope,
+        living_doc_markdown,
+        pod,
+        conflicts,
+        relevant_learnings,
+        recent_updates,
+      });
+    },
+  );
+
+  server.tool(
     "submit_context_update",
-    "Submit a context update to a pod. This is how agents and humans contribute progress, blockers, spec changes, questions, and decisions. Returns the created update and Council analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
+    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and Council analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
     {
       pod_id: PodId,
       agent_id: z.string().describe("ID of the submitting agent or human"),

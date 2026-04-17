@@ -60,7 +60,7 @@ ai-council/
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
 │   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # CLI for pod management, reporting, tunnels, and hooks
+│   ├── cli/             # council CLI — pods, context, hooks, tunnel, init, leave
 │   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
 ├── examples/
 │   └── demo-agent.ts    # End-to-end demo exercising the SDK
@@ -306,16 +306,17 @@ council report \
   --status in_progress
 ```
 
-**Session context (agents):**
-
-Pull a bundled markdown snapshot (living doc, pod, conflicts, learnings, recent updates) for agents and tooling:
+**Pod agent protocol** (pull before substantive work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
 
 ```bash
+# Flags or env: COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (and COUNCIL_SERVER_URL), or `.council.json` via `council init`
 council context --pod <podId> --agent <id> --scope frontend
-council context --brief --pod <podId> --agent <id> --scope frontend
+council context --brief --diff --pod <podId> --agent <id> --scope frontend
+council context --write .council/last-context.md    # optional explicit path
+council hooks install                                # optional: post-commit / post-rewrite → Council API
 ```
 
-Uses `COUNCIL_POD_ID`, `COUNCIL_AGENT_ID`, and `COUNCIL_SCOPE` when the matching flags are omitted.
+Omit `--pod` / `--agent` / `--scope` when the same values are set in the environment.
 
 **Living doc and lint:**
 

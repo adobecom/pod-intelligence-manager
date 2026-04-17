@@ -34,7 +34,7 @@ function resolveSessionOpts(opts: Record<string, string | undefined>) {
     process.exit(1);
   }
 
-  return { podId, agentId, scope: scopeRaw };
+  return { podId, agentId, scope: scopeRaw as Scope };
 }
 
 function formatMarkdownBundle(ctx: SessionContext): string {
@@ -162,7 +162,7 @@ export function registerContextCommand(program: Command): void {
         baseUrl: base,
         podId,
         agentId,
-        scope: scope as Scope,
+        scope,
       });
 
       const ctx = await client.pullSessionContext({
