@@ -1,6 +1,6 @@
 import type { Mock } from "vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 
 vi.mock("../../../db/connection.js", () => ({
   default: {

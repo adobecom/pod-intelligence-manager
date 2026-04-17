@@ -36,7 +36,7 @@ import db from "../../../db/connection.js";
 import { broadcast } from "../../../ws/index.js";
 import { recalculatePressure } from "../../../services/pressure.js";
 import { notifyConflictCreated, notifyPressureThreshold } from "../../../services/slack.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 
 function makeUpdate(overrides: Partial<ContextUpdate> = {}): ContextUpdate {
   return {

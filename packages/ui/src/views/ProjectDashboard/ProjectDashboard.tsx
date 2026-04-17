@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Heading, Text, Badge, Button, Picker, PickerItem, TextField, InlineAlert, Content } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { ProjectAnatomy } from "@council/shared";
+import type { ProjectAnatomy } from "@pim/shared";
 import { useProjectStore } from "../../stores/projectStore";
 import { useOrgStore } from "../../stores/orgStore";
 import * as api from "../../services/api";
@@ -88,7 +88,7 @@ export function ProjectDashboard() {
 
       <Text styles={style({ color: "neutral-subdued", maxWidth: "[720px]" })}>
         This initiative exists outside any single sprint pod. Context updates here are stored on the project for
-        reporting when you are not bound to an active pod (for example CLI `council report --project`).
+        reporting when you are not bound to an active pod (for example CLI `pim report --project`).
         Sprint work, conflicts, and the living doc still live on pods linked to this project when applicable.
       </Text>
 

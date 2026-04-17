@@ -1,6 +1,6 @@
 import { Badge, Text } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { CommunitySummary } from "@council/shared";
+import type { CommunitySummary } from "@pim/shared";
 
 const container = style({
   display: "flex",

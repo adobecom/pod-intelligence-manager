@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { ContextSearchRequest, ContextSearchResult, ContextSource } from "@council/shared";
-import { CONTEXT_SOURCES } from "@council/shared";
+import type { ContextSearchRequest, ContextSearchResult, ContextSource } from "@pim/shared";
+import { CONTEXT_SOURCES } from "@pim/shared";
 import * as api from "../services/api";
 
 interface SearchStore {

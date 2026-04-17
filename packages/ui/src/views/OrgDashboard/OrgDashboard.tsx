@@ -18,7 +18,7 @@ import {
   ProgressBar,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { OrgScopeDefinition } from "@council/shared";
+import type { OrgScopeDefinition } from "@pim/shared";
 import { useOrgStore } from "../../stores/orgStore";
 import { PressureMeter } from "../../components/PressureMeter";
 

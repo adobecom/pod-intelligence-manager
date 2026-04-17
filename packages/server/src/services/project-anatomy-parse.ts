@@ -1,5 +1,5 @@
-import type { ProjectAnatomy } from "@council/shared";
-import { EMPTY_PROJECT_ANATOMY } from "@council/shared";
+import type { ProjectAnatomy } from "@pim/shared";
+import { EMPTY_PROJECT_ANATOMY } from "@pim/shared";
 
 export function parseProjectAnatomy(raw: string | null | undefined): ProjectAnatomy {
   if (!raw) return { ...EMPTY_PROJECT_ANATOMY, internal: [], external: [] };

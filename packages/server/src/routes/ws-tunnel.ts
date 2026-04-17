@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { TunnelMessage } from "@council/shared";
+import type { TunnelMessage } from "@pim/shared";
 import db from "../db/connection.js";
 import {
   registerTunnelConnection,

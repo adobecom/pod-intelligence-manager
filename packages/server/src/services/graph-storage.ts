@@ -11,7 +11,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { KnowledgeGraph } from "@council/shared";
+import type { KnowledgeGraph } from "@pim/shared";
 
 const DATA_ROOT = path.resolve(process.cwd(), ".data", "knowledge-graph");
 

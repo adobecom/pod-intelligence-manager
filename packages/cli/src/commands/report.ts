@@ -1,17 +1,17 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { CouncilClient } from "@council/sdk";
-import type { ContextUpdateType, WorkStatus, Scope } from "@council/shared";
+import { PimClient } from "@pim/sdk";
+import type { ContextUpdateType, WorkStatus, Scope } from "@pim/shared";
 import { getBaseUrl } from "../util.js";
 
 export function registerReportCommand(program: Command) {
   program
     .command("report")
-    .description("Submit a context update to the Council (pod or project)")
+    .description("Submit a context update to PIM (pod or project)")
     .option("-p, --pod <podId>", "Pod ID")
     .option("--project <projectId>", "Project ID (between sprints / no active pod)")
     .requiredOption("-t, --type <type>", "Update type (progress|blocker|spec_change|question|decision)")
-    .requiredOption("--scope <scope>", "Scope (frontend|backend|design|qa|infra|pm)")
+    .requiredOption("--scope <scope>", "Org-defined scope id (see GET /api/org/config)")
     .requiredOption("--summary <text>", "Summary of the update")
     .option("--details <text>", "Detailed description", "")
     .option("--agent <id>", "Agent ID", "cli-user")
@@ -26,7 +26,7 @@ export function registerReportCommand(program: Command) {
         process.exit(1);
       }
 
-      const client = new CouncilClient({
+      const client = new PimClient({
         baseUrl: base,
         ...(pod ? { podId: pod } : { projectId: project! }),
         agentId: opts.agent,
@@ -41,19 +41,19 @@ export function registerReportCommand(program: Command) {
       });
 
       const classColor =
-        result.council.classification === "additive" ? chalk.green :
-        result.council.classification === "overlapping" ? chalk.yellow :
+        result.pim.classification === "additive" ? chalk.green :
+        result.pim.classification === "overlapping" ? chalk.yellow :
         chalk.red;
 
       console.log(chalk.bold("\n  Context update submitted\n"));
       console.log(`  ID:             ${result.id}`);
-      console.log(`  Classification: ${classColor(result.council.classification)}`);
-      console.log(`  Merged:         ${result.council.merged ? chalk.green("yes") : chalk.dim("no")}`);
-      if (result.council.conflictCreated) {
-        console.log(`  Conflict:       ${chalk.red("created")} (${result.council.conflictId})`);
+      console.log(`  Classification: ${classColor(result.pim.classification)}`);
+      console.log(`  Merged:         ${result.pim.merged ? chalk.green("yes") : chalk.dim("no")}`);
+      if (result.pim.conflictCreated) {
+        console.log(`  Conflict:       ${chalk.red("created")} (${result.pim.conflictId})`);
       }
-      if (result.council.note) {
-        console.log(`  Note:           ${chalk.dim(result.council.note)}`);
+      if (result.pim.note) {
+        console.log(`  Note:           ${chalk.dim(result.pim.note)}`);
       }
       console.log();
     });

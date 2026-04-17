@@ -1,5 +1,5 @@
 import db from "../db/connection.js";
-import type { Milestone } from "@council/shared";
+import type { Milestone } from "@pim/shared";
 
 interface LatestRow {
   agent_id: string;

@@ -1,5 +1,5 @@
 import { Badge } from "@react-spectrum/s2";
-import type { ConflictSeverity } from "@council/shared";
+import type { ConflictSeverity } from "@pim/shared";
 
 interface SeverityBadgeProps {
   severity: ConflictSeverity;

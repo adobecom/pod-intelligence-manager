@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CouncilClient } from "../client.js";
+import { PimClient } from "../client.js";
 
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch;
 
 function makeClient(overrides = {}) {
-  return new CouncilClient({
+  return new PimClient({
     baseUrl: "http://localhost:4000",
     podId: "pod-1",
     agentId: "agent-fe",
@@ -32,7 +32,7 @@ function mockError(status: number, body: string) {
   });
 }
 
-describe("CouncilClient", () => {
+describe("PimClient", () => {
   beforeEach(() => {
     mockFetch.mockReset();
   });
@@ -41,7 +41,7 @@ describe("CouncilClient", () => {
     it("requires exactly one of podId or projectId", () => {
       expect(
         () =>
-          new CouncilClient({
+          new PimClient({
             baseUrl: "http://localhost:4000",
             agentId: "a",
             scope: "frontend",
@@ -51,7 +51,7 @@ describe("CouncilClient", () => {
       ).toThrow(/exactly one of podId or projectId/);
       expect(
         () =>
-          new CouncilClient({
+          new PimClient({
             baseUrl: "http://localhost:4000",
             agentId: "a",
             scope: "frontend",
@@ -62,7 +62,7 @@ describe("CouncilClient", () => {
 
   describe("report", () => {
     it("sends POST to the correct URL", async () => {
-      mockOk({ id: "ctx-001", update: {}, council: {} });
+      mockOk({ id: "ctx-001", update: {}, pim: {} });
       const client = makeClient();
 
       await client.report({
@@ -79,8 +79,8 @@ describe("CouncilClient", () => {
     });
 
     it("sends POST to project URL when project-scoped", async () => {
-      mockOk({ id: "pcu-001", update: {}, council: {} });
-      const client = new CouncilClient({
+      mockOk({ id: "pcu-001", update: {}, pim: {} });
+      const client = new PimClient({
         baseUrl: "http://localhost:4000",
         projectId: "project-demo",
         agentId: "agent-fe",
@@ -101,7 +101,7 @@ describe("CouncilClient", () => {
     });
 
     it("merges agent_id and scope from config into body", async () => {
-      mockOk({ id: "ctx-001", update: {}, council: {} });
+      mockOk({ id: "ctx-001", update: {}, pim: {} });
       const client = makeClient();
 
       await client.report({
@@ -122,7 +122,7 @@ describe("CouncilClient", () => {
 
       await expect(
         client.report({ type: "progress", summary: "x", details: "", status: "in_progress" }),
-      ).rejects.toThrow("Council API error 400");
+      ).rejects.toThrow("PIM API error 400");
     });
   });
 

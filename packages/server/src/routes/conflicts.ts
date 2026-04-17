@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Conflict, ConflictSide } from "@council/shared";
+import type { Conflict, ConflictSide } from "@pim/shared";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "../services/pressure.js";
 import { notifyConflictResolved } from "../services/slack.js";

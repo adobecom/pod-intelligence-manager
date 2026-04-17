@@ -1,8 +1,8 @@
 import { useEffect } from "react";
 import { SearchField, Switch } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@council/shared";
-import { DEFAULT_ORG_CONFIG } from "@council/shared";
+import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@pim/shared";
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import { useOrgStore } from "../../stores/orgStore";
 
 const controlsContainer = style({

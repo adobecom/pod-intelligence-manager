@@ -10,7 +10,7 @@ import {
   archivedPods,
   livingDocs,
   EMPTY_PROJECT_ANATOMY,
-} from "@council/shared";
+} from "@pim/shared";
 
 const DEFAULT_PROJECT_ID = "project-demo";
 

@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { KnowledgeQueryOptions, CurationRequest } from "@council/shared";
+import type { KnowledgeQueryOptions, CurationRequest } from "@pim/shared";
 import {
   getGraph,
   queryKnowledge,

@@ -1,4 +1,4 @@
-/** Re-export demo seed data from `@council/shared` (single source of truth). */
+/** Re-export demo seed data from `@pim/shared` (single source of truth). */
 export {
   pods,
   conflicts,
@@ -9,4 +9,4 @@ export {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "@council/shared";
+} from "@pim/shared";

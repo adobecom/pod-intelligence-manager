@@ -20,7 +20,7 @@ import type {
   CurationAction,
   ContextUpdateType,
   Scope,
-} from "@council/shared";
+} from "@pim/shared";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,

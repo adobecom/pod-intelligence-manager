@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Pod, Conflict, ContextUpdate, Tunnel } from "@council/shared";
+import type { Pod, Conflict, ContextUpdate, Tunnel } from "@pim/shared";
 import * as api from "../services/api";
 import type { ContextUpdateInput, SubmitResult } from "../services/api";
 

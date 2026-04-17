@@ -1,6 +1,6 @@
 # Context Search
 
-Cross-source search across Adobe-internal context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git), exposed through the AI Council backend and callable from Claude Desktop, Claude Code, the Council UI, the `council` CLI, and pod agents mid-debug.
+Cross-source search across Adobe-internal context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git), exposed through the PIM backend and callable from Claude Desktop, Claude Code, the PIM UI, the `pim` CLI, and pod agents mid-debug.
 
 ## What it is
 
@@ -26,7 +26,7 @@ The summary is a Haiku-generated markdown synthesis with inline citations; the r
 
 Four decisions shaped the design:
 
-1. **Server-side fan-out, not a client skill.** MCP tools cannot invoke other MCPs on the client, so the only way one tool call can return unified results in **both** Claude Desktop and Claude Code is for the fan-out to happen on the Council backend. The same code path works for the eventual hosted deployment — only credentials swap (env tokens → AWS Secrets Manager / per-user OAuth via IMS).
+1. **Server-side fan-out, not a client skill.** MCP tools cannot invoke other MCPs on the client, so the only way one tool call can return unified results in **both** Claude Desktop and Claude Code is for the fan-out to happen on the PIM backend. The same code path works for the eventual hosted deployment — only credentials swap (env tokens → AWS Secrets Manager / per-user OAuth via IMS).
 2. **Both humans and agents invoke it.** One endpoint, three triggers: the CLI and UI for on-demand human queries, the `context_search` MCP tool for Claude Desktop / Code, and `get_agent_session_context` (the pod-agent protocol pull step) for agents at session start *and* mid-debug.
 3. **Synthesized markdown + raw hits.** The synthesis goes through Haiku (cheap, ~$0.001/query) and is cached to disk; the raw hits travel alongside so the caller can drill down without a second round-trip. Both formats survive the cache.
 4. **Pod-agnostic.** `pod_id` is optional and only used to bias local-git search and ranking. A query without a pod works fine — the MCP tool, CLI, and UI all support headless use outside a pod context.
@@ -34,9 +34,9 @@ Four decisions shaped the design:
 ## Architecture
 
 ```
-Claude Desktop / Claude Code                Council UI            council CLI
+Claude Desktop / Claude Code                PIM UI            pim CLI
         │                                        │                      │
-        │ tool: context_search(query, …)         │ POST /api/…          │ council search "…"
+        │ tool: context_search(query, …)         │ POST /api/…          │ pim search "…"
         ▼                                        ▼                      ▼
   packages/mcp-server ────────────────────►  /api/context-search  ◄─── packages/cli
   (tools.ts: context_search)                     (Fastify)              (commands/search.ts)
@@ -69,7 +69,7 @@ Claude Desktop / Claude Code                Council UI            council CLI
                         { summary_md, hits, sources_used, missing_sources, … }
 ```
 
-**Agent auto-pull path:** `CouncilClient.pullSessionContext({externalQuery})` adds a sixth fetch to the existing `Promise.allSettled` in the pod-agent protocol's pull step. The MCP's `get_agent_session_context` exposes the same param. Both return the context-search result bundled under `externalContext` / `external_context` alongside the living doc, conflicts, learnings, and recent updates.
+**Agent auto-pull path:** `PimClient.pullSessionContext({externalQuery})` adds a sixth fetch to the existing `Promise.allSettled` in the pod-agent protocol's pull step. The MCP's `get_agent_session_context` exposes the same param. Both return the context-search result bundled under `externalContext` / `external_context` alongside the living doc, conflicts, learnings, and recent updates.
 
 ## Sources
 
@@ -173,25 +173,25 @@ Plus the existing `get_agent_session_context` now takes an optional `external_qu
 ### CLI
 
 ```bash
-council search "milo block init" --sources=jira,confluence --days=30
-council search "…" --json       # full JSON response
-council search "…" --brief      # summary only, no raw hits
-council search "…" --raw        # raw hits only, skip summary
-council search "…" --no-cache   # force fresh fan-out
-council search "…" --no-synthesize  # skip the Haiku call
+pim search "milo block init" --sources=jira,confluence --days=30
+pim search "…" --json       # full JSON response
+pim search "…" --brief      # summary only, no raw hits
+pim search "…" --raw        # raw hits only, skip summary
+pim search "…" --no-cache   # force fresh fan-out
+pim search "…" --no-synthesize  # skip the Haiku call
 ```
 
-Implemented in `packages/cli/src/commands/search.ts`. Does **not** require `COUNCIL_POD_ID` or scope.
+Implemented in `packages/cli/src/commands/search.ts`. Does **not** require `PIM_POD_ID` or scope.
 
 ### SDK
 
 ```ts
 // Pod-scoped: client.searchContext(query, opts?) includes pod_id automatically
-const client = new CouncilClient({ baseUrl, agentId, scope, podId });
+const client = new PimClient({ baseUrl, agentId, scope, podId });
 await client.searchContext("stripe integration", { sources: ["jira"] });
 
 // Pod-less helper: import searchContext directly
-import { searchContext } from "@council/sdk";
+import { searchContext } from "@pim/sdk";
 await searchContext("http://localhost:4000", { query: "…" });
 
 // Agent auto-pull includes it alongside the living doc / conflicts / learnings
@@ -247,7 +247,7 @@ Haiku synthesis worked end-to-end; cross-check rule produced a summary that hedg
 - `packages/server/src/integrations/{types,slack,fluffyjaws,jira,confluence,github,git}.ts` — one per source
 - `packages/server/src/services/context-search.ts` — orchestrator, dedupe, rank, secret-scrub, synthesize, cache
 - `packages/server/src/routes/context-search.ts` — Fastify route + Zod validation
-- `packages/cli/src/commands/search.ts` — `council search`
+- `packages/cli/src/commands/search.ts` — `pim search`
 - `packages/ui/src/views/ContextSearch/ContextSearch.tsx` + `stores/searchStore.ts`
 - `prompts/context-search-synthesis.md` — Haiku system prompt
 
@@ -255,7 +255,7 @@ Haiku synthesis worked end-to-end; cross-check rule produced a summary that hedg
 - `packages/server/src/services/secret-scan.ts` — added `redactSecrets()` reusing existing regex patterns
 - `packages/server/src/index.ts` — registered the new route
 - `packages/mcp-server/src/tools.ts` — new `context_search` tool; `get_agent_session_context` gained `external_query`
-- `packages/sdk/src/client.ts` + `index.ts` — `CouncilClient.searchContext()` method + pod-less `searchContext()` helper; `SessionContextOptions.externalQuery` + `SessionContext.externalContext`
+- `packages/sdk/src/client.ts` + `index.ts` — `PimClient.searchContext()` method + pod-less `searchContext()` helper; `SessionContextOptions.externalQuery` + `SessionContext.externalContext`
 - `packages/cli/src/index.ts` — registered the `search` command
 - `packages/ui/src/router.tsx` + `services/api.ts` — `/search` route + `api.searchContext()`
 - `packages/shared/src/index.ts` — re-exports the new types
@@ -273,11 +273,11 @@ Haiku synthesis worked end-to-end; cross-check rule produced a summary that hedg
 ## Deferred / v2
 
 - **Microsoft Teams** — requires an Azure AD app registration with admin consent for `Chat.Read.All` / `ChannelMessage.Read.All`. Not a developer self-serve change at Adobe, and Adobe is Slack-first. Plumbed in shape only.
-- **Remote MCP transport** — today's MCP is stdio-only. Hosted rollout adds an HTTP/SSE transport variant + IMS auth, so Claude Desktop users could point at `https://council.adobe.internal/mcp` with no local setup. Nothing in v1 precludes this.
+- **Remote MCP transport** — today's MCP is stdio-only. Hosted rollout adds an HTTP/SSE transport variant + IMS auth, so Claude Desktop users could point at `https://pim.adobe.internal/mcp` with no local setup. Nothing in v1 precludes this.
 - **Per-user OAuth brokering** — v1 uses shared env tokens per source (same trust boundary as the Victor guide's Section 6). Hosted v2 swaps to AWS Secrets Manager + per-user IMS OAuth.
-- **Pod repo path** — add a `repo_path` column to `pods`, wire `council init` to capture it, and local git search immediately lights up.
+- **Pod repo path** — add a `repo_path` column to `pods`, wire `pim init` to capture it, and local git search immediately lights up.
 - **Vector index** — if live fan-out latency becomes a problem, layer BM25 or embeddings over cached results. Not needed for v1.
-- **Session auto-refresh for Fluffyjaws** — today, when the `fjv3_session` cookie rotates, the user has to re-run `fj login` and re-paste the session id into `.env`. A `council fj-sync` helper (~20 lines) could read `~/.config/fj/session.json` and update `.env` in one step.
+- **Session auto-refresh for Fluffyjaws** — today, when the `fjv3_session` cookie rotates, the user has to re-run `fj login` and re-paste the session id into `.env`. A `pim fj-sync` helper (~20 lines) could read `~/.config/fj/session.json` and update `.env` in one step.
 
 ## Known quirks (captured from live testing)
 

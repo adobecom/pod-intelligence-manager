@@ -1,11 +1,11 @@
 {
-  "name": "@council/mcp-server",
+  "name": "@pim/mcp-server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "council-mcp": "./dist/index.js"
+    "pim-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

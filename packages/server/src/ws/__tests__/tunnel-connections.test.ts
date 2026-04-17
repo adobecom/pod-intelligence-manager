@@ -24,7 +24,7 @@ import {
   handleResponseChunk,
   markTunnelTraffic,
 } from "../tunnel-connections.js";
-import type { TunnelResponse, TunnelResponseChunk } from "@council/shared";
+import type { TunnelResponse, TunnelResponseChunk } from "@pim/shared";
 
 function createMockWs() {
   return {

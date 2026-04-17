@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Pod, PodArea, Milestone } from "@council/shared";
-import { regenerateLivingDoc } from "../council/agents/summary.js";
-import { runLintPass } from "../council/agents/lint.js";
+import type { Pod, PodArea, Milestone } from "@pim/shared";
+import { regenerateLivingDoc } from "../pim/agents/summary.js";
+import { runLintPass } from "../pim/agents/lint.js";
 import { getRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { getOrgScopeIdsOrdered } from "../services/org-settings.js";

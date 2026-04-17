@@ -1,17 +1,15 @@
 {
-  "name": "ai-council",
+  "name": "pim",
   "private": true,
   "packageManager": "pnpm@10.33.0",
-  "bin": {
-    "council": "bin/council.mjs"
-  },
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "council": "tsx packages/cli/src/index.ts",
-    "install-cli": "pnpm install && pnpm link --global"
+    "pim": "tsx packages/cli/src/index.ts",
+    "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter @pim/cli build && pnpm -C packages/cli link --global && node scripts/bootstrap-reminder.mjs",
+    "install-cli": "pnpm bootstrap"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild", "@swc/core", "better-sqlite3"]

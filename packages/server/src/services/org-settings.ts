@@ -1,5 +1,5 @@
-import type { OrgConfig, OrgScopeDefinition } from "@council/shared";
-import { DEFAULT_ORG_CONFIG } from "@council/shared";
+import type { OrgConfig, OrgScopeDefinition } from "@pim/shared";
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import db from "../db/connection.js";
 import { ORG_CONFIG_ROW_KEY } from "../db/schema.js";
 

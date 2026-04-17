@@ -20,7 +20,7 @@ const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
 const Scope = z
   .string()
   .min(1)
-  .describe("Org-defined scope id (must match a scopes[].id from GET /api/org/config on the Council server)");
+  .describe("Org-defined scope id (must match a scopes[].id from GET /api/org/config on the PIM server)");
 
 const OrgScopeEntrySchema = z.object({
   id: z.string().min(1).describe("Stable scope id (e.g. frontend, security-review)"),
@@ -205,7 +205,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled Council context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
@@ -254,7 +254,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_context_update",
-    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and Council analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
+    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and PIM analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
     {
       pod_id: PodId,
       agent_id: z.string().describe("ID of the submitting agent or human"),
@@ -286,7 +286,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_project_context_update",
-    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full Council Master. High-signal types (decision, spec_change) may be added to the knowledge graph.",
+    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full PIM orchestrator. High-signal types (decision, spec_change) may be added to the knowledge graph.",
     {
       project_id: ProjectId,
       agent_id: z.string().describe("ID of the submitting agent or human"),

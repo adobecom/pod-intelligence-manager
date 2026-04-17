@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { searchContext } from "@council/sdk";
-import type { ContextSearchHit, ContextSearchRequest, ContextSource } from "@council/shared";
-import { CONTEXT_SOURCES } from "@council/shared";
+import { searchContext } from "@pim/sdk";
+import type { ContextSearchHit, ContextSearchRequest, ContextSource } from "@pim/shared";
+import { CONTEXT_SOURCES } from "@pim/shared";
 import { getBaseUrl } from "../util.js";
 
 function parseSources(raw?: string): ContextSource[] | undefined {
@@ -72,7 +72,7 @@ export function registerSearchCommand(program: Command): void {
       const request: ContextSearchRequest = {
         query,
         sources: parseSources(opts.sources),
-        pod_id: opts.pod ?? process.env.COUNCIL_POD_ID,
+        pod_id: opts.pod ?? process.env.PIM_POD_ID,
         time_window_days: Number.parseInt(opts.days, 10) || 90,
         max_hits_per_source: Number.parseInt(opts.max, 10) || 10,
         synthesize: opts.synthesize !== false,

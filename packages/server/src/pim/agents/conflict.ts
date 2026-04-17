@@ -1,7 +1,7 @@
 import db from "../../db/connection.js";
 import { randomUUID } from "crypto";
 import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
-import type { ContextUpdate, Conflict } from "@council/shared";
+import type { ContextUpdate, Conflict } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";

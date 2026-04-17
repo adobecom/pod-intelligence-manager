@@ -19,7 +19,7 @@ import {
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { PendingWork } from "@council/shared";
+import type { PendingWork } from "@pim/shared";
 import { MarkdownDetailsEditor } from "../../components/MarkdownDetailsEditor";
 import { SeverityBadge } from "../../components/SeverityBadge";
 import { RelativeTime } from "../../components/RelativeTime";
@@ -133,7 +133,7 @@ export function ConflictDetail() {
       </div>
 
       {/* Master Analysis */}
-      <Heading level={3}>Council Master Analysis</Heading>
+      <Heading level={3}>PIM orchestrator analysis</Heading>
       <InlineAlert variant="informative">
         <Heading>Analysis</Heading>
         <Content>

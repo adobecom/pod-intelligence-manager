@@ -7,7 +7,7 @@ import type {
   CrossPodOverlap,
   ArchivedPod,
   ArchivedProject,
-} from "@council/shared";
+} from "@pim/shared";
 import * as api from "../services/api";
 
 interface OrgStore {

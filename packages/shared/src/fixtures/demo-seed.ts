@@ -483,7 +483,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-checkout-redesign",
       dev_name: "alice",
       branch: "feat/cart-summary",
-      url: "checkout-alice.council.acme.com",
+      url: "checkout-alice.pim.acme.com",
       status: "active",
       last_activity: "2026-04-08T18:30:00Z",
     },
@@ -492,7 +492,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-checkout-redesign",
       dev_name: "bob",
       branch: "feat/promo-codes",
-      url: "checkout-bob.council.acme.com",
+      url: "checkout-bob.pim.acme.com",
       status: "active",
       last_activity: "2026-04-08T17:45:00Z",
     },
@@ -501,7 +501,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-checkout-redesign",
       dev_name: "carol",
       branch: "feat/cart-api",
-      url: "checkout-carol.council.acme.com",
+      url: "checkout-carol.pim.acme.com",
       status: "idle",
       last_activity: "2026-04-08T14:00:00Z",
     },
@@ -512,7 +512,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-auth-revamp",
       dev_name: "dave",
       branch: "feat/oauth-flow",
-      url: "auth-dave.council.acme.com",
+      url: "auth-dave.pim.acme.com",
       status: "active",
       last_activity: "2026-04-07T16:30:00Z",
     },
@@ -523,7 +523,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-search-infra",
       dev_name: "eve",
       branch: "feat/search-ui",
-      url: "search-eve.council.acme.com",
+      url: "search-eve.pim.acme.com",
       status: "active",
       last_activity: "2026-04-09T09:10:00Z",
     },
@@ -532,7 +532,7 @@ export const tunnels: Record<string, Tunnel[]> = {
       pod_id: "pod-search-infra",
       dev_name: "frank",
       branch: "feat/indexer",
-      url: "search-frank.council.acme.com",
+      url: "search-frank.pim.acme.com",
       status: "disconnected",
       last_activity: "2026-04-08T22:00:00Z",
     },
@@ -644,16 +644,16 @@ export const livingDocs: Record<string, string> = {
 
 - **[Apr 8 18:00]** fe-agent-01: Blocked — waiting on C-007 resolution for discount display
 - **[Apr 8 17:00]** fe-agent-02: Promo code input with basic validation
-- **[Apr 8 16:45]** Council: Conflict C-007 created — discount display approaches conflict
+- **[Apr 8 16:45]** PIM: Conflict C-007 created — discount display approaches conflict
 - **[Apr 8 14:32]** fe-agent-01: Implemented CartSummary with strikethrough discounts
 - **[Apr 8 13:10]** be-agent-01: /cart endpoint now returns discount metadata
 - **[Apr 8 11:15]** design-lead: Updated mockup v3 with "You save" line item
 
 ## Active Tunnels
 
-- 🟢 alice: feat/cart-summary → checkout-alice.council.acme.com
-- 🟢 bob: feat/promo-codes → checkout-bob.council.acme.com
-- 🟡 carol: feat/cart-api → checkout-carol.council.acme.com (idle)
+- 🟢 alice: feat/cart-summary → checkout-alice.pim.acme.com
+- 🟢 bob: feat/promo-codes → checkout-bob.pim.acme.com
+- 🟡 carol: feat/cart-api → checkout-carol.pim.acme.com (idle)
 `,
   "pod-auth-revamp": `# Pod: User Auth Revamp — Living Doc
 

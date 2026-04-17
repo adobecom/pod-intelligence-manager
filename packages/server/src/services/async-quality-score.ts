@@ -1,5 +1,5 @@
 import db from "../db/connection.js";
-import { callLLMJSON, isLLMAvailable, MODELS } from "../council/llm.js";
+import { callLLMJSON, isLLMAvailable, MODELS } from "../pim/llm.js";
 import { broadcast } from "../ws/index.js";
 import fs from "node:fs";
 import path from "node:path";

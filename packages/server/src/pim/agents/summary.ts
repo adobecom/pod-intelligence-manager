@@ -1,5 +1,5 @@
 import db from "../../db/connection.js";
-import { getPressureLabel, getPressureLevel } from "@council/shared";
+import { getPressureLabel, getPressureLevel } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { getRelevantLearnings } from "../../services/knowledge-graph.js";
 

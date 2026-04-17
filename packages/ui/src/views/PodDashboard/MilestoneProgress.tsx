@@ -1,6 +1,6 @@
 import { Heading, ProgressBar, Text } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { Milestone } from "@council/shared";
+import type { Milestone } from "@pim/shared";
 
 const well = style({
   backgroundColor: "layer-1",

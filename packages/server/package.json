@@ -1,5 +1,5 @@
 {
-  "name": "@council/server",
+  "name": "@pim/server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@council/shared": "workspace:*",
+    "@pim/shared": "workspace:*",
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/websocket": "^11.2.0",

@@ -23,6 +23,9 @@ const POD_DATA_EVENTS = new Set([
 
 const THROTTLE_MS = 5_000;
 
+/** Adobe brand red (primary) */
+const ADOBE_RED = "#e1251b";
+
 const topBar = style({
   display: "flex",
   alignItems: "center",
@@ -92,7 +95,7 @@ export function AppLayout() {
     <div className={appContainer}>
       <div className={topBar}>
         <Heading level={3} styles={style({ marginY: 0, whiteSpace: "nowrap", flexShrink: 0 })}>
-          AI Council
+          <span style={{ color: ADOBE_RED }}>PIM</span>
         </Heading>
 
         <div className={style({ display: "flex", flexDirection: "column", gap: 4, alignItems: "start" })}>

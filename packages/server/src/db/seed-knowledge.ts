@@ -4,7 +4,7 @@
  * /knowledge UI has data to display out of the box.
  */
 
-import type { EnhancedPodLearning } from "@council/shared";
+import type { EnhancedPodLearning } from "@pim/shared";
 import { getGraph, addLearningsToGraph } from "../services/knowledge-graph.js";
 
 // --- Onboarding Flow v2 (pod-onboarding-v2, completed 2026-03-28) ---

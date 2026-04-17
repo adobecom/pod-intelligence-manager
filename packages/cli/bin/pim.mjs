@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * `council` bin when `@council/cli` is linked or installed.
- * Runs the CLI from TypeScript via tsx (same behavior as the monorepo root wrapper).
+ * Global `pim` entry when `@pim/cli` is linked (`pnpm -C packages/cli link --global`).
+ * Prefer the bundled CLI so `pim` works from any cwd without tsx / workspace TS resolution.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -12,9 +12,21 @@ import { fileURLToPath } from "node:url";
 const binDir = path.dirname(fileURLToPath(import.meta.url));
 const pkgRoot = path.resolve(binDir, "..");
 const userCwd = process.cwd();
+const bundlePath = path.join(pkgRoot, "dist", "pim.bundle.cjs");
+const env = { ...process.env, PIM_CLI_ROOT: pkgRoot };
+
+if (existsSync(bundlePath)) {
+  const result = spawnSync(process.execPath, [bundlePath, ...process.argv.slice(2)], {
+    cwd: userCwd,
+    stdio: "inherit",
+    env,
+  });
+  process.exit(result.status ?? 1);
+}
+
+// Dev fallback: no bundle yet — run TypeScript entry via tsx
 const cliEntry = path.join(pkgRoot, "src/index.ts");
 const requireFromPkg = createRequire(path.join(pkgRoot, "package.json"));
-
 let tsxCli;
 try {
   const tsxDir = path.dirname(requireFromPkg.resolve("tsx/package.json"));
@@ -22,7 +34,7 @@ try {
   if (!existsSync(tsxCli)) throw new Error("missing tsx cli");
 } catch {
   console.error(
-    "council: could not resolve tsx. In the ai-council workspace run:\n  pnpm install\n",
+    "pim: no bundled CLI (dist/pim.bundle.cjs). From the monorepo run:\n  pnpm --filter @pim/cli build\n",
   );
   process.exit(1);
 }
@@ -30,7 +42,7 @@ try {
 const result = spawnSync(process.execPath, [tsxCli, cliEntry, ...process.argv.slice(2)], {
   cwd: userCwd,
   stdio: "inherit",
-  env: process.env,
+  env,
 });
 
 process.exit(result.status ?? 1);

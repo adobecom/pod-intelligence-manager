@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { OrgPodSummary, CrossPodOverlap, ArchivedPod, ArchivedProject } from "@council/shared";
+import type { OrgPodSummary, CrossPodOverlap, ArchivedPod, ArchivedProject } from "@pim/shared";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { validateBody } from "../middleware/validation.js";
 import { getOrgConfig, setOrgConfig } from "../services/org-settings.js";
-import { extractKnowledgeEnhanced } from "../council/agents/knowledge-extraction.js";
+import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { addLearningsToGraph } from "../services/knowledge-graph.js";
 import { broadcastToAll } from "../ws/index.js";
 

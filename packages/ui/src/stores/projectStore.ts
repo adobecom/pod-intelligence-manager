@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Project, ProjectContextUpdate } from "@council/shared";
+import type { Project, ProjectContextUpdate } from "@pim/shared";
 import * as api from "../services/api";
 import type { ContextUpdateInput, ProjectSubmitResult } from "../services/api";
 

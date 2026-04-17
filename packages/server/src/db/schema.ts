@@ -1,4 +1,4 @@
-import { DEFAULT_ORG_CONFIG } from "@council/shared";
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import db from "./connection.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";

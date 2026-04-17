@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
-import type { PendingWork } from "@council/shared";
+import type { PendingWork } from "@pim/shared";
 
 export default async function pendingWorkRoutes(app: FastifyInstance) {
   app.get<{ Params: { conflictId: string } }>("/api/conflicts/:conflictId/pending-work", async (req) => {

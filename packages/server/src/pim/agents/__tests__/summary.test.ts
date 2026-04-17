@@ -53,7 +53,7 @@ const MOCK_DECISIONS = [
 ];
 
 const MOCK_TUNNELS = [
-  { dev_name: "alice", branch: "feature/checkout", url: "https://alpha-alice.council.adobe.com", status: "active" },
+  { dev_name: "alice", branch: "feature/checkout", url: "https://alpha-alice.pim.adobe.com", status: "active" },
 ];
 
 // The summary function calls db.prepare many times in sequence.

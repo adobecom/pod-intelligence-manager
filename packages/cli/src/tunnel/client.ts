@@ -3,8 +3,8 @@ import type {
   TunnelResponse,
   TunnelResponseChunk,
   TunnelMessage,
-} from "@council/shared";
-import { TUNNEL_CHUNK_THRESHOLD, TUNNEL_WS_HEARTBEAT_MS } from "@council/shared";
+} from "@pim/shared";
+import { TUNNEL_CHUNK_THRESHOLD, TUNNEL_WS_HEARTBEAT_MS } from "@pim/shared";
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
 

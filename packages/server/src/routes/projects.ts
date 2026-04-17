@@ -1,8 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { ArchivedProject, Project, ProjectContextUpdate } from "@council/shared";
-import { EMPTY_PROJECT_ANATOMY } from "@council/shared";
+import {
+  type ArchivedProject,
+  type Project,
+  type ProjectContextUpdate,
+  EMPTY_PROJECT_ANATOMY,
+} from "@pim/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
@@ -228,7 +232,7 @@ export default async function projectRoutes(app: FastifyInstance) {
         return { deduplicated: true, message: "Commit already reported by another source" };
       }
       reply.code(201);
-      return { id: result.update!.id, update: result.update, council: result.council };
+      return { id: result.update!.id, update: result.update, pim: result.pim };
     },
   );
 

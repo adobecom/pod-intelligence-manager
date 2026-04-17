@@ -1,5 +1,5 @@
 import { WebClient } from "@slack/web-api";
-import type { Conflict } from "@council/shared";
+import type { Conflict } from "@pim/shared";
 import db from "../db/connection.js";
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -34,7 +34,7 @@ function podName(podId: string): string {
   return row?.name ?? podId;
 }
 
-const UI_BASE = process.env.COUNCIL_UI_URL ?? "http://localhost:5173";
+const UI_BASE = process.env.PIM_UI_URL ?? "http://localhost:5173";
 
 function conflictUrl(podId: string, conflictId: string): string {
   return `${UI_BASE}/pod/${podId}/conflict/${conflictId}`;
@@ -91,7 +91,7 @@ export function notifyConflictCreated(conflict: Conflict): void {
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "View in Council" },
+              text: { type: "plain_text", text: "View in PIM" },
               url,
             },
           ],

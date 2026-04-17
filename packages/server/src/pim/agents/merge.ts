@@ -1,6 +1,6 @@
 import db from "../../db/connection.js";
 import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";

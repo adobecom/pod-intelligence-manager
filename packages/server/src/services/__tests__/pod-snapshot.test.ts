@@ -9,7 +9,7 @@ const { testDb } = vi.hoisted(() => {
 
 vi.mock("../../db/connection.js", () => ({ default: testDb }));
 
-import { DEFAULT_ORG_CONFIG } from "@council/shared";
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import { createTables } from "../../db/schema.js";
 import {
   refreshPodSnapshotFromContext,

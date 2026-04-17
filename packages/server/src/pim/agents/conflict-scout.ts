@@ -1,5 +1,5 @@
 import db from "../../db/connection.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 import type { Classification } from "../classifier.js";
 import { callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
 import fs from "node:fs";

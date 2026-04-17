@@ -10,7 +10,7 @@ import * as events from "aws-cdk-lib/aws-events";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 import { Construct } from "constructs";
 
-export class CouncilStack extends cdk.Stack {
+export class PimStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -19,14 +19,14 @@ export class CouncilStack extends cdk.Stack {
     // ──────────────────────────────────────
 
     const podsTable = new dynamodb.Table(this, "PodsTable", {
-      tableName: "council-pods",
+      tableName: "pim-pods",
       partitionKey: { name: "pod_id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     const contextUpdatesTable = new dynamodb.Table(this, "ContextUpdatesTable", {
-      tableName: "council-context-updates",
+      tableName: "pim-context-updates",
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -38,7 +38,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const conflictsTable = new dynamodb.Table(this, "ConflictsTable", {
-      tableName: "council-conflicts",
+      tableName: "pim-conflicts",
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -50,7 +50,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const knowledgeNodesTable = new dynamodb.Table(this, "KnowledgeNodesTable", {
-      tableName: "council-knowledge-nodes",
+      tableName: "pim-knowledge-nodes",
       partitionKey: { name: "id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -62,14 +62,14 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const livingDocsTable = new dynamodb.Table(this, "LivingDocsTable", {
-      tableName: "council-living-docs",
+      tableName: "pim-living-docs",
       partitionKey: { name: "pod_id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     const tunnelsTable = new dynamodb.Table(this, "TunnelsTable", {
-      tableName: "council-tunnels",
+      tableName: "pim-tunnels",
       partitionKey: { name: "tunnel_id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -80,7 +80,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const orgSummariesTable = new dynamodb.Table(this, "OrgSummariesTable", {
-      tableName: "council-org-summaries",
+      tableName: "pim-org-summaries",
       partitionKey: { name: "pod_id", type: dynamodb.AttributeType.STRING },
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
@@ -91,21 +91,21 @@ export class CouncilStack extends cdk.Stack {
     // ──────────────────────────────────────
 
     const livingDocsBucket = new s3.Bucket(this, "LivingDocsBucket", {
-      bucketName: `council-living-docs-${this.account}`,
+      bucketName: `pim-living-docs-${this.account}`,
       versioned: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
     const knowledgeGraphBucket = new s3.Bucket(this, "KnowledgeGraphBucket", {
-      bucketName: `council-knowledge-graph-${this.account}`,
+      bucketName: `pim-knowledge-graph-${this.account}`,
       versioned: true,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
     });
 
     const uiBucket = new s3.Bucket(this, "UIBucket", {
-      bucketName: `council-ui-${this.account}`,
+      bucketName: `pim-ui-${this.account}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -128,7 +128,7 @@ export class CouncilStack extends cdk.Stack {
     };
 
     const apiLambda = new lambda.Function(this, "ApiFunction", {
-      functionName: "council-api",
+      functionName: "pim-api",
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "index.handler",
       code: lambda.Code.fromAsset("../server/dist"),
@@ -138,7 +138,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const ingestionLambda = new lambda.Function(this, "IngestionFunction", {
-      functionName: "council-ingestion",
+      functionName: "pim-ingestion",
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "ingestion.handler",
       code: lambda.Code.fromAsset("../server/dist"),
@@ -147,10 +147,10 @@ export class CouncilStack extends cdk.Stack {
       environment: commonEnv,
     });
 
-    const councilLambda = new lambda.Function(this, "CouncilFunction", {
-      functionName: "council-brain",
+    const pimBrainLambda = new lambda.Function(this, "PimBrainFunction", {
+      functionName: "pim-brain",
       runtime: lambda.Runtime.NODEJS_22_X,
-      handler: "council.handler",
+      handler: "pim.handler",
       code: lambda.Code.fromAsset("../server/dist"),
       memorySize: 1024,
       timeout: cdk.Duration.seconds(120),
@@ -158,7 +158,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const wsLambda = new lambda.Function(this, "WebSocketFunction", {
-      functionName: "council-ws",
+      functionName: "pim-ws",
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "ws.handler",
       code: lambda.Code.fromAsset("../server/dist"),
@@ -168,7 +168,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const escalationLambda = new lambda.Function(this, "EscalationFunction", {
-      functionName: "council-escalation",
+      functionName: "pim-escalation",
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "escalation.handler",
       code: lambda.Code.fromAsset("../server/dist"),
@@ -178,7 +178,7 @@ export class CouncilStack extends cdk.Stack {
     });
 
     const lintLambda = new lambda.Function(this, "LintFunction", {
-      functionName: "council-lint",
+      functionName: "pim-lint",
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "lint.handler",
       code: lambda.Code.fromAsset("../server/dist"),
@@ -189,7 +189,7 @@ export class CouncilStack extends cdk.Stack {
 
     // Grant DynamoDB access to all Lambdas
     const allTables = [podsTable, contextUpdatesTable, conflictsTable, knowledgeNodesTable, livingDocsTable, tunnelsTable, orgSummariesTable];
-    const allLambdas = [apiLambda, ingestionLambda, councilLambda, wsLambda, escalationLambda, lintLambda];
+    const allLambdas = [apiLambda, ingestionLambda, pimBrainLambda, wsLambda, escalationLambda, lintLambda];
     for (const table of allTables) {
       for (const fn of allLambdas) {
         table.grantReadWriteData(fn);
@@ -198,15 +198,15 @@ export class CouncilStack extends cdk.Stack {
 
     // Grant S3 access
     livingDocsBucket.grantReadWrite(apiLambda);
-    livingDocsBucket.grantReadWrite(councilLambda);
-    knowledgeGraphBucket.grantReadWrite(councilLambda);
+    livingDocsBucket.grantReadWrite(pimBrainLambda);
+    knowledgeGraphBucket.grantReadWrite(pimBrainLambda);
 
     // ──────────────────────────────────────
     // REST API Gateway
     // ──────────────────────────────────────
 
-    const restApi = new apigateway.RestApi(this, "CouncilRestApi", {
-      restApiName: "Council API",
+    const restApi = new apigateway.RestApi(this, "PimRestApi", {
+      restApiName: "PIM API",
       deployOptions: { stageName: "v1" },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
@@ -254,8 +254,8 @@ export class CouncilStack extends cdk.Stack {
     // WebSocket API Gateway
     // ──────────────────────────────────────
 
-    const wsApi = new apigatewayv2.CfnApi(this, "CouncilWebSocketApi", {
-      name: "Council WebSocket",
+    const wsApi = new apigatewayv2.CfnApi(this, "PimWebSocketApi", {
+      name: "PIM WebSocket",
       protocolType: "WEBSOCKET",
       routeSelectionExpression: "$request.body.action",
     });
@@ -303,7 +303,7 @@ export class CouncilStack extends cdk.Stack {
     // CloudFront Distribution
     // ──────────────────────────────────────
 
-    const distribution = new cloudfront.Distribution(this, "CouncilCDN", {
+    const distribution = new cloudfront.Distribution(this, "PimCDN", {
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(uiBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,

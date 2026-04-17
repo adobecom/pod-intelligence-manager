@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { ensureCliPackageRootEnv } from "./cli-root.js";
+
+ensureCliPackageRootEnv();
+
 import { registerPodCommands } from "./commands/pod.js";
 import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";
@@ -15,10 +19,10 @@ import { registerSearchCommand } from "./commands/search.js";
 const program = new Command();
 
 program
-  .name("council")
-  .description("AI Council CLI — manage pods, submit context, and tunnel dev servers")
+  .name("pim")
+  .description("PIM (Pod Intelligence Manager) CLI — manage pods, submit context, and tunnel dev servers")
   .version("0.0.1")
-  .option("-s, --server <url>", "Server base URL", process.env.COUNCIL_SERVER_URL ?? "http://localhost:4000");
+  .option("-s, --server <url>", "Server base URL", process.env.PIM_SERVER_URL ?? "http://localhost:4000");
 
 registerPodCommands(program);
 registerReportCommand(program);

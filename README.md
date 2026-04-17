@@ -1,11 +1,11 @@
-# AI Council
+# PIM
 
-An orchestration layer for cross-functional AI+human "pods" (5-day sprints). Agents and humans submit structured context updates to a central Council, which classifies, merges, detects conflicts, and assembles a read-only "living doc" that keeps everyone synchronized.
+An orchestration layer for cross-functional AI+human "pods" (5-day sprints). Agents and humans submit structured context updates to **PIM (Pod Intelligence Manager)**, which classifies, merges, detects conflicts, and assembles a read-only "living doc" that keeps everyone synchronized.
 
 Three pillars:
 
-1. **AI Council (Brain)** -- A context bus: agents submit updates, a Council Master routes to Committee agents (Merge, Conflict, Summary), and a living `.md` doc is assembled from the current state.
-2. **Council UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
+1. **PIM (Brain)** -- A context bus: agents submit updates, a PIM orchestrator routes to Committee agents (Merge, Conflict, Summary), and a living `.md` doc is assembled from the current state.
+2. **PIM UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
 3. **FE Tunneling** -- Expo-style localhost tunneling (**prototype implemented**: CLI + server routes for WebSocket request proxying).
 
 ## Quick Demo
@@ -14,8 +14,8 @@ Run these commands in separate terminals to see everything working:
 
 ```bash
 pnpm install
-pnpm --filter @council/server dev      # Terminal 1 — backend on :4000
-pnpm --filter @council/ui dev          # Terminal 2 — UI on :5173
+pnpm --filter @pim/server dev      # Terminal 1 — backend on :4000
+pnpm --filter @pim/ui dev          # Terminal 2 — UI on :5173
 ```
 
 Then run the guided demo (creates a pod, submits updates, triggers a conflict, resolves it):
@@ -35,17 +35,26 @@ Optional:
 
 - **`AWS_BEARER_TOKEN_BEDROCK`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet) via AWS Bedrock. Set `AWS_REGION` (defaults to `us-west-2`) and optionally override `BEDROCK_MODEL_FAST` / `BEDROCK_MODEL_SMART`. The system works fully without it using deterministic classification and merging.
 
+## Setup (pick one path)
+
+| Goal | Easiest command |
+|------|----------------|
+| **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and `@pim/cli`, links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
+| **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
+
+For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
+
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install dependencies (skip if you already ran pnpm bootstrap)
 pnpm install
 
 # Terminal 1 -- start the backend (port 4000)
-pnpm --filter @council/server dev
+pnpm --filter @pim/server dev
 
 # Terminal 2 -- start the UI (port 5173)
-pnpm --filter @council/ui dev
+pnpm --filter @pim/ui dev
 ```
 
 Open **http://localhost:5173**. The database auto-seeds with three demo pods on first run.
@@ -53,14 +62,14 @@ Open **http://localhost:5173**. The database auto-seeds with three demo pods on 
 ## Project Structure
 
 ```
-ai-council/
+pim/
 ├── packages/
 │   ├── shared/          # Types, interfaces, constants (single source of truth)
-│   ├── server/          # Fastify backend + Council Master + Committee agents
+│   ├── server/          # Fastify backend + PIM orchestrator + Committee agents
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
-│   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
+│   ├── sdk/             # @pim/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # council CLI — pods, context, hooks, tunnel, init, leave
+│   ├── cli/             # pim CLI — pods, context, hooks, tunnel, init, leave
 │   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
 ├── examples/
 │   └── demo-agent.ts    # End-to-end demo exercising the SDK
@@ -73,13 +82,13 @@ ai-council/
 
 ## Packages
 
-### `@council/shared`
+### `@pim/shared`
 
 TypeScript types and constants shared across all packages. No runtime dependencies.
 
 Key exports: `Pod`, `Conflict`, `ContextUpdate`, `Tunnel`, `OrgPodSummary`, `CrossPodOverlap`, `ArchivedPod`, `PendingWork`, `PRESSURE_THRESHOLDS`, `getPressureLevel()`.
 
-### `@council/server`
+### `@pim/server`
 
 Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) for storage and WebSocket for real-time events.
 
@@ -108,7 +117,7 @@ Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) f
 
 **WebSocket events:** `context_update_added`, `conflict_created`, `conflict_resolved`, `conflict_escalated`, `pressure_changed`, `living_doc_updated`, `tunnel_status_changed`, `lint_completed`.
 
-**Council Master pipeline:** When a context update is submitted via POST, it flows through:
+**PIM orchestrator pipeline:** When a context update is submitted via POST, it flows through:
 
 1. **Zod validation** -- Schema enforcement
 2. **Secret scan** -- Regex patterns for AWS keys, JWTs, connection strings, PEM blocks
@@ -132,16 +141,16 @@ The living doc’s **Current Status** and milestone progress line follow this sn
 For faster demo cycles, set shorter intervals:
 
 ```bash
-ESCALATION_INTERVAL_MS=30000 LINT_INTERVAL_MS=60000 pnpm --filter @council/server dev
+ESCALATION_INTERVAL_MS=30000 LINT_INTERVAL_MS=60000 pnpm --filter @pim/server dev
 ```
 
-**Database:** SQLite file at `.data/council.db`. Auto-created and seeded on first run. Delete the file to reset:
+**Database:** SQLite file at `.data/pim.db`. Auto-created and seeded on first run. Delete the file to reset:
 
 ```bash
-rm .data/council.db
+rm .data/pim.db
 ```
 
-### `@council/ui`
+### `@pim/ui`
 
 React 19 SPA built with Vite 6 and Adobe Spectrum 2.
 
@@ -163,14 +172,14 @@ React 19 SPA built with Vite 6 and Adobe Spectrum 2.
 
 The Vite dev server proxies `/api` and `/ws` to `localhost:4000`.
 
-### `@council/sdk`
+### `@pim/sdk`
 
 TypeScript client for AI agent integration.
 
 ```typescript
-import { CouncilClient } from '@council/sdk';
+import { PimClient } from '@pim/sdk';
 
-const council = new CouncilClient({
+const pim = new PimClient({
   baseUrl: 'http://localhost:4000',
   podId: 'pod-checkout-redesign',
   agentId: 'my-agent',
@@ -178,27 +187,27 @@ const council = new CouncilClient({
 });
 
 // Submit a context update
-const result = await council.report({
+const result = await pim.report({
   type: 'progress',
   summary: 'Implemented cart summary component',
   details: 'CartSummary.tsx renders line items with discounts.',
   status: 'completed',
 });
 
-console.log(result.council.classification); // "additive" | "overlapping" | "contradictory"
+console.log(result.pim.classification); // "additive" | "overlapping" | "contradictory"
 
 // Fetch the living doc
-const doc = await council.getContext();
+const doc = await pim.getContext();
 
 // Fetch pod state, conflicts, updates
-const pod = await council.getPod();
-const conflicts = await council.getConflicts();
-const updates = await council.getUpdates();
+const pod = await pim.getPod();
+const conflicts = await pim.getConflicts();
+const updates = await pim.getUpdates();
 ```
 
-### `@council/mcp-server`
+### `@pim/mcp-server`
 
-MCP (Model Context Protocol) server that exposes Council data to Claude.ai. When connected, Claude can render an interactive pod dashboard as an artifact in the side panel.
+MCP (Model Context Protocol) server that exposes PIM data to Claude.ai. When connected, Claude can render an interactive pod dashboard as an artifact in the side panel.
 
 **Tools:**
 
@@ -211,10 +220,10 @@ The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, t
 
 **Setup:**
 
-1. Build the package:
+1. Build the package (or run `pnpm bootstrap` from the repo root to build MCP server and CLI and link `pim` globally):
 
 ```bash
-pnpm --filter @council/mcp-server build
+pnpm --filter @pim/mcp-server build
 ```
 
 2. Add to your Claude Desktop or Claude.ai MCP configuration:
@@ -222,18 +231,18 @@ pnpm --filter @council/mcp-server build
 ```json
 {
   "mcpServers": {
-    "ai-council": {
+    "pim": {
       "command": "node",
-      "args": ["/absolute/path/to/ai-council/packages/mcp-server/dist/index.js"],
+      "args": ["/absolute/path/to/pim/packages/mcp-server/dist/index.js"],
       "env": {
-        "COUNCIL_API_URL": "http://localhost:4000"
+        "PIM_API_URL": "http://localhost:4000"
       }
     }
   }
 }
 ```
 
-3. Start the Council server (`pnpm --filter @council/server dev`), then ask Claude: *"Show me pod Auth Revamp's dashboard"*
+3. Start the PIM server (`pnpm --filter @pim/server dev`), then ask Claude: *"Show me pod Auth Revamp's dashboard"*
 
 The artifact renders a read-only snapshot — no network requests from the artifact itself. To refresh, ask Claude to show it again.
 
@@ -241,56 +250,58 @@ The artifact renders a read-only snapshot — no network requests from the artif
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COUNCIL_API_URL` | `http://localhost:4000` | Base URL of the Council Fastify server |
+| `PIM_API_URL` | `http://localhost:4000` | Base URL of the PIM Fastify server |
 
-### `@council/cli`
+### `@pim/cli`
 
 Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands.
 
-**From this clone (pick one):**
+**Easiest install from this clone:** run **`pnpm bootstrap`** at the monorepo root (see **Setup** above). It builds the bundled CLI (`packages/cli/dist/pim.bundle.cjs`) and runs **`pnpm -C packages/cli link --global`**, so **`pim` works from any directory** (for example `pim init` in another repo) once your shell **`PATH`** includes pnpm’s global executables directory. **`pnpm install-cli`** is the same script.
 
-| Command | When to use |
-|---------|-------------|
-| `pnpm install && pnpm link --global` | Installs the `council` command on your PATH (points at this repo; keep the clone, or run `pnpm unlink --global` before deleting it). |
-| `pnpm council <args>` | No global install; run only from the monorepo root (example: `pnpm council pod list`). |
+| Alternative | When to use |
+|-------------|-------------|
+| `pnpm pim <args>` | No global install; run only from the monorepo root (e.g. `pnpm pim pod list`). |
+| `npx tsx packages/cli/src/index.ts` | Debug / run from TypeScript without building the bundle first. |
 
-You can still run the entry file directly with `npx tsx packages/cli/src/index.ts`.
+Before deleting a clone you linked globally, run **`pnpm unlink --global`** from `packages/cli` if you want to remove the global `pim` shim.
+
+**If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old **`council`** shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
 
 **Repository setup (per clone):**
 
-`council init` wires this git repo to the Council server: writes `.council.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `council pod create`).
+`pim init` wires this git repo to the PIM server: writes `.pim.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `pim pod create`). From an interactive terminal, run `pim init` without `--pod` to use a guided wizard (pod list, optional project, optional scope, agent). In CI or non-interactive use, pass `--pod` explicitly.
 
 ```bash
-council init --pod pod-my-sprint-a1b2c3
-council init --pod pod-my-sprint-a1b2c3 --project project-demo
-council init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
+pim init --pod pod-my-sprint-a1b2c3
+pim init --pod pod-my-sprint-a1b2c3 --project project-demo
+pim init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
 ```
 
-- `--pod` is required (server must return that pod). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
+- `--pod` is required when stdin is not a TTY (e.g. CI); otherwise the wizard prompts for a pod. `--scope` must be an **id** from org config (`GET /api/org/config`, labels are for display only). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
 - Skip flags: `--skip-hooks`, `--skip-claude`, `--skip-claude-md` to avoid installing hooks or touching `.claude/` / `CLAUDE.md`.
 
-`council leave` removes **pod** binding from this repo (clears `podId` in `.council.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
+`pim leave` removes **pod** binding from this repo (clears `podId` in `.pim.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
 
 ```bash
-council leave
-council leave --skip-claude-md --skip-sync --skip-config   # only adjust .council.json, etc.
+pim leave
+pim leave --skip-claude-md --skip-sync --skip-config   # only adjust .pim.json, etc.
 ```
 
 **Pod management:**
 
 ```bash
-council pod create --name "My Sprint"        # Create a new pod
-council pod list                              # List active pods
-council pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
-council pod archive pod-my-sprint-a1b2c3      # Archive a completed pod
+pim pod create --name "My Sprint"        # Create a new pod
+pim pod list                              # List active pods
+pim pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
+pim pod archive pod-my-sprint-a1b2c3      # Archive a completed pod
 ```
 
 **Context updates:**
 
-Submit exactly one of `--pod` or `--project` (not both). Pod mode runs the full Council pipeline for the sprint; project mode records off-pod / between-sprint updates without a living doc or conflict flow.
+Submit exactly one of `--pod` or `--project` (not both). Pod mode runs the full PIM pipeline for the sprint; project mode records off-pod / between-sprint updates without a living doc or conflict flow.
 
 ```bash
-council report \
+pim report \
   --pod pod-my-sprint-a1b2c3 \
   --type progress \
   --scope frontend \
@@ -298,7 +309,7 @@ council report \
   --details "Responsive layout with animated gradient." \
   --status completed
 
-council report \
+pim report \
   --project project-demo \
   --type progress \
   --scope backend \
@@ -309,11 +320,11 @@ council report \
 **Pod agent protocol** (pull before substantive work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
 
 ```bash
-# Flags or env: COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (and COUNCIL_SERVER_URL), or `.council.json` via `council init`
-council context --pod <podId> --agent <id> --scope frontend
-council context --brief --diff --pod <podId> --agent <id> --scope frontend
-council context --write .council/last-context.md    # optional explicit path
-council hooks install                                # optional: post-commit / post-rewrite → Council API
+# Flags or env: PIM_POD_ID, PIM_AGENT_ID, PIM_SCOPE (and PIM_SERVER_URL), or `.pim.json` via `pim init`
+pim context --pod <podId> --agent <id> --scope frontend
+pim context --brief --diff --pod <podId> --agent <id> --scope frontend
+pim context --write .pim/last-context.md    # optional explicit path
+pim hooks install                                # optional: post-commit / post-rewrite → PIM API
 ```
 
 Omit `--pod` / `--agent` / `--scope` when the same values are set in the environment.
@@ -321,19 +332,19 @@ Omit `--pod` / `--agent` / `--scope` when the same values are set in the environ
 **Living doc and lint:**
 
 ```bash
-council doc pod-my-sprint-a1b2c3              # Print the living doc
-council lint pod-my-sprint-a1b2c3             # Run a lint pass
+pim doc pod-my-sprint-a1b2c3              # Print the living doc
+pim lint pod-my-sprint-a1b2c3             # Run a lint pass
 ```
 
 **Tunnel management:**
 
 ```bash
-council tunnel start --pod pod-my-sprint-a1b2c3 --port 3000 --dev alice
-council tunnel list --pod pod-my-sprint-a1b2c3
-council tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
+pim tunnel start --pod pod-my-sprint-a1b2c3 --port 3000 --dev alice
+pim tunnel list --pod pod-my-sprint-a1b2c3
+pim tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
 ```
 
-All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `COUNCIL_SERVER_URL`.
+All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `PIM_SERVER_URL`.
 
 ## Running the Demo Agent
 
@@ -343,7 +354,7 @@ With the server running:
 npx tsx examples/demo-agent.ts
 ```
 
-This creates two agents (frontend + backend), submits various update types (progress, decision, blocker), fetches the regenerated living doc, and prints the Council's classification for each update.
+This creates two agents (frontend + backend), submits various update types (progress, decision, blocker), fetches the regenerated living doc, and prints PIM's classification for each update.
 
 ## Running the Full Demo
 
@@ -368,7 +379,7 @@ With the server and UI running, here's what each view shows:
 | **Org Dashboard** | `/org` | All pods with pressure gauges, conflict counts, and tunnel activity |
 | **Pod Dashboard** | `/pod/:id` | Health banner, milestone progress, area status grid, lint findings |
 | **Conflict Center** | `/pod/:id/conflicts` | Open vs. resolved conflicts, severity badges, jump to detail |
-| **Conflict Detail** | `/pod/:id/conflict/:cid` | Side-by-side positions, Council Master analysis, resolution buttons |
+| **Conflict Detail** | `/pod/:id/conflict/:cid` | Side-by-side positions, PIM orchestrator analysis, resolution buttons |
 | **Living Doc** | `/pod/:id/doc` | Auto-generated markdown with health, decisions, context stream |
 | **Context Feed** | `/pod/:id/feed` | Filterable stream of all updates + submission form at the top |
 | **Tunnel Dashboard** | `/pod/:id/tunnels` | Active tunnels with status lights, dev names, branches, URLs |
@@ -383,10 +394,10 @@ pnpm build         # Build all packages
 pnpm typecheck     # Type-check all packages
 
 # Per-package
-pnpm --filter @council/server dev
-pnpm --filter @council/ui dev
-pnpm --filter @council/server typecheck
-pnpm --filter @council/ui typecheck
+pnpm --filter @pim/server dev
+pnpm --filter @pim/ui dev
+pnpm --filter @pim/server typecheck
+pnpm --filter @pim/ui typecheck
 ```
 
 ## Environment Variables
@@ -400,7 +411,7 @@ pnpm --filter @council/ui typecheck
 | `BEDROCK_MODEL_SMART` | `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | Bedrock model ID for smart/conflict agent |
 | `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
 | `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
-| `COUNCIL_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the Council server |
+| `PIM_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the PIM server |
 
 ## Architecture
 
@@ -416,7 +427,7 @@ Agent/Human submits update
   Ingestion (validation, secret scan, DB write, pod snapshot, WS broadcast)
         |
         v
-  Council Master (classify update)
+  PIM orchestrator (classify update)
         |
   additive ---------> Deterministic merge (no LLM, ~60% of traffic)
   overlapping ------> LLM merge via Haiku (or deterministic fallback)
@@ -499,4 +510,4 @@ This is a lightweight “production readiness” checklist that used to live in 
 
 - **Expanded unit/integration tests** — Includes ingestion, pressure, classification, merge/conflict/summary agents, and Fastify `inject()` integration tests.
 - **SDK + CLI tests** — vitest coverage for client methods + command registration.
-- **CDK stack** — present in `packages/infra/lib/council-stack.ts` (see note above about production deployment/ops).
+- **CDK stack** — present in `packages/infra/lib/pim-stack.ts` (see note above about production deployment/ops).

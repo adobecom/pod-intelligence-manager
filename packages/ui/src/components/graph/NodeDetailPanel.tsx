@@ -1,6 +1,6 @@
 import { Button, Badge, InlineAlert, Heading } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { KnowledgeGraph, KnowledgeNode } from "@council/shared";
+import type { KnowledgeGraph, KnowledgeNode } from "@pim/shared";
 
 const panel = style({
   padding: 16,

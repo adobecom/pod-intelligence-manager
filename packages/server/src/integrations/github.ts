@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@council/shared";
+import type { ContextSearchHit } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 // GitHub REST search: /search/code + /search/issues. Scoped to GITHUB_SEARCH_ORGS.
