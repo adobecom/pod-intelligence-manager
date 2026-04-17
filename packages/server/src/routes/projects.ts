@@ -1,55 +1,101 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Project, ProjectContextUpdate } from "@council/shared";
+import type { ArchivedProject, Project, ProjectContextUpdate } from "@council/shared";
+import { EMPTY_PROJECT_ANATOMY } from "@council/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
+import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
+import { getOrgScopeIds } from "../services/org-settings.js";
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()),
   description: z.string().optional(),
 });
 
-const PatchProjectSchema = z.object({
-  name: z.string().min(1).transform(s => s.trim()).optional(),
-  description: z.union([z.string(), z.null()]).optional(),
+const ProjectAnatomyBodySchema = z.object({
+  internal: z.array(z.object({ scope_id: z.string().min(1) })),
+  external: z.array(
+    z.object({
+      name: z.string().min(1),
+      role: z.string().min(1),
+      notes: z.string().optional(),
+    }),
+  ),
 });
+
+const PatchProjectSchema = z
+  .object({
+    name: z.string().min(1).transform(s => s.trim()).optional(),
+    description: z.union([z.string(), z.null()]).optional(),
+    anatomy: ProjectAnatomyBodySchema.optional(),
+  })
+  .refine(
+    body => {
+      if (!body.anatomy) return true;
+      const ids = getOrgScopeIds();
+      return body.anatomy.internal.every(s => ids.has(s.scope_id));
+    },
+    { message: "Each anatomy.internal.scope_id must exist in org scopes", path: ["anatomy"] },
+  );
 
 function rowToProject(row: {
   project_id: string;
   name: string;
   description: string | null;
   created_at: string;
+  anatomy_json?: string | null;
 }): Project {
   return {
     project_id: row.project_id,
     name: row.name,
     description: row.description,
     created_at: row.created_at,
+    anatomy: parseProjectAnatomy(row.anatomy_json),
+  };
+}
+
+function rowToArchivedProject(row: {
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  anatomy_json: string;
+  archived_date: string;
+}): ArchivedProject {
+  return {
+    project_id: row.project_id,
+    name: row.name,
+    description: row.description,
+    created_at: row.created_at,
+    archived_date: row.archived_date,
+    anatomy: parseProjectAnatomy(row.anatomy_json),
   };
 }
 
 export default async function projectRoutes(app: FastifyInstance) {
   app.get("/api/projects", async () => {
-    const rows = db.prepare("SELECT project_id, name, description, created_at FROM projects ORDER BY name").all() as Array<{
+    const rows = db.prepare("SELECT project_id, name, description, created_at, anatomy_json FROM projects ORDER BY name").all() as Array<{
       project_id: string;
       name: string;
       description: string | null;
       created_at: string;
+      anatomy_json: string | null;
     }>;
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const row = db
-      .prepare("SELECT project_id, name, description, created_at FROM projects WHERE project_id = ?")
+      .prepare("SELECT project_id, name, description, created_at, anatomy_json FROM projects WHERE project_id = ?")
       .get(req.params.projectId) as
       | {
           project_id: string;
           name: string;
           description: string | null;
           created_at: string;
+          anatomy_json: string | null;
         }
       | undefined;
     if (!row) {
@@ -68,15 +114,17 @@ export default async function projectRoutes(app: FastifyInstance) {
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
       const created_at = new Date().toISOString();
+      const anatomyJson = JSON.stringify(EMPTY_PROJECT_ANATOMY);
       db.prepare(
-        "INSERT INTO projects (project_id, name, description, created_at) VALUES (?, ?, ?, ?)",
-      ).run(projectId, name, description ?? null, created_at);
+        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json) VALUES (?, ?, ?, ?, ?)",
+      ).run(projectId, name, description ?? null, created_at, anatomyJson);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
         name,
         description: description ?? null,
         created_at,
+        anatomy_json: anatomyJson,
       });
     },
   );
@@ -91,6 +139,7 @@ export default async function projectRoutes(app: FastifyInstance) {
           name: string;
           description: string | null;
           created_at: string;
+          anatomy_json: string | null;
         }
       | undefined;
     if (!row) {
@@ -99,15 +148,19 @@ export default async function projectRoutes(app: FastifyInstance) {
     }
     const name = req.body.name ?? row.name;
     const description = req.body.description !== undefined ? req.body.description : row.description;
-    db.prepare("UPDATE projects SET name = ?, description = ? WHERE project_id = ?").run(
+    const anatomyJson =
+      req.body.anatomy !== undefined ? JSON.stringify(req.body.anatomy) : row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
+    db.prepare("UPDATE projects SET name = ?, description = ?, anatomy_json = ? WHERE project_id = ?").run(
       name,
       description,
+      anatomyJson,
       req.params.projectId,
     );
     return rowToProject({
       ...row,
       name,
       description,
+      anatomy_json: anatomyJson,
     });
   });
 
@@ -178,4 +231,44 @@ export default async function projectRoutes(app: FastifyInstance) {
       return { id: result.update!.id, update: result.update, council: result.council };
     },
   );
+
+  app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
+    const projectId = req.params.projectId;
+    const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(projectId) as
+      | {
+          project_id: string;
+          name: string;
+          description: string | null;
+          created_at: string;
+          anatomy_json: string | null;
+        }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: "Project not found" };
+    }
+
+    const archivedDate = new Date().toISOString().split("T")[0];
+    const anatomyJson = row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
+
+    const run = () => {
+      db.prepare("DELETE FROM project_context_updates WHERE project_id = ?").run(projectId);
+      db.prepare("UPDATE pods SET project_id = NULL WHERE project_id = ?").run(projectId);
+      db.prepare(
+        `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate);
+      db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
+    };
+    db.transaction(run)();
+
+    return rowToArchivedProject({
+      project_id: row.project_id,
+      name: row.name,
+      description: row.description,
+      created_at: row.created_at,
+      anatomy_json: anatomyJson,
+      archived_date: archivedDate,
+    });
+  });
 }

@@ -11,6 +11,11 @@ interface OrgPodSummary {
   name: string;
 }
 
+interface ProjectSummary {
+  project_id: string;
+  name: string;
+}
+
 function podResourceLister(pathSuffix: string, descriptionFn: (name: string) => string) {
   return async () => {
     try {
@@ -75,6 +80,27 @@ export function registerResources(server: McpServer) {
   );
 
   server.resource(
+    "org-archived-projects",
+    "council://org/archived-projects",
+    { description: "Archived initiatives: id, name, description, anatomy snapshot, created_at, archived_date" },
+    async (uri) => jsonContents(uri, await apiFetch("/api/org/archived-projects")),
+  );
+
+  server.resource(
+    "org-config",
+    "council://org/config",
+    { description: "Org-wide scope definitions (ids + labels) for pods, context updates, and project anatomy" },
+    async (uri) => jsonContents(uri, await apiFetch("/api/org/config")),
+  );
+
+  server.resource(
+    "org-projects",
+    "council://org/projects",
+    { description: "All long-lived projects with anatomy and metadata" },
+    async (uri) => jsonContents(uri, await apiFetch("/api/projects")),
+  );
+
+  server.resource(
     "knowledge-stats",
     "council://knowledge/stats",
     { description: "Knowledge graph statistics (node/edge counts, top domains)" },
@@ -82,6 +108,31 @@ export function registerResources(server: McpServer) {
   );
 
   // ── pod-scoped resource templates ────────────────────────────────
+
+  server.resource(
+    "project",
+    new ResourceTemplate("council://projects/{project_id}", {
+      list: async () => {
+        try {
+          const projects = await apiFetch<ProjectSummary[]>("/api/projects");
+          return {
+            resources: projects.map((p) => ({
+              uri: `council://projects/${p.project_id}`,
+              name: p.name,
+              description: `Project metadata and anatomy for ${p.name}`,
+            })),
+          };
+        } catch {
+          return { resources: [] };
+        }
+      },
+    }),
+    { description: "Project metadata, description, and anatomy (internal scopes + external teams)" },
+    async (uri, { project_id }) => {
+      const id = Array.isArray(project_id) ? project_id[0] : project_id;
+      return jsonContents(uri, await apiFetch(`/api/projects/${encodeURIComponent(String(id))}`));
+    },
+  );
 
   server.resource(
     "pod",
