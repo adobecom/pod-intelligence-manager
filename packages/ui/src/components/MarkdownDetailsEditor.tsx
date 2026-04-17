@@ -60,6 +60,8 @@ export function MarkdownDetailsEditor({
   const quillRef = useRef<Quill | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const textChangeHandlerRef = useRef<(() => void) | null>(null);
   const skipEmitRef = useRef(false);
 
@@ -82,6 +84,10 @@ export function MarkdownDetailsEditor({
       if (skipEmitRef.current) return;
       const html = quill.root.innerHTML;
       const md = turndown.turndown(html).trim();
+      // If markdown is unchanged vs controlled `value`, skip onChange + skipEmit.
+      // Otherwise a trailing space (same trimmed md) can skip React re-render while
+      // skipEmit stays true, silencing all further edits until remount.
+      if (md === valueRef.current.trim()) return;
       skipEmitRef.current = true;
       onChangeRef.current(md);
     };

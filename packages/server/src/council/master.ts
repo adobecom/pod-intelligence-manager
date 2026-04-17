@@ -5,6 +5,15 @@ import { createConflict } from "./agents/conflict.js";
 import { regenerateLivingDoc } from "./agents/summary.js";
 import { detectOverlaps } from "./agents/cross-pod.js";
 import { isLLMAvailable } from "./llm.js";
+import {
+  shouldRunConflictScout,
+  runConflictScout,
+  scoutSaysOpenConflict,
+  scoutSuppressesMergeEscalate,
+  ADDITIVE_SCOUT_CONFLICT_MIN_CONF,
+  OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF,
+  type ScoutRecommendation,
+} from "./agents/conflict-scout.js";
 
 export interface CouncilResult {
   classification: Classification;
@@ -12,67 +21,104 @@ export interface CouncilResult {
   conflictCreated: boolean;
   conflictId?: string;
   note?: string;
+  scout_used?: boolean;
+  scout_recommendation?: ScoutRecommendation | null;
 }
 
 export async function processUpdate(update: ContextUpdate): Promise<CouncilResult> {
-  // 1. Classify the update
   const classification = classifyUpdate(update);
+
+  let scout_used = false;
+  let scout_recommendation: ScoutRecommendation | null = null;
+  let scoutResult = null as Awaited<ReturnType<typeof runConflictScout>>;
+
+  if (shouldRunConflictScout(classification, update)) {
+    scout_used = true;
+    scoutResult = await runConflictScout(update, classification);
+    if (scoutResult) {
+      scout_recommendation = scoutResult.recommendation;
+    }
+  }
 
   let merged = false;
   let conflictCreated = false;
   let conflictId: string | undefined;
   let note: string | undefined;
 
-  // 2. Route based on classification
-  switch (classification) {
-    case "additive": {
-      const result = deterministicMerge(update, classification);
-      merged = result.merged;
-      note = result.note;
-      break;
+  // Scout-forced conflict on overlapping: skip merge LLM when scout is decisive
+  if (
+    classification === "overlapping" &&
+    scoutSaysOpenConflict(scoutResult, OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF)
+  ) {
+    const conflict = await createConflict(update);
+    if (conflict) {
+      conflictCreated = true;
+      conflictId = conflict.id;
     }
-    case "overlapping": {
-      // Use LLM merge if available, otherwise deterministic
-      if (isLLMAvailable()) {
-        const result = await llmMerge(update);
+    merged = true;
+    note = scoutResult?.rationale;
+  } else {
+    switch (classification) {
+      case "additive": {
+        const result = deterministicMerge(update, classification);
         merged = result.merged;
         note = result.note;
-        // If LLM says to escalate, create a conflict
-        if (result.escalate) {
+        if (scoutSaysOpenConflict(scoutResult, ADDITIVE_SCOUT_CONFLICT_MIN_CONF)) {
           const conflict = await createConflict(update);
           if (conflict) {
             conflictCreated = true;
             conflictId = conflict.id;
+            note = scoutResult?.rationale ?? note;
           }
         }
-      } else {
-        const result = deterministicMerge(update, classification);
-        merged = result.merged;
-        note = result.note;
+        break;
       }
-      break;
-    }
-    case "contradictory": {
-      // Create a conflict record (with LLM analysis if available)
-      const conflict = await createConflict(update);
-      if (conflict) {
-        conflictCreated = true;
-        conflictId = conflict.id;
+      case "overlapping": {
+        if (isLLMAvailable()) {
+          const result = await llmMerge(update);
+          merged = result.merged;
+          note = result.note;
+          if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult)) {
+            const conflict = await createConflict(update);
+            if (conflict) {
+              conflictCreated = true;
+              conflictId = conflict.id;
+            }
+          }
+        } else {
+          const result = deterministicMerge(update, classification);
+          merged = result.merged;
+          note = result.note;
+        }
+        break;
       }
-      merged = true;
-      break;
+      case "contradictory": {
+        const conflict = await createConflict(update);
+        if (conflict) {
+          conflictCreated = true;
+          conflictId = conflict.id;
+        }
+        merged = true;
+        break;
+      }
     }
   }
 
-  // 3. Regenerate the living doc from current DB state
   regenerateLivingDoc(update.pod_id);
 
-  // 4. Detect cross-pod overlaps (lightweight, runs on every update)
   try {
     detectOverlaps();
   } catch {
-    // Non-critical — don't block the update pipeline
+    // Non-critical
   }
 
-  return { classification, merged, conflictCreated, conflictId, note };
+  return {
+    classification,
+    merged,
+    conflictCreated,
+    conflictId,
+    note,
+    scout_used,
+    scout_recommendation,
+  };
 }

@@ -12,6 +12,10 @@ import {
   NumberField,
   Picker,
   PickerItem,
+  Dialog,
+  DialogTrigger,
+  ButtonGroup,
+  ProgressBar,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useOrgStore } from "../../stores/orgStore";
@@ -60,6 +64,12 @@ const createFormContent = style({ display: "flex", flexDirection: "column", gap:
 const createFormActions = style({ display: "flex", gap: 12, justifyContent: "end" });
 const sectionHeader = style({ display: "flex", alignItems: "center", justifyContent: "space-between" });
 
+type ArchiveFlow =
+  | { phase: "confirm"; podId: string; podName: string }
+  | { phase: "running"; podId: string; podName: string }
+  | { phase: "success"; podId: string; podName: string; learnings_extracted?: number }
+  | { phase: "error"; podId: string; podName: string; message: string };
+
 export function OrgDashboard() {
   const {
     pods,
@@ -87,9 +97,41 @@ export function OrgDashboard() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
+  const [archiveFlow, setArchiveFlow] = useState<ArchiveFlow | null>(null);
+
   useEffect(() => {
     loadOrg();
   }, [loadOrg]);
+
+  useEffect(() => {
+    if (!archiveFlow || archiveFlow.phase !== "running") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await archivePod(archiveFlow.podId);
+        if (!cancelled) {
+          setArchiveFlow({
+            phase: "success",
+            podId: archiveFlow.podId,
+            podName: archiveFlow.podName,
+            learnings_extracted: res.learnings_extracted,
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setArchiveFlow({
+            phase: "error",
+            podId: archiveFlow.podId,
+            podName: archiveFlow.podName,
+            message: err instanceof Error ? err.message : "Archive failed",
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [archiveFlow, archivePod]);
 
   async function handleCreate() {
     if (!podName.trim()) return;
@@ -133,13 +175,8 @@ export function OrgDashboard() {
     }
   }
 
-  async function handleArchive(podId: string, podName: string) {
-    if (!confirm(`Archive pod "${podName}"? This cannot be undone.`)) return;
-    try {
-      await archivePod(podId);
-    } catch {
-      // Org data will be refreshed anyway
-    }
+  function openArchiveDialog(podId: string, podName: string) {
+    setArchiveFlow({ phase: "confirm", podId, podName });
   }
 
   if (loading) return null;
@@ -327,10 +364,7 @@ export function OrgDashboard() {
                   >
                     Open Pod
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onPress={() => handleArchive(pod.pod_id, pod.name)}
-                  >
+                  <Button variant="secondary" onPress={() => openArchiveDialog(pod.pod_id, pod.name)}>
                     Archive
                   </Button>
                 </div>
@@ -379,6 +413,120 @@ export function OrgDashboard() {
               ))}
             </div>
           </>
+        )}
+
+        {archiveFlow !== null && (
+          <DialogTrigger
+            isOpen={archiveFlow !== null}
+            onOpenChange={(open) => {
+              if (!open) setArchiveFlow(null);
+            }}
+          >
+            <Button aria-label="Archive dialog anchor" UNSAFE_style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", pointerEvents: "none" }}>
+              .
+            </Button>
+            <Dialog
+              isDismissible={false}
+              isKeyboardDismissDisabled={archiveFlow.phase === "running"}
+            >
+              {archiveFlow.phase === "confirm" && (
+                <>
+                  <Heading slot="title">Archive pod?</Heading>
+                  <Content>
+                    <Text>
+                      Archive &quot;{archiveFlow.podName}&quot;? This cannot be undone. Knowledge extraction may run
+                      and can take a short while.
+                    </Text>
+                  </Content>
+                  <ButtonGroup>
+                    <Button variant="secondary" onPress={() => setArchiveFlow(null)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="negative"
+                      onPress={() =>
+                        setArchiveFlow({
+                          phase: "running",
+                          podId: archiveFlow.podId,
+                          podName: archiveFlow.podName,
+                        })
+                      }
+                    >
+                      Archive pod
+                    </Button>
+                  </ButtonGroup>
+                </>
+              )}
+              {archiveFlow.phase === "running" && (
+                <>
+                  <Heading slot="title">Archiving pod</Heading>
+                  <Content
+                    styles={style({
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "start",
+                      gap: 16,
+                    })}
+                  >
+                    <Text>
+                      Archiving &quot;{archiveFlow.podName}&quot; and running knowledge extraction. Please wait…
+                    </Text>
+                    <ProgressBar
+                      isIndeterminate
+                      label="Archiving"
+                      size="M"
+                      styles={style({ width: "full" })}
+                    />
+                  </Content>
+                </>
+              )}
+              {archiveFlow.phase === "success" && (
+                <>
+                  <Heading slot="title">Pod archived</Heading>
+                  <Content>
+                    <Text>
+                      &quot;{archiveFlow.podName}&quot; was archived successfully.
+                      {typeof archiveFlow.learnings_extracted === "number" && (
+                        <> {archiveFlow.learnings_extracted} learning(s) added to org memory.</>
+                      )}
+                    </Text>
+                  </Content>
+                  <ButtonGroup>
+                    <Button variant="accent" onPress={() => setArchiveFlow(null)}>
+                      Close
+                    </Button>
+                  </ButtonGroup>
+                </>
+              )}
+              {archiveFlow.phase === "error" && (
+                <>
+                  <Heading slot="title">Archive failed</Heading>
+                  <Content>
+                    <InlineAlert variant="negative">
+                      <Content>{archiveFlow.message}</Content>
+                    </InlineAlert>
+                  </Content>
+                  <ButtonGroup>
+                    <Button variant="secondary" onPress={() => setArchiveFlow(null)}>
+                      Close
+                    </Button>
+                    <Button
+                      variant="accent"
+                      onPress={() =>
+                        setArchiveFlow({
+                          phase: "running",
+                          podId: archiveFlow.podId,
+                          podName: archiveFlow.podName,
+                        })
+                      }
+                    >
+                      Retry
+                    </Button>
+                  </ButtonGroup>
+                </>
+              )}
+            </Dialog>
+          </DialogTrigger>
         )}
       </div>
     </div>

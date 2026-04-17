@@ -23,4 +23,6 @@ export interface ArchivedPod {
   completed_date: string;
   duration_days: number;
   final_pressure: number;
+  /** Present on archive API response when knowledge extraction ran. */
+  learnings_extracted?: number;
 }

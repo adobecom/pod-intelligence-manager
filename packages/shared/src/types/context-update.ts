@@ -22,6 +22,8 @@ export interface ContextUpdate {
   blocked_by: string[];
   needs_input_from: InputRequest[];
   quality_score?: number;
+  /** Short AI rationale after async quality pass (optional). */
+  quality_rationale?: string | null;
   source?: ContextUpdateSource;
 }
 

@@ -23,7 +23,7 @@ interface OrgStore {
     project_id?: string;
   }) => Promise<Pod>;
   createProject: (input: { name: string; description?: string }) => Promise<Project>;
-  archivePod: (podId: string) => Promise<void>;
+  archivePod: (podId: string) => Promise<ArchivedPod>;
 }
 
 async function fetchOrgSnapshot() {
@@ -64,8 +64,9 @@ export const useOrgStore = create<OrgStore>((set) => ({
   },
 
   archivePod: async (podId) => {
-    await api.archivePod(podId);
+    const archived = await api.archivePod(podId);
     const snapshot = await fetchOrgSnapshot();
     set(snapshot);
+    return archived;
   },
 }));
