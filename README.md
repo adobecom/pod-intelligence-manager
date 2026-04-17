@@ -245,7 +245,7 @@ The artifact renders a read-only snapshot — no network requests from the artif
 
 ### `@council/cli`
 
-Command-line interface for pod management, context submission, and tunnel control.
+Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands.
 
 **From this clone (pick one):**
 
@@ -256,40 +256,80 @@ Command-line interface for pod management, context submission, and tunnel contro
 
 You can still run the entry file directly with `npx tsx packages/cli/src/index.ts`.
 
+**Repository setup (per clone):**
+
+`council init` wires this git repo to the Council server: writes `.council.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `council pod create`).
+
+```bash
+council init --pod pod-my-sprint-a1b2c3
+council init --pod pod-my-sprint-a1b2c3 --project project-demo
+council init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
+```
+
+- `--pod` is required (server must return that pod). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
+- Skip flags: `--skip-hooks`, `--skip-claude`, `--skip-claude-md` to avoid installing hooks or touching `.claude/` / `CLAUDE.md`.
+
+`council leave` removes **pod** binding from this repo (clears `podId` in `.council.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
+
+```bash
+council leave
+council leave --skip-claude-md --skip-sync --skip-config   # only adjust .council.json, etc.
+```
+
 **Pod management:**
 
 ```bash
 council pod create --name "My Sprint"        # Create a new pod
 council pod list                              # List active pods
-council pod status pod-my-sprint              # Show pod details
-council pod archive pod-my-sprint             # Archive a completed pod
+council pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
+council pod archive pod-my-sprint-a1b2c3      # Archive a completed pod
 ```
 
 **Context updates:**
 
+Submit exactly one of `--pod` or `--project` (not both). Pod mode runs the full Council pipeline for the sprint; project mode records off-pod / between-sprint updates without a living doc or conflict flow.
+
 ```bash
 council report \
-  --pod pod-my-sprint \
+  --pod pod-my-sprint-a1b2c3 \
   --type progress \
   --scope frontend \
   --summary "Built the hero section" \
   --details "Responsive layout with animated gradient." \
   --status completed
+
+council report \
+  --project project-demo \
+  --type progress \
+  --scope backend \
+  --summary "Refactored auth module" \
+  --status in_progress
 ```
+
+**Session context (agents):**
+
+Pull a bundled markdown snapshot (living doc, pod, conflicts, learnings, recent updates) for agents and tooling:
+
+```bash
+council context --pod <podId> --agent <id> --scope frontend
+council context --brief --pod <podId> --agent <id> --scope frontend
+```
+
+Uses `COUNCIL_POD_ID`, `COUNCIL_AGENT_ID`, and `COUNCIL_SCOPE` when the matching flags are omitted.
 
 **Living doc and lint:**
 
 ```bash
-council doc pod-my-sprint                     # Print the living doc
-council lint pod-my-sprint                    # Run a lint pass
+council doc pod-my-sprint-a1b2c3              # Print the living doc
+council lint pod-my-sprint-a1b2c3             # Run a lint pass
 ```
 
 **Tunnel management:**
 
 ```bash
-council tunnel start --pod pod-my-sprint --port 3000 --dev alice
-council tunnel list --pod pod-my-sprint
-council tunnel stop --pod pod-my-sprint --tunnel <tunnelId>
+council tunnel start --pod pod-my-sprint-a1b2c3 --port 3000 --dev alice
+council tunnel list --pod pod-my-sprint-a1b2c3
+council tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
 ```
 
 All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `COUNCIL_SERVER_URL`.
