@@ -207,12 +207,23 @@ export interface LintFinding {
   suggestion: string | null;
 }
 
+/** Mirrors server `LintPassMeta` — whether the fast/Haiku supplement ran. */
+export interface LintPassMeta {
+  bedrock_configured: boolean;
+  llm_ok: boolean;
+  llm_model: string | null;
+  llm_extra_findings: number;
+  llm_error: string | null;
+}
+
 export async function getLintFindings(podId: string): Promise<LintFinding[]> {
   return fetchJSON<LintFinding[]>(`/api/pods/${podId}/lint-findings`);
 }
 
-export async function triggerLintPass(podId: string): Promise<{ findings: LintFinding[] }> {
-  return fetchJSON<{ findings: LintFinding[] }>(`/api/pods/${podId}/lint`, {
+export async function triggerLintPass(
+  podId: string,
+): Promise<{ findings: LintFinding[]; meta: LintPassMeta }> {
+  return fetchJSON<{ findings: LintFinding[]; meta: LintPassMeta }>(`/api/pods/${podId}/lint`, {
     method: "POST",
   });
 }
