@@ -24,7 +24,7 @@ async function postCommit(): Promise<void> {
 
   if (!config) {
     fail(
-      "Skipping: set COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (or create .council.json) for Council git hooks.",
+      "Skipping: set COUNCIL_AGENT_ID, COUNCIL_SCOPE, and either COUNCIL_POD_ID or COUNCIL_PROJECT_ID (or .council.json).",
       strict,
     );
     return;
@@ -62,7 +62,10 @@ async function postCommit(): Promise<void> {
       .filter(Boolean)
       .join("\n\n") || "(no extra details)";
 
-  const url = `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId)}/context-updates`;
+  const url =
+    config.mode === "pod"
+      ? `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId!)}/context-updates`
+      : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -87,7 +90,8 @@ async function postCommit(): Promise<void> {
     return;
   }
 
-  console.error(`[council-hook] Reported commit to Council (${config.podId})`);
+  const label = config.mode === "pod" ? config.podId : config.projectId;
+  console.error(`[council-hook] Reported commit to Council (${label})`);
 }
 
 async function postRewrite(): Promise<void> {
@@ -96,7 +100,7 @@ async function postRewrite(): Promise<void> {
 
   if (!config) {
     fail(
-      "Skipping: set COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (or create .council.json) for Council git hooks.",
+      "Skipping: set COUNCIL_AGENT_ID, COUNCIL_SCOPE, and either COUNCIL_POD_ID or COUNCIL_PROJECT_ID (or .council.json).",
       strict,
     );
     return;
@@ -116,7 +120,10 @@ async function postRewrite(): Promise<void> {
     stdinData ? `Mappings:\n${stdinData.trim()}` : "(no stdin)",
   ].join("\n\n");
 
-  const url = `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId)}/context-updates`;
+  const url =
+    config.mode === "pod"
+      ? `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId!)}/context-updates`
+      : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -141,7 +148,8 @@ async function postRewrite(): Promise<void> {
     return;
   }
 
-  console.error(`[council-hook] Reported post-rewrite to Council (${config.podId})`);
+  const label = config.mode === "pod" ? config.podId : config.projectId;
+  console.error(`[council-hook] Reported post-rewrite to Council (${label})`);
 }
 
 const kind = process.env.COUNCIL_HOOK_KIND ?? "";

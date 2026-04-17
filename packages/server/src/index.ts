@@ -6,6 +6,7 @@ import { createTables } from "./db/schema.js";
 import { seedDatabase } from "./db/seed.js";
 import { seedKnowledgeGraph } from "./db/seed-knowledge.js";
 import podRoutes from "./routes/pods.js";
+import projectRoutes from "./routes/projects.js";
 import conflictRoutes from "./routes/conflicts.js";
 import contextUpdateRoutes from "./routes/context-updates.js";
 import tunnelRoutes from "./routes/tunnels.js";
@@ -67,6 +68,7 @@ app.addHook("onRequest", async (req, reply) => {
 
 // Register routes
 app.register(podRoutes);
+app.register(projectRoutes);
 app.register(conflictRoutes);
 app.register(contextUpdateRoutes);
 app.register(tunnelRoutes);

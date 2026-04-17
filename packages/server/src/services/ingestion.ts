@@ -6,6 +6,7 @@ import { scoreUpdate } from "./quality-scoring.js";
 import { broadcast } from "../ws/index.js";
 import { processUpdate, type CouncilResult } from "../council/master.js";
 import type { ContextUpdate } from "@council/shared";
+import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 
 const ScopeSchema = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
@@ -13,7 +14,7 @@ const WorkStatusSchema = z.enum(["completed", "in_progress", "blocked"]);
 
 const SourceSchema = z.enum(["manual", "git-hook", "claude-code-hook", "mcp", "sdk"]);
 
-const ContextUpdateInputSchema = z.object({
+export const ContextUpdateInputSchema = z.object({
   agent_id: z.string().min(1),
   type: UpdateTypeSchema,
   scope: ScopeSchema,
@@ -125,6 +126,9 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     JSON.stringify(update.needs_input_from),
     update.source ?? "manual", commitSha,
   );
+
+  // 6.5 Denormalize pod_areas + milestone % + org agent_count from context stream
+  refreshPodSnapshotFromContext(podId);
 
   // 7. Broadcast via WebSocket
   broadcast({

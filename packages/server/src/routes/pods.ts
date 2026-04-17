@@ -6,12 +6,25 @@ import { regenerateLivingDoc } from "../council/agents/summary.js";
 import { runLintPass } from "../council/agents/lint.js";
 import { getRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
+import { POD_SCOPES } from "../services/pod-snapshot.js";
 
 const CreatePodSchema = z.object({
   name: z.string().min(1, "name is required").transform(s => s.trim()),
   sprint_days: z.number().int().min(1).max(30).default(5),
   milestone_name: z.string().min(1).default("Sprint Goal"),
+  project_id: z.string().min(1).optional(),
 });
+
+const PatchMilestoneSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    target_date: z.string().min(1).optional(),
+    percent_complete: z.number().int().min(0).max(100).optional(),
+  })
+  .refine(
+    (d) => d.name !== undefined || d.target_date !== undefined || d.percent_complete !== undefined,
+    { message: "Provide at least one of name, target_date, percent_complete" },
+  );
 
 interface PodRow {
   pod_id: string;
@@ -22,6 +35,7 @@ interface PodRow {
   total_days: number;
   conflict_pressure: number;
   milestone_json: string;
+  project_id: string | null;
 }
 
 interface AreaRow {
@@ -34,6 +48,7 @@ interface AreaRow {
 function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
   return {
     pod_id: row.pod_id,
+    project_id: row.project_id ?? undefined,
     name: row.name,
     sprint_start: row.sprint_start,
     sprint_end: row.sprint_end,
@@ -44,8 +59,6 @@ function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
     areas: areas as PodArea[],
   };
 }
-
-const SCOPES = ["frontend", "backend", "design", "qa", "infra", "pm"] as const;
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -62,10 +75,31 @@ export default async function podRoutes(app: FastifyInstance) {
     return rowToPod(row, areas);
   });
 
+  app.patch<{
+    Params: { podId: string };
+    Body: z.infer<typeof PatchMilestoneSchema>;
+  }>("/api/pods/:podId/milestone", { preHandler: validateBody(PatchMilestoneSchema) }, async (req, reply) => {
+    const { podId } = req.params;
+    const row = db.prepare("SELECT milestone_json FROM pods WHERE pod_id = ?").get(podId) as { milestone_json: string } | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: `Pod not found: ${podId}` };
+    }
+    const current = JSON.parse(row.milestone_json) as Milestone;
+    const next: Milestone = {
+      name: req.body.name ?? current.name,
+      target_date: req.body.target_date ?? current.target_date,
+      percent_complete: req.body.percent_complete ?? current.percent_complete,
+    };
+    db.prepare("UPDATE pods SET milestone_json = ? WHERE pod_id = ?").run(JSON.stringify(next), podId);
+    regenerateLivingDoc(podId);
+    return next;
+  });
+
   app.post<{
     Body: z.infer<typeof CreatePodSchema>;
   }>("/api/pods", { preHandler: validateBody(CreatePodSchema) }, async (req, reply) => {
-    const { name, sprint_days, milestone_name } = req.body;
+    const { name, sprint_days, milestone_name, project_id } = req.body;
 
     const podId = `pod-${slugify(name)}`;
 
@@ -74,6 +108,14 @@ export default async function podRoutes(app: FastifyInstance) {
     if (existing) {
       reply.code(409);
       return { error: `Pod "${name}" already exists` };
+    }
+
+    if (project_id) {
+      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(project_id);
+      if (!proj) {
+        reply.code(400);
+        return { error: `Project not found: ${project_id}` };
+      }
     }
 
     const now = new Date();
@@ -87,8 +129,8 @@ export default async function podRoutes(app: FastifyInstance) {
     };
 
     db.prepare(
-      `INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json)
-       VALUES (?, ?, ?, ?, 1, ?, 0.0, ?)`,
+      `INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id)
+       VALUES (?, ?, ?, ?, 1, ?, 0.0, ?, ?)`,
     ).run(
       podId,
       name,
@@ -96,13 +138,14 @@ export default async function podRoutes(app: FastifyInstance) {
       sprintEnd.toISOString().split("T")[0],
       sprint_days,
       JSON.stringify(milestone),
+      project_id ?? null,
     );
 
     // Create default areas
     const insertArea = db.prepare(
       "INSERT INTO pod_areas (pod_id, scope, owner, status) VALUES (?, ?, 'unassigned', 'waiting')",
     );
-    for (const scope of SCOPES) {
+    for (const scope of POD_SCOPES) {
       insertArea.run(podId, scope);
     }
 
@@ -117,8 +160,8 @@ export default async function podRoutes(app: FastifyInstance) {
 
     // Seed with knowledge from past pods
     try {
-      const allScopes = [...SCOPES];
-      const learnings = getRelevantLearnings(allScopes, [], 3000);
+      const allScopes = [...POD_SCOPES];
+      const learnings = getRelevantLearnings(allScopes, [], 3000, project_id ?? null);
       if (learnings.nodes.length > 0) {
         let knowledgeSection = "\n## Historical Knowledge Context\n\n";
         knowledgeSection += "The following learnings from past pods may be relevant:\n\n";

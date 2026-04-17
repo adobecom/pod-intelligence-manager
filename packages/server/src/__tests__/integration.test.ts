@@ -18,8 +18,15 @@ vi.mock("../db/connection.js", () => ({ default: testDb }));
 vi.mock("../services/knowledge-graph.js", () => ({
   initializeKnowledgeGraph: vi.fn(),
   refreshAnalysis: vi.fn(),
-  getRelevantLearnings: vi.fn().mockReturnValue({ nodes: [], truncated: false, total_matching: 0 }),
+  getRelevantLearnings: vi.fn().mockReturnValue({
+    nodes: [],
+    truncated: false,
+    total_matching: 0,
+    token_estimate: 0,
+    edges: [],
+  }),
   getPrecedents: vi.fn().mockReturnValue({ nodes: [] }),
+  maybeAddProjectContextSignalToGraph: vi.fn().mockReturnValue({ added: false }),
 }));
 
 // Mock Slack (external service)
@@ -35,6 +42,7 @@ import podRoutes from "../routes/pods.js";
 import conflictRoutes from "../routes/conflicts.js";
 import contextUpdateRoutes from "../routes/context-updates.js";
 import livingDocRoutes from "../routes/living-doc.js";
+import projectRoutes from "../routes/projects.js";
 
 let app: FastifyInstance;
 
@@ -60,6 +68,7 @@ beforeAll(async () => {
   });
 
   app.register(podRoutes);
+  app.register(projectRoutes);
   app.register(conflictRoutes);
   app.register(contextUpdateRoutes);
   app.register(livingDocRoutes);
@@ -206,5 +215,131 @@ describe("Integration: API endpoints", () => {
     const body = res.json();
     // Should be classified as overlapping due to keyword matches
     expect(["overlapping", "additive"]).toContain(body.council.classification);
+  });
+
+  it("GET pod reflects pod_areas and milestone derived from context stream", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Snapshot Area Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = create.json().pod_id as string;
+
+    const ingest = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "cursor-agent",
+        type: "progress",
+        scope: "frontend",
+        summary: "Shipped locale picker",
+        details: "Details",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(ingest.statusCode).toBe(201);
+
+    const getPod = await app.inject({ method: "GET", url: `/api/pods/${podId}` });
+    expect(getPod.statusCode).toBe(200);
+    const pod = getPod.json() as { areas: { scope: string; owner: string; status: string }[]; milestone: { percent_complete: number } };
+    const fe = pod.areas.find((a) => a.scope === "frontend");
+    expect(fe?.owner).toBe("cursor-agent");
+    expect(fe?.status).toBe("done");
+    expect(pod.milestone.percent_complete).toBe(17);
+  });
+
+  it("PATCH /api/pods/:podId/milestone merges fields and refreshes living doc", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Milestone Patch Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = create.json().pod_id as string;
+
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/pods/${podId}/milestone`,
+      payload: { name: "Custom Milestone Title", percent_complete: 72 },
+    });
+    expect(patch.statusCode).toBe(200);
+    const body = patch.json() as { name: string; percent_complete: number };
+    expect(body.name).toBe("Custom Milestone Title");
+    expect(body.percent_complete).toBe(72);
+
+    const doc = await app.inject({ method: "GET", url: `/api/pods/${podId}/living-doc` });
+    expect(doc.statusCode).toBe(200);
+    expect(doc.body).toContain("Custom Milestone Title");
+    expect(doc.body).toContain("72% complete");
+  });
+
+  it("POST /api/projects creates a project", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Integration Project Alpha" },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { project_id: string; name: string };
+    expect(body.project_id).toBe("project-integration-project-alpha");
+    expect(body.name).toBe("Integration Project Alpha");
+  });
+
+  it("POST /api/pods accepts optional project_id", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Pod Link Project" },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Linked Sprint", project_id: projectId },
+    });
+    expect(res.statusCode).toBe(201);
+    expect((res.json() as { project_id?: string }).project_id).toBe(projectId);
+  });
+
+  it("POST /api/projects/:id/context-updates ingests project context", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Ctx Project" },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/context-updates`,
+      payload: {
+        agent_id: "agent-proj",
+        type: "decision",
+        scope: "backend",
+        summary: "Chose SQLite for local dev",
+        details: "Matches existing stack",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json() as { id: string; council: { note?: string } };
+    expect(body.id).toMatch(/^pcu-/);
+    expect(body.council.note).toContain("Project context");
+
+    const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/context-updates` });
+    expect(list.statusCode).toBe(200);
+    expect((list.json() as { agent_id: string }[])[0].agent_id).toBe("agent-proj");
   });
 });

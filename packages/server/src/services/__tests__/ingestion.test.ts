@@ -23,7 +23,12 @@ vi.mock("../../council/master.js", () => ({
   processUpdate: vi.fn(),
 }));
 
+vi.mock("../pod-snapshot.js", () => ({
+  refreshPodSnapshotFromContext: vi.fn(),
+}));
+
 import { ingestContextUpdate } from "../ingestion.js";
+import { refreshPodSnapshotFromContext } from "../pod-snapshot.js";
 import db from "../../db/connection.js";
 import { broadcast } from "../../ws/index.js";
 import { scanForSecrets } from "../secret-scan.js";
@@ -139,6 +144,11 @@ describe("ingestContextUpdate", () => {
         podId: "pod-1",
       }),
     );
+  });
+
+  it("calls refreshPodSnapshotFromContext after insert", async () => {
+    await ingestContextUpdate("pod-1", validInput());
+    expect(refreshPodSnapshotFromContext).toHaveBeenCalledWith("pod-1");
   });
 
   it("calls processUpdate and returns council result", async () => {

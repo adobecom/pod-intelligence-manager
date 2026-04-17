@@ -90,6 +90,7 @@ Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) f
 | GET | `/api/health` | Health check |
 | GET | `/api/pods/:podId` | Get pod with areas |
 | POST | `/api/pods` | Create a new pod |
+| PATCH | `/api/pods/:podId/milestone` | Update milestone fields (`name`, `target_date`, `percent_complete`) and regenerate living doc |
 | GET | `/api/pods/:podId/conflicts` | List conflicts |
 | GET | `/api/pods/:podId/conflicts/:id` | Get single conflict |
 | POST | `/api/pods/:podId/conflicts/:id/resolve` | Resolve a conflict |
@@ -112,11 +113,14 @@ Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) f
 1. **Zod validation** -- Schema enforcement
 2. **Secret scan** -- Regex patterns for AWS keys, JWTs, connection strings, PEM blocks
 3. **DB write** -- Persisted to SQLite
-4. **WebSocket broadcast** -- All connected clients notified
-5. **Classification** -- Categorized as `additive`, `overlapping`, or `contradictory`
-6. **Routing** -- Additive: deterministic merge (no LLM). Overlapping: LLM merge (Haiku) or deterministic fallback. Contradictory: conflict record created with optional LLM analysis (Sonnet).
-7. **Living doc regeneration** -- Template-based markdown assembled from current DB state
-8. **Cross-pod overlap detection** -- Keyword analysis across active pods
+4. **Pod snapshot refresh** -- Denormalize `pod_areas` from the latest context update per scope (updates with `type: blocker` force that scope to `blocked`), recompute milestone `percent_complete` as a sprint-health proxy (round of done scopes / 6), and refresh org `agent_count` (distinct `agent_id` values). This is deterministic, not LLM-inferred.
+5. **WebSocket broadcast** -- All connected clients notified
+6. **Classification** -- Categorized as `additive`, `overlapping`, or `contradictory`
+7. **Routing** -- Additive: deterministic merge (no LLM). Overlapping: LLM merge (Haiku) or deterministic fallback. Contradictory: conflict record created with optional LLM analysis (Sonnet).
+8. **Living doc regeneration** -- Template-based markdown assembled from current DB state (including the updated areas and milestone)
+9. **Cross-pod overlap detection** -- Keyword analysis across active pods
+
+The living doc’s **Current Status** and milestone progress line follow this snapshot plus conflicts/pressure from the DB. Humans may override milestone fields with `PATCH /api/pods/:podId/milestone`; **`percent_complete` is recomputed again on the next context ingestion** from scope `done` counts, while `name` and `target_date` persist until changed.
 
 **Periodic tasks:**
 
@@ -368,7 +372,7 @@ Agent/Human submits update
   POST /api/pods/:podId/context-updates
         |
         v
-  Ingestion Lambda (validation, secret scan, DB write, WS broadcast)
+  Ingestion (validation, secret scan, DB write, pod snapshot, WS broadcast)
         |
         v
   Council Master (classify update)

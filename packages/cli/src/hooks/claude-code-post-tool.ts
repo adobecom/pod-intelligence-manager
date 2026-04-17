@@ -7,7 +7,7 @@
  * Reads JSON from stdin: { tool_name, tool_input, tool_output }
  * Must be fast — Claude Code waits for hooks to complete.
  */
-import { resolveConfig, readConfigFile } from "../config.js";
+import { resolveConfig, readConfigFile, type CouncilConfig } from "../config.js";
 
 interface HookInput {
   tool_name: string;
@@ -37,11 +37,14 @@ function extractPrUrl(output: string): string | null {
   return match?.[0] ?? null;
 }
 
-async function reportToCouncil(
-  config: { podId: string; agentId: string; scope: string; serverUrl: string },
-  payload: Record<string, unknown>,
-): Promise<void> {
-  const url = `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId)}/context-updates`;
+function contextUpdatesUrl(config: CouncilConfig): string {
+  return config.mode === "pod"
+    ? `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId!)}/context-updates`
+    : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
+}
+
+async function reportToCouncil(config: CouncilConfig, payload: Record<string, unknown>): Promise<void> {
+  const url = contextUpdatesUrl(config);
   try {
     await fetch(url, {
       method: "POST",

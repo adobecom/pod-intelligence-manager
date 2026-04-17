@@ -1,0 +1,131 @@
+import { randomUUID } from "crypto";
+import db from "../db/connection.js";
+import { ContextUpdateInputSchema } from "./ingestion.js";
+import { scanForSecrets } from "./secret-scan.js";
+import { scoreProjectUpdate } from "./quality-scoring.js";
+import { broadcastToAll } from "../ws/index.js";
+import type { ProjectContextUpdate } from "@council/shared";
+import { maybeAddProjectContextSignalToGraph } from "./knowledge-graph.js";
+import type { CouncilResult } from "../council/master.js";
+
+export interface ProjectIngestionResult {
+  success: boolean;
+  update?: ProjectContextUpdate;
+  council?: CouncilResult;
+  error?: string;
+  secretFindings?: string[];
+  deduplicated?: boolean;
+}
+
+export async function ingestProjectContextUpdate(
+  projectId: string,
+  input: unknown,
+): Promise<ProjectIngestionResult> {
+  const parsed = ContextUpdateInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: `Validation failed: ${parsed.error.message}` };
+  }
+
+  const data = parsed.data;
+
+  const project = db.prepare("SELECT project_id, name FROM projects WHERE project_id = ?").get(projectId) as
+    | { project_id: string; name: string }
+    | undefined;
+  if (!project) {
+    return { success: false, error: `Project not found: ${projectId}` };
+  }
+
+  const textToScan = [data.summary, data.details, ...data.artifacts.map(a => a.path ?? a.url ?? "")].join(" ");
+  const scanResult = scanForSecrets(textToScan);
+  if (!scanResult.clean) {
+    return {
+      success: false,
+      error: "Context update rejected: potential secrets detected",
+      secretFindings: scanResult.findings,
+    };
+  }
+
+  const quality = scoreProjectUpdate(data, projectId);
+
+  const commitArtifact = data.artifacts.find(a => a.type === "commit" && a.sha);
+  const commitSha = commitArtifact?.sha ?? null;
+
+  if (commitSha) {
+    const recent = db.prepare(
+      `SELECT id FROM project_context_updates
+       WHERE project_id = ? AND commit_sha = ?
+       AND timestamp > datetime('now', '-60 seconds')`,
+    ).get(projectId, commitSha) as { id: string } | undefined;
+    if (recent) {
+      return { success: true, update: undefined, council: undefined, deduplicated: true };
+    }
+  }
+
+  const id = `pcu-${randomUUID().slice(0, 8)}`;
+  const timestamp = new Date().toISOString();
+
+  const update: ProjectContextUpdate = {
+    id,
+    agent_id: data.agent_id,
+    timestamp,
+    project_id: projectId,
+    type: data.type,
+    scope: data.scope,
+    summary: data.summary,
+    details: data.details,
+    artifacts: data.artifacts as ProjectContextUpdate["artifacts"],
+    status: data.status,
+    blocks: data.blocks,
+    blocked_by: data.blocked_by,
+    needs_input_from: data.needs_input_from as ProjectContextUpdate["needs_input_from"],
+    quality_score: quality.total,
+    source: data.source,
+  };
+
+  db.prepare(
+    `INSERT INTO project_context_updates (id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    update.id,
+    update.agent_id,
+    update.timestamp,
+    update.project_id,
+    update.type,
+    update.scope,
+    update.summary,
+    update.details,
+    JSON.stringify(update.artifacts),
+    update.status,
+    update.quality_score ?? 0,
+    JSON.stringify(update.blocks),
+    JSON.stringify(update.blocked_by),
+    JSON.stringify(update.needs_input_from),
+    update.source ?? "manual",
+    commitSha,
+  );
+
+  maybeAddProjectContextSignalToGraph(
+    project.project_id,
+    project.name,
+    data.type,
+    data.summary,
+    data.details,
+    data.scope,
+  );
+
+  broadcastToAll({
+    type: "project_context_update_added",
+    payload: { projectId, update },
+  });
+
+  return {
+    success: true,
+    update,
+    council: {
+      classification: "additive",
+      merged: true,
+      conflictCreated: false,
+      note: "Project context recorded (no pod Council Master run)",
+    },
+  };
+}

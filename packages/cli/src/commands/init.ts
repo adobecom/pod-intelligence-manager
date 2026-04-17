@@ -19,6 +19,7 @@ export function registerInitCommand(program: Command): void {
     .command("init")
     .description("Initialize Council integration for this repo (hooks, Claude Code config, CLAUDE.md)")
     .requiredOption("-p, --pod <podId>", "Pod ID to connect to")
+    .option("--project <projectId>", "Optional project ID for long-lived memory (must exist on server)")
     .option("--scope <scope>", "Agent scope (frontend|backend|design|qa|infra|pm)")
     .option("--agent <id>", "Agent ID (default: git user.name)")
     .option("--skip-hooks", "Skip git hook installation")
@@ -70,6 +71,22 @@ export function registerInitCommand(program: Command): void {
         process.exit(1);
       }
 
+      const projectIdOpt: string | undefined = opts.project;
+      if (projectIdOpt) {
+        console.log(chalk.dim("  Verifying project..."));
+        try {
+          const prRes = await fetch(`${serverUrl}/api/projects/${encodeURIComponent(projectIdOpt)}`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!prRes.ok) throw new Error(`HTTP ${prRes.status}`);
+          const pr = (await prRes.json()) as { name: string };
+          console.log(chalk.green(`  Project: ${pr.name} (${projectIdOpt})`));
+        } catch {
+          console.error(chalk.red(`  Project "${projectIdOpt}" not found on server.\n`));
+          process.exit(1);
+        }
+      }
+
       // 3. Write .council.json
       const configPath = path.join(root, ".council.json");
       const configData: Record<string, unknown> = {
@@ -79,6 +96,7 @@ export function registerInitCommand(program: Command): void {
       };
       if (scope) configData.scope = scope;
       if (agentId) configData.agentId = agentId;
+      if (projectIdOpt) configData.projectId = projectIdOpt;
 
       fs.writeFileSync(configPath, JSON.stringify(configData, null, 2) + "\n", "utf-8");
       console.log(chalk.green("  Created .council.json"));

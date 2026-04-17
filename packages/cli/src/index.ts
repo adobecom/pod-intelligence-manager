@@ -9,6 +9,7 @@ import { registerLintCommand } from "./commands/lint.js";
 import { registerHooksCommand } from "./commands/hooks.js";
 import { registerContextCommand } from "./commands/context.js";
 import { registerInitCommand } from "./commands/init.js";
+import { registerLeaveCommand } from "./commands/leave.js";
 
 const program = new Command();
 
@@ -26,5 +27,6 @@ registerLintCommand(program);
 registerHooksCommand(program);
 registerContextCommand(program);
 registerInitCommand(program);
+registerLeaveCommand(program);
 
 program.parse();
