@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "ESNext",
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "src/config.ts",
+    "src/git-hook/run.ts",
+    "src/hooks/claude-code-post-tool.ts",
+    "src/hooks/claude-code-pre-tool.ts"
+  ]
+}

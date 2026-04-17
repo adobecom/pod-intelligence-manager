@@ -25,8 +25,16 @@ function isOurHook(content: string): boolean {
 
 export function resolveRunnerPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const runner = path.join(here, "../git-hook/run.js");
-  return path.resolve(runner);
+  const sibling = path.resolve(here, "../git-hook/run.js");
+  if (fs.existsSync(sibling)) return sibling;
+
+  // `bin/council.mjs` runs the CLI via tsx from `src/`; source is `run.ts`, so `run.js`
+  // is not next to `hooks.ts`. After `pnpm --filter @council/cli build`, use dist.
+  const pkgRoot = path.resolve(here, "../..");
+  const distRunner = path.join(pkgRoot, "dist/git-hook/run.js");
+  if (fs.existsSync(distRunner)) return distRunner;
+
+  return sibling;
 }
 
 export function installHooks(): void {

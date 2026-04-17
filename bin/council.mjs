@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 
 const binDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(binDir, "..");
+/** Shell cwd when the user invoked `council` — must be preserved for git + init file paths. */
+const userCwd = process.cwd();
 const cliEntry = path.join(repoRoot, "packages/cli/src/index.ts");
 const requireFromRoot = createRequire(path.join(repoRoot, "package.json"));
 
@@ -27,7 +29,9 @@ try {
 }
 
 const result = spawnSync(process.execPath, [tsxCli, cliEntry, ...process.argv.slice(2)], {
-  cwd: repoRoot,
+  // Never use repoRoot here: that made `council init` from another repo write into ai-council
+  // because `git rev-parse --show-toplevel` inherited this cwd.
+  cwd: userCwd,
   stdio: "inherit",
   env: process.env,
 });
