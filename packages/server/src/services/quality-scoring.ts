@@ -47,6 +47,21 @@ export function scoreUpdate(input: ContextUpdateInput, podId: string): QualityBr
   };
 }
 
+export function scoreProjectUpdate(input: ContextUpdateInput, projectId: string): QualityBreakdown {
+  const completeness = scoreCompleteness(input);
+  const specificity = scoreSpecificity(input);
+  const relationships = scoreRelationships(input);
+  const contextual_fit = scoreContextualFitProject(input, projectId);
+
+  return {
+    completeness,
+    specificity,
+    relationships,
+    contextual_fit,
+    total: Math.min(1.0, completeness + specificity + relationships + contextual_fit),
+  };
+}
+
 function scoreCompleteness(input: ContextUpdateInput): number {
   let score = 0;
 
@@ -149,6 +164,29 @@ function scoreContextualFit(input: ContextUpdateInput, podId: string): number {
   ).get(podId, input.agent_id) as AreaRow | undefined;
 
   if (area && area.scope === input.scope) {
+    score += 0.05;
+  }
+
+  return Math.min(0.2, score);
+}
+
+function scoreContextualFitProject(input: ContextUpdateInput, projectId: string): number {
+  let score = 0;
+
+  const priorUpdates = db.prepare(
+    "SELECT scope FROM project_context_updates WHERE project_id = ? AND agent_id = ? ORDER BY timestamp DESC LIMIT 5",
+  ).all(projectId, input.agent_id) as PriorUpdateRow[];
+
+  if (priorUpdates.length > 0) {
+    const scopeCounts = new Map<string, number>();
+    for (const u of priorUpdates) {
+      scopeCounts.set(u.scope, (scopeCounts.get(u.scope) ?? 0) + 1);
+    }
+    const majorityScope = [...scopeCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    score += input.scope === majorityScope ? 0.10 : 0.03;
+    score += 0.05;
+  } else {
+    score += 0.10;
     score += 0.05;
   }
 

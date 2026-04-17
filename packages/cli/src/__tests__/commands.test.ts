@@ -39,17 +39,18 @@ describe("CLI command registration", () => {
       .option("-s, --server <url>", "Server URL", "http://localhost:4000");
   });
 
-  it("report command requires --pod, --type, --scope, --summary", async () => {
-    // Dynamically import to get the register function
+  it("report command has --pod or --project plus required --type, --scope, --summary", async () => {
     const { registerReportCommand } = await import("../commands/report.js");
     registerReportCommand(program);
 
     const reportCmd = program.commands.find(c => c.name() === "report");
     expect(reportCmd).toBeDefined();
 
+    const longNames = reportCmd!.options.map(o => o.long);
+    expect(longNames).toContain("--pod");
+    expect(longNames).toContain("--project");
     const requiredOpts = reportCmd!.options.filter(o => o.mandatory);
     const requiredNames = requiredOpts.map(o => o.long);
-    expect(requiredNames).toContain("--pod");
     expect(requiredNames).toContain("--type");
     expect(requiredNames).toContain("--scope");
     expect(requiredNames).toContain("--summary");
@@ -85,5 +86,13 @@ describe("CLI command registration", () => {
 
     const lintCmd = program.commands.find(c => c.name() === "lint");
     expect(lintCmd).toBeDefined();
+  });
+
+  it("leave command is registered", async () => {
+    const { registerLeaveCommand } = await import("../commands/leave.js");
+    registerLeaveCommand(program);
+
+    const leaveCmd = program.commands.find(c => c.name() === "leave");
+    expect(leaveCmd).toBeDefined();
   });
 });

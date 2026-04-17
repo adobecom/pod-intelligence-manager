@@ -94,4 +94,36 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(q.nodes[0]?.summary.toLowerCase()).toContain("zebra");
   });
+
+  it("getRelevantLearnings with projectId filters out nodes tagged to other projects", () => {
+    const orgId = `kg-test-${orgSeq++}`;
+    initializeKnowledgeGraph(orgId);
+    const base: EnhancedPodLearning = {
+      type: "decision",
+      details: "",
+      domains: ["backend"],
+      confidence: "extracted",
+      confidence_score: 0.9,
+      summary: "",
+    };
+    addLearningsToGraph([{ ...base, summary: "Shared org learning" }], "pod-a", "Pod A");
+    addLearningsToGraph(
+      [{ ...base, summary: "Project Alpha decision" }],
+      "pod-b",
+      "Pod B",
+      { project_id: "proj-alpha", project_name: "Alpha" },
+    );
+    addLearningsToGraph(
+      [{ ...base, summary: "Project Beta decision" }],
+      "pod-c",
+      "Pod C",
+      { project_id: "proj-beta", project_name: "Beta" },
+    );
+
+    const forAlpha = getRelevantLearnings(["backend"], [], 2000, "proj-alpha");
+    const summaries = forAlpha.nodes.map(n => n.summary);
+    expect(summaries.some(s => s.includes("Shared org"))).toBe(true);
+    expect(summaries.some(s => s.includes("Project Alpha"))).toBe(true);
+    expect(summaries.some(s => s.includes("Project Beta"))).toBe(false);
+  });
 });

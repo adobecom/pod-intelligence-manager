@@ -10,6 +10,8 @@ import {
   Divider,
   TextField,
   NumberField,
+  Picker,
+  PickerItem,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useOrgStore } from "../../stores/orgStore";
@@ -59,14 +61,31 @@ const createFormActions = style({ display: "flex", gap: 12, justifyContent: "end
 const sectionHeader = style({ display: "flex", alignItems: "center", justifyContent: "space-between" });
 
 export function OrgDashboard() {
-  const { pods, overlaps, archivedPods, loading, loadOrg, createPod, archivePod } = useOrgStore();
+  const {
+    pods,
+    projects,
+    overlaps,
+    archivedPods,
+    loading,
+    loadOrg,
+    createPod,
+    createProject,
+    archivePod,
+  } = useOrgStore();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
   const [podName, setPodName] = useState("");
   const [sprintDays, setSprintDays] = useState(5);
   const [milestoneName, setMilestoneName] = useState("Sprint Goal");
+  const [linkProjectId, setLinkProjectId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [showCreateProject, setShowCreateProject] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [projectCreateError, setProjectCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     loadOrg();
@@ -81,14 +100,36 @@ export function OrgDashboard() {
         name: podName.trim(),
         sprint_days: sprintDays,
         milestone_name: milestoneName.trim() || "Sprint Goal",
+        ...(linkProjectId ? { project_id: linkProjectId } : {}),
       });
       setPodName("");
+      setLinkProjectId(null);
       setShowCreate(false);
       navigate(`/pod/${pod.pod_id}`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create pod");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleCreateProject() {
+    if (!projectName.trim()) return;
+    setCreatingProject(true);
+    setProjectCreateError(null);
+    try {
+      const project = await createProject({
+        name: projectName.trim(),
+        description: projectDescription.trim() || undefined,
+      });
+      setProjectName("");
+      setProjectDescription("");
+      setShowCreateProject(false);
+      navigate(`/project/${project.project_id}`);
+    } catch (err) {
+      setProjectCreateError(err instanceof Error ? err.message : "Failed to create project");
+    } finally {
+      setCreatingProject(false);
     }
   }
 
@@ -109,6 +150,82 @@ export function OrgDashboard() {
         <Heading level={2} styles={style({ marginY: 0 })}>
           Organization Dashboard
         </Heading>
+
+        {/* Projects (long-lived initiatives) */}
+        <div className={sectionHeader}>
+          <Heading level={3}>Projects ({projects.length})</Heading>
+          <Button
+            variant={showCreateProject ? "secondary" : "accent"}
+            onPress={() => {
+              setShowCreateProject(!showCreateProject);
+              setProjectCreateError(null);
+            }}
+          >
+            {showCreateProject ? "Cancel" : "Create Project"}
+          </Button>
+        </div>
+
+        {showCreateProject && (
+          <div className={createFormCard}>
+            <div className={createFormContent}>
+              {projectCreateError && (
+                <InlineAlert variant="negative">
+                  <Content>{projectCreateError}</Content>
+                </InlineAlert>
+              )}
+              <TextField
+                label="Project Name"
+                value={projectName}
+                onChange={setProjectName}
+                isRequired
+              />
+              <TextField
+                label="Description"
+                value={projectDescription}
+                onChange={setProjectDescription}
+              />
+              <div className={createFormActions}>
+                <Button
+                  variant="accent"
+                  onPress={handleCreateProject}
+                  isDisabled={!projectName.trim() || creatingProject}
+                  isPending={creatingProject}
+                >
+                  Create Project
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className={podGrid}>
+          {projects.map((project) => (
+            <div key={project.project_id} className={podCard}>
+              <div className={podCardContent}>
+                <div className={podCardHeader}>
+                  <Text styles={style({ fontWeight: "bold", font: "body-lg" })}>
+                    {project.name}
+                  </Text>
+                  <Badge variant="neutral">Initiative</Badge>
+                </div>
+                <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
+                  {project.project_id}
+                </Text>
+                {project.description && (
+                  <Text styles={style({ font: "body-sm" })}>{project.description}</Text>
+                )}
+                <div className={style({ display: "flex", gap: 8 })}>
+                  <Button
+                    variant="primary"
+                    onPress={() => navigate(`/project/${project.project_id}`)}
+                  >
+                    Open Project
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
 
         {/* Active Pods */}
         <div className={sectionHeader}>
@@ -147,6 +264,21 @@ export function OrgDashboard() {
                 value={milestoneName}
                 onChange={setMilestoneName}
               />
+              <Picker
+                label="Link to project"
+                description="Optional — attach this sprint to an initiative for shared context and knowledge."
+                selectedKey={linkProjectId ?? "none"}
+                onSelectionChange={(key) => {
+                  setLinkProjectId(key === "none" ? null : (key as string));
+                }}
+              >
+                <PickerItem id="none">None</PickerItem>
+                {projects.map((p) => (
+                  <PickerItem key={p.project_id} id={p.project_id}>
+                    {p.name}
+                  </PickerItem>
+                ))}
+              </Picker>
               <div className={createFormActions}>
                 <Button
                   variant="accent"

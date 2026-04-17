@@ -1,7 +1,9 @@
 import type {
   Pod,
+  Project,
   Conflict,
   ContextUpdate,
+  ProjectContextUpdate,
   ContextUpdateType,
   WorkStatus,
   Scope,
@@ -25,12 +27,9 @@ export interface SessionContext {
   recentUpdates: ContextUpdate[];
 }
 
-export interface CouncilClientConfig {
-  baseUrl: string;
-  podId: string;
-  agentId: string;
-  scope: Scope;
-}
+export type CouncilClientConfig =
+  | { baseUrl: string; agentId: string; scope: Scope; podId: string; projectId?: undefined }
+  | { baseUrl: string; agentId: string; scope: Scope; projectId: string; podId?: undefined };
 
 export interface ReportInput {
   type: ContextUpdateType;
@@ -45,7 +44,7 @@ export interface ReportInput {
 
 export interface ReportResult {
   id: string;
-  update: ContextUpdate;
+  update: ContextUpdate | ProjectContextUpdate;
   council: {
     classification: string;
     merged: boolean;
@@ -68,7 +67,16 @@ export class CouncilClient {
   private config: CouncilClientConfig;
 
   constructor(config: CouncilClientConfig) {
+    const hasPod = Boolean(config.podId);
+    const hasProj = Boolean(config.projectId);
+    if (hasPod === hasProj) {
+      throw new Error("CouncilClient requires exactly one of podId or projectId");
+    }
     this.config = config;
+  }
+
+  private isPodMode(): boolean {
+    return Boolean(this.config.podId);
   }
 
   private url(path: string): string {
@@ -77,22 +85,23 @@ export class CouncilClient {
 
   // Submit a context update to the Council
   async report(input: ReportInput): Promise<ReportResult> {
-    return fetchJSON<ReportResult>(
-      this.url(`/api/pods/${this.config.podId}/context-updates`),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_id: this.config.agentId,
-          scope: this.config.scope,
-          ...input,
-        }),
-      },
-    );
+    const path = this.isPodMode()
+      ? `/api/pods/${this.config.podId}/context-updates`
+      : `/api/projects/${this.config.projectId}/context-updates`;
+    return fetchJSON<ReportResult>(this.url(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: this.config.agentId,
+        scope: this.config.scope,
+        ...input,
+      }),
+    });
   }
 
   // Fetch the current living doc for the pod
   async getContext(): Promise<string> {
+    if (!this.isPodMode()) throw new Error("getContext requires a pod-scoped client (podId)");
     const res = await fetch(this.url(`/api/pods/${this.config.podId}/living-doc`));
     if (!res.ok) throw new Error(`Failed to fetch living doc: ${res.status}`);
     return res.text();
@@ -100,17 +109,32 @@ export class CouncilClient {
 
   // Fetch current pod state
   async getPod(): Promise<Pod> {
+    if (!this.isPodMode()) throw new Error("getPod requires a pod-scoped client (podId)");
     return fetchJSON<Pod>(this.url(`/api/pods/${this.config.podId}`));
+  }
+
+  async getProject(): Promise<Project> {
+    if (this.isPodMode()) throw new Error("getProject requires a project-scoped client (projectId)");
+    return fetchJSON<Project>(this.url(`/api/projects/${this.config.projectId}`));
   }
 
   // Fetch current conflicts for the pod
   async getConflicts(): Promise<Conflict[]> {
+    if (!this.isPodMode()) throw new Error("getConflicts requires a pod-scoped client (podId)");
     return fetchJSON<Conflict[]>(this.url(`/api/pods/${this.config.podId}/conflicts`));
   }
 
   // Fetch context updates for the pod
   async getUpdates(): Promise<ContextUpdate[]> {
+    if (!this.isPodMode()) throw new Error("getUpdates requires a pod-scoped client (podId)");
     return fetchJSON<ContextUpdate[]>(this.url(`/api/pods/${this.config.podId}/context-updates`));
+  }
+
+  async getProjectUpdates(): Promise<ProjectContextUpdate[]> {
+    if (this.isPodMode()) throw new Error("getProjectUpdates requires a project-scoped client (projectId)");
+    return fetchJSON<ProjectContextUpdate[]>(
+      this.url(`/api/projects/${this.config.projectId}/context-updates`),
+    );
   }
 
   // Query the organizational knowledge graph with token budget
@@ -140,6 +164,11 @@ export class CouncilClient {
 
   // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)
   async pullSessionContext(opts?: SessionContextOptions): Promise<SessionContext> {
+    if (!this.isPodMode()) {
+      throw new Error(
+        "pullSessionContext requires a pod-scoped client (podId). For project-only mode use getProject(), getProjectUpdates(), and queryKnowledge().",
+      );
+    }
     const maxTokens = opts?.learningsMaxTokens ?? 2000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 

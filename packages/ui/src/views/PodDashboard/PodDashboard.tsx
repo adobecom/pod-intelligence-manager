@@ -1,6 +1,7 @@
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../../stores/podStore";
 import { PodHeader } from "./PodHeader";
+import { PodProjectAssociation } from "./PodProjectAssociation";
 import { HealthBanner } from "./HealthBanner";
 import { ConflictPressureGauge } from "./ConflictPressureGauge";
 import { MilestoneProgress } from "./MilestoneProgress";
@@ -43,6 +44,8 @@ export function PodDashboard() {
         openConflicts={openConflictCount}
       />
       <PodHeader pod={pod} />
+
+      <PodProjectAssociation />
 
       <div className={row}>
         <div className={halfPanel}>

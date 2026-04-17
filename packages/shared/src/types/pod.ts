@@ -1,5 +1,7 @@
 export interface Pod {
   pod_id: string;
+  /** Owning initiative; optional for legacy pods. */
+  project_id?: string | null;
   name: string;
   sprint_start: string;
   sprint_end: string;

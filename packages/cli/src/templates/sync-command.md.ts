@@ -8,6 +8,14 @@ export interface SyncCommandParams {
   scope: string;
 }
 
+/** Placeholder after `council leave` — no embedded pod ID. */
+export const DISCONNECTED_SYNC_COMMAND = `This repo is not attached to an AI Council pod.
+
+When you join a sprint again, run \`council init -p <podId>\` to regenerate the /sync workflow.
+
+If this repo is configured for project-level updates only, use \`council report --project <id>\` (and set projectId in .council.json when supported).
+`;
+
 export function renderSyncCommand(params: SyncCommandParams): string {
   return `Pull the latest AI Council pod context and summarize what's relevant to your current work.
 

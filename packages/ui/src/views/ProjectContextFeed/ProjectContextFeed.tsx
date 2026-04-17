@@ -12,8 +12,8 @@ import {
   Content,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import { usePodStore } from "../../stores/podStore";
-import { FeedItem } from "./FeedItem";
+import { useProjectStore } from "../../stores/projectStore";
+import { FeedItem } from "../ContextFeed/FeedItem";
 
 const column = style({ display: "flex", flexDirection: "column", gap: 20 });
 const headerRow = style({ display: "flex", alignItems: "center", justifyContent: "space-between" });
@@ -31,9 +31,9 @@ const formGrid = style({ display: "flex", flexDirection: "column", gap: 12 });
 const formRow = style({ display: "flex", gap: 12, flexWrap: "wrap" });
 const formActions = style({ display: "flex", gap: 12, justifyContent: "end" });
 
-export function ContextFeed() {
-  const contextUpdates = usePodStore((s) => s.contextUpdates);
-  const submitContextUpdate = usePodStore((s) => s.submitContextUpdate);
+export function ProjectContextFeed() {
+  const contextUpdates = useProjectStore((s) => s.contextUpdates);
+  const submitProjectContextUpdate = useProjectStore((s) => s.submitProjectContextUpdate);
   const [scopeFilter, setScopeFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -52,7 +52,7 @@ export function ContextFeed() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await submitContextUpdate({
+      await submitProjectContextUpdate({
         type: formType as "progress" | "blocker" | "spec_change" | "question" | "decision",
         scope: formScope as "frontend" | "backend" | "design" | "qa" | "infra" | "pm",
         summary: formSummary,

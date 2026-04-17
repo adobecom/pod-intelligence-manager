@@ -37,6 +37,29 @@ describe("CouncilClient", () => {
     mockFetch.mockReset();
   });
 
+  describe("constructor", () => {
+    it("requires exactly one of podId or projectId", () => {
+      expect(
+        () =>
+          new CouncilClient({
+            baseUrl: "http://localhost:4000",
+            agentId: "a",
+            scope: "frontend",
+            podId: "p",
+            projectId: "proj",
+          } as never),
+      ).toThrow(/exactly one of podId or projectId/);
+      expect(
+        () =>
+          new CouncilClient({
+            baseUrl: "http://localhost:4000",
+            agentId: "a",
+            scope: "frontend",
+          } as never),
+      ).toThrow(/exactly one of podId or projectId/);
+    });
+  });
+
   describe("report", () => {
     it("sends POST to the correct URL", async () => {
       mockOk({ id: "ctx-001", update: {}, council: {} });
@@ -51,6 +74,28 @@ describe("CouncilClient", () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         "http://localhost:4000/api/pods/pod-1/context-updates",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it("sends POST to project URL when project-scoped", async () => {
+      mockOk({ id: "pcu-001", update: {}, council: {} });
+      const client = new CouncilClient({
+        baseUrl: "http://localhost:4000",
+        projectId: "project-demo",
+        agentId: "agent-fe",
+        scope: "frontend",
+      });
+
+      await client.report({
+        type: "decision",
+        summary: "Chose SQLite",
+        details: "",
+        status: "completed",
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:4000/api/projects/project-demo/context-updates",
         expect.objectContaining({ method: "POST" }),
       );
     });
