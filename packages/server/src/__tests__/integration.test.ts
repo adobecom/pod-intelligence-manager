@@ -82,6 +82,9 @@ afterAll(async () => {
 });
 
 describe("Integration: API endpoints", () => {
+  /** Set by the first pod create test; used for subsequent pod-scoped requests. */
+  let integrationPodId = "";
+
   it("GET /api/health returns 200 with db status", async () => {
     const res = await app.inject({ method: "GET", url: "/api/health" });
     expect(res.statusCode).toBe(200);
@@ -98,7 +101,8 @@ describe("Integration: API endpoints", () => {
     });
     expect(res.statusCode).toBe(201);
     const pod = res.json();
-    expect(pod.pod_id).toBe("pod-integration-test-pod");
+    integrationPodId = pod.pod_id as string;
+    expect(integrationPodId).toMatch(/^pod-integration-test-pod-[a-f0-9]{6}$/);
     expect(pod.name).toBe("Integration Test Pod");
     expect(pod.areas).toHaveLength(6); // 6 scopes
   });
@@ -106,7 +110,7 @@ describe("Integration: API endpoints", () => {
   it("GET /api/pods/:podId returns the created pod", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pods/pod-integration-test-pod",
+      url: `/api/pods/${integrationPodId}`,
     });
     expect(res.statusCode).toBe(200);
     const pod = res.json();
@@ -121,19 +125,26 @@ describe("Integration: API endpoints", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("POST /api/pods rejects duplicate pod names", async () => {
-    const res = await app.inject({
+  it("POST /api/pods allows the same display name with distinct ids", async () => {
+    const first = await app.inject({
       method: "POST",
       url: "/api/pods",
-      payload: { name: "Integration Test Pod" },
+      payload: { name: "Duplicate Name Pod" },
     });
-    expect(res.statusCode).toBe(409);
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Duplicate Name Pod" },
+    });
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect((first.json() as { pod_id: string }).pod_id).not.toBe((second.json() as { pod_id: string }).pod_id);
   });
 
   it("POST /api/pods/:podId/context-updates ingests an update", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/pods/pod-integration-test-pod/context-updates",
+      url: `/api/pods/${integrationPodId}/context-updates`,
       payload: {
         agent_id: "agent-fe",
         type: "progress",
@@ -157,7 +168,7 @@ describe("Integration: API endpoints", () => {
   it("POST /api/pods/:podId/context-updates rejects invalid input", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/pods/pod-integration-test-pod/context-updates",
+      url: `/api/pods/${integrationPodId}/context-updates`,
       payload: { summary: "incomplete" },
     });
     expect(res.statusCode).toBe(400);
@@ -166,7 +177,7 @@ describe("Integration: API endpoints", () => {
   it("GET /api/pods/:podId/context-updates returns updates", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pods/pod-integration-test-pod/context-updates",
+      url: `/api/pods/${integrationPodId}/context-updates`,
     });
     expect(res.statusCode).toBe(200);
     const updates = res.json();
@@ -177,7 +188,7 @@ describe("Integration: API endpoints", () => {
   it("GET /api/pods/:podId/living-doc returns markdown", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pods/pod-integration-test-pod/living-doc",
+      url: `/api/pods/${integrationPodId}/living-doc`,
     });
     expect(res.statusCode).toBe(200);
     const text = res.body;
@@ -188,7 +199,7 @@ describe("Integration: API endpoints", () => {
   it("GET /api/pods/:podId/conflicts returns empty initially", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/pods/pod-integration-test-pod/conflicts",
+      url: `/api/pods/${integrationPodId}/conflicts`,
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
@@ -197,7 +208,7 @@ describe("Integration: API endpoints", () => {
   it("overlapping updates from different agents are classified", async () => {
     const res = await app.inject({
       method: "POST",
-      url: "/api/pods/pod-integration-test-pod/context-updates",
+      url: `/api/pods/${integrationPodId}/context-updates`,
       payload: {
         agent_id: "agent-be",
         type: "progress",
@@ -286,7 +297,7 @@ describe("Integration: API endpoints", () => {
     });
     expect(res.statusCode).toBe(201);
     const body = res.json() as { project_id: string; name: string };
-    expect(body.project_id).toBe("project-integration-project-alpha");
+    expect(body.project_id).toMatch(/^project-integration-project-alpha-[a-f0-9]{6}$/);
     expect(body.name).toBe("Integration Project Alpha");
   });
 

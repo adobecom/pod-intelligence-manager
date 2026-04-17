@@ -7,6 +7,7 @@ import { runLintPass } from "../council/agents/lint.js";
 import { getRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { POD_SCOPES } from "../services/pod-snapshot.js";
+import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 
 const CreatePodSchema = z.object({
   name: z.string().min(1, "name is required").transform(s => s.trim()),
@@ -63,10 +64,6 @@ function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
     milestone: JSON.parse(row.milestone_json) as Milestone,
     areas: areas as PodArea[],
   };
-}
-
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 export default async function podRoutes(app: FastifyInstance) {
@@ -134,14 +131,9 @@ export default async function podRoutes(app: FastifyInstance) {
   }>("/api/pods", { preHandler: validateBody(CreatePodSchema) }, async (req, reply) => {
     const { name, sprint_days, milestone_name, project_id } = req.body;
 
-    const podId = `pod-${slugify(name)}`;
-
-    // Check for duplicates
-    const existing = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ?").get(podId);
-    if (existing) {
-      reply.code(409);
-      return { error: `Pod "${name}" already exists` };
-    }
+    const podId = allocateUniqueResourceId("pod", name, (id) =>
+      Boolean(db.prepare("SELECT pod_id FROM pods WHERE pod_id = ?").get(id)),
+    );
 
     if (project_id) {
       const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(project_id);

@@ -4,6 +4,7 @@ import db from "../db/connection.js";
 import type { Project, ProjectContextUpdate } from "@council/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
+import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()),
@@ -14,10 +15,6 @@ const PatchProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()).optional(),
   description: z.union([z.string(), z.null()]).optional(),
 });
-
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
 
 function rowToProject(row: {
   project_id: string;
@@ -67,12 +64,9 @@ export default async function projectRoutes(app: FastifyInstance) {
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
       const { name, description } = req.body;
-      const projectId = `project-${slugify(name)}`;
-      const existing = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(projectId);
-      if (existing) {
-        reply.code(409);
-        return { error: `Project "${name}" already exists` };
-      }
+      const projectId = allocateUniqueResourceId("project", name, (id) =>
+        Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
+      );
       const created_at = new Date().toISOString();
       db.prepare(
         "INSERT INTO projects (project_id, name, description, created_at) VALUES (?, ?, ?, ?)",
