@@ -15,6 +15,7 @@ interface ContextUpdateRow {
   artifacts_json: string;
   status: string;
   quality_score: number;
+  quality_rationale?: string | null;
   blocks_json: string;
   blocked_by_json: string;
   needs_input_from_json: string;
@@ -34,6 +35,7 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
     artifacts: JSON.parse(row.artifacts_json) as Artifact[],
     status: row.status as ContextUpdate["status"],
     quality_score: row.quality_score ?? 0,
+    quality_rationale: row.quality_rationale ?? null,
     blocks: JSON.parse(row.blocks_json) as string[],
     blocked_by: JSON.parse(row.blocked_by_json) as string[],
     needs_input_from: JSON.parse(row.needs_input_from_json) as InputRequest[],

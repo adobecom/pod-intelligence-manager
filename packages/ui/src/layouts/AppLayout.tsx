@@ -14,6 +14,7 @@ const loadProject = useProjectStore.getState().loadProject;
 /** Events that change pod data and warrant a re-fetch. */
 const POD_DATA_EVENTS = new Set([
   "context_update_added",
+  "context_update_quality_revised",
   "conflict_created",
   "conflict_resolved",
   "pressure_changed",

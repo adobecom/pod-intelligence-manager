@@ -7,6 +7,7 @@ import { broadcast } from "../ws/index.js";
 import { processUpdate, type CouncilResult } from "../council/master.js";
 import type { ContextUpdate } from "@council/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
+import { scheduleAsyncQualityScore } from "./async-quality-score.js";
 
 const ScopeSchema = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
@@ -139,6 +140,9 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
 
   // 8. Run through Council Master (classify, route, regenerate living doc)
   const councilResult = await processUpdate(update);
+
+  // 9. Async AI quality score (non-blocking; updates row + WS when done)
+  scheduleAsyncQualityScore(podId, update.id);
 
   return { success: true, update, council: councilResult };
 }

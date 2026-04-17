@@ -42,6 +42,7 @@ export function createTables() {
       artifacts_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
       quality_score REAL NOT NULL DEFAULT 0.0,
+      quality_rationale TEXT,
       blocks_json TEXT NOT NULL DEFAULT '[]',
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
       needs_input_from_json TEXT NOT NULL DEFAULT '[]',
@@ -183,6 +184,7 @@ export function createTables() {
   try { db.exec("ALTER TABLE context_updates ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN commit_sha TEXT"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_rationale TEXT"); } catch { /* already exists */ }
 
   // Projects + pod membership (existing DBs) — projects table must exist before ALTER pods
   try {
