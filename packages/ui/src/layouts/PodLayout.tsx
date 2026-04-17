@@ -3,8 +3,10 @@ import { Outlet, useParams, NavLink, useLocation } from "react-router-dom";
 import { Button, Content, Heading, IllustratedMessage, ProgressCircle } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../stores/podStore";
+import { useOrgStore } from "../stores/orgStore";
 
 const loadPod = usePodStore.getState().loadPod;
+const loadOrgConfig = useOrgStore.getState().loadOrgConfig;
 
 const navItems = [
   { path: "", label: "Dashboard", end: true },
@@ -51,6 +53,10 @@ export function PodLayout() {
   const pod = usePodStore((s) => s.pod);
   const error = usePodStore((s) => s.error);
   const location = useLocation();
+
+  useEffect(() => {
+    void loadOrgConfig();
+  }, []);
 
   useEffect(() => {
     if (podId) loadPod(podId);

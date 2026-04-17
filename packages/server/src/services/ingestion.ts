@@ -8,8 +8,11 @@ import { processUpdate, type CouncilResult } from "../council/master.js";
 import type { ContextUpdate } from "@council/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 import { scheduleAsyncQualityScore } from "./async-quality-score.js";
+import { getOrgScopeIds } from "./org-settings.js";
 
-const ScopeSchema = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
+const ScopeSchema = z.string().min(1).refine(s => getOrgScopeIds().has(s), {
+  message: "scope must be one of the org-defined scope ids",
+});
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
 const WorkStatusSchema = z.enum(["completed", "in_progress", "blocked"]);
 

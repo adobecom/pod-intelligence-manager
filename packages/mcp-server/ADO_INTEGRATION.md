@@ -6,26 +6,36 @@ This guide is for anyone working in the `ado-mcp` repo who wants to add AI Counc
 
 The MCP server is stdio-based and connects to a running Council Fastify server over HTTP. It has one configuration value: the Council server URL.
 
-### Tools (12)
+### Tools (22)
 
-Full CRUD for pod-scoped operations:
+Org configuration, long-lived projects, pod lifecycle, agent session bundle, conflicts, tunnels, knowledge graph, and maintenance:
 
 | Tool | Input | Output |
 |------|-------|--------|
-| `list_pods` | (none) | JSON array of active pods with IDs, names, pressure scores, conflict counts |
-| `render_pod_dashboard` | `pod_id` | Single-file React component (~36KB) rendered as a Claude artifact |
+| `get_org_config` | (none) | Org scope list (ids + labels) |
+| `update_org_config` | `scopes` (full replacement list) | Patched org config |
+| `list_projects` | (none) | All active projects with anatomy |
+| `create_project` | `name`, `description?` | Created project |
+| `get_project` | `project_id` | Single project + anatomy |
+| `update_project` | `project_id`, `name?`, `description?`, `anatomy?` | Patched project |
+| `archive_project` | `project_id` | Archived project snapshot (removes active row; deletes project context stream; unlinks pods; no pod knowledge extraction) |
+| `list_pods` | (none) | Active pod summaries |
+| `render_pod_dashboard` | `pod_id` | Single-file React component rendered as a Claude artifact |
 | `create_pod` | `name`, `sprint_days?`, `milestone_name?` | Created pod with generated ID and default areas |
-| `archive_pod` | `pod_id` | Archived pod record + knowledge learnings extracted count |
-| `submit_context_update` | `pod_id`, `agent_id`, `type`, `scope`, `summary`, `details`, `status`, ... | Created update + Council analysis |
-| `get_conflict_details` | `pod_id`, `conflict_id` | Conflict details + downstream pending work |
-| `resolve_conflict` | `pod_id`, `conflict_id`, `resolution`, `resolved_by` | Updated conflict record |
-| `create_tunnel` | `pod_id`, `dev_name`, `branch`, `port` | Created tunnel record |
-| `disconnect_tunnel` | `pod_id`, `tunnel_id` | Disconnected tunnel record |
-| `query_knowledge` | `domains?`, `types?`, `text_search?`, `max_tokens?`, ... | Token-budgeted knowledge graph results |
-| `curate_knowledge_node` | `node_id`, `action`, `edits?` | Curation confirmation |
-| `trigger_lint` | `pod_id` | Lint findings array |
+| `archive_pod` | `pod_id` | Archived pod record + learnings extracted count |
+| `get_agent_session_context` | `pod_id`, `agent_id`, `scope`, optional budgets / `external_query` | Bundled session context (living doc, conflicts, learnings, recent updates) |
+| `submit_context_update` | `pod_id`, `agent_id`, `type`, `scope`, `summary`, `details`, `status`, ... | Created pod update + Council analysis |
+| `submit_project_context_update` | `project_id`, same fields as pod context | Created project-level update |
+| `get_conflict_details` | `pod_id`, `conflict_id` | Conflict + pending work |
+| `resolve_conflict` | `pod_id`, `conflict_id`, `resolution`, `resolved_by` | Resolved conflict |
+| `create_tunnel` | `pod_id`, `dev_name`, `branch`, `port` | Tunnel record |
+| `disconnect_tunnel` | `pod_id`, `tunnel_id` | Disconnected tunnel |
+| `query_knowledge` | `domains?`, `types?`, `text_search?`, `max_tokens?`, ... | Token-budgeted graph query |
+| `context_search` | `query`, `sources?`, `pod_id?`, ... | Cross-source search summary + hits |
+| `curate_knowledge_node` | `node_id`, `action`, `edits?` | Curation result |
+| `trigger_lint` | `pod_id` | Lint findings |
 
-### Resources (11)
+### Resources (15)
 
 URI-addressable read-only data that MCP clients can attach to conversations:
 
@@ -34,6 +44,10 @@ URI-addressable read-only data that MCP clients can attach to conversations:
 | `council://org/pods` | All active pod summaries |
 | `council://org/overlaps` | Cross-pod overlap advisories |
 | `council://org/archived` | Archived pod history |
+| `council://org/archived-projects` | Archived initiatives (snapshot + dates) |
+| `council://org/config` | Org-wide scope definitions |
+| `council://org/projects` | Same payload as `GET /api/projects` (active projects) |
+| `council://projects/{project_id}` | Project metadata and anatomy (listable per active project) |
 | `council://knowledge/stats` | Knowledge graph statistics |
 | `council://knowledge/graph` | Full knowledge graph (may be large) |
 | `council://pods/{pod_id}` | Pod metadata, areas, milestone, pressure |
@@ -43,7 +57,7 @@ URI-addressable read-only data that MCP clients can attach to conversations:
 | `council://pods/{pod_id}/tunnels` | Active dev tunnels |
 | `council://pods/{pod_id}/lint-findings` | Lint findings |
 
-Pod-scoped templates support listing — MCP clients can enumerate available pods automatically.
+Pod- and project-scoped templates support listing — MCP clients can enumerate available pods and projects automatically.
 
 ### Prompts (6)
 
@@ -275,6 +289,7 @@ Once the sidecar is running, users can ask Claude things like:
 - *"Search org knowledge for auth patterns"* — calls `query_knowledge`
 - *"Run a health check on pod-checkout"* — invokes the `pod_health_check` prompt
 - *"Generate a retro for pod-auth before archiving"* — invokes `pod_retrospective` prompt then `archive_pod`
+- *"Archive initiative project-checkout after pods are done"* — calls `archive_project` (or read `council://org/archived-projects` afterward)
 
 Claude sees tools, resources, and prompts through ADO's `list_mcp_tools` output and routes calls through the `ClientRegistry`.
 

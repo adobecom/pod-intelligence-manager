@@ -1,3 +1,5 @@
+import type { ProjectAnatomy } from "./project";
+
 export interface OrgPodSummary {
   pod_id: string;
   name: string;
@@ -25,4 +27,14 @@ export interface ArchivedPod {
   final_pressure: number;
   /** Present on archive API response when knowledge extraction ran. */
   learnings_extracted?: number;
+}
+
+/** Initiative removed from the active list; context updates are deleted at archive time. */
+export interface ArchivedProject {
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  archived_date: string;
+  anatomy: ProjectAnatomy;
 }

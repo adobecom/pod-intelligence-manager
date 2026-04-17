@@ -9,13 +9,15 @@ const { testDb } = vi.hoisted(() => {
 
 vi.mock("../../db/connection.js", () => ({ default: testDb }));
 
+import { DEFAULT_ORG_CONFIG } from "@council/shared";
 import { createTables } from "../../db/schema.js";
 import {
   refreshPodSnapshotFromContext,
   workStatusToAreaStatus,
   resolveAreaStatus,
-  POD_SCOPES,
 } from "../pod-snapshot.js";
+
+const DEFAULT_SCOPE_IDS = DEFAULT_ORG_CONFIG.scopes.map(s => s.id);
 
 function seedPod(podId: string): void {
   const milestone = JSON.stringify({ name: "Sprint Goal", target_date: "2026-04-20", percent_complete: 0 });
@@ -28,7 +30,7 @@ function seedPod(podId: string): void {
   const ins = testDb.prepare(
     "INSERT INTO pod_areas (pod_id, scope, owner, status) VALUES (?, ?, 'unassigned', 'waiting')",
   );
-  for (const s of POD_SCOPES) {
+  for (const s of DEFAULT_SCOPE_IDS) {
     ins.run(podId, s);
   }
   testDb
@@ -138,7 +140,7 @@ describe("refreshPodSnapshotFromContext", () => {
     seedPod(podId);
     const ts = "2026-04-16T12:00:00.000Z";
     let i = 0;
-    for (const s of POD_SCOPES) {
+    for (const s of DEFAULT_SCOPE_IDS) {
       insertUpdate(podId, {
         id: `ctx-${i++}`,
         scope: s,
