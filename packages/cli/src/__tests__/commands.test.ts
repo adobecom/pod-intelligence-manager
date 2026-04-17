@@ -3,9 +3,9 @@ import { Command } from "commander";
 import { getBaseUrl } from "../util.js";
 
 // Mock the SDK so commands don't make real HTTP calls
-vi.mock("@council/sdk", () => ({
-  CouncilClient: vi.fn().mockImplementation(() => ({
-    report: vi.fn().mockResolvedValue({ id: "ctx-001", council: { classification: "additive", merged: true, conflictCreated: false } }),
+vi.mock("@pim/sdk", () => ({
+  PimClient: vi.fn().mockImplementation(() => ({
+    report: vi.fn().mockResolvedValue({ id: "ctx-001", pim: { classification: "additive", merged: true, conflictCreated: false } }),
     getContext: vi.fn().mockResolvedValue("# Living Doc"),
     getPod: vi.fn().mockResolvedValue({ pod_id: "pod-1" }),
     getConflicts: vi.fn().mockResolvedValue([]),
@@ -49,7 +49,7 @@ describe("CLI command registration", () => {
   beforeEach(() => {
     program = new Command();
     program
-      .name("council")
+      .name("pim")
       .option("-s, --server <url>", "Server URL", "http://localhost:4000");
   });
 

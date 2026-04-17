@@ -17,7 +17,7 @@ const VALID_SCOPES = ["frontend", "backend", "design", "qa", "infra", "pm"];
 export function registerInitCommand(program: Command): void {
   program
     .command("init")
-    .description("Initialize Council integration for this repo (hooks, Claude Code config, CLAUDE.md)")
+    .description("Initialize PIM integration for this repo (hooks, Claude Code config, CLAUDE.md)")
     .requiredOption("-p, --pod <podId>", "Pod ID to connect to")
     .option("--project <projectId>", "Optional project ID for long-lived memory (must exist on server)")
     .option("--scope <scope>", "Agent scope (frontend|backend|design|qa|infra|pm)")
@@ -43,7 +43,7 @@ export function registerInitCommand(program: Command): void {
         process.exit(1);
       }
 
-      console.log(chalk.bold("\n  Council Init\n"));
+      console.log(chalk.bold("\n  PIM Init\n"));
 
       // 1. Verify server connectivity
       console.log(chalk.dim("  Checking server..."));
@@ -51,7 +51,7 @@ export function registerInitCommand(program: Command): void {
         const healthRes = await fetch(`${serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
         if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
       } catch (e) {
-        console.error(chalk.red(`  Cannot reach Council server at ${serverUrl}`));
+        console.error(chalk.red(`  Cannot reach PIM server at ${serverUrl}`));
         console.error(chalk.dim(`  Make sure the server is running. Error: ${e instanceof Error ? e.message : e}\n`));
         process.exit(1);
       }
@@ -87,8 +87,8 @@ export function registerInitCommand(program: Command): void {
         }
       }
 
-      // 3. Write .council.json
-      const configPath = path.join(root, ".council.json");
+      // 3. Write .pim.json
+      const configPath = path.join(root, ".pim.json");
       const configData: Record<string, unknown> = {
         podId,
         serverUrl,
@@ -99,7 +99,7 @@ export function registerInitCommand(program: Command): void {
       if (projectIdOpt) configData.projectId = projectIdOpt;
 
       fs.writeFileSync(configPath, JSON.stringify(configData, null, 2) + "\n", "utf-8");
-      console.log(chalk.green("  Created .council.json"));
+      console.log(chalk.green("  Created .pim.json"));
 
       // 4. Install git hooks
       if (!opts.skipHooks) {
@@ -108,7 +108,7 @@ export function registerInitCommand(program: Command): void {
           console.log(chalk.dim("  Installing git hooks..."));
           installHooks();
         } else {
-          console.log(chalk.yellow("  Git hooks skipped (build CLI first: pnpm --filter @council/cli build)"));
+          console.log(chalk.yellow("  Git hooks skipped (build CLI first: pnpm --filter @pim/cli build)"));
         }
       } else {
         console.log(chalk.dim("  Skipped git hooks (--skip-hooks)"));
@@ -205,28 +205,28 @@ export function registerInitCommand(program: Command): void {
         console.log(chalk.dim("  Skipped CLAUDE.md (--skip-claude-md)"));
       }
 
-      // 7. Create .council/ directory for context caching
-      const councilDir = path.join(root, ".council");
-      fs.mkdirSync(councilDir, { recursive: true });
+      // 7. Create .pim/ directory for context caching
+      const pimDir = path.join(root, ".pim");
+      fs.mkdirSync(pimDir, { recursive: true });
 
-      // Add .council/ to .gitignore if not already there
+      // Add .pim/ to .gitignore if not already there
       const gitignorePath = path.join(root, ".gitignore");
       if (fs.existsSync(gitignorePath)) {
         const gitignore = fs.readFileSync(gitignorePath, "utf-8");
-        if (!gitignore.includes(".council/")) {
-          fs.appendFileSync(gitignorePath, "\n# Council local state\n.council/\n");
-          console.log(chalk.green("  Added .council/ to .gitignore"));
+        if (!gitignore.includes(".pim/")) {
+          fs.appendFileSync(gitignorePath, "\n# PIM local state\n.pim/\n");
+          console.log(chalk.green("  Added .pim/ to .gitignore"));
         }
       }
 
-      console.log(chalk.bold.green("\n  Council initialized!\n"));
+      console.log(chalk.bold.green("\n  PIM initialized!\n"));
       console.log(chalk.dim("  Next steps:"));
-      console.log(chalk.dim(`    1. Set COUNCIL_AGENT_ID (or pass --agent) for commit attribution`));
+      console.log(chalk.dim(`    1. Set PIM_AGENT_ID (or pass --agent) for commit attribution`));
       if (!scope) {
-        console.log(chalk.dim(`    2. Set COUNCIL_SCOPE or pass --scope to scope your reports`));
+        console.log(chalk.dim(`    2. Set PIM_SCOPE or pass --scope to scope your reports`));
       }
-      console.log(chalk.dim(`    3. Run 'council context --pod ${podId}' to pull initial pod state`));
-      console.log(chalk.dim(`    4. Start coding — commits will auto-report to the Council\n`));
+      console.log(chalk.dim(`    3. Run 'pim context --pod ${podId}' to pull initial pod state`));
+      console.log(chalk.dim(`    4. Start coding — commits will auto-report to PIM\n`));
     });
 }
 

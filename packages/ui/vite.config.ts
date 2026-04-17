@@ -10,7 +10,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@council/shared": path.resolve(__dirname, "../shared/src"),
+      "@pim/shared": path.resolve(__dirname, "../shared/src"),
     },
   },
   server: {

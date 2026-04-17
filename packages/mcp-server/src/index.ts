@@ -7,7 +7,7 @@ import { registerResources } from "./resources.js";
 import { registerPrompts } from "./prompts.js";
 
 const server = new McpServer({
-  name: "ai-council",
+  name: "pim",
   version: "0.1.0",
 });
 

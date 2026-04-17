@@ -1,5 +1,5 @@
 {
-  "name": "@council/ui",
+  "name": "@pim/ui",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@council/shared": "workspace:*",
+    "@pim/shared": "workspace:*",
     "@react-spectrum/s2": "^1.2.0",
     "date-fns": "^4.1.0",
     "markdown-it": "^14.1.1",

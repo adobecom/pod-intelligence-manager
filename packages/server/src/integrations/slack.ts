@@ -1,5 +1,5 @@
 import { WebClient } from "@slack/web-api";
-import type { ContextSearchHit } from "@council/shared";
+import type { ContextSearchHit } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate, isoDaysAgo } from "./types.js";
 
 // Per-workspace user tokens. Empty entries are skipped.

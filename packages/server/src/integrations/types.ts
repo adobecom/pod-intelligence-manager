@@ -1,4 +1,4 @@
-import type { ContextSearchHit, ContextSource } from "@council/shared";
+import type { ContextSearchHit, ContextSource } from "@pim/shared";
 
 export interface IntegrationSearchOpts {
   query: string;

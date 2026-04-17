@@ -13,7 +13,7 @@ import type {
   KnowledgeQueryResult,
   ContextSearchRequest,
   ContextSearchResult,
-} from "@council/shared";
+} from "@pim/shared";
 
 export interface SessionContextOptions {
   learningsMaxTokens?: number;
@@ -31,8 +31,8 @@ export interface SessionContext {
   externalContext?: ContextSearchResult;
 }
 
-// Pod-agnostic helper for callers that don't need a full CouncilClient.
-// Used by the `council search` CLI (which should not require COUNCIL_POD_ID).
+// Pod-agnostic helper for callers that don't need a full PimClient.
+// Used by the `pim search` CLI (which should not require PIM_POD_ID).
 export async function searchContext(
   baseUrl: string,
   request: ContextSearchRequest,
@@ -44,7 +44,7 @@ export async function searchContext(
   });
 }
 
-export type CouncilClientConfig =
+export type PimClientConfig =
   | { baseUrl: string; agentId: string; scope: Scope; podId: string; projectId?: undefined }
   | { baseUrl: string; agentId: string; scope: Scope; projectId: string; podId?: undefined };
 
@@ -62,7 +62,7 @@ export interface ReportInput {
 export interface ReportResult {
   id: string;
   update: ContextUpdate | ProjectContextUpdate;
-  council: {
+  pim: {
     classification: string;
     merged: boolean;
     conflictCreated: boolean;
@@ -75,19 +75,19 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Council API error ${res.status}: ${body}`);
+    throw new Error(`PIM API error ${res.status}: ${body}`);
   }
   return res.json() as Promise<T>;
 }
 
-export class CouncilClient {
-  private config: CouncilClientConfig;
+export class PimClient {
+  private config: PimClientConfig;
 
-  constructor(config: CouncilClientConfig) {
+  constructor(config: PimClientConfig) {
     const hasPod = Boolean(config.podId);
     const hasProj = Boolean(config.projectId);
     if (hasPod === hasProj) {
-      throw new Error("CouncilClient requires exactly one of podId or projectId");
+      throw new Error("PimClient requires exactly one of podId or projectId");
     }
     this.config = config;
   }
@@ -100,7 +100,7 @@ export class CouncilClient {
     return `${this.config.baseUrl}${path}`;
   }
 
-  // Submit a context update to the Council
+  // Submit a context update to PIM
   async report(input: ReportInput): Promise<ReportResult> {
     const path = this.isPodMode()
       ? `/api/pods/${this.config.podId}/context-updates`

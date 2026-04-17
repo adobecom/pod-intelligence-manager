@@ -16,7 +16,7 @@ import type {
   CurationRequest,
   ContextSearchRequest,
   ContextSearchResult,
-} from "@council/shared";
+} from "@pim/shared";
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -271,7 +271,7 @@ export interface ContextUpdateInput {
 export interface SubmitResult {
   id: string;
   update: ContextUpdate;
-  council: {
+  pim: {
     classification: string;
     merged: boolean;
     conflictCreated: boolean;
@@ -305,7 +305,7 @@ export async function submitContextUpdate(
 export interface ProjectSubmitResult {
   id: string;
   update: ProjectContextUpdate;
-  council: {
+  pim: {
     classification: string;
     merged: boolean;
     conflictCreated: boolean;

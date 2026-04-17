@@ -13,18 +13,18 @@ function git(args: string[]): string {
 }
 
 function fail(msg: string, strict: boolean): void {
-  console.error(`[council-hook] ${msg}`);
+  console.error(`[pim-hook] ${msg}`);
   if (strict) process.exit(1);
   process.exit(0);
 }
 
 async function postCommit(): Promise<void> {
   const config = resolveConfig();
-  const strict = process.env.COUNCIL_HOOK_STRICT === "1";
+  const strict = process.env.PIM_HOOK_STRICT === "1";
 
   if (!config) {
     fail(
-      "Skipping: set COUNCIL_AGENT_ID, COUNCIL_SCOPE, and either COUNCIL_POD_ID or COUNCIL_PROJECT_ID (or .council.json).",
+      "Skipping: set PIM_AGENT_ID, PIM_SCOPE, and either PIM_POD_ID or PIM_PROJECT_ID (or .pim.json).",
       strict,
     );
     return;
@@ -86,21 +86,21 @@ async function postCommit(): Promise<void> {
 
   if (!res.ok) {
     const text = await res.text();
-    fail(`Council POST failed ${res.status}: ${text}`, strict);
+    fail(`PIM POST failed ${res.status}: ${text}`, strict);
     return;
   }
 
   const label = config.mode === "pod" ? config.podId : config.projectId;
-  console.error(`[council-hook] Reported commit to Council (${label})`);
+  console.error(`[pim-hook] Reported commit to PIM (${label})`);
 }
 
 async function postRewrite(): Promise<void> {
   const config = resolveConfig();
-  const strict = process.env.COUNCIL_HOOK_STRICT === "1";
+  const strict = process.env.PIM_HOOK_STRICT === "1";
 
   if (!config) {
     fail(
-      "Skipping: set COUNCIL_AGENT_ID, COUNCIL_SCOPE, and either COUNCIL_POD_ID or COUNCIL_PROJECT_ID (or .council.json).",
+      "Skipping: set PIM_AGENT_ID, PIM_SCOPE, and either PIM_POD_ID or PIM_PROJECT_ID (or .pim.json).",
       strict,
     );
     return;
@@ -144,15 +144,15 @@ async function postRewrite(): Promise<void> {
 
   if (!res.ok) {
     const text = await res.text();
-    fail(`Council POST failed ${res.status}: ${text}`, strict);
+    fail(`PIM POST failed ${res.status}: ${text}`, strict);
     return;
   }
 
   const label = config.mode === "pod" ? config.podId : config.projectId;
-  console.error(`[council-hook] Reported post-rewrite to Council (${label})`);
+  console.error(`[pim-hook] Reported post-rewrite to PIM (${label})`);
 }
 
-const kind = process.env.COUNCIL_HOOK_KIND ?? "";
+const kind = process.env.PIM_HOOK_KIND ?? "";
 
 async function main(): Promise<void> {
   if (kind === "post-commit") {
@@ -163,11 +163,11 @@ async function main(): Promise<void> {
     await postRewrite();
     return;
   }
-  console.error("[council-hook] COUNCIL_HOOK_KIND must be post-commit or post-rewrite");
+  console.error("[pim-hook] PIM_HOOK_KIND must be post-commit or post-rewrite");
   process.exit(1);
 }
 
 main().catch((e) => {
-  console.error("[council-hook]", e);
-  process.exit(process.env.COUNCIL_HOOK_STRICT === "1" ? 1 : 0);
+  console.error("[pim-hook]", e);
+  process.exit(process.env.PIM_HOOK_STRICT === "1" ? 1 : 0);
 });

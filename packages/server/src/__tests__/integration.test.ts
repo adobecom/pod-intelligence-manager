@@ -161,8 +161,8 @@ describe("Integration: API endpoints", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.id).toMatch(/^ctx-/);
-    expect(body.council.classification).toBe("additive");
-    expect(body.council.merged).toBe(true);
+    expect(body.pim.classification).toBe("additive");
+    expect(body.pim.merged).toBe(true);
   });
 
   it("POST /api/pods/:podId/context-updates rejects invalid input", async () => {
@@ -225,7 +225,7 @@ describe("Integration: API endpoints", () => {
     expect(res.statusCode).toBe(201);
     const body = res.json();
     // Should be classified as overlapping due to keyword matches
-    expect(["overlapping", "additive"]).toContain(body.council.classification);
+    expect(["overlapping", "additive"]).toContain(body.pim.classification);
   });
 
   it("GET pod reflects pod_areas and milestone derived from context stream", async () => {
@@ -379,9 +379,9 @@ describe("Integration: API endpoints", () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    const body = res.json() as { id: string; council: { note?: string } };
+    const body = res.json() as { id: string; pim: { note?: string } };
     expect(body.id).toMatch(/^pcu-/);
-    expect(body.council.note).toContain("Project context");
+    expect(body.pim.note).toContain("Project context");
 
     const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/context-updates` });
     expect(list.statusCode).toBe(200);

@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { Pod, OrgPodSummary, ArchivedPod } from "@council/shared";
-import { getPressureLevel, getPressureLabel } from "@council/shared";
+import type { Pod, OrgPodSummary, ArchivedPod } from "@pim/shared";
+import { getPressureLevel, getPressureLabel } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
 
 export function registerPodCommands(program: Command) {

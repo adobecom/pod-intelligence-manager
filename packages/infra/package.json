@@ -1,5 +1,5 @@
 {
-  "name": "@council/infra",
+  "name": "@pim/infra",
   "version": "0.0.1",
   "private": true,
   "type": "module",

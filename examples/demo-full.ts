@@ -1,20 +1,20 @@
 /**
- * AI Council — Full Lifecycle Demo
+ * PIM — Full Lifecycle Demo
  *
- * Walks through the complete Council pipeline:
+ * Walks through the complete PIM pipeline:
  *   Part A: Creates a fresh pod, submits updates, shows the pipeline
  *   Part B: Uses the seeded "Checkout Redesign" pod to demo conflicts & resolution
  *
  * Usage:
- *   1. Start the server: pnpm --filter @council/server dev
- *   2. Optionally start the UI: pnpm --filter @council/ui dev
+ *   1. Start the server: pnpm --filter @pim/server dev
+ *   2. Optionally start the UI: pnpm --filter @pim/ui dev
  *   3. Run this script: npx tsx examples/demo-full.ts
  *
  * Note: Without AWS_BEARER_TOKEN_BEDROCK, updates are merged deterministically (no LLM).
  * The seeded pods have pre-existing conflicts to demonstrate the full conflict flow.
  */
 
-import { CouncilClient } from "../packages/sdk/src/client.js";
+import { PimClient } from "../packages/sdk/src/client.js";
 
 const BASE = "http://localhost:4000";
 const DIVIDER = "═".repeat(64);
@@ -42,7 +42,7 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 
 async function main() {
   console.log(`\n${DIVIDER}`);
-  console.log("  AI Council — Full Lifecycle Demo");
+  console.log("  PIM — Full Lifecycle Demo");
   console.log(DIVIDER);
 
   // ═══════════════════════════════════════════════════════════
@@ -66,7 +66,7 @@ async function main() {
 
   // ── Step 2: Submit a progress update (auto-merge) ──
   step(2, "Submit a progress update (auto-merge)");
-  const feAgent = new CouncilClient({
+  const feAgent = new PimClient({
     baseUrl: BASE,
     podId: pod.pod_id,
     agentId: "fe-agent",
@@ -79,13 +79,13 @@ async function main() {
     artifacts: [{ type: "component", path: "src/components/ProductList.tsx" }],
     status: "completed",
   });
-  console.log(`  Classification: ${r1.council.classification}`);
-  console.log(`  Merged: ${r1.council.merged}`);
+  console.log(`  Classification: ${r1.pim.classification}`);
+  console.log(`  Merged: ${r1.pim.merged}`);
   await pause();
 
   // ── Step 3: Submit a backend update ──
   step(3, "Submit a backend progress update");
-  const beAgent = new CouncilClient({
+  const beAgent = new PimClient({
     baseUrl: BASE,
     podId: pod.pod_id,
     agentId: "be-agent",
@@ -98,8 +98,8 @@ async function main() {
     artifacts: [{ type: "api", path: "src/routes/products.ts" }],
     status: "completed",
   });
-  console.log(`  Classification: ${r2.council.classification}`);
-  console.log(`  Merged: ${r2.council.merged}`);
+  console.log(`  Classification: ${r2.pim.classification}`);
+  console.log(`  Merged: ${r2.pim.merged}`);
   await pause();
 
   // ── Step 4: Record a decision ──
@@ -110,7 +110,7 @@ async function main() {
     details: "TanStack Query handles caching, deduplication, and background refetching. Preferred over manual fetch + useState for the product listing and cart pages.",
     status: "completed",
   });
-  console.log(`  Classification: ${r3.council.classification}`);
+  console.log(`  Classification: ${r3.pim.classification}`);
   hint("Check the Living Doc — decisions appear in the 'Recent Decisions' section.");
   await pause();
 
@@ -124,7 +124,7 @@ async function main() {
     blocked_by: ["INFRA-412"],
     needs_input_from: [{ role: "infra", question: "ETA for DNS fix?" }],
   });
-  console.log(`  Classification: ${r4.council.classification}`);
+  console.log(`  Classification: ${r4.pim.classification}`);
   console.log(`  This update will appear in the Context Feed as a blocker.`);
   await pause();
 

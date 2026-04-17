@@ -17,11 +17,11 @@ function main(): void {
   const root = findGitRoot();
   if (!root) return; // Not in a git repo — nothing to check
 
-  const lastPullPath = path.join(root, ".council", "last-pull");
+  const lastPullPath = path.join(root, ".pim", "last-pull");
 
   if (!fs.existsSync(lastPullPath)) {
     console.error(
-      "[council] Pod context has not been pulled this session. Run: council context (or /sync) before proceeding.",
+      "[pim] Pod context has not been pulled this session. Run: pim context (or /sync) before proceeding.",
     );
     return;
   }
@@ -31,7 +31,7 @@ function main(): void {
     const lastPullTime = new Date(lastPull).getTime();
 
     if (isNaN(lastPullTime)) {
-      console.error("[council] Invalid last-pull timestamp. Run: council context to refresh.");
+      console.error("[pim] Invalid last-pull timestamp. Run: pim context to refresh.");
       return;
     }
 
@@ -40,12 +40,12 @@ function main(): void {
       const hours = Math.floor(ageMs / (60 * 60 * 1000));
       const mins = Math.floor((ageMs % (60 * 60 * 1000)) / (60 * 1000));
       console.error(
-        `[council] Pod context is stale (${hours}h ${mins}m old). Run: council context --diff to see what changed.`,
+        `[pim] Pod context is stale (${hours}h ${mins}m old). Run: pim context --diff to see what changed.`,
       );
     }
   } catch {
     // Can't read the file — warn once
-    console.error("[council] Could not check context freshness. Run: council context to refresh.");
+    console.error("[pim] Could not check context freshness. Run: pim context to refresh.");
   }
 }
 

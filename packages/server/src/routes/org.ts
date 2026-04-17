@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
-import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "@council/shared";
-import { extractKnowledgeEnhanced } from "../council/agents/knowledge-extraction.js";
+import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "@pim/shared";
+import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { addLearningsToGraph } from "../services/knowledge-graph.js";
 import { broadcastToAll } from "../ws/index.js";
 

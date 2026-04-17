@@ -11,7 +11,7 @@ import {
   getRelevantLearnings,
   addLearningsToGraph,
 } from "../knowledge-graph.js";
-import type { EnhancedPodLearning } from "@council/shared";
+import type { EnhancedPodLearning } from "@pim/shared";
 
 let orgSeq = 0;
 

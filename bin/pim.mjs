@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Global `council` entry when this repo is linked (`pnpm link --global`).
+ * Global `pim` entry when this repo is linked (`pnpm link --global`).
  * Runs the CLI from TypeScript source via the workspace tsx dependency.
  */
 import { spawnSync } from "node:child_process";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const binDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(binDir, "..");
-/** Shell cwd when the user invoked `council` — must be preserved for git + init file paths. */
+/** Shell cwd when the user invoked `pim` — must be preserved for git + init file paths. */
 const userCwd = process.cwd();
 const cliEntry = path.join(repoRoot, "packages/cli/src/index.ts");
 const requireFromRoot = createRequire(path.join(repoRoot, "package.json"));
@@ -23,13 +23,13 @@ try {
   if (!existsSync(tsxCli)) throw new Error("missing tsx cli");
 } catch {
   console.error(
-    "council: could not resolve tsx. From the ai-council clone root run:\n  pnpm install\n",
+    "pim: could not resolve tsx. From the pim clone root run:\n  pnpm install\n",
   );
   process.exit(1);
 }
 
 const result = spawnSync(process.execPath, [tsxCli, cliEntry, ...process.argv.slice(2)], {
-  // Never use repoRoot here: that made `council init` from another repo write into ai-council
+  // Never use repoRoot here: that made `pim init` from another repo write into pim
   // because `git rev-parse --show-toplevel` inherited this cwd.
   cwd: userCwd,
   stdio: "inherit",

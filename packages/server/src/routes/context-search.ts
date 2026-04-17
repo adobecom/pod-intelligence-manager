@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { ContextSearchRequest } from "@council/shared";
+import type { ContextSearchRequest } from "@pim/shared";
 import { searchContext } from "../services/context-search.js";
 import { validateBody } from "../middleware/validation.js";
 

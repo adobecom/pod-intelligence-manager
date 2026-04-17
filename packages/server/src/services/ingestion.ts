@@ -4,8 +4,8 @@ import db from "../db/connection.js";
 import { scanForSecrets } from "./secret-scan.js";
 import { scoreUpdate } from "./quality-scoring.js";
 import { broadcast } from "../ws/index.js";
-import { processUpdate, type CouncilResult } from "../council/master.js";
-import type { ContextUpdate } from "@council/shared";
+import { processUpdate, type PimResult } from "../pim/master.js";
+import type { ContextUpdate } from "@pim/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 import { scheduleAsyncQualityScore } from "./async-quality-score.js";
 
@@ -42,7 +42,7 @@ export type ContextUpdateInput = z.infer<typeof ContextUpdateInputSchema>;
 export interface IngestionResult {
   success: boolean;
   update?: ContextUpdate;
-  council?: CouncilResult;
+  pim?: PimResult;
   error?: string;
   secretFindings?: string[];
   deduplicated?: boolean;
@@ -89,7 +89,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
        AND timestamp > datetime('now', '-60 seconds')`
     ).get(podId, commitSha) as { id: string } | undefined;
     if (recent) {
-      return { success: true, update: undefined, council: undefined, deduplicated: true };
+      return { success: true, update: undefined, pim: undefined, deduplicated: true };
     }
   }
 
@@ -138,11 +138,11 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     payload: update,
   });
 
-  // 8. Run through Council Master (classify, route, regenerate living doc)
-  const councilResult = await processUpdate(update);
+  // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
+  const pimResult = await processUpdate(update);
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)
   scheduleAsyncQualityScore(podId, update.id);
 
-  return { success: true, update, council: councilResult };
+  return { success: true, update, pim: pimResult };
 }

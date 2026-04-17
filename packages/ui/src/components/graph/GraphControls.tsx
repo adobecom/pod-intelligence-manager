@@ -1,6 +1,6 @@
 import { SearchField, Switch } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@council/shared";
+import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@pim/shared";
 
 const controlsContainer = style({
   display: "flex",

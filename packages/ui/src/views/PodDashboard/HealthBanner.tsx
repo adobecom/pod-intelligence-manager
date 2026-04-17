@@ -1,5 +1,5 @@
 import { InlineAlert, Heading, Content } from "@react-spectrum/s2";
-import { getPressureLevel } from "@council/shared";
+import { getPressureLevel } from "@pim/shared";
 
 interface HealthBannerProps {
   pressure: number;
@@ -16,7 +16,7 @@ export function HealthBanner({ pressure, openConflicts }: HealthBannerProps) {
   return (
     <InlineAlert variant={isCritical ? "negative" : "notice"}>
       <Heading>
-        Council Health: {isCritical ? "Critical" : "Degraded"}
+        PIM Health: {isCritical ? "Critical" : "Degraded"}
       </Heading>
       <Content>
         {isCritical

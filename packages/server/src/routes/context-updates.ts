@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
-import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@council/shared";
+import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@pim/shared";
 import { ingestContextUpdate } from "../services/ingestion.js";
 
 interface ContextUpdateRow {
@@ -87,6 +87,6 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
       return { deduplicated: true, message: "Commit already reported by another source" };
     }
     reply.code(201);
-    return { id: result.update!.id, update: result.update, council: result.council };
+    return { id: result.update!.id, update: result.update, pim: result.pim };
   });
 }

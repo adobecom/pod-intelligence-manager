@@ -1,10 +1,10 @@
 {
-  "name": "@council/cli",
+  "name": "@pim/cli",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "bin": {
-    "council": "./bin/council.mjs"
+    "pim": "./bin/pim.mjs"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -13,8 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@council/sdk": "workspace:*",
-    "@council/shared": "workspace:*",
+    "@pim/sdk": "workspace:*",
+    "@pim/shared": "workspace:*",
     "chalk": "^5.4.1",
     "commander": "^13.1.0"
   },

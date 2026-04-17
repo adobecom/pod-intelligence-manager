@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { Network, type Options } from "vis-network";
 import { DataSet } from "vis-data";
-import type { KnowledgeGraph, KnowledgeNode, KnowledgeQueryFilters } from "@council/shared";
+import type { KnowledgeGraph, KnowledgeNode, KnowledgeQueryFilters } from "@pim/shared";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 
 const NODE_COLORS: Record<string, string> = {

@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@council/shared": ["../shared/src"]
+      "@pim/shared": ["../shared/src"]
     }
   },
   "include": ["src"]

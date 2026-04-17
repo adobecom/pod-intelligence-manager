@@ -19,7 +19,7 @@ vi.mock("../quality-scoring.js", () => ({
   scoreUpdate: vi.fn(),
 }));
 
-vi.mock("../../council/master.js", () => ({
+vi.mock("../../pim/master.js", () => ({
   processUpdate: vi.fn(),
 }));
 
@@ -33,7 +33,7 @@ import db from "../../db/connection.js";
 import { broadcast } from "../../ws/index.js";
 import { scanForSecrets } from "../secret-scan.js";
 import { scoreUpdate } from "../quality-scoring.js";
-import { processUpdate } from "../../council/master.js";
+import { processUpdate } from "../../pim/master.js";
 
 function validInput() {
   return {
@@ -151,10 +151,10 @@ describe("ingestContextUpdate", () => {
     expect(refreshPodSnapshotFromContext).toHaveBeenCalledWith("pod-1");
   });
 
-  it("calls processUpdate and returns council result", async () => {
+  it("calls processUpdate and returns pim result", async () => {
     const result = await ingestContextUpdate("pod-1", validInput());
     expect(processUpdate).toHaveBeenCalled();
-    expect(result.council).toEqual({
+    expect(result.pim).toEqual({
       classification: "additive",
       merged: true,
       conflictCreated: false,

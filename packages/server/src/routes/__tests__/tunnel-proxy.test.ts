@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import type { TunnelResponse } from "@council/shared";
+import type { TunnelResponse } from "@pim/shared";
 
 // Mock db
 vi.mock("../../db/connection.js", () => ({

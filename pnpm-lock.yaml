@@ -20,10 +20,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@council/sdk':
+      '@pim/sdk':
         specifier: workspace:*
         version: link:../sdk
-      '@council/shared':
+      '@pim/shared':
         specifier: workspace:*
         version: link:../shared
       chalk:
@@ -86,7 +86,7 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@council/shared':
+      '@pim/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -99,7 +99,7 @@ importers:
 
   packages/server:
     dependencies:
-      '@council/shared':
+      '@pim/shared':
         specifier: workspace:*
         version: link:../shared
       '@fastify/cors':
@@ -151,7 +151,7 @@ importers:
 
   packages/ui:
     dependencies:
-      '@council/shared':
+      '@pim/shared':
         specifier: workspace:*
         version: link:../shared
       '@react-spectrum/s2':

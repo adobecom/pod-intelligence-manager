@@ -8,11 +8,11 @@ import {
   PROTOCOL_MARKER_END,
 } from "../templates/pod-agent-protocol.md.js";
 
-describe("council leave", () => {
+describe("pim leave", () => {
   let tmp: string;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "council-leave-"));
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pim-leave-"));
     spawnSync("git", ["init"], { cwd: tmp, encoding: "utf-8" });
   });
 
@@ -20,7 +20,7 @@ describe("council leave", () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("strips protocol markers from CLAUDE.md and removes podId from .council.json", async () => {
+  it("strips protocol markers from CLAUDE.md and removes podId from .pim.json", async () => {
     const prev = process.cwd();
     process.chdir(tmp);
 
@@ -30,7 +30,7 @@ describe("council leave", () => {
       "utf-8",
     );
     fs.writeFileSync(
-      path.join(tmp, ".council.json"),
+      path.join(tmp, ".pim.json"),
       JSON.stringify({ podId: "pod-x", serverUrl: "http://localhost:4000", scope: "backend" }, null, 2),
       "utf-8",
     );
@@ -38,7 +38,7 @@ describe("council leave", () => {
     const { registerLeaveCommand } = await import("../commands/leave.js");
     const { Command } = await import("commander");
     const program = new Command();
-    program.name("council");
+    program.name("pim");
     registerLeaveCommand(program);
 
     try {
@@ -51,7 +51,7 @@ describe("council leave", () => {
     expect(md).not.toContain(PROTOCOL_MARKER_BEGIN);
     expect(md).not.toContain("pod-x");
 
-    const cfg = JSON.parse(fs.readFileSync(path.join(tmp, ".council.json"), "utf-8")) as Record<string, unknown>;
+    const cfg = JSON.parse(fs.readFileSync(path.join(tmp, ".pim.json"), "utf-8")) as Record<string, unknown>;
     expect(cfg.podId).toBeUndefined();
     expect(cfg.serverUrl).toBe("http://localhost:4000");
     expect(cfg.scope).toBe("backend");

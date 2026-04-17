@@ -5,7 +5,7 @@ import type {
   KnowledgeNode,
   KnowledgeQueryFilters,
   CurationAction,
-} from "@council/shared";
+} from "@pim/shared";
 import * as api from "../services/api";
 
 interface KnowledgeStore {

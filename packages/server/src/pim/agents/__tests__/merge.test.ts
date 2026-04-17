@@ -22,7 +22,7 @@ vi.mock("fs", () => ({
 
 import { deterministicMerge, llmMerge } from "../merge.js";
 import { isLLMAvailable, callLLMJSON } from "../../llm.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 
 function makeUpdate(overrides: Partial<ContextUpdate> = {}): ContextUpdate {
   return {

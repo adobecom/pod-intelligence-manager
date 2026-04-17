@@ -291,7 +291,7 @@ Based on this context:
 1. Identify any open conflicts or blockers that affect your work
 2. Note recent updates from other agents that you should be aware of
 3. Check if any org learnings are relevant to your planned work
-4. Proceed with your task, knowing that commits will auto-report to the Council`);
+4. Proceed with your task, knowing that commits will auto-report to PIM`);
     },
   );
 

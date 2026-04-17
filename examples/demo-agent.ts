@@ -1,30 +1,30 @@
 /**
- * Demo Agent — exercises the full Council pipeline via the SDK.
+ * Demo Agent — exercises the full PIM pipeline via the SDK.
  *
  * Usage:
- *   1. Start the server: pnpm --filter @council/server dev
+ *   1. Start the server: pnpm --filter @pim/server dev
  *   2. Run this script:  npx tsx examples/demo-agent.ts
  */
 
-import { CouncilClient } from "../packages/sdk/src/client.js";
+import { PimClient } from "../packages/sdk/src/client.js";
 
 const DIVIDER = "═".repeat(60);
 
 async function main() {
   console.log(DIVIDER);
-  console.log("  AI Council — Demo Agent");
+  console.log("  PIM — Demo Agent");
   console.log(DIVIDER);
   console.log();
 
   // Create two agents in different scopes
-  const feAgent = new CouncilClient({
+  const feAgent = new PimClient({
     baseUrl: "http://localhost:4000",
     podId: "pod-checkout-redesign",
     agentId: "demo-fe-agent",
     scope: "frontend",
   });
 
-  const beAgent = new CouncilClient({
+  const beAgent = new PimClient({
     baseUrl: "http://localhost:4000",
     podId: "pod-checkout-redesign",
     agentId: "demo-be-agent",
@@ -50,8 +50,8 @@ async function main() {
     status: "completed",
   });
   console.log(`   ID: ${r1.id}`);
-  console.log(`   Classification: ${r1.council.classification}`);
-  console.log(`   Merged: ${r1.council.merged}`);
+  console.log(`   Classification: ${r1.pim.classification}`);
+  console.log(`   Merged: ${r1.pim.merged}`);
   console.log();
 
   // 3. Submit a decision
@@ -63,7 +63,7 @@ async function main() {
     status: "completed",
   });
   console.log(`   ID: ${r2.id}`);
-  console.log(`   Classification: ${r2.council.classification}`);
+  console.log(`   Classification: ${r2.pim.classification}`);
   console.log();
 
   // 4. Submit a blocker
@@ -77,7 +77,7 @@ async function main() {
     needs_input_from: [{ role: "infra", question: "When will Stripe test keys be available?" }],
   });
   console.log(`   ID: ${r3.id}`);
-  console.log(`   Classification: ${r3.council.classification}`);
+  console.log(`   Classification: ${r3.pim.classification}`);
   console.log();
 
   // 5. Check current conflicts

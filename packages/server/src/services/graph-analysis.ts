@@ -12,7 +12,7 @@ import type {
   KnowledgeEdgeType,
   KnowledgeGraph,
   CommunitySummary,
-} from "@council/shared";
+} from "@pim/shared";
 
 // --- Keyword Extraction ---
 

@@ -10,7 +10,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const dbPath = path.join(DATA_DIR, "council.db");
+const dbPath = path.join(DATA_DIR, "pim.db");
 const db: DatabaseType = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");

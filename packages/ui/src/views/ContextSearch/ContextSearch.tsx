@@ -12,8 +12,8 @@ import {
   Content,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import { CONTEXT_SOURCES } from "@council/shared";
-import type { ContextSource, ContextSearchHit } from "@council/shared";
+import { CONTEXT_SOURCES } from "@pim/shared";
+import type { ContextSource, ContextSearchHit } from "@pim/shared";
 import { useSearchStore } from "../../stores/searchStore";
 
 const page = style({ padding: 24, maxWidth: "[980px]", marginX: "auto" });

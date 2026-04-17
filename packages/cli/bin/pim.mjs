@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `council` bin when `@council/cli` is linked or installed.
+ * `pim` bin when `@pim/cli` is linked or installed.
  * Runs the CLI from TypeScript via tsx (same behavior as the monorepo root wrapper).
  */
 import { spawnSync } from "node:child_process";
@@ -22,7 +22,7 @@ try {
   if (!existsSync(tsxCli)) throw new Error("missing tsx cli");
 } catch {
   console.error(
-    "council: could not resolve tsx. In the ai-council workspace run:\n  pnpm install\n",
+    "pim: could not resolve tsx. In the pim workspace run:\n  pnpm install\n",
   );
   process.exit(1);
 }

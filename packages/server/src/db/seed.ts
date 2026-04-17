@@ -9,7 +9,7 @@ import {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "@council/shared";
+} from "@pim/shared";
 
 const DEFAULT_PROJECT_ID = "project-demo";
 

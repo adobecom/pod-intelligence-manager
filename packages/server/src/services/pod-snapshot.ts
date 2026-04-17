@@ -1,5 +1,5 @@
 import db from "../db/connection.js";
-import type { Milestone } from "@council/shared";
+import type { Milestone } from "@pim/shared";
 
 /** Six scopes; must match `pod_areas` rows created for each pod. */
 export const POD_SCOPES = ["frontend", "backend", "design", "qa", "infra", "pm"] as const;

@@ -320,7 +320,7 @@ async function runLLMIntelligenceLint(
   const context = buildLintLLMContext(podId, detSummary);
   if (!context) return [];
 
-  const system = `You are the AI Council lint assistant. Given pod state (areas, recent Markdown context updates, living doc excerpt) and a list of findings already produced by deterministic rules, add ONLY new advisory findings of types:
+  const system = `You are the PIM lint assistant. Given pod state (areas, recent Markdown context updates, living doc excerpt) and a list of findings already produced by deterministic rules, add ONLY new advisory findings of types:
 - implicit_assumption — work depends on something not formally decided or documented.
 - spec_drift — agent updates reference behaviors or terms not reflected in the living doc / spec.
 

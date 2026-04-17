@@ -17,7 +17,7 @@ function podResourceLister(pathSuffix: string, descriptionFn: (name: string) => 
       const pods = await apiFetch<OrgPodSummary[]>("/api/org/pods");
       return {
         resources: pods.map((p) => ({
-          uri: `council://pods/${p.pod_id}${pathSuffix}`,
+          uri: `pim://pods/${p.pod_id}${pathSuffix}`,
           name: `${p.name}${pathSuffix}`,
           description: descriptionFn(p.name),
         })),
@@ -55,28 +55,28 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "org-pods",
-    "council://org/pods",
+    "pim://org/pods",
     { description: "All active pod summaries (IDs, names, pressure, conflicts, agents)" },
     async (uri) => jsonContents(uri, await apiFetch("/api/org/pods")),
   );
 
   server.resource(
     "org-overlaps",
-    "council://org/overlaps",
+    "pim://org/overlaps",
     { description: "Cross-pod overlap advisories" },
     async (uri) => jsonContents(uri, await apiFetch("/api/org/overlaps")),
   );
 
   server.resource(
     "org-archived",
-    "council://org/archived",
+    "pim://org/archived",
     { description: "Archived pods with completion dates and final pressure" },
     async (uri) => jsonContents(uri, await apiFetch("/api/org/archived")),
   );
 
   server.resource(
     "knowledge-stats",
-    "council://knowledge/stats",
+    "pim://knowledge/stats",
     { description: "Knowledge graph statistics (node/edge counts, top domains)" },
     async (uri) => jsonContents(uri, await apiFetch("/api/knowledge/stats")),
   );
@@ -85,7 +85,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod",
-    new ResourceTemplate("council://pods/{pod_id}", {
+    new ResourceTemplate("pim://pods/{pod_id}", {
       list: podResourceLister("", (name) => `Pod metadata for ${name}`),
     }),
     { description: "Pod metadata, areas, milestone, and pressure" },
@@ -95,7 +95,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod-living-doc",
-    new ResourceTemplate("council://pods/{pod_id}/living-doc", {
+    new ResourceTemplate("pim://pods/{pod_id}/living-doc", {
       list: podResourceLister("/living-doc", (name) => `Living doc for ${name}`),
     }),
     { description: "Living document markdown for a pod" },
@@ -105,7 +105,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod-conflicts",
-    new ResourceTemplate("council://pods/{pod_id}/conflicts", {
+    new ResourceTemplate("pim://pods/{pod_id}/conflicts", {
       list: podResourceLister("/conflicts", (name) => `Conflicts for ${name}`),
     }),
     { description: "All conflicts for a pod (open, in discussion, resolved)" },
@@ -115,7 +115,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod-context-updates",
-    new ResourceTemplate("council://pods/{pod_id}/context-updates", {
+    new ResourceTemplate("pim://pods/{pod_id}/context-updates", {
       list: podResourceLister("/context-updates", (name) => `Context updates for ${name}`),
     }),
     { description: "Context update feed for a pod (progress, blockers, decisions)" },
@@ -125,7 +125,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod-tunnels",
-    new ResourceTemplate("council://pods/{pod_id}/tunnels", {
+    new ResourceTemplate("pim://pods/{pod_id}/tunnels", {
       list: podResourceLister("/tunnels", (name) => `Tunnels for ${name}`),
     }),
     { description: "Active dev tunnels for a pod" },
@@ -135,7 +135,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "pod-lint-findings",
-    new ResourceTemplate("council://pods/{pod_id}/lint-findings", {
+    new ResourceTemplate("pim://pods/{pod_id}/lint-findings", {
       list: podResourceLister("/lint-findings", (name) => `Lint findings for ${name}`),
     }),
     { description: "Lint findings for a pod (consistency issues, stale blockers)" },
@@ -147,7 +147,7 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "knowledge-graph",
-    "council://knowledge/graph",
+    "pim://knowledge/graph",
     { description: "Full knowledge graph (nodes, edges, communities) — may be large" },
     async (uri) => jsonContents(uri, await apiFetch("/api/knowledge/graph")),
   );

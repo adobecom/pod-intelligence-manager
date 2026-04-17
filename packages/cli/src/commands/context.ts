@@ -2,30 +2,30 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { CouncilClient } from "@council/sdk";
-import type { SessionContext } from "@council/sdk";
-import type { Scope } from "@council/shared";
+import { PimClient } from "@pim/sdk";
+import type { SessionContext } from "@pim/sdk";
+import type { Scope } from "@pim/shared";
 import { getBaseUrl } from "../util.js";
 import { findGitRoot } from "../config.js";
 
 const SCOPES = new Set(["frontend", "backend", "design", "qa", "infra", "pm"]);
 
 function resolveSessionOpts(opts: Record<string, string | undefined>) {
-  const podId = opts.pod ?? process.env.COUNCIL_POD_ID;
-  const agentId = opts.agent ?? process.env.COUNCIL_AGENT_ID;
-  const scopeRaw = opts.scope ?? process.env.COUNCIL_SCOPE;
+  const podId = opts.pod ?? process.env.PIM_POD_ID;
+  const agentId = opts.agent ?? process.env.PIM_AGENT_ID;
+  const scopeRaw = opts.scope ?? process.env.PIM_SCOPE;
 
   if (!podId?.trim()) {
-    console.error(chalk.red("  Missing pod id: set COUNCIL_POD_ID or use --pod"));
+    console.error(chalk.red("  Missing pod id: set PIM_POD_ID or use --pod"));
     process.exit(1);
   }
   if (!agentId?.trim()) {
-    console.error(chalk.red("  Missing agent id: set COUNCIL_AGENT_ID or use --agent"));
+    console.error(chalk.red("  Missing agent id: set PIM_AGENT_ID or use --agent"));
     process.exit(1);
   }
   if (!scopeRaw?.trim()) {
     console.error(
-      chalk.red("  Missing scope: set COUNCIL_SCOPE or use --scope (frontend|backend|design|qa|infra|pm)"),
+      chalk.red("  Missing scope: set PIM_SCOPE or use --scope (frontend|backend|design|qa|infra|pm)"),
     );
     process.exit(1);
   }
@@ -40,7 +40,7 @@ function resolveSessionOpts(opts: Record<string, string | undefined>) {
 function formatMarkdownBundle(ctx: SessionContext): string {
   const lines: string[] = [];
 
-  lines.push(`# Council session context`);
+  lines.push(`# PIM session context`);
   lines.push(`Pulled at: ${ctx.pulledAt}`);
   lines.push("");
 
@@ -111,7 +111,7 @@ function formatBrief(ctx: SessionContext): string {
 function writeFreshnessMarker(): void {
   const root = findGitRoot();
   if (!root) return;
-  const dir = path.join(root, ".council");
+  const dir = path.join(root, ".pim");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "last-pull"), new Date().toISOString(), "utf-8");
 }
@@ -142,13 +142,13 @@ export function registerContextCommand(program: Command): void {
   program
     .command("context")
     .description("Pull bundled session context (living doc, pod, conflicts, learnings, recent updates)")
-    .option("-p, --pod <podId>", "Pod ID (else COUNCIL_POD_ID)")
-    .option("-a, --agent <id>", "Agent id (else COUNCIL_AGENT_ID)")
-    .option("--scope <scope>", "Scope (else COUNCIL_SCOPE)")
+    .option("-p, --pod <podId>", "Pod ID (else PIM_POD_ID)")
+    .option("-a, --agent <id>", "Agent id (else PIM_AGENT_ID)")
+    .option("--scope <scope>", "Scope (else PIM_SCOPE)")
     .option("--json", "Print JSON instead of markdown")
     .option("--brief", "Print one-screen summary")
     .option("--diff", "Show only what changed since last pull")
-    .option("-w, --write <file>", "Also write markdown bundle to a file (e.g. .council/last-context.md)")
+    .option("-w, --write <file>", "Also write markdown bundle to a file (e.g. .pim/last-context.md)")
     .option("--learnings-tokens <n>", "Token budget for relevant learnings", "2000")
     .option("--recent <n>", "Max recent context updates to include", "20")
     .action(async (opts) => {
@@ -158,7 +158,7 @@ export function registerContextCommand(program: Command): void {
       const learningsMaxTokens = parseInt(opts.learningsTokens, 10);
       const recentLimit = parseInt(opts.recent, 10);
 
-      const client = new CouncilClient({
+      const client = new PimClient({
         baseUrl: base,
         podId,
         agentId,
@@ -177,7 +177,7 @@ export function registerContextCommand(program: Command): void {
 
       // Determine output path for last-context.md
       const root = findGitRoot();
-      const lastContextPath = root ? path.join(root, ".council", "last-context.md") : null;
+      const lastContextPath = root ? path.join(root, ".pim", "last-context.md") : null;
 
       if (opts.diff && lastContextPath) {
         const diffOutput = diffWithLast(md, lastContextPath);

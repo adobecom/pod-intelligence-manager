@@ -7,7 +7,7 @@ import {
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ContextUpdate, ProjectContextUpdate } from "@council/shared";
+import type { ContextUpdate, ProjectContextUpdate } from "@pim/shared";
 import { RelativeTime } from "../../components/RelativeTime";
 import { QualityBadge } from "../../components/QualityBadge";
 

@@ -1,4 +1,4 @@
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 import { classifyUpdate, type Classification } from "./classifier.js";
 import { deterministicMerge, llmMerge } from "./agents/merge.js";
 import { createConflict } from "./agents/conflict.js";
@@ -15,7 +15,7 @@ import {
   type ScoutRecommendation,
 } from "./agents/conflict-scout.js";
 
-export interface CouncilResult {
+export interface PimResult {
   classification: Classification;
   merged: boolean;
   conflictCreated: boolean;
@@ -25,7 +25,7 @@ export interface CouncilResult {
   scout_recommendation?: ScoutRecommendation | null;
 }
 
-export async function processUpdate(update: ContextUpdate): Promise<CouncilResult> {
+export async function processUpdate(update: ContextUpdate): Promise<PimResult> {
   const classification = classifyUpdate(update);
 
   let scout_used = false;

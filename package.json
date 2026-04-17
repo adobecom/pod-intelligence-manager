@@ -1,16 +1,16 @@
 {
-  "name": "ai-council",
+  "name": "pim",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "bin": {
-    "council": "bin/council.mjs"
+    "pim": "bin/pim.mjs"
   },
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "council": "tsx packages/cli/src/index.ts",
+    "pim": "tsx packages/cli/src/index.ts",
     "install-cli": "pnpm install && pnpm link --global"
   },
   "pnpm": {

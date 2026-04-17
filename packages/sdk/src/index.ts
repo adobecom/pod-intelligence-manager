@@ -1,6 +1,6 @@
-export { CouncilClient, searchContext } from "./client.js";
+export { PimClient, searchContext } from "./client.js";
 export type {
-  CouncilClientConfig,
+  PimClientConfig,
   ReportInput,
   ReportResult,
   SessionContext,

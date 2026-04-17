@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@council/shared";
+import type { ContextSearchHit } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 // Fluffyjaws is a conversational RAG API, not a REST search endpoint. The

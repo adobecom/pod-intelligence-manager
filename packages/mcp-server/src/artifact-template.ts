@@ -1,12 +1,12 @@
 /**
- * Artifact template for the AI Council pod dashboard.
+ * Artifact template for the PIM pod dashboard.
  * Produces a single-file React component designed for Claude.ai's artifact sandbox.
  * Tailwind CSS + lucide-react only — no external packages.
  */
 
 export function buildArtifact(data: unknown): string {
   const json = JSON.stringify(data, null, 2);
-  return TEMPLATE.replace("__COUNCIL_DATA__", json);
+  return TEMPLATE.replace("__PIM_DATA__", json);
 }
 
 const TEMPLATE = `import { useState, useMemo } from "react";
@@ -32,7 +32,7 @@ import {
 } from "lucide-react";
 
 // ─── Data ────────────────────────────────────────────────────────────────────
-const DATA = __COUNCIL_DATA__;
+const DATA = __PIM_DATA__;
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 
@@ -574,7 +574,7 @@ function ConflictDetail({ conflict }) {
       </div>
       {conflict.master_analysis && (
         <div>
-          <h4 className="text-sm font-medium text-gray-300 mb-1">Council Analysis</h4>
+          <h4 className="text-sm font-medium text-gray-300 mb-1">PIM analysis</h4>
           <p className="text-sm text-gray-400">{conflict.master_analysis}</p>
         </div>
       )}
@@ -835,7 +835,7 @@ const TABS = [
   { id: "doc", label: "Live Doc", icon: FileText },
 ];
 
-export default function CouncilDashboard() {
+export default function PimDashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [selectedConflict, setSelectedConflict] = useState(null);
 
