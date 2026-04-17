@@ -81,21 +81,21 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "org-archived-projects",
-    "council://org/archived-projects",
+    "pim://org/archived-projects",
     { description: "Archived initiatives: id, name, description, anatomy snapshot, created_at, archived_date" },
     async (uri) => jsonContents(uri, await apiFetch("/api/org/archived-projects")),
   );
 
   server.resource(
     "org-config",
-    "council://org/config",
+    "pim://org/config",
     { description: "Org-wide scope definitions (ids + labels) for pods, context updates, and project anatomy" },
     async (uri) => jsonContents(uri, await apiFetch("/api/org/config")),
   );
 
   server.resource(
     "org-projects",
-    "council://org/projects",
+    "pim://org/projects",
     { description: "All long-lived projects with anatomy and metadata" },
     async (uri) => jsonContents(uri, await apiFetch("/api/projects")),
   );
@@ -111,13 +111,13 @@ export function registerResources(server: McpServer) {
 
   server.resource(
     "project",
-    new ResourceTemplate("council://projects/{project_id}", {
+    new ResourceTemplate("pim://projects/{project_id}", {
       list: async () => {
         try {
           const projects = await apiFetch<ProjectSummary[]>("/api/projects");
           return {
             resources: projects.map((p) => ({
-              uri: `council://projects/${p.project_id}`,
+              uri: `pim://projects/${p.project_id}`,
               name: p.name,
               description: `Project metadata and anatomy for ${p.name}`,
             })),

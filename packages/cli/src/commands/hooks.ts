@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import chalk from "chalk";
+import { getCliPackageRoot } from "../cli-root.js";
 import { findGitRoot } from "../config.js";
 
 const MARKER_BEGIN = "# pim-git-hook-begin";
@@ -24,17 +24,8 @@ function isOurHook(content: string): boolean {
 }
 
 export function resolveRunnerPath(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const sibling = path.resolve(here, "../git-hook/run.js");
-  if (fs.existsSync(sibling)) return sibling;
-
-  // `bin/pim.mjs` runs the CLI via tsx from `src/`; source is `run.ts`, so `run.js`
-  // is not next to `hooks.ts`. After `pnpm --filter @pim/cli build`, use dist.
-  const pkgRoot = path.resolve(here, "../..");
-  const distRunner = path.join(pkgRoot, "dist/git-hook/run.js");
-  if (fs.existsSync(distRunner)) return distRunner;
-
-  return sibling;
+  const pkgRoot = getCliPackageRoot();
+  return path.join(pkgRoot, "dist/git-hook/run.js");
 }
 
 export function installHooks(): void {

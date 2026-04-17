@@ -11,7 +11,7 @@ export function registerReportCommand(program: Command) {
     .option("-p, --pod <podId>", "Pod ID")
     .option("--project <projectId>", "Project ID (between sprints / no active pod)")
     .requiredOption("-t, --type <type>", "Update type (progress|blocker|spec_change|question|decision)")
-    .requiredOption("--scope <scope>", "Scope (frontend|backend|design|qa|infra|pm)")
+    .requiredOption("--scope <scope>", "Org-defined scope id (see GET /api/org/config)")
     .requiredOption("--summary <text>", "Summary of the update")
     .option("--details <text>", "Detailed description", "")
     .option("--agent <id>", "Agent ID", "cli-user")

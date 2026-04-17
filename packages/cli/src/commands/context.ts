@@ -7,10 +7,13 @@ import type { SessionContext } from "@pim/sdk";
 import type { Scope } from "@pim/shared";
 import { getBaseUrl } from "../util.js";
 import { findGitRoot } from "../config.js";
+import { fetchOrgConfig, formatScopeChoicesForError, scopeIdsFromConfig } from "../org-config.js";
 
-const SCOPES = new Set(["frontend", "backend", "design", "qa", "infra", "pm"]);
-
-function resolveSessionOpts(opts: Record<string, string | undefined>) {
+function resolveSessionOpts(
+  opts: Record<string, string | undefined>,
+  allowedScopeIds: Set<string>,
+  scopeHelp: string,
+) {
   const podId = opts.pod ?? process.env.PIM_POD_ID;
   const agentId = opts.agent ?? process.env.PIM_AGENT_ID;
   const scopeRaw = opts.scope ?? process.env.PIM_SCOPE;
@@ -24,13 +27,11 @@ function resolveSessionOpts(opts: Record<string, string | undefined>) {
     process.exit(1);
   }
   if (!scopeRaw?.trim()) {
-    console.error(
-      chalk.red("  Missing scope: set PIM_SCOPE or use --scope (frontend|backend|design|qa|infra|pm)"),
-    );
+    console.error(chalk.red(`  Missing scope: set PIM_SCOPE or use --scope (${scopeHelp})`));
     process.exit(1);
   }
-  if (!SCOPES.has(scopeRaw)) {
-    console.error(chalk.red(`  Invalid scope "${scopeRaw}". Must be one of: ${[...SCOPES].join(", ")}`));
+  if (!allowedScopeIds.has(scopeRaw)) {
+    console.error(chalk.red(`  Invalid scope "${scopeRaw}". Must be one of: ${scopeHelp}`));
     process.exit(1);
   }
 
@@ -153,7 +154,17 @@ export function registerContextCommand(program: Command): void {
     .option("--recent <n>", "Max recent context updates to include", "20")
     .action(async (opts) => {
       const base = getBaseUrl(program);
-      const { podId, agentId, scope } = resolveSessionOpts(opts);
+      let orgConfig;
+      try {
+        orgConfig = await fetchOrgConfig(base);
+      } catch (e) {
+        console.error(chalk.red("\n  Cannot load org config from server."));
+        console.error(chalk.dim(`  ${e instanceof Error ? e.message : e}\n`));
+        process.exit(1);
+      }
+      const allowed = scopeIdsFromConfig(orgConfig);
+      const scopeHelp = formatScopeChoicesForError(orgConfig);
+      const { podId, agentId, scope } = resolveSessionOpts(opts, allowed, scopeHelp);
 
       const learningsMaxTokens = parseInt(opts.learningsTokens, 10);
       const recentLimit = parseInt(opts.recent, 10);

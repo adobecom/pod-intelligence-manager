@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 import { Command } from "commander";
+import { ensureCliPackageRootEnv } from "./cli-root.js";
+
+ensureCliPackageRootEnv();
+
 import { registerPodCommands } from "./commands/pod.js";
 import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";

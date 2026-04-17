@@ -44,7 +44,8 @@ function readPimJson(): PimJsonFile | null {
   }
 }
 
-function gitUserName(): string | null {
+/** Git `user.name` for default agent id in prompts / resolved config. */
+export function getGitUserName(): string | null {
   const r = spawnSync("git", ["config", "user.name"], { encoding: "utf-8" });
   return r.status === 0 ? r.stdout.trim() || null : null;
 }
@@ -60,7 +61,7 @@ export function resolveConfig(): PimConfig | null {
   const projectId = process.env.PIM_PROJECT_ID?.trim() || json?.projectId;
   const scope = process.env.PIM_SCOPE?.trim() || json?.scope;
   const serverUrl = (process.env.PIM_SERVER_URL ?? json?.serverUrl ?? "http://localhost:4000").replace(/\/$/, "");
-  const agentId = process.env.PIM_AGENT_ID?.trim() || json?.agentId || gitUserName();
+  const agentId = process.env.PIM_AGENT_ID?.trim() || json?.agentId || getGitUserName();
 
   if (!agentId || !scope) return null;
 

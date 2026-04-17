@@ -44,12 +44,12 @@ URI-addressable read-only data that MCP clients can attach to conversations:
 | `pim://org/pods` | All active pod summaries |
 | `pim://org/overlaps` | Cross-pod overlap advisories |
 | `pim://org/archived` | Archived pod history |
-| `council://org/archived-projects` | Archived initiatives (snapshot + dates) |
-| `council://org/config` | Org-wide scope definitions |
-| `council://org/projects` | Same payload as `GET /api/projects` (active projects) |
+| `pim://org/archived-projects` | Archived initiatives (snapshot + dates) |
+| `pim://org/config` | Org-wide scope definitions |
+| `pim://org/projects` | Same payload as `GET /api/projects` (active projects) |
 | `pim://knowledge/stats` | Knowledge graph statistics |
 | `pim://knowledge/graph` | Full knowledge graph (may be large) |
-| `council://projects/{project_id}` | Project metadata and anatomy (listable per active project) |
+| `pim://projects/{project_id}` | Project metadata and anatomy (listable per active project) |
 | `pim://pods/{pod_id}` | Pod metadata, areas, milestone, pressure |
 | `pim://pods/{pod_id}/living-doc` | Living document markdown |
 | `pim://pods/{pod_id}/conflicts` | All conflicts for a pod |
@@ -290,7 +290,7 @@ Once the sidecar is running, users can ask Claude things like:
 - *"Search org knowledge for auth patterns"* — calls `query_knowledge`
 - *"Run a health check on pod-checkout"* — invokes the `pod_health_check` prompt
 - *"Generate a retro for pod-auth before archiving"* — invokes `pod_retrospective` prompt then `archive_pod`
-- *"Archive initiative project-checkout after pods are done"* — calls `archive_project` (or read `council://org/archived-projects` afterward)
+- *"Archive initiative project-checkout after pods are done"* — calls `archive_project` (or read `pim://org/archived-projects` afterward)
 
 Claude sees tools, resources, and prompts through ADO's `list_mcp_tools` output and routes calls through the `ClientRegistry`.
 

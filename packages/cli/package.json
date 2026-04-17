@@ -8,11 +8,12 @@
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.hooks.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/pim.bundle.cjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@inquirer/prompts": "^7.5.0",
     "@pim/sdk": "workspace:*",
     "@pim/shared": "workspace:*",
     "chalk": "^5.4.1",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "esbuild": "^0.28.0",
     "tsx": "^4.19.4",
     "typescript": "^5.7.0",
     "vitest": "^4.1.4"

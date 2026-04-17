@@ -35,10 +35,19 @@ Optional:
 
 - **`AWS_BEARER_TOKEN_BEDROCK`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet) via AWS Bedrock. Set `AWS_REGION` (defaults to `us-west-2`) and optionally override `BEDROCK_MODEL_FAST` / `BEDROCK_MODEL_SMART`. The system works fully without it using deterministic classification and merging.
 
+## Setup (pick one path)
+
+| Goal | Easiest command |
+|------|----------------|
+| **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and `@pim/cli`, links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
+| **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
+
+For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
+
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install dependencies (skip if you already ran pnpm bootstrap)
 pnpm install
 
 # Terminal 1 -- start the backend (port 4000)
@@ -211,7 +220,7 @@ The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, t
 
 **Setup:**
 
-1. Build the package:
+1. Build the package (or run `pnpm bootstrap` from the repo root to build MCP server and CLI and link `pim` globally):
 
 ```bash
 pnpm --filter @pim/mcp-server build
@@ -247,18 +256,20 @@ The artifact renders a read-only snapshot — no network requests from the artif
 
 Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands.
 
-**From this clone (pick one):**
+**Easiest install from this clone:** run **`pnpm bootstrap`** at the monorepo root (see **Setup** above). It builds the bundled CLI (`packages/cli/dist/pim.bundle.cjs`) and runs **`pnpm -C packages/cli link --global`**, so **`pim` works from any directory** (for example `pim init` in another repo) once your shell **`PATH`** includes pnpm’s global executables directory. **`pnpm install-cli`** is the same script.
 
-| Command | When to use |
-|---------|-------------|
-| `pnpm install && pnpm link --global` | Installs the `pim` command on your PATH (points at this repo; keep the clone, or run `pnpm unlink --global` before deleting it). |
-| `pnpm pim <args>` | No global install; run only from the monorepo root (example: `pnpm pim pod list`). |
+| Alternative | When to use |
+|-------------|-------------|
+| `pnpm pim <args>` | No global install; run only from the monorepo root (e.g. `pnpm pim pod list`). |
+| `npx tsx packages/cli/src/index.ts` | Debug / run from TypeScript without building the bundle first. |
 
-You can still run the entry file directly with `npx tsx packages/cli/src/index.ts`.
+Before deleting a clone you linked globally, run **`pnpm unlink --global`** from `packages/cli` if you want to remove the global `pim` shim.
+
+**If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old **`council`** shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
 
 **Repository setup (per clone):**
 
-`pim init` wires this git repo to the PIM server: writes `.pim.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `PIM pod create`).
+`pim init` wires this git repo to the PIM server: writes `.pim.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `pim pod create`). From an interactive terminal, run `pim init` without `--pod` to use a guided wizard (pod list, optional project, optional scope, agent). In CI or non-interactive use, pass `--pod` explicitly.
 
 ```bash
 pim init --pod pod-my-sprint-a1b2c3
@@ -266,7 +277,7 @@ pim init --pod pod-my-sprint-a1b2c3 --project project-demo
 pim init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
 ```
 
-- `--pod` is required (server must return that pod). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
+- `--pod` is required when stdin is not a TTY (e.g. CI); otherwise the wizard prompts for a pod. `--scope` must be an **id** from org config (`GET /api/org/config`, labels are for display only). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
 - Skip flags: `--skip-hooks`, `--skip-claude`, `--skip-claude-md` to avoid installing hooks or touching `.claude/` / `CLAUDE.md`.
 
 `pim leave` removes **pod** binding from this repo (clears `podId` in `.pim.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
