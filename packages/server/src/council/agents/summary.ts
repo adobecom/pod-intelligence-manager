@@ -12,6 +12,7 @@ interface PodRow {
   total_days: number;
   conflict_pressure: number;
   milestone_json: string;
+  project_id?: string | null;
 }
 
 interface AreaRow {
@@ -128,7 +129,12 @@ export function regenerateLivingDoc(podId: string): string {
   try {
     const activeScopes = areas.map(a => a.scope);
     const conflictSummaries = openConflicts.map(c => c.summary);
-    const knowledgeResult = getRelevantLearnings(activeScopes, conflictSummaries, 1500);
+    const knowledgeResult = getRelevantLearnings(
+      activeScopes,
+      conflictSummaries,
+      1500,
+      pod.project_id ?? null,
+    );
     if (knowledgeResult.nodes.length > 0) {
       md += `## Knowledge Context\n\n`;
       md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;

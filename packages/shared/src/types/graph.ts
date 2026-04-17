@@ -18,6 +18,9 @@ export interface KnowledgeNode {
   details: string;
   source_pod_id: string;
   source_pod_name: string;
+  /** When set, this node is also attributable to a long-lived project (e.g. off-pod updates). */
+  source_project_id?: string;
+  source_project_name?: string;
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number; // 0.0–1.0
@@ -69,9 +72,22 @@ export interface KnowledgeQueryFilters {
   domains?: string[];
   types?: KnowledgeNodeType[];
   source_pod_ids?: string[];
+  /** When set, only nodes whose `source_project_id` is in this list. */
+  source_project_ids?: string[];
+  /**
+   * When set with domain filters: include org-wide nodes (no `source_project_id`) and nodes
+   * tagged with this project; exclude nodes tagged with other projects.
+   */
+  include_project_id?: string;
   confidence_min?: number;
   curated_only?: boolean;
+  /** Substring filter on summary + details (unchanged behavior). */
   text_search?: string;
+  /**
+   * Terms for relevance scoring only (does not filter candidates).
+   * Merged with tokens derived from `text_search` for ranking.
+   */
+  keywords?: string[];
 }
 
 export interface KnowledgeQueryOptions {

@@ -1,16 +1,18 @@
 import { useEffect, useCallback, useRef } from "react";
 import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
-import { Heading, Picker, PickerItem, Button, StatusLight } from "@react-spectrum/s2";
+import { Heading, Header, Picker, PickerItem, PickerSection, Button, StatusLight, Text } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useOrgStore } from "../stores/orgStore";
 import { usePodStore } from "../stores/podStore";
+import { useProjectStore } from "../stores/projectStore";
 import { useWebSocket } from "../hooks/useWebSocket";
 
 const loadOrg = useOrgStore.getState().loadOrg;
 const loadPod = usePodStore.getState().loadPod;
+const loadProject = useProjectStore.getState().loadProject;
 
 /** Events that change pod data and warrant a re-fetch. */
-const DATA_EVENTS = new Set([
+const POD_DATA_EVENTS = new Set([
   "context_update_added",
   "conflict_created",
   "conflict_resolved",
@@ -40,26 +42,48 @@ const contentArea = style({
 
 export function AppLayout() {
   const navigate = useNavigate();
-  const { podId } = useParams();
+  const { podId, projectId } = useParams();
   const location = useLocation();
   const pods = useOrgStore((s) => s.pods);
-  const lastReload = useRef(0);
+  const projects = useOrgStore((s) => s.projects);
+  const lastPodReload = useRef(0);
+  const lastProjectReload = useRef(0);
 
   const isOrgPage = location.pathname === "/org";
+
+  /** Pod room for sprint events; `global` receives broadcastToAll (including project updates). */
+  const wsRoomId = podId ?? (projectId ? "global" : undefined);
+
+  const scopeKey = podId ?? projectId ?? null;
+  const hasScopeOptions = pods.length > 0 || projects.length > 0;
 
   useEffect(() => {
     loadOrg();
   }, []);
 
-  const handleWSEvent = useCallback((event: { type: string }) => {
-    if (!podId || !DATA_EVENTS.has(event.type)) return;
-    const now = Date.now();
-    if (now - lastReload.current < THROTTLE_MS) return;
-    lastReload.current = now;
-    loadPod(podId);
-  }, [podId]);
+  const handleWSEvent = useCallback(
+    (event: { type: string; payload?: unknown }) => {
+      if (event.type === "project_context_update_added") {
+        const payload = event.payload as { projectId?: string } | undefined;
+        if (projectId && payload?.projectId === projectId) {
+          const now = Date.now();
+          if (now - lastProjectReload.current < THROTTLE_MS) return;
+          lastProjectReload.current = now;
+          loadProject(projectId);
+        }
+        return;
+      }
 
-  const wsStatus = useWebSocket(podId, handleWSEvent);
+      if (!podId || !POD_DATA_EVENTS.has(event.type)) return;
+      const now = Date.now();
+      if (now - lastPodReload.current < THROTTLE_MS) return;
+      lastPodReload.current = now;
+      loadPod(podId);
+    },
+    [podId, projectId],
+  );
+
+  const wsStatus = useWebSocket(wsRoomId, handleWSEvent);
   const wsVariant = wsStatus === "connected" ? "positive" : wsStatus === "connecting" ? "notice" : "negative";
   const wsLabel = wsStatus === "connected" ? "Live" : wsStatus === "connecting" ? "Connecting" : "Disconnected";
 
@@ -70,20 +94,49 @@ export function AppLayout() {
           AI Council
         </Heading>
 
-        <Picker
-          label="Pod"
-          labelPosition="side"
-          selectedKey={podId ?? null}
-          onSelectionChange={(key) => {
-            if (key) navigate(`/pod/${key}`);
-          }}
-        >
-          {pods.map((p) => (
-            <PickerItem key={p.pod_id} id={p.pod_id}>
-              {p.name}
-            </PickerItem>
-          ))}
-        </Picker>
+        <div className={style({ display: "flex", flexDirection: "column", gap: 4, alignItems: "start" })}>
+          <Picker
+            label="Scope"
+            labelPosition="side"
+            selectedKey={scopeKey}
+            onSelectionChange={(key) => {
+              if (!key) return;
+              const k = String(key);
+              if (pods.some((p) => p.pod_id === k)) {
+                navigate(`/pod/${k}`);
+              } else if (projects.some((p) => p.project_id === k)) {
+                navigate(`/project/${k}`);
+              }
+            }}
+            isDisabled={!hasScopeOptions}
+          >
+            {pods.length > 0 && (
+              <PickerSection>
+                <Header>Pods</Header>
+                {pods.map((p) => (
+                  <PickerItem key={p.pod_id} id={p.pod_id} textValue={p.name}>
+                    {p.name}
+                  </PickerItem>
+                ))}
+              </PickerSection>
+            )}
+            {projects.length > 0 && (
+              <PickerSection>
+                <Header>Projects</Header>
+                {projects.map((p) => (
+                  <PickerItem key={p.project_id} id={p.project_id} textValue={p.name}>
+                    {p.name}
+                  </PickerItem>
+                ))}
+              </PickerSection>
+            )}
+          </Picker>
+          {!hasScopeOptions && (
+            <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
+              No pods or projects yet — create them from the org dashboard.
+            </Text>
+          )}
+        </div>
 
         {podId && <StatusLight variant={wsVariant}>{wsLabel}</StatusLight>}
 

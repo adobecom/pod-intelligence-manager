@@ -11,6 +11,7 @@ interface PodRow {
   sprint_start: string;
   day_number: number;
   conflict_pressure: number;
+  project_id?: string | null;
 }
 
 export default async function orgRoutes(app: FastifyInstance) {
@@ -28,7 +29,7 @@ export default async function orgRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/archive", async (req, reply) => {
     const { podId } = req.params;
-    const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    const pod = db.prepare("SELECT pod_id, name, sprint_start, day_number, conflict_pressure, project_id FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
     if (!pod) {
       reply.code(404);
       return { error: "Pod not found" };
@@ -54,7 +55,14 @@ export default async function orgRoutes(app: FastifyInstance) {
     try {
       const learnings = await extractKnowledgeEnhanced(podId);
       if (learnings.length > 0) {
-        const result = addLearningsToGraph(learnings, podId, pod.name);
+        let projectMeta: { project_id: string; project_name: string } | undefined;
+        if (pod.project_id) {
+          const pr = db.prepare("SELECT name FROM projects WHERE project_id = ?").get(pod.project_id) as
+            | { name: string }
+            | undefined;
+          if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
+        }
+        const result = addLearningsToGraph(learnings, podId, pod.name, projectMeta);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

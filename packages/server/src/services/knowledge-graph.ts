@@ -18,12 +18,15 @@ import type {
   ConfidenceLevel,
   EnhancedPodLearning,
   CurationAction,
+  ContextUpdateType,
+  Scope,
 } from "@council/shared";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
   detectCommunities,
   identifyHubs,
+  keywordsFromTexts,
   scoreRelevance,
 } from "./graph-analysis.js";
 
@@ -74,6 +77,7 @@ export function addLearningsToGraph(
   learnings: EnhancedPodLearning[],
   podId: string,
   podName: string,
+  project?: { project_id: string; project_name: string },
 ): { nodesAdded: number; edgesAdded: number } {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
@@ -88,6 +92,9 @@ export function addLearningsToGraph(
       details: learning.details,
       source_pod_id: podId,
       source_pod_name: podName,
+      ...(project
+        ? { source_project_id: project.project_id, source_project_name: project.project_name }
+        : {}),
       domains: learning.domains,
       confidence: learning.confidence,
       confidence_score: learning.confidence_score,
@@ -121,7 +128,69 @@ export function addLearningsToGraph(
   };
 }
 
+/**
+ * Lightweight ingestion from project context updates: high-signal types only.
+ */
+export function maybeAddProjectContextSignalToGraph(
+  projectId: string,
+  projectName: string,
+  type: ContextUpdateType,
+  summary: string,
+  details: string,
+  scope: Scope,
+): { added: boolean } {
+  if (!graph) return { added: false };
+  if (type !== "decision" && type !== "spec_change") return { added: false };
+
+  const now = new Date().toISOString();
+  const nodeType: KnowledgeNodeType = type === "decision" ? "decision" : "scope_insight";
+  const node: KnowledgeNode = {
+    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
+    type: nodeType,
+    summary,
+    details,
+    source_pod_id: "project",
+    source_pod_name: projectName,
+    source_project_id: projectId,
+    source_project_name: projectName,
+    domains: [scope],
+    confidence: "extracted",
+    confidence_score: 0.85,
+    created_at: now,
+    curated: false,
+  };
+
+  const newEdges = buildEdges([node], graph.nodes);
+  graph.nodes.push(node);
+  graph.edges.push(...newEdges);
+  graph.version++;
+  graph.updated_at = now;
+  graph.communities = detectCommunities(graph);
+  hubIds = new Set(identifyHubs(graph));
+  saveGraph(graph.org_id, graph);
+  return { added: true };
+}
+
 // --- Query Knowledge ---
+
+function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string[] {
+  const fromExplicit =
+    filters.keywords?.map((k) => k.toLowerCase().trim()).filter((k) => k.length > 2) ?? [];
+  const fromTextSearch = filters.text_search
+    ? filters.text_search
+        .split(/\s+/)
+        .filter((w) => w.length > 2)
+        .map((w) => w.toLowerCase())
+    : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const w of [...fromExplicit, ...fromTextSearch]) {
+    if (seen.has(w)) continue;
+    seen.add(w);
+    out.push(w);
+  }
+  return out;
+}
 
 export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryResult {
   if (!graph) throw new Error("Knowledge graph not initialized");
@@ -139,6 +208,14 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
     }
     if (filters.source_pod_ids?.length) {
       if (!filters.source_pod_ids.includes(node.source_pod_id)) return false;
+    }
+    if (filters.source_project_ids?.length) {
+      const pid = node.source_project_id;
+      if (!pid || !filters.source_project_ids.includes(pid)) return false;
+    }
+    if (filters.include_project_id) {
+      const want = filters.include_project_id;
+      if (node.source_project_id && node.source_project_id !== want) return false;
     }
     if (filters.confidence_min !== undefined) {
       if (node.confidence_score < filters.confidence_min) return false;
@@ -158,9 +235,7 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
 
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
-  const keywords = filters.text_search
-    ? filters.text_search.split(/\s+/).filter((w) => w.length > 2)
-    : [];
+  const keywords = mergeScoringKeywords(filters);
 
   const scored = candidates.map((node) => ({
     node,
@@ -215,15 +290,15 @@ export function getRelevantLearnings(
   scopes: string[],
   activeConflictSummaries: string[],
   maxTokens: number,
+  projectId?: string | null,
 ): KnowledgeQueryResult {
-  // Extract keywords from conflict summaries for keyword matching
-  const keywords = activeConflictSummaries
-    .flatMap((s) => s.split(/\s+/))
-    .filter((w) => w.length > 3);
+  const keywords = keywordsFromTexts(activeConflictSummaries, 40);
 
   return queryKnowledge({
     filters: {
       domains: scopes,
+      ...(keywords.length > 0 ? { keywords } : {}),
+      ...(projectId ? { include_project_id: projectId } : {}),
     },
     max_tokens: maxTokens,
     include_details: false,

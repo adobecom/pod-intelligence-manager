@@ -6,9 +6,12 @@ export type {
   Scope,
 } from "./types/pod";
 
+export type { Project, ProjectContextUpdate } from "./types/project";
+
 export type {
   ContextUpdate,
   ContextUpdateType,
+  ContextUpdateSource,
   WorkStatus,
   Artifact,
   InputRequest,

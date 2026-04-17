@@ -1,7 +1,9 @@
 import type {
   Pod,
+  Project,
   Conflict,
   ContextUpdate,
+  ProjectContextUpdate,
   ContextUpdateType,
   WorkStatus,
   Scope,
@@ -11,12 +13,23 @@ import type {
   KnowledgeQueryResult,
 } from "@council/shared";
 
-export interface CouncilClientConfig {
-  baseUrl: string;
-  podId: string;
-  agentId: string;
-  scope: Scope;
+export interface SessionContextOptions {
+  learningsMaxTokens?: number;
+  recentUpdateLimit?: number;
 }
+
+export interface SessionContext {
+  pulledAt: string;
+  pod: Pod;
+  livingDocMarkdown: string;
+  conflicts: Conflict[];
+  relevantLearnings: KnowledgeQueryResult;
+  recentUpdates: ContextUpdate[];
+}
+
+export type CouncilClientConfig =
+  | { baseUrl: string; agentId: string; scope: Scope; podId: string; projectId?: undefined }
+  | { baseUrl: string; agentId: string; scope: Scope; projectId: string; podId?: undefined };
 
 export interface ReportInput {
   type: ContextUpdateType;
@@ -31,7 +44,7 @@ export interface ReportInput {
 
 export interface ReportResult {
   id: string;
-  update: ContextUpdate;
+  update: ContextUpdate | ProjectContextUpdate;
   council: {
     classification: string;
     merged: boolean;
@@ -39,16 +52,6 @@ export interface ReportResult {
     conflictId?: string;
     note?: string;
   };
-}
-
-/** Bundled snapshot for session start (pod agent protocol). */
-export interface SessionContext {
-  livingDocMarkdown: string;
-  pod: Pod;
-  conflicts: Conflict[];
-  relevantLearnings: KnowledgeQueryResult;
-  recentUpdates: ContextUpdate[];
-  pulledAt: string;
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -64,7 +67,16 @@ export class CouncilClient {
   private config: CouncilClientConfig;
 
   constructor(config: CouncilClientConfig) {
+    const hasPod = Boolean(config.podId);
+    const hasProj = Boolean(config.projectId);
+    if (hasPod === hasProj) {
+      throw new Error("CouncilClient requires exactly one of podId or projectId");
+    }
     this.config = config;
+  }
+
+  private isPodMode(): boolean {
+    return Boolean(this.config.podId);
   }
 
   private url(path: string): string {
@@ -73,22 +85,23 @@ export class CouncilClient {
 
   // Submit a context update to the Council
   async report(input: ReportInput): Promise<ReportResult> {
-    return fetchJSON<ReportResult>(
-      this.url(`/api/pods/${this.config.podId}/context-updates`),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          agent_id: this.config.agentId,
-          scope: this.config.scope,
-          ...input,
-        }),
-      },
-    );
+    const path = this.isPodMode()
+      ? `/api/pods/${this.config.podId}/context-updates`
+      : `/api/projects/${this.config.projectId}/context-updates`;
+    return fetchJSON<ReportResult>(this.url(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: this.config.agentId,
+        scope: this.config.scope,
+        ...input,
+      }),
+    });
   }
 
   // Fetch the current living doc for the pod
   async getContext(): Promise<string> {
+    if (!this.isPodMode()) throw new Error("getContext requires a pod-scoped client (podId)");
     const res = await fetch(this.url(`/api/pods/${this.config.podId}/living-doc`));
     if (!res.ok) throw new Error(`Failed to fetch living doc: ${res.status}`);
     return res.text();
@@ -96,45 +109,32 @@ export class CouncilClient {
 
   // Fetch current pod state
   async getPod(): Promise<Pod> {
+    if (!this.isPodMode()) throw new Error("getPod requires a pod-scoped client (podId)");
     return fetchJSON<Pod>(this.url(`/api/pods/${this.config.podId}`));
+  }
+
+  async getProject(): Promise<Project> {
+    if (this.isPodMode()) throw new Error("getProject requires a project-scoped client (projectId)");
+    return fetchJSON<Project>(this.url(`/api/projects/${this.config.projectId}`));
   }
 
   // Fetch current conflicts for the pod
   async getConflicts(): Promise<Conflict[]> {
+    if (!this.isPodMode()) throw new Error("getConflicts requires a pod-scoped client (podId)");
     return fetchJSON<Conflict[]>(this.url(`/api/pods/${this.config.podId}/conflicts`));
   }
 
   // Fetch context updates for the pod
   async getUpdates(): Promise<ContextUpdate[]> {
+    if (!this.isPodMode()) throw new Error("getUpdates requires a pod-scoped client (podId)");
     return fetchJSON<ContextUpdate[]>(this.url(`/api/pods/${this.config.podId}/context-updates`));
   }
 
-  /**
-   * Pull everything needed before substantive work (pod agent protocol).
-   * Parallel-fetches living doc, pod, conflicts, relevant learnings, and recent updates.
-   */
-  async pullSessionContext(options?: { learningsMaxTokens?: number; recentUpdateLimit?: number }): Promise<SessionContext> {
-    const learningsMaxTokens = options?.learningsMaxTokens ?? 2000;
-    const recentLimit = options?.recentUpdateLimit ?? 20;
-
-    const [livingDocMarkdown, pod, conflicts, relevantLearnings, allUpdates] = await Promise.all([
-      this.getContext(),
-      this.getPod(),
-      this.getConflicts(),
-      this.getRelevantLearnings(learningsMaxTokens),
-      this.getUpdates(),
-    ]);
-
-    const recentUpdates = allUpdates.slice(0, recentLimit);
-
-    return {
-      livingDocMarkdown,
-      pod,
-      conflicts,
-      relevantLearnings,
-      recentUpdates,
-      pulledAt: new Date().toISOString(),
-    };
+  async getProjectUpdates(): Promise<ProjectContextUpdate[]> {
+    if (this.isPodMode()) throw new Error("getProjectUpdates requires a project-scoped client (projectId)");
+    return fetchJSON<ProjectContextUpdate[]>(
+      this.url(`/api/projects/${this.config.projectId}/context-updates`),
+    );
   }
 
   // Query the organizational knowledge graph with token budget
@@ -160,5 +160,45 @@ export class CouncilClient {
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/precedents?conflict=${conflict}&maxTokens=${maxTokens}`),
     );
+  }
+
+  // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)
+  async pullSessionContext(opts?: SessionContextOptions): Promise<SessionContext> {
+    if (!this.isPodMode()) {
+      throw new Error(
+        "pullSessionContext requires a pod-scoped client (podId). For project-only mode use getProject(), getProjectUpdates(), and queryKnowledge().",
+      );
+    }
+    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const recentLimit = opts?.recentUpdateLimit ?? 20;
+
+    const results = await Promise.allSettled([
+      this.getPod(),
+      this.getContext(),
+      this.getConflicts(),
+      this.getRelevantLearnings(maxTokens),
+      this.getUpdates(),
+    ]);
+
+    const pod = results[0].status === "fulfilled" ? results[0].value : null;
+    if (!pod) {
+      throw new Error(`Failed to fetch pod: ${results[0].status === "rejected" ? results[0].reason : "unknown"}`);
+    }
+
+    const livingDocMarkdown = results[1].status === "fulfilled" ? results[1].value : "(unavailable)";
+    const conflicts = results[2].status === "fulfilled" ? results[2].value : [];
+    const relevantLearnings: KnowledgeQueryResult = results[3].status === "fulfilled"
+      ? results[3].value
+      : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
+    const allUpdates = results[4].status === "fulfilled" ? results[4].value : [];
+
+    return {
+      pulledAt: new Date().toISOString(),
+      pod,
+      livingDocMarkdown,
+      conflicts,
+      relevantLearnings,
+      recentUpdates: allUpdates.slice(0, recentLimit),
+    };
   }
 }

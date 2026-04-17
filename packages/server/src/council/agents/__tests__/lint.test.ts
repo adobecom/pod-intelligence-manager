@@ -13,6 +13,12 @@ vi.mock("../../../ws/index.js", () => ({
   broadcast: vi.fn(),
 }));
 
+vi.mock("../../llm.js", () => ({
+  isLLMAvailable: () => false,
+  MODELS: { fast: "claude-haiku", smart: "claude-sonnet" },
+  callLLMJSON: vi.fn(),
+}));
+
 import { runLintPass } from "../lint.js";
 import db from "../../../db/connection.js";
 
@@ -71,13 +77,13 @@ describe("runLintPass", () => {
     vi.useFakeTimers({ now: NOW });
   });
 
-  it("returns empty for non-existent pod", () => {
+  it("returns empty for non-existent pod", async () => {
     setupDb({ pod: undefined });
-    const findings = runLintPass("pod-nonexistent");
+    const { findings } = await runLintPass("pod-nonexistent");
     expect(findings).toEqual([]);
   });
 
-  it("detects staleness when an area has old updates", () => {
+  it("detects staleness when an area has old updates", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 3 },
       areas: [{ scope: "frontend", owner: "agent-fe", status: "active", last_activity: null }],
@@ -87,14 +93,14 @@ describe("runLintPass", () => {
       conflicts: [],
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const stale = findings.filter(f => f.type === "staleness");
     expect(stale.length).toBe(1);
     expect(stale[0].summary).toContain("frontend");
     expect(stale[0].summary).toContain("12h");
   });
 
-  it("detects coverage gaps for areas still waiting past day 2", () => {
+  it("detects coverage gaps for areas still waiting past day 2", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 3 },
       areas: [{ scope: "design", owner: "unassigned", status: "waiting", last_activity: null }],
@@ -102,13 +108,13 @@ describe("runLintPass", () => {
       conflicts: [],
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const gaps = findings.filter(f => f.type === "coverage_gap");
     expect(gaps.length).toBe(1);
     expect(gaps[0].summary).toContain("design");
   });
 
-  it("detects dependency risk when multiple agents share a scope without coordination", () => {
+  it("detects dependency risk when multiple agents share a scope without coordination", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 2 },
       areas: [{ scope: "frontend", owner: "agent-fe", status: "active", last_activity: hoursAgo(1) }],
@@ -119,13 +125,13 @@ describe("runLintPass", () => {
       conflicts: [],
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const deps = findings.filter(f => f.type === "dependency_risk");
     expect(deps.length).toBe(1);
     expect(deps[0].summary).toContain("2 agents");
   });
 
-  it("detects aging unresolved conflicts", () => {
+  it("detects aging unresolved conflicts", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 3 },
       areas: [],
@@ -143,13 +149,13 @@ describe("runLintPass", () => {
       viewRows: [undefined, undefined], // Neither agent viewed
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const unresolved = findings.filter(f => f.type === "unresolved_conflict");
     expect(unresolved.length).toBe(1);
     expect(unresolved[0].severity).toBe("critical");
   });
 
-  it("detects doc_not_read for conflict agents who haven't viewed the living doc", () => {
+  it("detects doc_not_read for conflict agents who haven't viewed the living doc", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 3 },
       areas: [],
@@ -170,13 +176,13 @@ describe("runLintPass", () => {
       ],
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const docNotRead = findings.filter(f => f.type === "doc_not_read");
     expect(docNotRead.length).toBe(2);
     expect(docNotRead[0].summary).toContain("hasn't viewed the living doc");
   });
 
-  it("skips doc_not_read when no living doc exists", () => {
+  it("skips doc_not_read when no living doc exists", async () => {
     setupDb({
       pod: { pod_id: "pod-test", day_number: 2 },
       areas: [],
@@ -193,7 +199,7 @@ describe("runLintPass", () => {
       livingDoc: null,
     });
 
-    const findings = runLintPass("pod-test");
+    const { findings } = await runLintPass("pod-test");
     const docNotRead = findings.filter(f => f.type === "doc_not_read");
     expect(docNotRead.length).toBe(0);
   });

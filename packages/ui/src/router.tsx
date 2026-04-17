@@ -9,6 +9,9 @@ import { LiveDocView } from "./views/LiveDocView/LiveDocView";
 import { ContextFeed } from "./views/ContextFeed/ContextFeed";
 import { TunnelDashboard } from "./views/TunnelDashboard/TunnelDashboard";
 import { KnowledgeGraphView } from "./views/KnowledgeGraph/KnowledgeGraph";
+import { ProjectLayout } from "./layouts/ProjectLayout";
+import { ProjectDashboard } from "./views/ProjectDashboard/ProjectDashboard";
+import { ProjectContextFeed } from "./views/ProjectContextFeed/ProjectContextFeed";
 
 export const router = createBrowserRouter([
   {
@@ -17,6 +20,14 @@ export const router = createBrowserRouter([
       { path: "/", element: <Navigate to="/org" replace /> },
       { path: "/org", element: <OrgDashboard /> },
       { path: "/knowledge", element: <KnowledgeGraphView /> },
+      {
+        path: "/project/:projectId",
+        element: <ProjectLayout />,
+        children: [
+          { index: true, element: <ProjectDashboard /> },
+          { path: "feed", element: <ProjectContextFeed /> },
+        ],
+      },
       {
         path: "/pod/:podId",
         element: <PodLayout />,

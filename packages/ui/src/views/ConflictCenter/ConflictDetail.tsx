@@ -6,7 +6,6 @@ import {
   Button,
   InlineAlert,
   Content,
-  TextArea,
   Divider,
   ActionButton,
   Badge,
@@ -18,7 +17,10 @@ import {
   TableHeader,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { PendingWork } from "@council/shared";
+import { MarkdownDetailsEditor } from "../../components/MarkdownDetailsEditor";
 import { SeverityBadge } from "../../components/SeverityBadge";
 import { RelativeTime } from "../../components/RelativeTime";
 import { usePodStore } from "../../stores/podStore";
@@ -118,7 +120,9 @@ export function ConflictDetail() {
                   {side.contributor}
                 </Text>
               </div>
-              <Text>{side.position}</Text>
+              <div style={{ fontSize: 14 }}>
+                <Markdown remarkPlugins={[remarkGfm]}>{side.position}</Markdown>
+              </div>
               <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
                 Submitted <RelativeTime timestamp={side.timestamp} />
                 {" · "}Ref: {side.context_update_id}
@@ -133,7 +137,9 @@ export function ConflictDetail() {
       <InlineAlert variant="informative">
         <Heading>Analysis</Heading>
         <Content>
-          <Text>{conflict.master_analysis}</Text>
+          <div style={{ fontSize: 14 }}>
+            <Markdown remarkPlugins={[remarkGfm]}>{conflict.master_analysis}</Markdown>
+          </div>
         </Content>
       </InlineAlert>
 
@@ -202,7 +208,7 @@ export function ConflictDetail() {
 
           {showCustom && (
             <div className={customForm}>
-              <TextArea
+              <MarkdownDetailsEditor
                 label="Custom resolution"
                 value={customResolution}
                 onChange={setCustomResolution}
@@ -225,7 +231,9 @@ export function ConflictDetail() {
           <Divider />
           <Heading level={3}>Resolution</Heading>
           <div className={well}>
-            <Text>{conflict.resolution}</Text>
+            <div style={{ fontSize: 14 }}>
+              <Markdown remarkPlugins={[remarkGfm]}>{conflict.resolution}</Markdown>
+            </div>
             <br />
             <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
               Resolved by {conflict.resolved_by}{" "}

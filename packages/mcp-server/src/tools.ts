@@ -16,6 +16,7 @@ const json = (data: unknown) => ({
 /* ------------------------------------------------------------------ */
 
 const PodId = z.string().describe("Pod ID (e.g. 'pod-checkout-redesign')");
+const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
 const Scope = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
 
 /* ------------------------------------------------------------------ */
@@ -159,7 +160,38 @@ export function registerTools(server: McpServer) {
         .describe("Input requests from other roles"),
     },
     async ({ pod_id, ...body }) => {
-      const result = await apiPost(`/api/pods/${pod_id}/context-updates`, body);
+      const result = await apiPost(`/api/pods/${pod_id}/context-updates`, { ...body, source: "mcp" });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "submit_project_context_update",
+    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full Council Master. High-signal types (decision, spec_change) may be added to the knowledge graph.",
+    {
+      project_id: ProjectId,
+      agent_id: z.string().describe("ID of the submitting agent or human"),
+      type: z.enum(["progress", "blocker", "spec_change", "question", "decision"]),
+      scope: Scope,
+      summary: z.string().describe("One-line summary of the update"),
+      details: z.string().describe("Full details of the update"),
+      status: z.enum(["completed", "in_progress", "blocked"]),
+      artifacts: z
+        .array(z.object({
+          type: z.string(),
+          path: z.string().optional(),
+          url: z.string().optional(),
+        }))
+        .optional()
+        .describe("Attached artifacts (files, URLs)"),
+      blocks: z.array(z.string()).optional(),
+      blocked_by: z.array(z.string()).optional(),
+      needs_input_from: z
+        .array(z.object({ role: Scope, question: z.string() }))
+        .optional(),
+    },
+    async ({ project_id, ...body }) => {
+      const result = await apiPost(`/api/projects/${project_id}/context-updates`, { ...body, source: "mcp" });
       return json(result);
     },
   );

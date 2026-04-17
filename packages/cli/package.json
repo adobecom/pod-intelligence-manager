@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "bin": {
-    "council": "./dist/index.js"
+    "council": "./bin/council.mjs"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc -p tsconfig.hooks.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

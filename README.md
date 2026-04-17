@@ -6,11 +6,11 @@ Three pillars:
 
 1. **AI Council (Brain)** -- A context bus: agents submit updates, a Council Master routes to Committee agents (Merge, Conflict, Summary), and a living `.md` doc is assembled from the current state.
 2. **Council UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
-3. **FE Tunneling** -- Expo-style localhost tunneling (planned; not yet implemented).
+3. **FE Tunneling** -- Expo-style localhost tunneling (**prototype implemented**: CLI + server routes for WebSocket request proxying).
 
 ## Quick Demo
 
-Run these three commands in separate terminals to see everything working:
+Run these commands in separate terminals to see everything working:
 
 ```bash
 pnpm install
@@ -33,7 +33,7 @@ Open **http://localhost:5173** and watch the Org Dashboard, Pod Dashboard, Confl
 
 Optional:
 
-- **`ANTHROPIC_API_KEY`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet). The system works fully without it using deterministic classification and merging.
+- **`AWS_BEARER_TOKEN_BEDROCK`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet) via AWS Bedrock. Set `AWS_REGION` (defaults to `us-west-2`) and optionally override `BEDROCK_MODEL_FAST` / `BEDROCK_MODEL_SMART`. The system works fully without it using deterministic classification and merging.
 
 ## Quick Start
 
@@ -60,8 +60,8 @@ ai-council/
 │   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
 │   ├── sdk/             # @council/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # council CLI — pods, context, hooks, tunnel
-│   └── infra/           # (scaffolded, not yet implemented -- AWS CDK)
+│   ├── cli/             # council CLI — pods, context, hooks, tunnel, init, leave
+│   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
 ├── examples/
 │   └── demo-agent.ts    # End-to-end demo exercising the SDK
 ├── prompts/             # Version-controlled LLM system prompts
@@ -90,6 +90,7 @@ Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) f
 | GET | `/api/health` | Health check |
 | GET | `/api/pods/:podId` | Get pod with areas |
 | POST | `/api/pods` | Create a new pod |
+| PATCH | `/api/pods/:podId/milestone` | Update milestone fields (`name`, `target_date`, `percent_complete`) and regenerate living doc |
 | GET | `/api/pods/:podId/conflicts` | List conflicts |
 | GET | `/api/pods/:podId/conflicts/:id` | Get single conflict |
 | POST | `/api/pods/:podId/conflicts/:id/resolve` | Resolve a conflict |
@@ -112,11 +113,14 @@ Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) f
 1. **Zod validation** -- Schema enforcement
 2. **Secret scan** -- Regex patterns for AWS keys, JWTs, connection strings, PEM blocks
 3. **DB write** -- Persisted to SQLite
-4. **WebSocket broadcast** -- All connected clients notified
-5. **Classification** -- Categorized as `additive`, `overlapping`, or `contradictory`
-6. **Routing** -- Additive: deterministic merge (no LLM). Overlapping: LLM merge (Haiku) or deterministic fallback. Contradictory: conflict record created with optional LLM analysis (Sonnet).
-7. **Living doc regeneration** -- Template-based markdown assembled from current DB state
-8. **Cross-pod overlap detection** -- Keyword analysis across active pods
+4. **Pod snapshot refresh** -- Denormalize `pod_areas` from the latest context update per scope (updates with `type: blocker` force that scope to `blocked`), recompute milestone `percent_complete` as a sprint-health proxy (round of done scopes / 6), and refresh org `agent_count` (distinct `agent_id` values). This is deterministic, not LLM-inferred.
+5. **WebSocket broadcast** -- All connected clients notified
+6. **Classification** -- Categorized as `additive`, `overlapping`, or `contradictory`
+7. **Routing** -- Additive: deterministic merge (no LLM). Overlapping: LLM merge (Haiku) or deterministic fallback. Contradictory: conflict record created with optional LLM analysis (Sonnet).
+8. **Living doc regeneration** -- Template-based markdown assembled from current DB state (including the updated areas and milestone)
+9. **Cross-pod overlap detection** -- Keyword analysis across active pods
+
+The living doc’s **Current Status** and milestone progress line follow this snapshot plus conflicts/pressure from the DB. Humans may override milestone fields with `PATCH /api/pods/:podId/milestone`; **`percent_complete` is recomputed again on the next context ingestion** from scope `done` counts, while `name` and `target_date` persist until changed.
 
 **Periodic tasks:**
 
@@ -241,50 +245,92 @@ The artifact renders a read-only snapshot — no network requests from the artif
 
 ### `@council/cli`
 
-Command-line interface for pod management, context submission, and tunnel control. Run via `npx tsx packages/cli/src/index.ts` (or `council` after building).
+Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands.
+
+**From this clone (pick one):**
+
+| Command | When to use |
+|---------|-------------|
+| `pnpm install && pnpm link --global` | Installs the `council` command on your PATH (points at this repo; keep the clone, or run `pnpm unlink --global` before deleting it). |
+| `pnpm council <args>` | No global install; run only from the monorepo root (example: `pnpm council pod list`). |
+
+You can still run the entry file directly with `npx tsx packages/cli/src/index.ts`.
+
+**Repository setup (per clone):**
+
+`council init` wires this git repo to the Council server: writes `.council.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `council pod create`).
+
+```bash
+council init --pod pod-my-sprint-a1b2c3
+council init --pod pod-my-sprint-a1b2c3 --project project-demo
+council init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
+```
+
+- `--pod` is required (server must return that pod). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
+- Skip flags: `--skip-hooks`, `--skip-claude`, `--skip-claude-md` to avoid installing hooks or touching `.claude/` / `CLAUDE.md`.
+
+`council leave` removes **pod** binding from this repo (clears `podId` in `.council.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
+
+```bash
+council leave
+council leave --skip-claude-md --skip-sync --skip-config   # only adjust .council.json, etc.
+```
 
 **Pod management:**
 
 ```bash
 council pod create --name "My Sprint"        # Create a new pod
 council pod list                              # List active pods
-council pod status pod-my-sprint              # Show pod details
-council pod archive pod-my-sprint             # Archive a completed pod
+council pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
+council pod archive pod-my-sprint-a1b2c3      # Archive a completed pod
 ```
 
 **Context updates:**
 
+Submit exactly one of `--pod` or `--project` (not both). Pod mode runs the full Council pipeline for the sprint; project mode records off-pod / between-sprint updates without a living doc or conflict flow.
+
 ```bash
 council report \
-  --pod pod-my-sprint \
+  --pod pod-my-sprint-a1b2c3 \
   --type progress \
   --scope frontend \
   --summary "Built the hero section" \
   --details "Responsive layout with animated gradient." \
   --status completed
+
+council report \
+  --project project-demo \
+  --type progress \
+  --scope backend \
+  --summary "Refactored auth module" \
+  --status in_progress
 ```
 
-**Pod agent protocol** (pull before work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
+**Pod agent protocol** (pull before substantive work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
 
 ```bash
-# Set COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (and COUNCIL_SERVER_URL if needed)
-council context --write .council/last-context.md    # Bundled living doc, conflicts, learnings, recent updates
-council hooks install                               # Optional: post-commit / post-rewrite → Council API
+# Flags or env: COUNCIL_POD_ID, COUNCIL_AGENT_ID, COUNCIL_SCOPE (and COUNCIL_SERVER_URL), or `.council.json` via `council init`
+council context --pod <podId> --agent <id> --scope frontend
+council context --brief --diff --pod <podId> --agent <id> --scope frontend
+council context --write .council/last-context.md    # optional explicit path
+council hooks install                                # optional: post-commit / post-rewrite → Council API
 ```
+
+Omit `--pod` / `--agent` / `--scope` when the same values are set in the environment.
 
 **Living doc and lint:**
 
 ```bash
-council doc pod-my-sprint                     # Print the living doc
-council lint pod-my-sprint                    # Run a lint pass
+council doc pod-my-sprint-a1b2c3              # Print the living doc
+council lint pod-my-sprint-a1b2c3             # Run a lint pass
 ```
 
 **Tunnel management:**
 
 ```bash
-council tunnel start --pod pod-my-sprint --port 3000 --dev alice
-council tunnel list --pod pod-my-sprint
-council tunnel stop --pod pod-my-sprint --tunnel <tunnelId>
+council tunnel start --pod pod-my-sprint-a1b2c3 --port 3000 --dev alice
+council tunnel list --pod pod-my-sprint-a1b2c3
+council tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
 ```
 
 All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `COUNCIL_SERVER_URL`.
@@ -348,7 +394,10 @@ pnpm --filter @council/ui typecheck
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `4000` | Server port |
-| `ANTHROPIC_API_KEY` | (none) | Enables LLM features (Haiku for merges, Sonnet for conflicts) |
+| `AWS_BEARER_TOKEN_BEDROCK` | (none) | Enables LLM features via Bedrock (Haiku for merges, Sonnet for conflicts) |
+| `AWS_REGION` | `us-west-2` | AWS region for Bedrock Converse endpoint |
+| `BEDROCK_MODEL_FAST` | `us.anthropic.claude-3-5-haiku-20241022-v1:0` | Bedrock model ID for fast/merge agent |
+| `BEDROCK_MODEL_SMART` | `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | Bedrock model ID for smart/conflict agent |
 | `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
 | `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
 | `COUNCIL_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the Council server |
@@ -364,7 +413,7 @@ Agent/Human submits update
   POST /api/pods/:podId/context-updates
         |
         v
-  Ingestion Lambda (validation, secret scan, DB write, WS broadcast)
+  Ingestion (validation, secret scan, DB write, pod snapshot, WS broadcast)
         |
         v
   Council Master (classify update)
@@ -421,10 +470,33 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 
 ## Not Yet Implemented (Deferred to AWS Deployment)
 
-- **FE Tunneling** -- Real outbound WebSocket tunnels with proxy (localhost stub works via CLI)
-- **AWS Infrastructure** (`packages/infra`) -- CDK stack for API Gateway, Lambda, DynamoDB, S3, Route 53
+- **Production FE tunneling** — The local tunnel prototype (CLI + server routes + WS proxying) exists, but the hosted “stable URL” deployment story (custom domains, edge, auth) is still a deployment milestone.
+- **Production deployment** — `packages/infra` contains an AWS CDK stack; the remaining work is deploying and operationalizing it for real org environments (accounts, domains/certs, secrets, observability, runbooks).
 - **Adobe IMS auth** -- Currently no authentication
 - **Slack integration** -- Conflict notifications and emoji-based resolution
 - **Notification system** -- In-app, email, Slack DM per-user preferences
 
 See `SPEC.md` for the full specification and implementation milestones.
+
+## Hardening checklist (consolidated)
+
+This is a lightweight “production readiness” checklist that used to live in `HARDENING.md`. Items marked **[DONE]** are already implemented; they’re kept as a quick map of what exists and where.
+
+### Tier 1 — Credibility **[DONE]**
+
+- **Unit tests** — vitest set up in `packages/server` with broad coverage of core services. Run: `pnpm test`.
+- **Request validation** — Zod schemas + `validateBody()` middleware on POST routes (`packages/server/src/middleware/validation.ts`).
+- **Health check** — `GET /api/health` in `packages/server/src/index.ts` validates DB connectivity.
+
+### Tier 2 — Production readiness (local) **[DONE]**
+
+- **Global error handler** — `app.setErrorHandler` in `packages/server/src/index.ts` returns structured errors and avoids leaking stacks.
+- **Auth middleware skeleton** — `packages/server/src/middleware/auth.ts` (`AUTH_MODE=trust|ims`, IMS verification is TODO).
+- **CORS** — `@fastify/cors` in `packages/server/src/index.ts` (config via `CORS_ORIGIN`).
+- **Rate limiting** — `@fastify/rate-limit` in `packages/server/src/index.ts` plus route-level limits where needed.
+
+### Tier 3 — Testing & demo polish **[DONE]**
+
+- **Expanded unit/integration tests** — Includes ingestion, pressure, classification, merge/conflict/summary agents, and Fastify `inject()` integration tests.
+- **SDK + CLI tests** — vitest coverage for client methods + command registration.
+- **CDK stack** — present in `packages/infra/lib/council-stack.ts` (see note above about production deployment/ops).

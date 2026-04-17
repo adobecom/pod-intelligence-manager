@@ -2,6 +2,13 @@ import db from "./connection.js";
 
 export function createTables() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS projects (
+      project_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS pods (
       pod_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -10,7 +17,8 @@ export function createTables() {
       day_number INTEGER NOT NULL,
       total_days INTEGER NOT NULL,
       conflict_pressure REAL NOT NULL DEFAULT 0.0,
-      milestone_json TEXT NOT NULL
+      milestone_json TEXT NOT NULL,
+      project_id TEXT REFERENCES projects(project_id)
     );
 
     CREATE TABLE IF NOT EXISTS pod_areas (
@@ -36,7 +44,9 @@ export function createTables() {
       quality_score REAL NOT NULL DEFAULT 0.0,
       blocks_json TEXT NOT NULL DEFAULT '[]',
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
-      needs_input_from_json TEXT NOT NULL DEFAULT '[]'
+      needs_input_from_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'manual',
+      commit_sha TEXT
     );
 
     CREATE TABLE IF NOT EXISTS conflicts (
@@ -142,10 +152,75 @@ export function createTables() {
       curated INTEGER NOT NULL DEFAULT 0,
       community_id TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS project_context_updates (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      project_id TEXT NOT NULL REFERENCES projects(project_id),
+      type TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT NOT NULL,
+      artifacts_json TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL,
+      quality_score REAL NOT NULL DEFAULT 0.0,
+      blocks_json TEXT NOT NULL DEFAULT '[]',
+      blocked_by_json TEXT NOT NULL DEFAULT '[]',
+      needs_input_from_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT 'manual',
+      commit_sha TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time
+      ON project_context_updates(project_id, timestamp DESC);
   `);
 
   // Migration guards for existing databases
   try { db.exec("ALTER TABLE living_docs ADD COLUMN last_regenerated_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE living_docs ADD COLUMN regen_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_score REAL NOT NULL DEFAULT 0.0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN commit_sha TEXT"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
+
+  // Projects + pod membership (existing DBs) — projects table must exist before ALTER pods
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+  } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE pods ADD COLUMN project_id TEXT REFERENCES projects(project_id)"); } catch { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS project_context_updates (
+        id TEXT PRIMARY KEY,
+        agent_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        project_id TEXT NOT NULL REFERENCES projects(project_id),
+        type TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        artifacts_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL,
+        quality_score REAL NOT NULL DEFAULT 0.0,
+        blocks_json TEXT NOT NULL DEFAULT '[]',
+        blocked_by_json TEXT NOT NULL DEFAULT '[]',
+        needs_input_from_json TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL DEFAULT 'manual',
+        commit_sha TEXT
+      )
+    `);
+  } catch { /* already exists */ }
+  try {
+    db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time ON project_context_updates(project_id, timestamp DESC)",
+    );
+  } catch { /* already exists */ }
 }

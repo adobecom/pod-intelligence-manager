@@ -70,7 +70,7 @@ export function LiveDocView() {
     }
   }, [podId]);
 
-  const handleWSEvent = useCallback((event: { type: string; payload: unknown }) => {
+  const handleWSEvent = useCallback((event: { type: string; payload?: unknown }) => {
     if (event.type === "living_doc_updated") {
       const payload = event.payload as { markdown: string };
       setDoc(payload.markdown);

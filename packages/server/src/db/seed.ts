@@ -11,12 +11,17 @@ import {
   livingDocs,
 } from "@council/shared";
 
+const DEFAULT_PROJECT_ID = "project-demo";
+
 export function seedDatabase() {
   const podCount = db.prepare("SELECT COUNT(*) as count FROM pods").get() as { count: number };
   if (podCount.count > 0) return; // Already seeded
 
+  const insertProject = db.prepare(
+    "INSERT INTO projects (project_id, name, description, created_at) VALUES (?, ?, ?, ?)",
+  );
   const insertPod = db.prepare(
-    "INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   );
   const insertArea = db.prepare(
     "INSERT INTO pod_areas (pod_id, scope, owner, status, last_activity) VALUES (?, ?, ?, ?, ?)",
@@ -47,9 +52,27 @@ export function seedDatabase() {
   );
 
   const transaction = db.transaction(() => {
+    insertProject.run(
+      DEFAULT_PROJECT_ID,
+      "Demo initiative",
+      "Shared project for seed pods",
+      new Date().toISOString(),
+    );
+
     // Pods + areas
     for (const pod of Object.values(pods)) {
-      insertPod.run(pod.pod_id, pod.name, pod.sprint_start, pod.sprint_end, pod.day_number, pod.total_days, pod.conflict_pressure, JSON.stringify(pod.milestone));
+      const pid = pod.project_id ?? DEFAULT_PROJECT_ID;
+      insertPod.run(
+        pod.pod_id,
+        pod.name,
+        pod.sprint_start,
+        pod.sprint_end,
+        pod.day_number,
+        pod.total_days,
+        pod.conflict_pressure,
+        JSON.stringify(pod.milestone),
+        pid,
+      );
       for (const area of pod.areas) {
         insertArea.run(pod.pod_id, area.scope, area.owner, area.status, area.last_activity);
       }

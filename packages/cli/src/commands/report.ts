@@ -7,8 +7,9 @@ import { getBaseUrl } from "../util.js";
 export function registerReportCommand(program: Command) {
   program
     .command("report")
-    .description("Submit a context update to the Council")
-    .requiredOption("-p, --pod <podId>", "Pod ID")
+    .description("Submit a context update to the Council (pod or project)")
+    .option("-p, --pod <podId>", "Pod ID")
+    .option("--project <projectId>", "Project ID (between sprints / no active pod)")
     .requiredOption("-t, --type <type>", "Update type (progress|blocker|spec_change|question|decision)")
     .requiredOption("--scope <scope>", "Scope (frontend|backend|design|qa|infra|pm)")
     .requiredOption("--summary <text>", "Summary of the update")
@@ -18,9 +19,16 @@ export function registerReportCommand(program: Command) {
     .action(async (opts) => {
       const base = getBaseUrl(program);
 
+      const pod = opts.pod as string | undefined;
+      const project = opts.project as string | undefined;
+      if ((!pod && !project) || (pod && project)) {
+        console.error(chalk.red("\n  Specify exactly one of --pod or --project.\n"));
+        process.exit(1);
+      }
+
       const client = new CouncilClient({
         baseUrl: base,
-        podId: opts.pod,
+        ...(pod ? { podId: pod } : { projectId: project! }),
         agentId: opts.agent,
         scope: opts.scope as Scope,
       });
