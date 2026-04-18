@@ -15,16 +15,12 @@ import { upsertUserByIms } from "../services/users.js";
 import { createOrg, findOrgBySlug } from "../services/orgs.js";
 import { ensureOrgConfig } from "../services/org-settings.js";
 
-const DEFAULT_PROJECT_ID = "project-demo";
+const DEFAULT_PROJECT_ID = "project-emc";
 const DEMO_ORG_SLUG = "demo";
 const DEMO_ORG_ID = "org_demo";
 const DEMO_USER_EMAIL = process.env.DEV_USER_EMAIL ?? "dev@local";
 const DEMO_USER_NAME = process.env.DEV_USER_NAME ?? "Local Dev";
 
-/**
- * Ensure the demo user + demo org exist, and any pre-existing rows without
- * an org_id get backfilled. Safe to call on every boot — all steps are idempotent.
- */
 export function ensureDemoOrg(): { userId: string; orgId: string } {
   const user = upsertUserByIms({ email: DEMO_USER_EMAIL, display_name: DEMO_USER_NAME });
 
@@ -119,8 +115,8 @@ export function seedDatabase() {
   const transaction = db.transaction(() => {
     insertProject.run(
       DEFAULT_PROJECT_ID,
-      "Demo initiative",
-      "Shared project for seed pods",
+      "EMC Platform",
+      "Event Management Console for Adobe events — RBAC, sessions, and scope-level configs",
       new Date().toISOString(),
       JSON.stringify(EMPTY_PROJECT_ANATOMY),
       demoOrgId,

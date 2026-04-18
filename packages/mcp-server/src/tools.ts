@@ -15,8 +15,8 @@ const json = (data: unknown) => ({
 /*  Zod schemas (reusable fragments)                                  */
 /* ------------------------------------------------------------------ */
 
-const PodId = z.string().describe("Pod ID (e.g. 'pod-checkout-redesign')");
-const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
+const PodId = z.string().describe("Pod ID (e.g. 'pod-emc-rbac')");
+const ProjectId = z.string().describe("Project ID (e.g. 'project-emc')");
 const Scope = z
   .string()
   .min(1)
