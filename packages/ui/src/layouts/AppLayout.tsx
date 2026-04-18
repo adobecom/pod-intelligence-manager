@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
 import { Heading, Header, Picker, PickerItem, PickerSection, Button, StatusLight, Text } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
@@ -6,6 +6,10 @@ import { useOrgStore } from "../stores/orgStore";
 import { usePodStore } from "../stores/podStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { useAuth } from "../contexts/AuthContext";
+import { useOrg } from "../contexts/OrgContext";
+import { OrgSwitcher } from "../components/OrgSwitcher";
+import { CreateOrgModal } from "../views/CreateOrg/CreateOrgModal";
 
 const loadOrg = useOrgStore.getState().loadOrg;
 const loadPod = usePodStore.getState().loadPod;
@@ -52,6 +56,9 @@ export function AppLayout() {
   const projects = useOrgStore((s) => s.projects);
   const lastPodReload = useRef(0);
   const lastProjectReload = useRef(0);
+  const { signOut } = useAuth();
+  const { currentOrg } = useOrg();
+  const [createOrgOpen, setCreateOrgOpen] = useState(false);
 
   const isOrgPage = location.pathname === "/org";
 
@@ -61,9 +68,10 @@ export function AppLayout() {
   const scopeKey = podId ?? projectId ?? null;
   const hasScopeOptions = pods.length > 0 || projects.length > 0;
 
+  // Re-fetch org data whenever the selected org changes (e.g. via OrgSwitcher).
   useEffect(() => {
-    loadOrg();
-  }, []);
+    if (currentOrg) loadOrg();
+  }, [currentOrg?.slug]);
 
   const handleWSEvent = useCallback(
     (event: { type: string; payload?: unknown }) => {
@@ -144,7 +152,7 @@ export function AppLayout() {
 
         {podId && <StatusLight variant={wsVariant}>{wsLabel}</StatusLight>}
 
-        <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end", gap: 8 })}>
+        <div className={style({ flexGrow: 1, display: "flex", justifyContent: "end", gap: 8, alignItems: "center" })}>
           {!isOrgPage && (
             <Button onPress={() => navigate("/org")}>
               Org Dashboard
@@ -156,12 +164,21 @@ export function AppLayout() {
           >
             Knowledge
           </Button>
+          <Button
+            variant={location.pathname === "/org/members" ? "accent" : "secondary"}
+            onPress={() => navigate("/org/members")}
+          >
+            Members
+          </Button>
+          <OrgSwitcher onCreateOrg={() => setCreateOrgOpen(true)} onSignOut={signOut} />
         </div>
       </div>
 
       <div className={contentArea}>
         <Outlet />
       </div>
+
+      <CreateOrgModal isOpen={createOrgOpen} onOpenChange={setCreateOrgOpen} />
     </div>
   );
 }

@@ -38,18 +38,24 @@ vi.mock("../services/slack.js", () => ({
 
 // Import schema creation AFTER mocking db
 import { createTables } from "../db/schema.js";
+import { ensureDemoOrg } from "../db/seed.js";
+import { createAuthHook } from "../middleware/auth.js";
+import { resolveRequestOrg } from "../middleware/org-context.js";
 import podRoutes from "../routes/pods.js";
 import conflictRoutes from "../routes/conflicts.js";
 import contextUpdateRoutes from "../routes/context-updates.js";
 import livingDocRoutes from "../routes/living-doc.js";
 import projectRoutes from "../routes/projects.js";
 import orgRoutes from "../routes/org.js";
+import orgsRoutes from "../routes/orgs.js";
 
 let app: FastifyInstance;
 
 beforeAll(async () => {
   // Create tables in the in-memory database
   createTables();
+  // Ensure demo user + demo org exist so routes have a default org to scope to
+  ensureDemoOrg();
 
   // Build a Fastify instance with routes (no websocket for integration tests)
   app = Fastify();
@@ -62,6 +68,19 @@ beforeAll(async () => {
     });
   });
 
+  // Trust-mode auth + org-context hook — mirrors production index.ts wiring
+  const authenticate = createAuthHook("trust");
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url === "/api/health") return;
+    await authenticate(req, reply);
+    if (reply.sent) return;
+    const path = req.url.split("?")[0];
+    const orgBypass = ["/api/me", "/api/orgs"].some(p => path === p || path.startsWith(p + "/"));
+    if (!orgBypass) {
+      await resolveRequestOrg(req, reply);
+    }
+  });
+
   // Health check
   app.get("/api/health", async () => {
     const row = testDb.prepare("SELECT COUNT(*) as count FROM pods").get() as { count: number };
@@ -71,6 +90,7 @@ beforeAll(async () => {
   app.register(podRoutes);
   app.register(projectRoutes);
   app.register(orgRoutes);
+  app.register(orgsRoutes);
   app.register(conflictRoutes);
   app.register(contextUpdateRoutes);
   app.register(livingDocRoutes);

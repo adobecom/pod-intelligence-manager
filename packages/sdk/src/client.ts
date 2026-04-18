@@ -31,22 +31,48 @@ export interface SessionContext {
   externalContext?: ContextSearchResult;
 }
 
+/** Merge org header (X-Pim-Org) into an init record when an org slug is present. */
+function withOrgHeader(
+  init: RequestInit | undefined,
+  orgSlug: string | undefined,
+): RequestInit | undefined {
+  if (!orgSlug) return init;
+  const headers = new Headers(init?.headers);
+  headers.set("X-Pim-Org", orgSlug);
+  return { ...init, headers };
+}
+
 // Pod-agnostic helper for callers that don't need a full PimClient.
 // Used by the `pim search` CLI (which should not require PIM_POD_ID).
 export async function searchContext(
   baseUrl: string,
   request: ContextSearchRequest,
+  orgSlug?: string,
 ): Promise<ContextSearchResult> {
-  return fetchJSON<ContextSearchResult>(`${baseUrl}/api/context-search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
+  return fetchJSON<ContextSearchResult>(
+    `${baseUrl}/api/context-search`,
+    withOrgHeader(
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+      orgSlug,
+    ),
+  );
+}
+
+interface PimClientConfigBase {
+  baseUrl: string;
+  agentId: string;
+  scope: Scope;
+  /** Org slug sent as X-Pim-Org on every request. Required once the server enforces org scoping. */
+  orgSlug?: string;
 }
 
 export type PimClientConfig =
-  | { baseUrl: string; agentId: string; scope: Scope; podId: string; projectId?: undefined }
-  | { baseUrl: string; agentId: string; scope: Scope; projectId: string; podId?: undefined };
+  | (PimClientConfigBase & { podId: string; projectId?: undefined })
+  | (PimClientConfigBase & { projectId: string; podId?: undefined });
 
 export interface ReportInput {
   type: ContextUpdateType;
@@ -100,26 +126,36 @@ export class PimClient {
     return `${this.config.baseUrl}${path}`;
   }
 
+  private withHeaders(init?: RequestInit): RequestInit | undefined {
+    return withOrgHeader(init, this.config.orgSlug);
+  }
+
   // Submit a context update to PIM
   async report(input: ReportInput): Promise<ReportResult> {
     const path = this.isPodMode()
       ? `/api/pods/${this.config.podId}/context-updates`
       : `/api/projects/${this.config.projectId}/context-updates`;
-    return fetchJSON<ReportResult>(this.url(path), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agent_id: this.config.agentId,
-        scope: this.config.scope,
-        ...input,
+    return fetchJSON<ReportResult>(
+      this.url(path),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent_id: this.config.agentId,
+          scope: this.config.scope,
+          ...input,
+        }),
       }),
-    });
+    );
   }
 
   // Fetch the current living doc for the pod
   async getContext(): Promise<string> {
     if (!this.isPodMode()) throw new Error("getContext requires a pod-scoped client (podId)");
-    const res = await fetch(this.url(`/api/pods/${this.config.podId}/living-doc`));
+    const res = await fetch(
+      this.url(`/api/pods/${this.config.podId}/living-doc`),
+      this.withHeaders(),
+    );
     if (!res.ok) throw new Error(`Failed to fetch living doc: ${res.status}`);
     return res.text();
   }
@@ -127,40 +163,50 @@ export class PimClient {
   // Fetch current pod state
   async getPod(): Promise<Pod> {
     if (!this.isPodMode()) throw new Error("getPod requires a pod-scoped client (podId)");
-    return fetchJSON<Pod>(this.url(`/api/pods/${this.config.podId}`));
+    return fetchJSON<Pod>(this.url(`/api/pods/${this.config.podId}`), this.withHeaders());
   }
 
   async getProject(): Promise<Project> {
     if (this.isPodMode()) throw new Error("getProject requires a project-scoped client (projectId)");
-    return fetchJSON<Project>(this.url(`/api/projects/${this.config.projectId}`));
+    return fetchJSON<Project>(this.url(`/api/projects/${this.config.projectId}`), this.withHeaders());
   }
 
   // Fetch current conflicts for the pod
   async getConflicts(): Promise<Conflict[]> {
     if (!this.isPodMode()) throw new Error("getConflicts requires a pod-scoped client (podId)");
-    return fetchJSON<Conflict[]>(this.url(`/api/pods/${this.config.podId}/conflicts`));
+    return fetchJSON<Conflict[]>(
+      this.url(`/api/pods/${this.config.podId}/conflicts`),
+      this.withHeaders(),
+    );
   }
 
   // Fetch context updates for the pod
   async getUpdates(): Promise<ContextUpdate[]> {
     if (!this.isPodMode()) throw new Error("getUpdates requires a pod-scoped client (podId)");
-    return fetchJSON<ContextUpdate[]>(this.url(`/api/pods/${this.config.podId}/context-updates`));
+    return fetchJSON<ContextUpdate[]>(
+      this.url(`/api/pods/${this.config.podId}/context-updates`),
+      this.withHeaders(),
+    );
   }
 
   async getProjectUpdates(): Promise<ProjectContextUpdate[]> {
     if (this.isPodMode()) throw new Error("getProjectUpdates requires a project-scoped client (projectId)");
     return fetchJSON<ProjectContextUpdate[]>(
       this.url(`/api/projects/${this.config.projectId}/context-updates`),
+      this.withHeaders(),
     );
   }
 
   // Query the organizational knowledge graph with token budget
   async queryKnowledge(options: KnowledgeQueryOptions): Promise<KnowledgeQueryResult> {
-    return fetchJSON<KnowledgeQueryResult>(this.url("/api/knowledge/query"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(options),
-    });
+    return fetchJSON<KnowledgeQueryResult>(
+      this.url("/api/knowledge/query"),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      }),
+    );
   }
 
   // Get relevant learnings for this agent's scope with a token budget
@@ -168,6 +214,7 @@ export class PimClient {
     const scopes = encodeURIComponent(this.config.scope);
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}`),
+      this.withHeaders(),
     );
   }
 
@@ -176,6 +223,7 @@ export class PimClient {
     const conflict = encodeURIComponent(conflictSummary);
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/precedents?conflict=${conflict}&maxTokens=${maxTokens}`),
+      this.withHeaders(),
     );
   }
 
@@ -191,7 +239,7 @@ export class PimClient {
       ...opts,
       pod_id: opts?.pod_id ?? this.config.podId,
     };
-    return searchContext(this.config.baseUrl, body);
+    return searchContext(this.config.baseUrl, body, this.config.orgSlug);
   }
 
   // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)

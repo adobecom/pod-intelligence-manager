@@ -44,12 +44,22 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
 }
 
 export default async function contextUpdateRoutes(app: FastifyInstance) {
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/context-updates", async (req) => {
-    const rows = db.prepare("SELECT * FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC").all(req.params.podId) as ContextUpdateRow[];
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/context-updates", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return [];
+    }
+    const rows = db.prepare("SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? ORDER BY timestamp DESC").all(req.params.podId, req.org!.org_id) as ContextUpdateRow[];
     return rows.map(rowToContextUpdate);
   });
 
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/quality-stats", async (req) => {
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/quality-stats", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return [];
+    }
     const rows = db.prepare(`
       SELECT agent_id,
              COUNT(*) as update_count,
@@ -57,19 +67,24 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
              MIN(quality_score) as min_quality,
              MAX(quality_score) as max_quality
       FROM context_updates
-      WHERE pod_id = ?
+      WHERE pod_id = ? AND org_id = ?
       GROUP BY agent_id
       ORDER BY avg_quality DESC
-    `).all(req.params.podId);
+    `).all(req.params.podId, req.org!.org_id);
     return rows;
   });
 
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", {
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
   }, async (req, reply) => {
+    // Verify pod belongs to the requesting user's org
+    const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id) as { conflict_pressure: number } | undefined;
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
     // Gate: reject ingestion when pod is in critical conflict state (pressure >= 0.8)
-    const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(req.params.podId) as { conflict_pressure: number } | undefined;
-    if (pod && pod.conflict_pressure >= 0.8) {
+    if (pod.conflict_pressure >= 0.8) {
       reply.code(423);
       return {
         error: "Pod is in critical conflict state — ingestion paused. Resolve blocking conflicts first.",

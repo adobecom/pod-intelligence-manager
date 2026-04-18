@@ -28,8 +28,8 @@ const OrgConfigBodySchema = z.object({
 });
 
 export default async function orgRoutes(app: FastifyInstance) {
-  app.get("/api/org/config", async () => {
-    return getOrgConfig();
+  app.get("/api/org/config", async (req) => {
+    return getOrgConfig(req.org!.org_id);
   });
 
   app.patch<{ Body: z.infer<typeof OrgConfigBodySchema> }>(
@@ -39,7 +39,7 @@ export default async function orgRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       try {
-        return setOrgConfig(req.body);
+        return setOrgConfig(req.org!.org_id, req.body);
       } catch (e) {
         reply.code(400);
         return { error: e instanceof Error ? e.message : "Invalid org config" };
@@ -47,24 +47,24 @@ export default async function orgRoutes(app: FastifyInstance) {
     },
   );
 
-  app.get("/api/org/pods", async () => {
-    return db.prepare("SELECT * FROM org_pod_summaries").all() as OrgPodSummary[];
+  app.get("/api/org/pods", async (req) => {
+    return db.prepare("SELECT * FROM org_pod_summaries WHERE org_id = ?").all(req.org!.org_id) as OrgPodSummary[];
   });
 
-  app.get("/api/org/overlaps", async () => {
-    return db.prepare("SELECT * FROM cross_pod_overlaps").all() as CrossPodOverlap[];
+  app.get("/api/org/overlaps", async (req) => {
+    return db.prepare("SELECT * FROM cross_pod_overlaps WHERE org_id = ?").all(req.org!.org_id) as CrossPodOverlap[];
   });
 
-  app.get("/api/org/archived", async () => {
-    return db.prepare("SELECT * FROM archived_pods").all() as ArchivedPod[];
+  app.get("/api/org/archived", async (req) => {
+    return db.prepare("SELECT * FROM archived_pods WHERE org_id = ?").all(req.org!.org_id) as ArchivedPod[];
   });
 
-  app.get("/api/org/archived-projects", async () => {
+  app.get("/api/org/archived-projects", async (req) => {
     const rows = db
       .prepare(
-        "SELECT project_id, name, description, created_at, anatomy_json, archived_date FROM archived_projects ORDER BY archived_date DESC",
+        "SELECT project_id, name, description, created_at, anatomy_json, archived_date FROM archived_projects WHERE org_id = ? ORDER BY archived_date DESC",
       )
-      .all() as Array<{
+      .all(req.org!.org_id) as Array<{
       project_id: string;
       name: string;
       description: string | null;
@@ -86,7 +86,7 @@ export default async function orgRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/archive", async (req, reply) => {
     const { podId } = req.params;
-    const pod = db.prepare("SELECT pod_id, name, sprint_start, day_number, conflict_pressure, project_id FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    const pod = db.prepare("SELECT pod_id, name, sprint_start, day_number, conflict_pressure, project_id FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id) as PodRow | undefined;
     if (!pod) {
       reply.code(404);
       return { error: "Pod not found" };
@@ -98,9 +98,9 @@ export default async function orgRoutes(app: FastifyInstance) {
 
     // Insert into archived_pods
     db.prepare(
-      `INSERT OR REPLACE INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(podId, pod.name, now.toISOString().split("T")[0], durationDays, pod.conflict_pressure);
+      `INSERT OR REPLACE INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure, org_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(podId, pod.name, now.toISOString().split("T")[0], durationDays, pod.conflict_pressure, req.org!.org_id);
 
     // Remove from org_pod_summaries
     db.prepare("DELETE FROM org_pod_summaries WHERE pod_id = ?").run(podId);

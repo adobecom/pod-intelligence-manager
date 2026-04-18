@@ -235,7 +235,8 @@ pnpm --filter @pim/mcp-server build
       "command": "node",
       "args": ["/absolute/path/to/pim/packages/mcp-server/dist/index.js"],
       "env": {
-        "PIM_API_URL": "http://localhost:4000"
+        "PIM_API_URL": "http://localhost:4000",
+        "PIM_ORG_SLUG": "your-org-slug"
       }
     }
   }
@@ -246,11 +247,24 @@ pnpm --filter @pim/mcp-server build
 
 The artifact renders a read-only snapshot — no network requests from the artifact itself. To refresh, ask Claude to show it again.
 
+**Authentication:**
+
+The MCP server detects the PIM server's auth mode from `/api/health` on first request and caches it for the process lifetime.
+
+- **Trust mode** (server default for local dev): no auth required. `PIM_ORG_SLUG` is optional and `~/.pim/credentials.json` is ignored — the server upserts `dev@local` in the `demo` org for every request.
+- **IMS mode**: the MCP reads `~/.pim/credentials.json` (written by `pim login`) and injects `Authorization: Bearer <token>` + `X-Pim-Org: <slug>` on every request. Tokens are refreshed automatically when within 60s of expiry. If the refresh token is missing or invalid, the MCP logs a hint to stderr and the request surfaces a 401 back to Claude.
+
+To use MCP in IMS mode:
+
+1. Run `pim login` on the host first to populate `~/.pim/credentials.json` (chmod 600).
+2. Set `PIM_ORG_SLUG` in the MCP server `env` block above — or run the MCP from a repo that has `orgSlug` set in its `.pim.json` (via `pim init`).
+
 **Environment variables:**
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PIM_API_URL` | `http://localhost:4000` | Base URL of the PIM Fastify server |
+| `PIM_ORG_SLUG` | (from `.pim.json` in cwd) | Org slug sent as `X-Pim-Org`. Required in IMS mode if no `.pim.json` is present. |
 
 ### `@pim/cli`
 
@@ -412,6 +426,14 @@ pnpm --filter @pim/ui typecheck
 | `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
 | `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
 | `PIM_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the PIM server |
+| `PIM_ORG_SLUG` | (from `.pim.json`) | (MCP server + CLI) Org slug sent as `X-Pim-Org`. Required in IMS mode unless a `.pim.json` is present in cwd. |
+| `AUTH_MODE` | `trust` | (Server) `trust` upserts `dev@local` per request; `ims` verifies IMS JWTs via JWKS. |
+| `IMS_CLIENT_ID` | (none) | (Server, IMS mode) Adobe IMS client id for audience validation. Also advertised via `/api/health` so the CLI can auto-discover. |
+| `IMS_ENV` | `stg1` | (Server) `stg1` or `prod`. Selects the IMS JWKS and issuer. |
+| `IMS_EXPECTED_ISSUER` | *(IMS default)* | (Server) Override for the expected `iss` claim. Leave unset unless using a non-standard IMS deployment. |
+| `VITE_AUTH_MODE` | `trust` | (UI) Must match the server's `AUTH_MODE`. In `ims` the UI redirects to Adobe IMS; in `trust` it stubs a `dev@local` identity. |
+| `VITE_IMS_CLIENT_ID` | (none) | (UI, IMS mode) Adobe IMS client id (same value as `IMS_CLIENT_ID`). |
+| `VITE_IMS_ENV` | `stg1` | (UI) `stg1` or `prod`. |
 
 ## Architecture
 

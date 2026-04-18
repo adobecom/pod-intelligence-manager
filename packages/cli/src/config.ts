@@ -16,6 +16,8 @@ export interface PimConfig {
   agentId: string;
   scope: string;
   serverUrl: string;
+  /** Slug of the org that owns this pod/project. Sent as X-Pim-Org on every request. */
+  orgSlug?: string;
 }
 
 interface PimJsonFile {
@@ -24,6 +26,7 @@ interface PimJsonFile {
   agentId?: string;
   scope?: string;
   serverUrl?: string;
+  orgSlug?: string;
   autoReport?: { gitHook?: boolean; claudeCodeHook?: boolean };
 }
 
@@ -62,16 +65,25 @@ export function resolveConfig(): PimConfig | null {
   const scope = process.env.PIM_SCOPE?.trim() || json?.scope;
   const serverUrl = (process.env.PIM_SERVER_URL ?? json?.serverUrl ?? "http://localhost:4000").replace(/\/$/, "");
   const agentId = process.env.PIM_AGENT_ID?.trim() || json?.agentId || getGitUserName();
+  const orgSlug = process.env.PIM_ORG_SLUG?.trim() || json?.orgSlug;
 
   if (!agentId || !scope) return null;
 
   if (podId) {
-    return { mode: "pod", podId, agentId, scope, serverUrl };
+    return { mode: "pod", podId, agentId, scope, serverUrl, orgSlug };
   }
   if (projectId) {
-    return { mode: "project", projectId, agentId, scope, serverUrl };
+    return { mode: "project", projectId, agentId, scope, serverUrl, orgSlug };
   }
   return null;
+}
+
+/** Org slug from env or .pim.json, independent of whether a full PimConfig can be resolved. */
+export function resolveOrgSlug(): string | undefined {
+  const env = process.env.PIM_ORG_SLUG?.trim();
+  if (env) return env;
+  const json = readPimJson();
+  return json?.orgSlug?.trim() || undefined;
 }
 
 /**

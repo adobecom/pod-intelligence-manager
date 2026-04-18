@@ -140,17 +140,20 @@ export async function createConflict(
   };
 
   // Write to database atomically: conflict insert + pressure recalculation
-  const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
+  const podRow = db.prepare("SELECT conflict_pressure, org_id FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number; org_id: string | null } | undefined;
+  const previousPressure = podRow?.conflict_pressure ?? 0;
+  const orgId = podRow?.org_id ?? null;
 
   const insertAndRecalculate = db.transaction(() => {
     db.prepare(
-      `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date, org_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
       conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
       conflict.master_analysis, JSON.stringify(conflict.impact),
       conflict.resolved_by, conflict.resolution, conflict.resolution_date,
+      orgId,
     );
 
     return recalculatePressure(podId);

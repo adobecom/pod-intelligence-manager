@@ -9,10 +9,9 @@ import type { ContextUpdate } from "@pim/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 import { scheduleAsyncQualityScore } from "./async-quality-score.js";
 import { getOrgScopeIds } from "./org-settings.js";
+import { getOrgIdForPod } from "./orgs.js";
 
-const ScopeSchema = z.string().min(1).refine(s => getOrgScopeIds().has(s), {
-  message: "scope must be one of the org-defined scope ids",
-});
+const ScopeSchema = z.string().min(1);
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
 const WorkStatusSchema = z.enum(["completed", "in_progress", "blocked"]);
 
@@ -64,6 +63,21 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ?").get(podId);
   if (!pod) {
     return { success: false, error: `Pod not found: ${podId}` };
+  }
+
+  // 2.5 Validate scope against the pod's org scopes
+  const orgId = getOrgIdForPod(podId);
+  if (!orgId) {
+    return { success: false, error: `Pod ${podId} is not linked to an org` };
+  }
+  const validScopes = getOrgScopeIds(orgId);
+  if (!validScopes.has(data.scope)) {
+    return { success: false, error: `scope "${data.scope}" is not defined in the org` };
+  }
+  for (const req of data.needs_input_from) {
+    if (!validScopes.has(req.role)) {
+      return { success: false, error: `needs_input_from.role "${req.role}" is not a valid scope` };
+    }
   }
 
   // 3. Secret scan (summary + details + artifact paths/urls)
@@ -120,15 +134,15 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
 
   // 6. Write to database
   db.prepare(
-    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     update.id, update.agent_id, update.timestamp, update.pod_id,
     update.type, update.scope, update.summary, update.details,
     JSON.stringify(update.artifacts), update.status, update.quality_score,
     JSON.stringify(update.blocks), JSON.stringify(update.blocked_by),
     JSON.stringify(update.needs_input_from),
-    update.source ?? "manual", commitSha,
+    update.source ?? "manual", commitSha, orgId,
   );
 
   // 6.5 Denormalize pod_areas + milestone % + org agent_count from context stream

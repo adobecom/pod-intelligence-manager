@@ -35,8 +35,13 @@ function rowToTunnel(row: TunnelRow): Tunnel {
 }
 
 export default async function tunnelRoutes(app: FastifyInstance) {
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/tunnels", async (req) => {
-    const rows = db.prepare("SELECT * FROM tunnels WHERE pod_id = ?").all(req.params.podId) as TunnelRow[];
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/tunnels", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return [];
+    }
+    const rows = db.prepare("SELECT * FROM tunnels WHERE pod_id = ? AND org_id = ?").all(req.params.podId, req.org!.org_id) as TunnelRow[];
     return rows.map(rowToTunnel);
   });
 
@@ -46,14 +51,19 @@ export default async function tunnelRoutes(app: FastifyInstance) {
   }>("/api/pods/:podId/tunnels", { preHandler: validateBody(CreateTunnelSchema) }, async (req, reply) => {
     const { podId } = req.params;
     const { dev_name, branch, port } = req.body;
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
     const tunnel_id = `tunnel-${dev_name}-${Date.now()}`;
     const serverBase = process.env.TUNNEL_BASE_URL ?? `http://localhost:${process.env.PORT ?? "4000"}`;
     const url = `${serverBase}/tunnel/${tunnel_id}`;
     const now = new Date().toISOString();
 
     db.prepare(
-      "INSERT INTO tunnels (tunnel_id, pod_id, dev_name, branch, url, status, last_activity) VALUES (?, ?, ?, ?, ?, 'active', ?)"
-    ).run(tunnel_id, podId, dev_name, branch, url, now);
+      "INSERT INTO tunnels (tunnel_id, pod_id, dev_name, branch, url, status, last_activity, org_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)"
+    ).run(tunnel_id, podId, dev_name, branch, url, now, req.org!.org_id);
 
     // Update org summary tunnel count
     db.prepare(
@@ -86,8 +96,8 @@ export default async function tunnelRoutes(app: FastifyInstance) {
     const now = new Date().toISOString();
 
     const result = db.prepare(
-      "UPDATE tunnels SET last_activity = ?, status = 'active' WHERE tunnel_id = ? AND pod_id = ?"
-    ).run(now, tunnelId, podId);
+      "UPDATE tunnels SET last_activity = ?, status = 'active' WHERE tunnel_id = ? AND pod_id = ? AND org_id = ?"
+    ).run(now, tunnelId, podId, req.org!.org_id);
 
     if (result.changes === 0) {
       reply.code(404);
@@ -103,8 +113,8 @@ export default async function tunnelRoutes(app: FastifyInstance) {
     const { podId, tunnelId } = req.params;
 
     const result = db.prepare(
-      "UPDATE tunnels SET status = 'disconnected' WHERE tunnel_id = ? AND pod_id = ?"
-    ).run(tunnelId, podId);
+      "UPDATE tunnels SET status = 'disconnected' WHERE tunnel_id = ? AND pod_id = ? AND org_id = ?"
+    ).run(tunnelId, podId, req.org!.org_id);
 
     if (result.changes === 0) {
       reply.code(404);

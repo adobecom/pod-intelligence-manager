@@ -4,7 +4,13 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { resolveConfig } from "../config.js";
+import { resolveConfig, type PimConfig } from "../config.js";
+
+function orgHeaders(config: PimConfig): Record<string, string> {
+  const base: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.orgSlug) base["X-Pim-Org"] = config.orgSlug;
+  return base;
+}
 
 function git(args: string[]): string {
   const r = spawnSync("git", args, { encoding: "utf-8" });
@@ -68,7 +74,7 @@ async function postCommit(): Promise<void> {
       : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: orgHeaders(config),
     body: JSON.stringify({
       agent_id: config.agentId,
       scope: config.scope,
@@ -126,7 +132,7 @@ async function postRewrite(): Promise<void> {
       : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: orgHeaders(config),
     body: JSON.stringify({
       agent_id: config.agentId,
       scope: config.scope,

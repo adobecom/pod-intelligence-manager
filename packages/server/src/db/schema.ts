@@ -1,10 +1,49 @@
-import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import db from "./connection.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";
 
 export function createTables() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      user_id TEXT PRIMARY KEY,
+      ims_user_id TEXT UNIQUE,
+      email TEXT NOT NULL,
+      display_name TEXT,
+      created_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS orgs (
+      org_id TEXT PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      created_by_user_id TEXT NOT NULL REFERENCES users(user_id),
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memberships (
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(user_id),
+      role TEXT NOT NULL CHECK (role IN ('owner','admin','member')),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (org_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memberships_user ON memberships(user_id);
+
+    CREATE TABLE IF NOT EXISTS org_invites (
+      invite_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin','member')),
+      invited_by_user_id TEXT NOT NULL REFERENCES users(user_id),
+      created_at TEXT NOT NULL,
+      accepted_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_org_invites_email ON org_invites(email) WHERE accepted_at IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id);
+
     CREATE TABLE IF NOT EXISTS org_settings (
       key TEXT PRIMARY KEY,
       value_json TEXT NOT NULL
@@ -247,6 +286,33 @@ export function createTables() {
     db.exec("ALTER TABLE projects ADD COLUMN anatomy_json TEXT");
   } catch { /* already exists */ }
 
+  // Multi-tenant org FKs (nullable in Phase 1; seed backfills; Phase 2 enforces).
+  try { db.exec("ALTER TABLE projects ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE projects ADD COLUMN created_by_user_id TEXT REFERENCES users(user_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE pods ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE pods ADD COLUMN created_by_user_id TEXT REFERENCES users(user_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_context_updates ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE conflicts ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE tunnels ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE living_docs ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE archived_pods ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE archived_projects ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE org_pod_summaries ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE cross_pod_overlaps ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE lint_findings ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE pending_work ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_pods_org ON pods(org_id)"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_org_time ON context_updates(org_id, timestamp DESC)"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_conflicts_org ON conflicts(org_id)"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_knowledge_nodes_org ON knowledge_nodes(org_id)"); } catch { /* already exists */ }
+
+  // Per-org settings: add org_id column; existing single-row entries get backfilled by seed.
+  try { db.exec("ALTER TABLE org_settings ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS archived_projects (
@@ -260,8 +326,5 @@ export function createTables() {
     `);
   } catch { /* already exists */ }
 
-  db.prepare("INSERT OR IGNORE INTO org_settings (key, value_json) VALUES (?, ?)").run(
-    ORG_CONFIG_ROW_KEY,
-    JSON.stringify(DEFAULT_ORG_CONFIG),
-  );
+  // Org settings now keyed on (org_id, key); seed.ts installs the default row per org.
 }

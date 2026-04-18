@@ -153,14 +153,15 @@ export function regenerateLivingDoc(podId: string): string {
 
   // Write to database (atomically increment regen_count)
   const now = new Date().toISOString();
+  const podRow = db.prepare("SELECT org_id FROM pods WHERE pod_id = ?").get(podId) as { org_id: string | null } | undefined;
   db.prepare(
-    `INSERT INTO living_docs (pod_id, markdown, last_regenerated_at, regen_count)
-     VALUES (?, ?, ?, 1)
+    `INSERT INTO living_docs (pod_id, markdown, last_regenerated_at, regen_count, org_id)
+     VALUES (?, ?, ?, 1, ?)
      ON CONFLICT(pod_id) DO UPDATE SET
        markdown = excluded.markdown,
        last_regenerated_at = excluded.last_regenerated_at,
        regen_count = living_docs.regen_count + 1`
-  ).run(podId, md, now);
+  ).run(podId, md, now, podRow?.org_id ?? null);
 
   // Broadcast update
   broadcast({ type: "living_doc_updated", podId, payload: { markdown: md } });

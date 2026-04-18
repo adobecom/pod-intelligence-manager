@@ -21,11 +21,6 @@ function normalizeScopes(rows: OrgScopeDefinition[], label: string): OrgScopeDef
   return out;
 }
 
-/**
- * Validate PATCH/PUT body: `{ scopes }` only.
- * Legacy payloads with `roles` (same shape as scopes) are accepted only if `scopes` is missing or empty —
- * then `roles` is treated as the scope list for migration.
- */
 export function parseAndValidateOrgConfig(input: unknown): OrgConfig {
   if (!input || typeof input !== "object") {
     throw new Error("Body must be an object with a scopes array");
@@ -47,10 +42,10 @@ export function parseAndValidateOrgConfig(input: unknown): OrgConfig {
   return { scopes };
 }
 
-function readRow(): string | null {
-  const row = db.prepare("SELECT value_json FROM org_settings WHERE key = ?").get(ORG_CONFIG_ROW_KEY) as
-    | { value_json: string }
-    | undefined;
+function readRow(orgId: string): string | null {
+  const row = db
+    .prepare("SELECT value_json FROM org_settings WHERE org_id = ? AND key = ?")
+    .get(orgId, ORG_CONFIG_ROW_KEY) as { value_json: string } | undefined;
   return row?.value_json ?? null;
 }
 
@@ -63,35 +58,52 @@ function safeParseOrgConfig(json: string): OrgConfig | null {
   }
 }
 
-export function getOrgConfig(): OrgConfig {
-  const raw = readRow();
+export function getOrgConfig(orgId: string): OrgConfig {
+  const raw = readRow(orgId);
   if (!raw) {
     return { scopes: [...DEFAULT_ORG_CONFIG.scopes] };
   }
-  const parsed = safeParseOrgConfig(raw);
-  if (parsed) {
-    return parsed;
-  }
-  return { scopes: [...DEFAULT_ORG_CONFIG.scopes] };
+  return safeParseOrgConfig(raw) ?? { scopes: [...DEFAULT_ORG_CONFIG.scopes] };
 }
 
-export function setOrgConfig(config: unknown): OrgConfig {
+export function setOrgConfig(orgId: string, config: unknown): OrgConfig {
   const normalized = parseAndValidateOrgConfig(config);
-  const existing = db.prepare("SELECT key FROM org_settings WHERE key = ?").get(ORG_CONFIG_ROW_KEY) as
-    | { key: string }
-    | undefined;
+  const existing = db
+    .prepare("SELECT key FROM org_settings WHERE org_id = ? AND key = ?")
+    .get(orgId, ORG_CONFIG_ROW_KEY) as { key: string } | undefined;
   if (existing) {
-    db.prepare("UPDATE org_settings SET value_json = ? WHERE key = ?").run(JSON.stringify(normalized), ORG_CONFIG_ROW_KEY);
+    db.prepare("UPDATE org_settings SET value_json = ? WHERE org_id = ? AND key = ?").run(
+      JSON.stringify(normalized),
+      orgId,
+      ORG_CONFIG_ROW_KEY,
+    );
   } else {
-    db.prepare("INSERT INTO org_settings (key, value_json) VALUES (?, ?)").run(ORG_CONFIG_ROW_KEY, JSON.stringify(normalized));
+    db.prepare("INSERT INTO org_settings (org_id, key, value_json) VALUES (?, ?, ?)").run(
+      orgId,
+      ORG_CONFIG_ROW_KEY,
+      JSON.stringify(normalized),
+    );
   }
   return normalized;
 }
 
-export function getOrgScopeIds(): Set<string> {
-  return new Set(getOrgConfig().scopes.map(s => s.id));
+export function ensureOrgConfig(orgId: string): void {
+  const existing = db
+    .prepare("SELECT key FROM org_settings WHERE org_id = ? AND key = ?")
+    .get(orgId, ORG_CONFIG_ROW_KEY);
+  if (!existing) {
+    db.prepare("INSERT INTO org_settings (org_id, key, value_json) VALUES (?, ?, ?)").run(
+      orgId,
+      ORG_CONFIG_ROW_KEY,
+      JSON.stringify(DEFAULT_ORG_CONFIG),
+    );
+  }
 }
 
-export function getOrgScopeIdsOrdered(): string[] {
-  return getOrgConfig().scopes.map(s => s.id);
+export function getOrgScopeIds(orgId: string): Set<string> {
+  return new Set(getOrgConfig(orgId).scopes.map((s) => s.id));
+}
+
+export function getOrgScopeIdsOrdered(orgId: string): string[] {
+  return getOrgConfig(orgId).scopes.map((s) => s.id);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getAuthToken, getOrgSlug } from "../services/api";
 
 interface WSEvent {
   type: string;
@@ -36,7 +37,12 @@ export function useWebSocket(
 
       setStatus("connecting");
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws?podId=${encodeURIComponent(stableRoomId)}`);
+      const params = new URLSearchParams({ podId: stableRoomId });
+      const token = getAuthToken();
+      if (token) params.set("token", token);
+      const orgSlug = getOrgSlug();
+      if (orgSlug) params.set("org", orgSlug);
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws?${params.toString()}`);
       wsRef.current = ws;
 
       ws.onopen = () => {

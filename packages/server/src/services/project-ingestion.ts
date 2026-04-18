@@ -28,8 +28,8 @@ export async function ingestProjectContextUpdate(
 
   const data = parsed.data;
 
-  const project = db.prepare("SELECT project_id, name FROM projects WHERE project_id = ?").get(projectId) as
-    | { project_id: string; name: string }
+  const project = db.prepare("SELECT project_id, name, org_id FROM projects WHERE project_id = ?").get(projectId) as
+    | { project_id: string; name: string; org_id: string | null }
     | undefined;
   if (!project) {
     return { success: false, error: `Project not found: ${projectId}` };
@@ -83,8 +83,8 @@ export async function ingestProjectContextUpdate(
   };
 
   db.prepare(
-    `INSERT INTO project_context_updates (id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO project_context_updates (id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     update.id,
     update.agent_id,
@@ -102,6 +102,7 @@ export async function ingestProjectContextUpdate(
     JSON.stringify(update.needs_input_from),
     update.source ?? "manual",
     commitSha,
+    project.org_id,
   );
 
   maybeAddProjectContextSignalToGraph(

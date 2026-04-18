@@ -137,7 +137,10 @@ describe("PimClient", () => {
 
       const result = await client.getContext();
       expect(result).toBe("# Living Doc\n\nContent here");
-      expect(mockFetch).toHaveBeenCalledWith("http://localhost:4000/api/pods/pod-1/living-doc");
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:4000/api/pods/pod-1/living-doc",
+        undefined,
+      );
     });
   });
 
