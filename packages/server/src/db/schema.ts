@@ -192,6 +192,18 @@ export function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time
       ON project_context_updates(project_id, timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS ingestion_queue (
+      id TEXT PRIMARY KEY,
+      pod_id TEXT NOT NULL REFERENCES pods(pod_id),
+      org_id TEXT,
+      payload_json TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status
+      ON ingestion_queue(pod_id, status);
   `);
 
   // Migration guards for existing databases
@@ -258,6 +270,22 @@ export function createTables() {
         archived_date TEXT NOT NULL
       )
     `);
+  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ingestion_queue (
+        id TEXT PRIMARY KEY,
+        pod_id TEXT NOT NULL,
+        org_id TEXT,
+        payload_json TEXT NOT NULL,
+        queued_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+      )
+    `);
+  } catch { /* already exists */ }
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status ON ingestion_queue(pod_id, status)");
   } catch { /* already exists */ }
 
   db.prepare("INSERT OR IGNORE INTO org_settings (key, value_json) VALUES (?, ?)").run(
