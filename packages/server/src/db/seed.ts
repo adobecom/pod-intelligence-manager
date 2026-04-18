@@ -12,7 +12,7 @@ import {
   EMPTY_PROJECT_ANATOMY,
 } from "@pim/shared";
 
-const DEFAULT_PROJECT_ID = "project-demo";
+const DEFAULT_PROJECT_ID = "project-emc";
 
 export function seedDatabase() {
   const podCount = db.prepare("SELECT COUNT(*) as count FROM pods").get() as { count: number };
@@ -55,8 +55,8 @@ export function seedDatabase() {
   const transaction = db.transaction(() => {
     insertProject.run(
       DEFAULT_PROJECT_ID,
-      "Demo initiative",
-      "Shared project for seed pods",
+      "EMC Platform",
+      "Event Management Console for Adobe events — RBAC, sessions, and scope-level configs",
       new Date().toISOString(),
       JSON.stringify(EMPTY_PROJECT_ANATOMY),
     );
