@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { Project, ProjectResources } from "@council/shared";
+import type { Project, ProjectResources } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
 
 function parseList(raw: string | undefined): string[] | undefined {

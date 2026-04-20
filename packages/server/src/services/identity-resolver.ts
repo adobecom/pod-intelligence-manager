@@ -5,7 +5,7 @@
 // so repeat queries don't re-hit the Slack/GitHub APIs.
 
 import { WebClient } from "@slack/web-api";
-import type { ContextSearchActor } from "@council/shared";
+import type { ContextSearchActor } from "@pim/shared";
 import db from "../db/connection.js";
 
 const TTL_SEC = 7 * 24 * 3600;
