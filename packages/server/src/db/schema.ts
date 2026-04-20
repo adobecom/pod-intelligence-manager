@@ -168,7 +168,8 @@ export function createTables() {
       confidence_score REAL NOT NULL,
       created_at TEXT NOT NULL,
       curated INTEGER NOT NULL DEFAULT 0,
-      community_id TEXT
+      community_id TEXT,
+      embedding_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS project_context_updates (

@@ -15,10 +15,10 @@ import type { EnhancedPodLearning } from "@pim/shared";
 
 let orgSeq = 0;
 
-function seedGraph(learnings: EnhancedPodLearning[]) {
+async function seedGraph(learnings: EnhancedPodLearning[]) {
   const orgId = `kg-test-${orgSeq++}`;
   initializeKnowledgeGraph(orgId);
-  addLearningsToGraph(learnings, "pod-seed", "Seed Pod");
+  await addLearningsToGraph(learnings, "pod-seed", "Seed Pod");
 }
 
 describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
@@ -26,8 +26,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     vi.clearAllMocks();
   });
 
-  it("ranks nodes matching conflict-derived keywords ahead of same-domain peers", () => {
-    seedGraph([
+  it("ranks nodes matching conflict-derived keywords ahead of same-domain peers", async () => {
+    await seedGraph([
       {
         type: "scope_insight",
         summary: "Use webhook authentication for payment callbacks",
@@ -46,12 +46,12 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       },
     ]);
 
-    const withConflict = getRelevantLearnings(
+    const withConflict = await getRelevantLearnings(
       ["backend"],
       ["webhook payment authentication issue"],
       500,
     );
-    const withoutConflict = getRelevantLearnings(["backend"], [], 500);
+    const withoutConflict = await getRelevantLearnings(["backend"], [], 500);
 
     expect(withConflict.nodes[0]?.summary).toContain("webhook");
     expect(withoutConflict.nodes[0]?.summary).toBeDefined();
@@ -63,8 +63,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(webhookFirstWhenRelevant).toBeLessThan(cdnFirstWhenRelevant);
   });
 
-  it("merges filters.keywords with text_search tokens for scoring", () => {
-    seedGraph([
+  it("merges filters.keywords with text_search tokens for scoring", async () => {
+    await seedGraph([
       {
         type: "pattern",
         summary: "Zebra migration checklist for infra",
@@ -95,7 +95,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.nodes[0]?.summary.toLowerCase()).toContain("zebra");
   });
 
-  it("getRelevantLearnings with projectId filters out nodes tagged to other projects", () => {
+  it("getRelevantLearnings with projectId filters out nodes tagged to other projects", async () => {
     const orgId = `kg-test-${orgSeq++}`;
     initializeKnowledgeGraph(orgId);
     const base: EnhancedPodLearning = {
@@ -106,21 +106,21 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       confidence_score: 0.9,
       summary: "",
     };
-    addLearningsToGraph([{ ...base, summary: "Shared org learning" }], "pod-a", "Pod A");
-    addLearningsToGraph(
+    await addLearningsToGraph([{ ...base, summary: "Shared org learning" }], "pod-a", "Pod A");
+    await addLearningsToGraph(
       [{ ...base, summary: "Project Alpha decision" }],
       "pod-b",
       "Pod B",
       { project_id: "proj-alpha", project_name: "Alpha" },
     );
-    addLearningsToGraph(
+    await addLearningsToGraph(
       [{ ...base, summary: "Project Beta decision" }],
       "pod-c",
       "Pod C",
       { project_id: "proj-beta", project_name: "Beta" },
     );
 
-    const forAlpha = getRelevantLearnings(["backend"], [], 2000, "proj-alpha");
+    const forAlpha = await getRelevantLearnings(["backend"], [], 2000, "proj-alpha");
     const summaries = forAlpha.nodes.map(n => n.summary);
     expect(summaries.some(s => s.includes("Shared org"))).toBe(true);
     expect(summaries.some(s => s.includes("Project Alpha"))).toBe(true);

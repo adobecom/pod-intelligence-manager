@@ -27,6 +27,8 @@ export interface KnowledgeNode {
   created_at: string;
   curated: boolean; // false = auto-extracted, true = human-approved
   community_id?: string;
+  /** Titan Text Embeddings v2 vector; absent on nodes created before embedding backfill. */
+  embedding?: number[];
 }
 
 // --- Edge Types ---
@@ -96,6 +98,8 @@ export interface KnowledgeQueryOptions {
   include_details?: boolean;
   include_edges?: boolean;
   limit?: number;
+  /** Pre-computed query embedding for hybrid semantic+keyword scoring. */
+  query_embedding?: number[] | null;
 }
 
 export interface KnowledgeQueryResult {

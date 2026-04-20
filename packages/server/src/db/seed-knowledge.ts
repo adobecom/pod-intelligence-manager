@@ -217,13 +217,13 @@ const registrationLearnings: EnhancedPodLearning[] = [
   },
 ];
 
-export function seedKnowledgeGraph(): void {
+export async function seedKnowledgeGraph(): Promise<void> {
   const graph = getGraph();
   if (graph.nodes.length > 0) return; // Already seeded
 
   console.log("[knowledge-graph] Seeding mock knowledge from archived EMC pods...");
 
-  const result1 = addLearningsToGraph(
+  const result1 = await addLearningsToGraph(
     eventCrudLearnings,
     "pod-emc-event-crud",
     "Event CRUD v1",
@@ -232,7 +232,7 @@ export function seedKnowledgeGraph(): void {
     `[knowledge-graph] Event CRUD v1: ${result1.nodesAdded} nodes, ${result1.edgesAdded} edges`,
   );
 
-  const result2 = addLearningsToGraph(
+  const result2 = await addLearningsToGraph(
     registrationLearnings,
     "pod-emc-registration",
     "Registration Forms v1",

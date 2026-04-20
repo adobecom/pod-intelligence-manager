@@ -18,14 +18,14 @@ vi.mock("../db/connection.js", () => ({ default: testDb }));
 vi.mock("../services/knowledge-graph.js", () => ({
   initializeKnowledgeGraph: vi.fn(),
   refreshAnalysis: vi.fn(),
-  getRelevantLearnings: vi.fn().mockReturnValue({
+  getRelevantLearnings: vi.fn().mockResolvedValue({
     nodes: [],
     truncated: false,
     total_matching: 0,
     token_estimate: 0,
     edges: [],
   }),
-  getPrecedents: vi.fn().mockReturnValue({ nodes: [] }),
+  getPrecedents: vi.fn().mockResolvedValue({ nodes: [] }),
   maybeAddProjectContextSignalToGraph: vi.fn().mockReturnValue({ added: false }),
 }));
 
