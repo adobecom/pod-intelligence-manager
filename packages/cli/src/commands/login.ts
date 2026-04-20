@@ -26,6 +26,9 @@ interface HealthResponse {
   auth_mode?: "trust" | "ims";
   ims_client_id?: string;
   ims_env?: ImsEnv;
+  ims_cli_client_id?: string;
+  ims_cli_client_secret?: string;
+  ims_cli_scopes?: string;
 }
 
 async function fetchServerHealth(baseUrl: string): Promise<HealthResponse> {
@@ -101,7 +104,8 @@ function startLoopbackListener(expectedState: string): Promise<{
     });
 
     server.on("error", rejectServer);
-    server.listen(0, "127.0.0.1", () => {
+    const PIM_CALLBACK_PORT = parseInt(process.env.PIM_CALLBACK_PORT ?? "9876", 10);
+    server.listen(PIM_CALLBACK_PORT, "localhost", () => {
       const addr = server.address();
       if (!addr || typeof addr === "string") {
         rejectServer(new Error("Failed to bind loopback port"));
@@ -144,7 +148,8 @@ export function registerLoginCommand(program: Command): void {
         return;
       }
 
-      const clientId = process.env.PIM_IMS_CLIENT_ID ?? health.ims_client_id;
+      const clientId = process.env.PIM_IMS_CLIENT_ID ?? health.ims_cli_client_id ?? health.ims_client_id;
+      const clientSecret = process.env.PIM_IMS_CLIENT_SECRET ?? health.ims_cli_client_secret;
       const imsEnv: ImsEnv = (process.env.PIM_IMS_ENV as ImsEnv) ?? health.ims_env ?? "stg1";
       if (!clientId) {
         console.error(
@@ -159,11 +164,10 @@ export function registerLoginCommand(program: Command): void {
       const pkce = generatePkce();
       const state = generateState();
       const scope =
-        process.env.PIM_IMS_SCOPES ??
-        "AdobeID,openid,gnav,offline_access";
+        process.env.PIM_IMS_SCOPES ?? health.ims_cli_scopes ?? "AdobeID,openid";
 
       const listener = await startLoopbackListener(state);
-      const redirectUri = `http://127.0.0.1:${listener.port}/callback`;
+      const redirectUri = `http://localhost:${listener.port}/callback`;
 
       const { authorize } = getImsEndpoints(imsEnv);
       const authUrl = new URL(authorize);
@@ -194,6 +198,7 @@ export function registerLoginCommand(program: Command): void {
         tokenResponse = await exchangeCodeForToken({
           env: imsEnv,
           clientId,
+          clientSecret,
           code,
           verifier: pkce.verifier,
           redirectUri,

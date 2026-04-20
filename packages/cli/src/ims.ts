@@ -29,18 +29,21 @@ export function generateState(): string {
 export async function exchangeCodeForToken(params: {
   env: ImsEnv;
   clientId: string;
+  clientSecret?: string;
   code: string;
   verifier: string;
   redirectUri: string;
 }): Promise<TokenResponse> {
   const { token } = getImsEndpoints(params.env);
-  const body = new URLSearchParams({
+  const bodyParams: Record<string, string> = {
     grant_type: "authorization_code",
     client_id: params.clientId,
     code: params.code,
     code_verifier: params.verifier,
     redirect_uri: params.redirectUri,
-  });
+  };
+  if (params.clientSecret) bodyParams.client_secret = params.clientSecret;
+  const body = new URLSearchParams(bodyParams);
   const res = await fetch(token, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

@@ -118,10 +118,14 @@ app.get("/api/health", async (_req, reply) => {
       started_at: serverStartedAt,
       uptime_seconds: Math.floor(process.uptime()),
       auth_mode: authMode,
-      // Published so the CLI's `pim login` can auto-discover IMS settings
-      // without requiring every user to set PIM_IMS_CLIENT_ID manually.
       ims_client_id: process.env.IMS_CLIENT_ID ?? null,
       ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
+      // CLI login settings — advertised so users need no env vars to run `pim login`.
+      // client_secret is intentionally public: CLI clients are inherently not secret
+      // (distributed to all users), so advertising it is equivalent to shipping it in the binary.
+      ims_cli_client_id: process.env.IMS_CLI_CLIENT_ID ?? process.env.IMS_CLIENT_ID ?? null,
+      ims_cli_client_secret: process.env.IMS_CLI_CLIENT_SECRET ?? null,
+      ims_cli_scopes: process.env.IMS_CLI_SCOPES ?? "AdobeID,openid",
       db: { connected: true, active_pods: row.count },
     };
   } catch {
