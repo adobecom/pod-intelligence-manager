@@ -25,9 +25,8 @@ const authMode: AuthMode = raw.VITE_AUTH_MODE === "ims" ? "ims" : "trust";
 
 const imsEnv: ImsEnvironment = raw.VITE_IMS_ENV === "prod" ? "prod" : "stg1";
 
-const imsClientId = raw.VITE_IMS_CLIENT_ID ?? "";
-const imsScopes =
-  raw.VITE_IMS_SCOPES ?? "AdobeID,openid,read_organizations,additional_info.projectedProductContext";
+const imsClientId = raw.VITE_IMS_CLIENT_ID ?? "acom_event_mgmt_console";
+const imsScopes = raw.VITE_IMS_SCOPES ?? "AdobeID,openid,gnav";
 
 export const env = {
   authMode,

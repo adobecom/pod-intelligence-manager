@@ -160,7 +160,7 @@ export function registerLoginCommand(program: Command): void {
       const state = generateState();
       const scope =
         process.env.PIM_IMS_SCOPES ??
-        "AdobeID,openid,read_organizations,additional_info.projectedProductContext,offline_access";
+        "AdobeID,openid,gnav,offline_access";
 
       const listener = await startLoopbackListener(state);
       const redirectUri = `http://127.0.0.1:${listener.port}/callback`;
