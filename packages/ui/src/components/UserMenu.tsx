@@ -20,18 +20,11 @@ interface UserMenuProps {
   onSignOut: () => void;
 }
 
-function getInitials(name: string | null | undefined): string {
-  if (!name) return "?";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.substring(0, 2).toUpperCase();
-}
-
 export function UserMenu({ onCreateOrg, onSignOut }: UserMenuProps) {
   const { user } = useAuth();
   const { orgs, currentOrg, setCurrentOrg } = useOrg();
 
-  const initials = getInitials(user?.display_name);
+  const displayName = user?.display_name ?? user?.email ?? "";
 
   const handleAction = (key: React.Key) => {
     const k = String(key);
@@ -46,43 +39,11 @@ export function UserMenu({ onCreateOrg, onSignOut }: UserMenuProps) {
 
   return (
     <MenuTrigger>
-      <ActionButton isQuiet aria-label="User menu">
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 6,
-            background: "#0d66d0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#fff",
-            fontSize: 11,
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-            flexShrink: 0,
-          }}
-        >
-          {initials}
-        </div>
+      <ActionButton isQuiet aria-label="User menu" styles={style({ borderRadius: "pill" })}>
+        <Text>{displayName}</Text>
       </ActionButton>
 
       <Menu onAction={handleAction} UNSAFE_style={{ minWidth: 220 }}>
-        {/* Account info — decorative, not actionable */}
-        {user && (
-          <MenuSection aria-label="Account">
-            <MenuItem id="account-info" isDisabled textValue={user.display_name ?? user.email}>
-              <div className={style({ display: "flex", flexDirection: "column", gap: 2 })}>
-                <Text slot="label">{user.display_name ?? user.email}</Text>
-                {user.display_name && (
-                  <Text slot="description">{user.email}</Text>
-                )}
-              </div>
-            </MenuItem>
-          </MenuSection>
-        )}
-
-        {/* Org switcher */}
         {orgs.length > 0 && (
           <MenuSection>
             <Header>Organization</Header>
@@ -95,7 +56,6 @@ export function UserMenu({ onCreateOrg, onSignOut }: UserMenuProps) {
           </MenuSection>
         )}
 
-        {/* Actions */}
         <MenuSection aria-label="Actions">
           <MenuItem id="neworg" textValue="New org">
             <Add />
