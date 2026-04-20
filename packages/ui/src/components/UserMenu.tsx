@@ -7,7 +7,6 @@ import {
   Header,
   Text,
 } from "@react-spectrum/s2";
-import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Leave from "@react-spectrum/s2/icons/Leave";
 import UserGroup from "@react-spectrum/s2/icons/UserGroup";
 import Checkmark from "@react-spectrum/s2/icons/Checkmark";
@@ -39,7 +38,7 @@ export function UserMenu({ onCreateOrg, onSignOut }: UserMenuProps) {
 
   return (
     <MenuTrigger>
-      <ActionButton isQuiet aria-label="User menu" styles={style({ borderRadius: "pill" })}>
+      <ActionButton isQuiet aria-label="User menu">
         <Text>{displayName}</Text>
       </ActionButton>
 
