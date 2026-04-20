@@ -13,6 +13,7 @@ import type {
   KnowledgeGraph,
   CommunitySummary,
 } from "@pim/shared";
+import { cosineSimilarity } from "./embeddings.js";
 
 // --- Keyword Extraction ---
 
@@ -79,9 +80,11 @@ export function buildEdges(
     for (const existing of existingNodes) {
       if (newNode.id === existing.id) continue;
 
-      const summaryOverlap = keywordOverlap(newNode.summary, existing.summary);
       const domOverlap = domainOverlap(newNode.domains, existing.domains);
-      const combinedScore = summaryOverlap * 0.6 + domOverlap * 0.4;
+      const combinedScore =
+        newNode.embedding && existing.embedding
+          ? cosineSimilarity(newNode.embedding, existing.embedding) * 0.7 + domOverlap * 0.3
+          : keywordOverlap(newNode.summary, existing.summary) * 0.6 + domOverlap * 0.4;
 
       if (combinedScore < 0.3) continue;
 
@@ -285,42 +288,50 @@ export function identifyHubs(graph: KnowledgeGraph): string[] {
 
 export function scoreRelevance(
   node: KnowledgeNode,
-  context: { scopes: string[]; keywords: string[] },
+  context: { scopes: string[]; keywords: string[]; querySimilarity?: number },
   hubIds: Set<string>,
 ): number {
-  // Domain overlap (0.4 weight)
+  // Domain overlap
   const scopeSet = new Set(context.scopes);
   let domainMatch = 0;
   for (const d of node.domains) {
     if (scopeSet.has(d)) domainMatch++;
   }
-  const domainScore =
-    node.domains.length > 0
-      ? domainMatch / node.domains.length
-      : 0;
+  const domainScore = node.domains.length > 0 ? domainMatch / node.domains.length : 0;
 
-  // Keyword match (0.3 weight)
+  // Keyword match
   const nodeKw = extractKeywords(`${node.summary} ${node.details}`);
   let kwMatch = 0;
   for (const kw of context.keywords) {
     if (nodeKw.has(kw.toLowerCase())) kwMatch++;
   }
   const keywordScore =
-    context.keywords.length > 0
-      ? Math.min(1, kwMatch / context.keywords.length)
-      : 0;
+    context.keywords.length > 0 ? Math.min(1, kwMatch / context.keywords.length) : 0;
 
-  // Confidence (0.15 weight)
+  // Confidence
   const confidenceScore = node.confidence_score;
 
-  // Recency (0.1 weight) — newer = higher, decay over 90 days
+  // Recency — decay over 90 days
   const ageMs = Date.now() - new Date(node.created_at).getTime();
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
   const recencyScore = Math.max(0, 1 - ageDays / 90);
 
-  // Hub bonus (0.05 weight)
+  // Hub bonus
   const hubScore = hubIds.has(node.id) ? 1 : 0;
 
+  // Hybrid scoring: when a query embedding is available and the node has one,
+  // cosine similarity becomes the primary signal; keyword/domain become rerankers.
+  if (context.querySimilarity !== undefined && node.embedding) {
+    return (
+      context.querySimilarity * 0.5 +
+      keywordScore * 0.2 +
+      domainScore * 0.15 +
+      confidenceScore * 0.1 +
+      recencyScore * 0.05
+    );
+  }
+
+  // Fallback: keyword + domain scoring (original behavior)
   return (
     domainScore * 0.4 +
     keywordScore * 0.3 +

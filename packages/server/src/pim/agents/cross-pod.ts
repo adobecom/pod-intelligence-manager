@@ -33,7 +33,7 @@ function extractKeywords(text: string): string[] {
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 }
 
-export function detectOverlaps(): void {
+export async function detectOverlaps(): Promise<void> {
   // Get all active pods
   const pods = db.prepare(
     "SELECT pod_id, name, org_id FROM pods WHERE pod_id IN (SELECT pod_id FROM org_pod_summaries)",
@@ -81,7 +81,7 @@ export function detectOverlaps(): void {
         // Enrich with historical knowledge
         let advisory = `Both pods are working on related concepts (${topTerms}). Coordinate to avoid conflicting approaches.`;
         try {
-          const historicalLearnings = getRelevantLearnings(shared.slice(0, 3), [], 500);
+          const historicalLearnings = await getRelevantLearnings(shared.slice(0, 3), [], 500);
           if (historicalLearnings.nodes.length > 0) {
             const relevantNote = historicalLearnings.nodes[0];
             advisory += ` Historical note: "${relevantNote.summary}" (from ${relevantNote.source_pod_name}).`;

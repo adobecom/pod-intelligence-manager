@@ -190,7 +190,7 @@ export default async function podRoutes(app: FastifyInstance) {
     // Seed with knowledge from past pods
     try {
       const allScopes = getOrgScopeIdsOrdered(orgId);
-      const learnings = getRelevantLearnings(allScopes, [], 3000, project_id ?? null);
+      const learnings = await getRelevantLearnings(allScopes, [], 3000, project_id ?? null);
       if (learnings.nodes.length > 0) {
         let knowledgeSection = "\n## Historical Knowledge Context\n\n";
         knowledgeSection += "The following learnings from past pods may be relevant:\n\n";

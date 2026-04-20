@@ -119,7 +119,7 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = addLearningsToGraph(learnings, podId, pod.name, projectMeta);
+        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

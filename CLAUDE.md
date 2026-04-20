@@ -71,7 +71,7 @@ pim/
   - 0.0–0.3: Auto-merge freely
   - 0.3–0.6: Merge with disclaimers
   - 0.6–0.8: Hold contested areas
-  - 0.8–1.0: Ingestion halted
+  - 0.8–1.0: Intake queued (validation + secret scan still run; PIM orchestration paused until conflicts resolve; backlog alerts fire via Slack at threshold)
 
 ### Context Update Schema
 Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type` (progress|blocker|spec_change|question|decision), `scope` (frontend|backend|design|qa|infra|pm), `summary`, `details`, `artifacts`, `status`, `blocks`, `blocked_by`, `needs_input_from`.

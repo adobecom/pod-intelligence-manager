@@ -56,7 +56,7 @@ export async function createConflict(
   let precedentsContext = "";
   try {
     const conflictDesc = `${update.summary} vs ${conflicting.summary} in ${update.scope}`;
-    const precedents = getPrecedents(conflictDesc, 500);
+    const precedents = await getPrecedents(conflictDesc, 500);
     if (precedents.nodes.length > 0) {
       precedentsContext = "\n\n## Historical Precedents\n";
       for (const p of precedents.nodes.slice(0, 3)) {

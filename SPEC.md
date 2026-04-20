@@ -365,7 +365,7 @@ pim_health:
 | 0.0–0.3 | **Normal** | Auto-merge with full confidence. Business as usual. |
 | 0.3–0.6 | **Cautious** | Master adds disclaimers to merges that touch areas near open conflicts. Flags potential entanglement but still merges. |
 | 0.6–0.8 | **Degraded** | Master stops auto-merging anything that could be affected by an open conflict. New updates in contested areas are held in a **pending queue** with a note: "Cannot merge until C-007, C-012 are resolved." |
-| 0.8–1.0 | **Critical / Paused** | Master pauses all non-trivial ingestion. Posts an urgent alert to PIM UI + Slack: "Pod checkout-redesign is blocked. X conflicts must be resolved before work can continue." |
+| 0.8–1.0 | **Critical / Queued** | Context intake is still accepted (validation + secret scan run as normal) but PIM orchestration is paused. Incoming updates are written to an `ingestion_queue` and replayed automatically once conflicts are resolved and pressure drops below 0.8. If the queue grows past the backlog threshold (default: 10), an escalation alert fires to Slack. |
 
 **Escalation Ladder (Compressed for 5-Day Pods):**
 - Conflict created → Ping contributors immediately (PIM UI + Slack).

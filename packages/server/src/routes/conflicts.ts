@@ -6,6 +6,7 @@ import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "../services/pressure.js";
 import { notifyConflictResolved } from "../services/slack.js";
 import { validateBody } from "../middleware/validation.js";
+import { drainQueue } from "../services/ingestion-queue.js";
 
 const ResolveConflictSchema = z.object({
   resolution: z.string().min(1, "resolution is required"),
@@ -88,6 +89,13 @@ export default async function conflictRoutes(app: FastifyInstance) {
     const newPressure = recalculatePressure(podId);
     broadcast({ type: "conflict_resolved", podId, payload: resolved });
     broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
+
+    // If pressure dropped below critical, replay queued context updates
+    if (newPressure < 0.8) {
+      drainQueue(podId).catch((err) => {
+        console.error(`[ingestion-queue] drain failed for pod ${podId}:`, err);
+      });
+    }
 
     // Slack notification
     notifyConflictResolved(resolved);

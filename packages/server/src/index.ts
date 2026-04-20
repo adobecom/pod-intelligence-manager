@@ -45,7 +45,7 @@ seedDatabase();
 
 // Initialize knowledge graph (load from disk into memory)
 initializeKnowledgeGraph("default");
-seedKnowledgeGraph();
+await seedKnowledgeGraph();
 
 // Register WebSocket support
 await app.register(websocket);

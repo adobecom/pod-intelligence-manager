@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
 import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@pim/shared";
-import { ingestContextUpdate } from "../services/ingestion.js";
+import { ingestContextUpdate, preValidateAndScan } from "../services/ingestion.js";
+import { enqueueUpdate, getQueueSize, QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPods } from "../services/ingestion-queue.js";
+import { notifyQueueBacklog } from "../services/slack.js";
 
 interface ContextUpdateRow {
   id: string;
@@ -77,18 +79,32 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", {
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
   }, async (req, reply) => {
-    // Verify pod belongs to the requesting user's org
     const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id) as { conflict_pressure: number } | undefined;
     if (!pod) {
       reply.code(404);
       return { error: "Pod not found" };
     }
-    // Gate: reject ingestion when pod is in critical conflict state (pressure >= 0.8)
+
+    // When pressure is critical, intake is still accepted but processing is queued
     if (pod.conflict_pressure >= 0.8) {
-      reply.code(423);
+      const check = preValidateAndScan(req.body);
+      if (!check.success) {
+        reply.code(check.secretFindings ? 422 : 400);
+        return { error: check.error, secretFindings: check.secretFindings };
+      }
+      const queueId = enqueueUpdate(req.params.podId, req.org!.org_id, req.body);
+      const queueSize = getQueueSize(req.params.podId);
+      if (queueSize >= QUEUE_BACKLOG_THRESHOLD && !notifiedBacklogPods.has(req.params.podId)) {
+        notifiedBacklogPods.add(req.params.podId);
+        notifyQueueBacklog(req.params.podId, queueSize);
+      }
+      reply.code(202);
       return {
-        error: "Pod is in critical conflict state — ingestion paused. Resolve blocking conflicts first.",
+        queued: true,
+        queue_id: queueId,
+        queue_size: queueSize,
         conflict_pressure: pod.conflict_pressure,
+        message: "Pod is in critical conflict state — context queued for processing once conflicts are resolved.",
       };
     }
 
