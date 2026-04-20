@@ -313,6 +313,27 @@ export function createTables() {
   // Per-org settings: add org_id column; existing single-row entries get backfilled by seed.
   try { db.exec("ALTER TABLE org_settings ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
 
+  // Fix PRIMARY KEY: original schema had `key TEXT PRIMARY KEY` (single-column), which
+  // causes UNIQUE conflicts when multiple orgs share the same key name. Recreate with
+  // composite PK (org_id, key). SQLite can't ALTER a PK so we do the rename dance.
+  try {
+    const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='org_settings'").get() as { sql: string } | undefined;
+    if (row?.sql && /key\s+TEXT\s+PRIMARY\s+KEY/i.test(row.sql)) {
+      db.exec(`
+        CREATE TABLE org_settings_new (
+          org_id TEXT NOT NULL REFERENCES orgs(org_id),
+          key    TEXT NOT NULL,
+          value_json TEXT NOT NULL,
+          PRIMARY KEY (org_id, key)
+        );
+        INSERT INTO org_settings_new (org_id, key, value_json)
+          SELECT org_id, key, value_json FROM org_settings WHERE org_id IS NOT NULL;
+        DROP TABLE org_settings;
+        ALTER TABLE org_settings_new RENAME TO org_settings;
+      `);
+    }
+  } catch { /* already migrated */ }
+
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS archived_projects (
