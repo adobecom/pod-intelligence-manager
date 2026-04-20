@@ -62,13 +62,18 @@ export default async function graphRoutes(app: FastifyInstance) {
     return queryKnowledge(req.body);
   });
 
-  // Convenience: relevant learnings for given scopes
-  app.get<{ Querystring: { scopes?: string; maxTokens?: string } }>(
+  // Convenience: relevant learnings for given scopes.
+  // `projectId` scopes results to org-wide + nodes tagged with that project (no cross-project bleed).
+  // `query` is free-text used to generate a semantic embedding; without it, scoring falls back to keyword+domain only.
+  app.get<{ Querystring: { scopes?: string; maxTokens?: string; projectId?: string; query?: string } }>(
     "/api/knowledge/relevant",
     async (req) => {
       const scopes = req.query.scopes?.split(",").filter(Boolean) ?? [];
       const maxTokens = parseInt(req.query.maxTokens ?? "2000", 10);
-      return getRelevantLearnings(scopes, [], maxTokens);
+      const projectId = req.query.projectId?.trim() || null;
+      const queryText = req.query.query?.trim();
+      const conflictSummaries = queryText ? [queryText] : [];
+      return getRelevantLearnings(scopes, conflictSummaries, maxTokens, projectId);
     },
   );
 
