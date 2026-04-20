@@ -19,6 +19,27 @@ const PodId = z.string().describe("Pod ID (e.g. 'pod-checkout-redesign')");
 const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
 const Scope = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
 
+const ProjectResourcesSchema = z.object({
+  jira: z
+    .object({
+      project_keys: z.array(z.string()).optional(),
+      team: z.string().optional().describe("Jira 'Team' custom field value (e.g. 'Strata')"),
+    })
+    .optional(),
+  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
+  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
+  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  aliases: z.array(z.string()).optional(),
+});
+
+const ActorSchema = z.object({
+  email: z.string().email().optional(),
+  slack_user_id: z.string().optional(),
+  github_login: z.string().optional(),
+  display_name: z.string().optional(),
+});
+
 /* ------------------------------------------------------------------ */
 /*  Registration                                                      */
 /* ------------------------------------------------------------------ */
@@ -310,6 +331,37 @@ export function registerTools(server: McpServer) {
 
   // ── context search (cross-source external context) ──────────────
 
+  // ── project onboarding ──────────────────────────────────────────
+
+  server.tool(
+    "create_project",
+    "Create a new project with optional external resources (Jira keys, GitHub repos, Slack channels, Confluence spaces, local git repo paths, aliases). Configuring resources at creation narrows all downstream context_search calls that reference this project, dramatically improving result precision.",
+    {
+      name: z.string().describe("Project name (e.g. 'T3 Events')"),
+      description: z.string().optional(),
+      resources: ProjectResourcesSchema.optional().describe(
+        "External resources to scope searches. Any subset can be supplied.",
+      ),
+    },
+    async (args) => {
+      const project = await apiPost("/api/projects", args);
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "configure_project_resources",
+    "Replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
+    {
+      project_id: ProjectId,
+      resources: ProjectResourcesSchema,
+    },
+    async ({ project_id, resources }) => {
+      const result = await apiPut(`/api/projects/${project_id}/resources`, resources);
+      return json(result);
+    },
+  );
+
   server.tool(
     "context_search",
     "Search Adobe-internal context across Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
@@ -323,6 +375,15 @@ export function registerTools(server: McpServer) {
         .string()
         .optional()
         .describe("Optional — enables local git search for the pod's repo and biases ranking"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Optional — scope the fan-out to the project's configured Jira keys, GitHub repos, Slack channels, and Confluence spaces. Pass this when you know the project up-front; improves precision dramatically vs. a broad query.",
+        ),
+      actor: ActorSchema.optional().describe(
+        "Optional — filter hits to a specific person (email / Slack user id / GitHub login). Usually auto-detected from the query text ('what has rea01581@adobe.com been up to') but can be passed explicitly for programmatic callers.",
+      ),
       time_window_days: z.number().optional().describe("Default 90"),
       max_hits_per_source: z.number().optional().describe("Default 10"),
       synthesize: z.boolean().optional().describe("Default true. Set false to skip LLM summarization."),

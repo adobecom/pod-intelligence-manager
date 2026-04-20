@@ -6,7 +6,7 @@ export type {
   Scope,
 } from "./types/pod";
 
-export type { Project, ProjectContextUpdate } from "./types/project";
+export type { Project, ProjectContextUpdate, ProjectResources } from "./types/project";
 
 export type {
   ContextUpdate,
@@ -72,6 +72,7 @@ export type {
   ContextSearchHit,
   ContextSearchMissingSource,
   ContextSearchResult,
+  ContextSearchActor,
 } from "./types/context-search";
 
 export { CONTEXT_SOURCES } from "./types/context-search";

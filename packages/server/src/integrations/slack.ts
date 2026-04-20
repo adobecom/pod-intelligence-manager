@@ -15,7 +15,34 @@ interface SlackMatch {
   user?: string;
   username?: string;
   ts?: string;
-  channel?: { id?: string; name?: string };
+  channel?: { id?: string; name?: string; is_private?: boolean; is_im?: boolean; is_mpim?: boolean };
+}
+
+function buildSlackQuery(opts: IntegrationSearchOpts): string {
+  const parts: string[] = [];
+
+  let text = opts.query.trim();
+  // When actor email / slack id is already encoded as from:<UXXX>, strip
+  // it from the text-match so we don't also require the literal string.
+  const actor = opts.actor;
+  if (actor) {
+    for (const token of [actor.email, actor.slack_user_id]) {
+      if (token) text = text.replace(token, "");
+    }
+    text = text.replace(/\s+/g, " ").trim();
+  }
+  if (text) parts.push(text);
+
+  const channels = opts.project_resources?.slack?.channels ?? [];
+  for (const c of channels) {
+    const clean = c.replace(/^#/, "");
+    parts.push(`in:#${clean}`);
+  }
+
+  if (actor?.slack_user_id) parts.push(`from:<@${actor.slack_user_id}>`);
+
+  parts.push(`after:${isoDaysAgo(opts.time_window_days)}`);
+  return parts.join(" ");
 }
 
 export async function searchSlack(opts: IntegrationSearchOpts): Promise<IntegrationResult> {
@@ -28,7 +55,7 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
     };
   }
 
-  const query = `${opts.query} after:${isoDaysAgo(opts.time_window_days)}`;
+  const query = buildSlackQuery(opts);
   const perWorkspace = Math.max(1, Math.ceil(opts.max_hits_per_source / configured.length));
 
   const results = await Promise.allSettled(
@@ -41,7 +68,13 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
         sort_dir: "desc",
       });
       const matches = (res.messages?.matches ?? []) as SlackMatch[];
-      return matches.map<ContextSearchHit>((m) => ({
+      // Hard filter to public channels only, regardless of token scope.
+      // search:read grants search across DMs/private channels the user is in;
+      // we drop those server-side so only public-channel hits leave the server.
+      const publicOnly = matches.filter(
+        (m) => m.channel && m.channel.is_private !== true && !m.channel.is_im && !m.channel.is_mpim,
+      );
+      return publicOnly.map<ContextSearchHit>((m) => ({
         source: "slack",
         title: `#${m.channel?.name ?? "unknown"} (${ws.name})`,
         url: m.permalink,

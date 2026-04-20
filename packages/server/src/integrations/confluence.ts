@@ -42,7 +42,15 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
   // On-prem Confluence rejects relative dates (`"-90d"`) — use an absolute
   // yyyy-MM-dd cutoff. Cloud accepts both, so this works for either flavor.
   const cutoff = new Date(Date.now() - opts.time_window_days * 864e5).toISOString().slice(0, 10);
-  const cql = `text ~ "${escapeCql(opts.query)}" AND lastmodified >= "${cutoff}"`;
+  const clauses: string[] = [];
+  const spaceKeys = opts.project_resources?.confluence?.space_keys ?? [];
+  if (spaceKeys.length > 0) {
+    const list = spaceKeys.map((k) => `"${escapeCql(k)}"`).join(", ");
+    clauses.push(`space in (${list})`);
+  }
+  clauses.push(`text ~ "${escapeCql(opts.query)}"`);
+  clauses.push(`lastmodified >= "${cutoff}"`);
+  const cql = clauses.join(" AND ");
   const url =
     `${base.replace(/\/$/, "")}/rest/api/content/search` +
     `?cql=${encodeURIComponent(cql)}` +

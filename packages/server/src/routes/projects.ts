@@ -1,14 +1,29 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Project, ProjectContextUpdate } from "@council/shared";
+import type { Project, ProjectContextUpdate, ProjectResources } from "@council/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 
+const ResourcesSchema = z.object({
+  jira: z
+    .object({
+      project_keys: z.array(z.string()).optional(),
+      team: z.string().optional(),
+    })
+    .optional(),
+  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
+  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
+  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  aliases: z.array(z.string()).optional(),
+});
+
 const CreateProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()),
   description: z.string().optional(),
+  resources: ResourcesSchema.optional(),
 });
 
 const PatchProjectSchema = z.object({
@@ -16,42 +31,51 @@ const PatchProjectSchema = z.object({
   description: z.union([z.string(), z.null()]).optional(),
 });
 
+function parseResources(raw: string | null | undefined): ProjectResources | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as ProjectResources;
+  } catch {
+    return undefined;
+  }
+}
+
 function rowToProject(row: {
   project_id: string;
   name: string;
   description: string | null;
   created_at: string;
+  resources_json?: string | null;
 }): Project {
   return {
     project_id: row.project_id,
     name: row.name,
     description: row.description,
     created_at: row.created_at,
+    resources: parseResources(row.resources_json),
   };
 }
 
 export default async function projectRoutes(app: FastifyInstance) {
+  type ProjectRow = {
+    project_id: string;
+    name: string;
+    description: string | null;
+    created_at: string;
+    resources_json: string | null;
+  };
+
   app.get("/api/projects", async () => {
-    const rows = db.prepare("SELECT project_id, name, description, created_at FROM projects ORDER BY name").all() as Array<{
-      project_id: string;
-      name: string;
-      description: string | null;
-      created_at: string;
-    }>;
+    const rows = db
+      .prepare("SELECT project_id, name, description, created_at, resources_json FROM projects ORDER BY name")
+      .all() as ProjectRow[];
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const row = db
-      .prepare("SELECT project_id, name, description, created_at FROM projects WHERE project_id = ?")
-      .get(req.params.projectId) as
-      | {
-          project_id: string;
-          name: string;
-          description: string | null;
-          created_at: string;
-        }
-      | undefined;
+      .prepare("SELECT project_id, name, description, created_at, resources_json FROM projects WHERE project_id = ?")
+      .get(req.params.projectId) as ProjectRow | undefined;
     if (!row) {
       reply.code(404);
       return { error: "Project not found" };
@@ -59,24 +83,63 @@ export default async function projectRoutes(app: FastifyInstance) {
     return rowToProject(row);
   });
 
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/resources",
+    async (req, reply) => {
+      const row = db
+        .prepare("SELECT resources_json FROM projects WHERE project_id = ?")
+        .get(req.params.projectId) as { resources_json: string | null } | undefined;
+      if (!row) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return parseResources(row.resources_json) ?? {};
+    },
+  );
+
+  app.put<{
+    Params: { projectId: string };
+    Body: z.infer<typeof ResourcesSchema>;
+  }>(
+    "/api/projects/:projectId/resources",
+    { preHandler: validateBody(ResourcesSchema) },
+    async (req, reply) => {
+      const exists = db
+        .prepare("SELECT project_id FROM projects WHERE project_id = ?")
+        .get(req.params.projectId);
+      if (!exists) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const json = JSON.stringify(req.body);
+      db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ?").run(
+        json,
+        req.params.projectId,
+      );
+      return req.body;
+    },
+  );
+
   app.post<{ Body: z.infer<typeof CreateProjectSchema> }>(
     "/api/projects",
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
-      const { name, description } = req.body;
+      const { name, description, resources } = req.body;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
       const created_at = new Date().toISOString();
+      const resources_json = resources ? JSON.stringify(resources) : null;
       db.prepare(
-        "INSERT INTO projects (project_id, name, description, created_at) VALUES (?, ?, ?, ?)",
-      ).run(projectId, name, description ?? null, created_at);
+        "INSERT INTO projects (project_id, name, description, created_at, resources_json) VALUES (?, ?, ?, ?, ?)",
+      ).run(projectId, name, description ?? null, created_at, resources_json);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
         name,
         description: description ?? null,
         created_at,
+        resources_json,
       });
     },
   );
@@ -86,12 +149,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     Body: z.infer<typeof PatchProjectSchema>;
   }>("/api/projects/:projectId", { preHandler: validateBody(PatchProjectSchema) }, async (req, reply) => {
     const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(req.params.projectId) as
-      | {
-          project_id: string;
-          name: string;
-          description: string | null;
-          created_at: string;
-        }
+      | ProjectRow
       | undefined;
     if (!row) {
       reply.code(404);

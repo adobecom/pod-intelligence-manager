@@ -11,6 +11,7 @@ import { registerHooksCommand } from "./commands/hooks.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerLeaveCommand } from "./commands/leave.js";
 import { registerSearchCommand } from "./commands/search.js";
+import { registerProjectCommands } from "./commands/project.js";
 
 const program = new Command();
 
@@ -21,6 +22,7 @@ program
   .option("-s, --server <url>", "Server base URL", process.env.COUNCIL_SERVER_URL ?? "http://localhost:4000");
 
 registerPodCommands(program);
+registerProjectCommands(program);
 registerReportCommand(program);
 registerDocCommand(program);
 registerTunnelCommands(program);

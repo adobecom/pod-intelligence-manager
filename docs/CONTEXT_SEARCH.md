@@ -79,7 +79,7 @@ All six follow the same contract — `async function search<Source>(opts) → {s
 - **File:** `packages/server/src/integrations/slack.ts`
 - **Client:** `@slack/web-api` (already installed).
 - **Env:** `SLACK_USER_TOKEN_MWP`, `SLACK_USER_TOKEN_AEM_ENG`, `SLACK_USER_TOKEN_ADOBEDOTCOM`. Any subset works; empty workspaces are skipped.
-- **Auth:** User tokens (not bot) — `search.messages` requires `search:read`, which bot tokens don't get by default.
+- **Auth:** User tokens (not bot) — `search.messages` requires `search:read`, which bot tokens don't get by default. Slack's granular `search:read.public` scope is rejected by `search.messages` (a known Slack inconsistency), so use the broader `search:read`. The integration filters out non-public channels (`is_private`, `is_im`, `is_mpim`) server-side so only public-channel hits leave the server regardless of what the user's token can technically reach.
 - **Query:** `{query} after:{YYYY-MM-DD}` (derived from `time_window_days`), sorted by timestamp descending.
 - **Hit shape:** `title: "#channel (workspace)"`, `url: permalink`, `author: username`, `timestamp: ISO`.
 
@@ -262,6 +262,94 @@ Haiku synthesis worked end-to-end; cross-check rule produced a summary that hedg
 - `docs/POD_AGENT_PROTOCOL.md` — documented the new `externalQuery` / `external_query` pull-step option
 - `.env.example` — added the Context Search section
 
+## Project scoping (onboarding)
+
+Fan-out across all Jira projects / all GitHub orgs / all Slack workspaces is noisy for queries about a specific project ("has T3 Events completed their RBAC implementation?"). Each project can be **onboarded** with the external resources that define its surface area; every integration then narrows before searching.
+
+### Resource shape
+
+Stored as JSON in `projects.resources_json` (one column, migration-guarded):
+
+```ts
+interface ProjectResources {
+  jira?: {
+    project_keys?: string[];                // e.g. ["ADPINTAKE", "T3EV"]
+    team?: string;                          // Jira "Team" custom field value (e.g. "Strata")
+  };
+  github?: { repos?: string[] };            // e.g. ["adobecom/t3-events"]
+  slack?: { channels?: string[] };          // channel names, no '#'
+  confluence?: { space_keys?: string[] };
+  git?: { repo_paths?: string[] };          // absolute paths to local clones
+  aliases?: string[];                       // synonyms — "Tier 3 Events", "T3EV"
+}
+```
+
+### Onboarding
+
+```bash
+council project create "T3 Events" \
+  --jira MWPW \
+  --jira-team Strata \
+  --repos adobecom/EMC,adobecom/event-libs \
+  --slack da-events-devs,da-events \
+  --spaces adobedotcom \
+  --alias "Tier 3 Events,T3,Events on Milo"
+
+council project show <project_id>
+council project set-resources <project_id> --jira ADPINTAKE,FOO --repos ...
+```
+
+MCP tools: `create_project({ name, resources })`, `configure_project_resources({ project_id, resources })`.
+REST: `PUT /api/projects/:projectId/resources`.
+
+### How it threads through search
+
+`searchContext()` resolves project resources in this order:
+
+1. **Explicit** `req.project_id`
+2. **Pod-derived** `req.pod_id → pods.project_id`
+3. **Query-text match** — `detectProjectFromQuery()` scans the query (word-boundary, case-insensitive) against every project's `name` + `aliases`. Longest match wins, so "T3 Events" beats "T3" when both are aliases on the same project.
+4. Otherwise **unscoped**.
+
+When the project is resolved via #3, the matched term is stripped from the query before integrations run (strict boundary — `(?<![\w\-.])TERM(?![\w\-.])` — so "T3" is stripped from "T3 events project" but **not** from "T3-26.16"). The cleaned query prevents the project name from over-constraining every integration's text-match clause.
+
+Each integration then narrows:
+
+| Integration | Query rewrite |
+|---|---|
+| Jira | Prepends `project in ("K1","K2")` and/or `"Team" = "X"` to JQL. Detects release tokens (e.g. `T3-26.16`, `v1.2.3`) in the query and emits `fixVersion in ("T3-26.16")` — bypassing the `updated` window since release tickets span months. |
+| GitHub | Swaps env org-scope for `repo:X/Y repo:A/B`; falls back to orgs if no repos configured |
+| Slack | Appends `in:#c1 in:#c2` to the search |
+| Confluence | Prepends `space in ("K1")` to CQL |
+| Fluffyjaws | Prefixes the user query with a one-line scope hint |
+| Git | Iterates over `repo_paths` instead of the single `pods.repo_path` |
+
+The orchestrator also gives each hit a `+2` relevance boost when it can prove the hit came from an in-scope resource (Jira key prefix, GitHub repo, Slack channel, Confluence space), and passes `project_scope` into the Haiku synthesis prompt so empty-result answers become "no activity in T3 Events for this query" rather than hedged "related tickets elsewhere".
+
+### Person-scoped queries (identity resolver)
+
+Queries like `"what has rea01581@adobe.com been up to"` or `"what has U02C5ESQM38 been up to"` used to text-match the identifier string. Now `packages/server/src/services/identity-resolver.ts` auto-detects emails and Slack user IDs in the query and resolves to a unified `{ email, slack_user_id, github_login, display_name }` via `slack.users.lookupByEmail`, `slack.users.info`, and GitHub user search. Results cache in the `identity_cache` SQLite table for 7 days.
+
+When an `actor` is resolved (automatically or passed explicitly):
+
+- **Jira** adds `(assignee = "email" OR reporter = "email" OR creator = "email")`
+- **Slack** strips the identifier from the text query and adds `from:<@UXXX>`
+- **GitHub** adds `author:<login>` on `/search/code` and `involves:<login>` on `/search/issues`
+- **Git** adds `--author <email-or-name>` to the log invocation
+- **Fluffyjaws / Confluence** pass the display name through to the prompt but don't narrow server-side (no authorship operator)
+
+Project scope and actor compose: `project_id` + `actor` yields `project in (KEY) AND assignee = "email"` — "what has Rayyan shipped on T3 Events this sprint".
+
+### Reporting
+
+`sources_used` lists every source that ran without error, **including zero-hit runs** — so a caller can distinguish "Jira searched, nothing matched" from "Jira never ran". Errored sources go to `missing_sources` with the failure reason (truncated upstream body).
+
+The response echoes `project_id`, `project_name`, and `actor` when scope was resolved (explicitly, from a pod, or detected from query text), so agents can surface the narrowing to the user ("searched within **T3 Events** scoped to commits by **Rayyan**…").
+
+### Cache
+
+The resolved project-resources fingerprint and actor are part of the cache key, so editing a project's resources invalidates its cached entries on the next query. Pre-onboarding broad-result caches do not shadow scoped queries.
+
 ## Adding a new source
 
 1. Write `packages/server/src/integrations/<source>.ts` exporting `async function search<Source>(opts: IntegrationSearchOpts): Promise<IntegrationResult>`. Use `fetch`, respect `opts.query`, `opts.time_window_days`, `opts.max_hits_per_source`, `opts.pod_id`. Return `{source, hits: []}` when creds are missing — **never throw**.
@@ -288,4 +376,5 @@ These saved future maintainers a debugging cycle when we hit them:
 - **Confluence on-prem rejects relative CQL dates** (`"-90d"`) — use an absolute `YYYY-MM-DD` cutoff computed server-side.
 - **Fluffyjaws `reasoningEffort` wire values** are `none|minimal|low|medium|high|xhigh`, not the CLI-facing `fast|thinking`. The server auto-attaches `code_interpreter`, which rejects `minimal`, so `medium` is the practical minimum.
 - **Slack bot tokens can't call `search.messages`** — that scope is user-only. Use `xoxp-…` tokens.
+- **Slack granular `search:read.public` isn't honored by `search.messages`** — you'll see `missing_scope` even with the scope present. Grant the broader classic `search:read`; `slack.ts` filters results to public channels only (`is_private/is_im/is_mpim` dropped) so the effective privacy is the same.
 - **Truncate error bodies** before putting them in `missing_sources.reason` — upstream services often return multi-KB HTML error pages that otherwise bloat the response payload.

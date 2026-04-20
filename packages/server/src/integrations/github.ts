@@ -1,5 +1,14 @@
-import type { ContextSearchHit } from "@council/shared";
+import type { ContextSearchActor, ContextSearchHit } from "@council/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
+
+function stripPersonTokens(query: string, actor?: ContextSearchActor): string {
+  if (!actor) return query;
+  let q = query;
+  for (const token of [actor.email, actor.slack_user_id]) {
+    if (token) q = q.replace(token, "");
+  }
+  return q.replace(/\s+/g, " ").trim();
+}
 
 // GitHub REST search: /search/code + /search/issues. Scoped to GITHUB_SEARCH_ORGS.
 
@@ -36,15 +45,28 @@ function orgScope(): string {
     .join(" ");
 }
 
+function repoScope(opts: IntegrationSearchOpts): string {
+  const repos = opts.project_resources?.github?.repos ?? [];
+  return repos.map((r) => `repo:${r}`).join(" ");
+}
+
 export async function searchGithub(opts: IntegrationSearchOpts): Promise<IntegrationResult> {
   const token = process.env.GH_TOKEN;
   if (!token) {
     return { source: "github", hits: [], missing: "GH_TOKEN not set" };
   }
 
-  const scope = orgScope();
-  if (!scope) {
-    return { source: "github", hits: [], missing: "GITHUB_SEARCH_ORGS not set" };
+  // Prefer project-configured repos over the env org scope. If neither is
+  // set we can still search by actor (author:X), so only bail when nothing
+  // narrows the search at all.
+  const scope = repoScope(opts) || orgScope();
+  if (!scope && !opts.actor?.github_login) {
+    return {
+      source: "github",
+      hits: [],
+      missing:
+        "No scope: configure GITHUB_SEARCH_ORGS, add repos to the project, or pass an actor",
+    };
   }
 
   const headers = {
@@ -53,17 +75,37 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
     "X-GitHub-Api-Version": "2022-11-28",
   };
 
-  const codeQuery = encodeURIComponent(`${opts.query} ${scope}`);
-  const issueQuery = encodeURIComponent(
-    `${opts.query} ${scope} updated:>=${new Date(Date.now() - opts.time_window_days * 864e5)
-      .toISOString()
-      .slice(0, 10)}`,
-  );
-  const perPage = Math.max(1, Math.ceil(opts.max_hits_per_source / 2));
+  const login = opts.actor?.github_login;
+  const codeActor = login ? `author:${login}` : "";
+  const issueActor = login ? `involves:${login}` : "";
 
-  const [codeRes, issueRes] = await Promise.allSettled([
-    fetch(`https://api.github.com/search/code?q=${codeQuery}&per_page=${perPage}`, { headers }),
-    fetch(`https://api.github.com/search/issues?q=${issueQuery}&per_page=${perPage}`, { headers }),
+  // Strip person tokens from the text query when they're already encoded
+  // as author: / involves: qualifiers.
+  const cleanedQuery = stripPersonTokens(opts.query, opts.actor);
+
+  const codeQuery = encodeURIComponent(
+    [cleanedQuery, scope, codeActor].filter(Boolean).join(" ").trim(),
+  );
+  // GitHub's /search/issues endpoint now rejects queries without an
+  // `is:issue` or `is:pr` qualifier (HTTP 422). Fire both in parallel
+  // and merge — PRs usually give better signal, but issues matter too.
+  const updatedClause = `updated:>=${new Date(Date.now() - opts.time_window_days * 864e5).toISOString().slice(0, 10)}`;
+  const baseIssueTerms = [cleanedQuery, scope, issueActor, updatedClause]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const prQuery = encodeURIComponent(`${baseIssueTerms} is:pr`);
+  const issueQuery = encodeURIComponent(`${baseIssueTerms} is:issue`);
+  const perPage = Math.max(1, Math.ceil(opts.max_hits_per_source / 3));
+
+  const codeUrl = `https://api.github.com/search/code?q=${codeQuery}&per_page=${perPage}`;
+  const prUrl = `https://api.github.com/search/issues?q=${prQuery}&per_page=${perPage}`;
+  const issueUrl = `https://api.github.com/search/issues?q=${issueQuery}&per_page=${perPage}`;
+
+  const [codeRes, prRes, issueRes] = await Promise.allSettled([
+    fetch(codeUrl, { headers }),
+    fetch(prUrl, { headers }),
+    fetch(issueUrl, { headers }),
   ]);
 
   const hits: ContextSearchHit[] = [];
@@ -82,29 +124,37 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
       });
     }
   } else if (codeRes.status === "fulfilled") {
-    errors.push(`code ${codeRes.value.status}`);
+    const body = (await codeRes.value.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ");
+    errors.push(`code ${codeRes.value.status}: ${body}`);
   } else {
     errors.push(`code ${codeRes.reason?.message ?? codeRes.reason}`);
   }
 
-  if (issueRes.status === "fulfilled" && issueRes.value.ok) {
-    const data = (await issueRes.value.json()) as SearchResponse<IssueItem>;
-    for (const item of data.items ?? []) {
-      hits.push({
-        source: "github",
-        title: `${item.pull_request ? "PR" : "Issue"}: ${item.title ?? ""}`,
-        url: item.html_url,
-        snippet: truncate(item.body ?? ""),
-        author: item.user?.login,
-        timestamp: item.updated_at ?? item.created_at,
-        metadata: { kind: item.pull_request ? "pr" : "issue", state: item.state },
-      });
+  async function collectIssues(
+    res: PromiseSettledResult<Response>,
+    label: "prs" | "issues",
+  ): Promise<void> {
+    if (res.status === "fulfilled" && res.value.ok) {
+      const data = (await res.value.json()) as SearchResponse<IssueItem>;
+      for (const item of data.items ?? []) {
+        hits.push({
+          source: "github",
+          title: `${item.pull_request ? "PR" : "Issue"}: ${item.title ?? ""}`,
+          url: item.html_url,
+          snippet: truncate(item.body ?? ""),
+          author: item.user?.login,
+          timestamp: item.updated_at ?? item.created_at,
+          metadata: { kind: item.pull_request ? "pr" : "issue", state: item.state },
+        });
+      }
+    } else if (res.status === "fulfilled") {
+      const body = (await res.value.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ");
+      errors.push(`${label} ${res.value.status}: ${body}`);
+    } else {
+      errors.push(`${label} ${res.reason?.message ?? res.reason}`);
     }
-  } else if (issueRes.status === "fulfilled") {
-    errors.push(`issues ${issueRes.value.status}`);
-  } else {
-    errors.push(`issues ${issueRes.reason?.message ?? issueRes.reason}`);
   }
+  await Promise.all([collectIssues(prRes, "prs"), collectIssues(issueRes, "issues")]);
 
   return {
     source: "github",
