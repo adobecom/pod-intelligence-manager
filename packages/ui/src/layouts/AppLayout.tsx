@@ -8,7 +8,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAuth } from "../contexts/AuthContext";
 import { useOrg } from "../contexts/OrgContext";
-import { OrgSwitcher } from "../components/OrgSwitcher";
+import { UserMenu } from "../components/UserMenu";
 import { CreateOrgModal } from "../views/CreateOrg/CreateOrgModal";
 
 const loadOrg = useOrgStore.getState().loadOrg;
@@ -170,7 +170,7 @@ export function AppLayout() {
           >
             Members
           </Button>
-          <OrgSwitcher onCreateOrg={() => setCreateOrgOpen(true)} onSignOut={signOut} />
+          <UserMenu onCreateOrg={() => setCreateOrgOpen(true)} onSignOut={signOut} />
         </div>
       </div>
 
