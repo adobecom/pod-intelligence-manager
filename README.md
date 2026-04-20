@@ -8,9 +8,9 @@ Three pillars:
 2. **PIM UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
 3. **FE Tunneling** -- Expo-style localhost tunneling (**prototype implemented**: CLI + server routes for WebSocket request proxying).
 
-## Quick Demo
+## Quick Start
 
-Run these commands in separate terminals to see everything working:
+Run these commands in separate terminals:
 
 ```bash
 pnpm install
@@ -18,13 +18,7 @@ pnpm --filter @pim/server dev      # Terminal 1 — backend on :4000
 pnpm --filter @pim/ui dev          # Terminal 2 — UI on :5173
 ```
 
-Then run the guided demo (creates a pod, submits updates, triggers a conflict, resolves it):
-
-```bash
-npx tsx examples/demo-full.ts
-```
-
-Open **http://localhost:5173** and watch the Org Dashboard, Pod Dashboard, Conflict Center, and Living Doc update in real time as the demo runs.
+Open **http://localhost:5173**. The database auto-seeds with three demo pods on first run.
 
 ## Prerequisites
 
@@ -44,21 +38,6 @@ Optional:
 
 For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
 
-## Quick Start
-
-```bash
-# Install dependencies (skip if you already ran pnpm bootstrap)
-pnpm install
-
-# Terminal 1 -- start the backend (port 4000)
-pnpm --filter @pim/server dev
-
-# Terminal 2 -- start the UI (port 5173)
-pnpm --filter @pim/ui dev
-```
-
-Open **http://localhost:5173**. The database auto-seeds with three demo pods on first run.
-
 ## Project Structure
 
 ```
@@ -71,8 +50,6 @@ pim/
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
 │   ├── cli/             # pim CLI — pods, context, hooks, tunnel, init, leave
 │   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
-├── examples/
-│   └── demo-agent.ts    # End-to-end demo exercising the SDK
 ├── prompts/             # Version-controlled LLM system prompts
 ├── SPEC.md              # Full system specification
 ├── CLAUDE.md            # Guidance for Claude Code
@@ -265,7 +242,7 @@ Command-line interface for pod and project updates, per-repo setup (`init` / `le
 
 Before deleting a clone you linked globally, run **`pnpm unlink --global`** from `packages/cli` if you want to remove the global `pim` shim.
 
-**If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old **`council`** shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
+**If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
 
 **Repository setup (per clone):**
 
@@ -345,30 +322,6 @@ pim tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
 ```
 
 All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `PIM_SERVER_URL`.
-
-## Running the Demo Agent
-
-With the server running:
-
-```bash
-npx tsx examples/demo-agent.ts
-```
-
-This creates two agents (frontend + backend), submits various update types (progress, decision, blocker), fetches the regenerated living doc, and prints PIM's classification for each update.
-
-## Running the Full Demo
-
-The full demo walks through the complete lifecycle — pod creation, updates, conflicts, resolution, and lint:
-
-```bash
-npx tsx examples/demo-full.ts
-```
-
-Or use the CLI-based demo:
-
-```bash
-bash examples/demo-cli.sh
-```
 
 ## What You'll See
 
