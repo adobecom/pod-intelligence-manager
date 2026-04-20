@@ -51,6 +51,24 @@ export interface IngestionResult {
   deduplicated?: boolean;
 }
 
+export type PreValidateResult =
+  | { success: true }
+  | { success: false; error: string; secretFindings?: string[] };
+
+export function preValidateAndScan(input: unknown): PreValidateResult {
+  const parsed = ContextUpdateInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: `Validation failed: ${parsed.error.message}` };
+  }
+  const data = parsed.data;
+  const textToScan = [data.summary, data.details, ...data.artifacts.map(a => a.path ?? a.url ?? "")].join(" ");
+  const scanResult = scanForSecrets(textToScan);
+  if (!scanResult.clean) {
+    return { success: false, error: "Context update rejected: potential secrets detected", secretFindings: scanResult.findings };
+  }
+  return { success: true };
+}
+
 export async function ingestContextUpdate(podId: string, input: unknown): Promise<IngestionResult> {
   // 1. Validate schema
   const parsed = ContextUpdateInputSchema.safeParse(input);

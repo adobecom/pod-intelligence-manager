@@ -1,7 +1,8 @@
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure, setPodPressure } from "./pressure.js";
-import { notifyConflictEscalated, notifyPressureThreshold } from "./slack.js";
+import { notifyConflictEscalated, notifyPressureThreshold, notifyQueueBacklog } from "./slack.js";
+import { QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPods } from "./ingestion-queue.js";
 
 interface OpenConflictRow {
   id: string;
@@ -82,6 +83,23 @@ export function checkEscalations(): void {
 
         break; // Only escalate one level at a time
       }
+    }
+  }
+
+  // Safety-net: notify if any pod's queue has grown past the backlog threshold.
+  // Uses the same in-memory set as the enqueue path to avoid spamming every 5 min.
+  const backlogs = db.prepare(`
+    SELECT pod_id, COUNT(*) as queue_size
+    FROM ingestion_queue
+    WHERE status = 'pending'
+    GROUP BY pod_id
+    HAVING COUNT(*) >= ?
+  `).all(QUEUE_BACKLOG_THRESHOLD) as { pod_id: string; queue_size: number }[];
+
+  for (const { pod_id, queue_size } of backlogs) {
+    if (!notifiedBacklogPods.has(pod_id)) {
+      notifiedBacklogPods.add(pod_id);
+      notifyQueueBacklog(pod_id, queue_size);
     }
   }
 }
