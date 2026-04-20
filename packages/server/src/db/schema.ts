@@ -228,6 +228,21 @@ export function createTables() {
     `);
   } catch { /* already exists */ }
   try { db.exec("ALTER TABLE pods ADD COLUMN project_id TEXT REFERENCES projects(project_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE projects ADD COLUMN resources_json TEXT"); } catch { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS identity_cache (
+        kind TEXT NOT NULL,
+        value TEXT NOT NULL,
+        email TEXT,
+        slack_user_id TEXT,
+        github_login TEXT,
+        display_name TEXT,
+        resolved_at TEXT NOT NULL,
+        PRIMARY KEY (kind, value)
+      )
+    `);
+  } catch { /* already exists */ }
   try {
     db.exec(`
       CREATE TABLE IF NOT EXISTS project_context_updates (

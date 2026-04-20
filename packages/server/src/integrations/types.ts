@@ -1,10 +1,19 @@
-import type { ContextSearchHit, ContextSource } from "@pim/shared";
+import type {
+  ContextSearchActor,
+  ContextSearchHit,
+  ContextSource,
+  ProjectResources,
+} from "@pim/shared";
 
 export interface IntegrationSearchOpts {
   query: string;
   time_window_days: number;
   max_hits_per_source: number;
   pod_id?: string;
+  project_id?: string;
+  project_name?: string;
+  project_resources?: ProjectResources;
+  actor?: ContextSearchActor;
 }
 
 export interface IntegrationResult {

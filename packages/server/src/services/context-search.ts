@@ -2,10 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  ContextSearchActor,
   ContextSearchHit,
   ContextSearchRequest,
   ContextSearchResult,
   ContextSource,
+  ProjectResources,
 } from "@pim/shared";
 import { CONTEXT_SOURCES } from "@pim/shared";
 import { callLLM, isLLMAvailable, MODELS } from "../pim/llm.js";
@@ -17,6 +19,8 @@ import { searchConfluence } from "../integrations/confluence.js";
 import { searchGithub } from "../integrations/github.js";
 import { searchGit } from "../integrations/git.js";
 import type { IntegrationResult, IntegrationSearchOpts } from "../integrations/types.js";
+import db from "../db/connection.js";
+import { detectPersonTokens, resolveActor } from "./identity-resolver.js";
 
 const DEFAULT_TIME_WINDOW_DAYS = 90;
 const DEFAULT_MAX_HITS_PER_SOURCE = 10;
@@ -38,7 +42,19 @@ const INTEGRATIONS: Record<ContextSource, Integration> = {
   git: searchGit,
 };
 
-function cacheKey(req: ContextSearchRequest): string {
+interface ResolvedScope {
+  project_id?: string;
+  project_name?: string;
+  project_resources?: ProjectResources;
+  actor?: ContextSearchActor;
+  /** Query with any matched project name/alias stripped out, so
+   * integrations' text-search clauses don't over-constrain results.
+   * The project scope itself is already encoded structurally via
+   * project_resources. */
+  cleaned_query?: string;
+}
+
+function cacheKey(req: ContextSearchRequest, scope: ResolvedScope): string {
   const normalized = {
     query: req.query.trim().toLowerCase(),
     sources: [...(req.sources ?? CONTEXT_SOURCES)].sort(),
@@ -46,6 +62,9 @@ function cacheKey(req: ContextSearchRequest): string {
     max_hits_per_source: req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE,
     synthesize: req.synthesize !== false,
     pod_id: req.pod_id ?? null,
+    project_id: scope.project_id ?? null,
+    project_resources: scope.project_resources ?? null,
+    actor: scope.actor ?? null,
   };
   return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
@@ -77,12 +96,190 @@ function writeCache(key: string, result: ContextSearchResult): void {
   }
 }
 
+function loadProjectRow(projectId: string):
+  | { project_id: string; name: string; resources_json: string | null }
+  | null {
+  try {
+    const row = db
+      .prepare(
+        "SELECT project_id, name, resources_json FROM projects WHERE project_id = ?",
+      )
+      .get(projectId) as
+      | { project_id: string; name: string; resources_json: string | null }
+      | undefined;
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function parseResources(raw: string | null): ProjectResources | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as ProjectResources;
+  } catch {
+    return undefined;
+  }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Scan the query text for any project's name or alias and return the
+// best-matching project_id plus every term that matched (so the caller
+// can strip them). Word-boundary, case-insensitive. Across different
+// projects the longest single match wins (so "T3 Events" beats a stray
+// "EMC" hit in a different project).
+function detectProjectFromQuery(
+  query: string,
+): { projectId: string; matchedTerms: string[] } | undefined {
+  if (!query || query.trim().length === 0) return undefined;
+  let rows: Array<{ project_id: string; name: string; resources_json: string | null }>;
+  try {
+    rows = db
+      .prepare("SELECT project_id, name, resources_json FROM projects")
+      .all() as typeof rows;
+  } catch {
+    return undefined;
+  }
+  let best:
+    | { id: string; longest: number; matched: string[] }
+    | undefined;
+  for (const row of rows) {
+    const resources = parseResources(row.resources_json);
+    const terms = [row.name, ...(resources?.aliases ?? [])].filter(
+      (t): t is string => typeof t === "string" && t.trim().length > 0,
+    );
+    const matched: string[] = [];
+    let longest = 0;
+    for (const term of terms) {
+      // Lenient \b boundary for *detection* — if the query mentions a
+      // version token like "T3-26.16" we still want it to resolve to
+      // the "T3" project. (Stripping uses a stricter boundary below
+      // so the token itself survives and becomes a fixVersion clause.)
+      const re = new RegExp(`\\b${escapeRegex(term)}\\b`, "i");
+      if (re.test(query)) {
+        matched.push(term);
+        if (term.length > longest) longest = term.length;
+      }
+    }
+    if (matched.length > 0 && (!best || longest > best.longest)) {
+      best = { id: row.project_id, longest, matched };
+    }
+  }
+  return best ? { projectId: best.id, matchedTerms: best.matched } : undefined;
+}
+
+function stripTerms(query: string, terms: string[]): string {
+  // Remove matched project names/aliases from the query and tidy the
+  // leftover. Preserves word-boundary safety and collapses leftover
+  // "in the", "for the" filler around the removed term.
+  let out = query;
+  // Sort longest-first so "T3 Events" is removed before the substring "T3".
+  const sorted = [...terms].sort((a, b) => b.length - a.length);
+  for (const term of sorted) {
+    const re = new RegExp(
+      `(?<![\\w\\-.])${escapeRegex(term)}(?![\\w\\-.])`,
+      "gi",
+    );
+    out = out.replace(re, " ");
+  }
+  return out
+    .replace(/\b(in|for|on|of|the|at)\s+(in|for|on|of|the|at)\b/gi, "$1")
+    .replace(/\b(in|for|on|about|regarding)\s*(project|pod)?\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function resolveScope(req: ContextSearchRequest): Promise<ResolvedScope> {
+  const scope: ResolvedScope = {};
+
+  // 1. Project: explicit > inferred from pod > detected from query text
+  let projectId = req.project_id;
+  if (!projectId && req.pod_id) {
+    try {
+      const row = db
+        .prepare("SELECT project_id FROM pods WHERE pod_id = ?")
+        .get(req.pod_id) as { project_id: string | null } | undefined;
+      projectId = row?.project_id ?? undefined;
+    } catch {
+      /* ignore */
+    }
+  }
+  let detectedTerms: string[] = [];
+  if (!projectId) {
+    const detected = detectProjectFromQuery(req.query);
+    if (detected) {
+      projectId = detected.projectId;
+      detectedTerms = detected.matchedTerms;
+    }
+  }
+  if (projectId) {
+    const row = loadProjectRow(projectId);
+    if (row) {
+      scope.project_id = row.project_id;
+      scope.project_name = row.name;
+      scope.project_resources = parseResources(row.resources_json);
+      if (detectedTerms.length > 0) {
+        const cleaned = stripTerms(req.query, detectedTerms);
+        if (cleaned && cleaned !== req.query) scope.cleaned_query = cleaned;
+      }
+    }
+  }
+
+  // 2. Actor: explicit > detected from query text
+  if (req.actor) {
+    scope.actor = req.actor;
+  } else {
+    const tokens = detectPersonTokens(req.query);
+    if (tokens.email || tokens.slack_user_id) {
+      scope.actor = await resolveActor(tokens);
+    }
+  }
+
+  return scope;
+}
+
+function boostFor(hit: ContextSearchHit, resources?: ProjectResources): number {
+  if (!resources) return 0;
+  const url = (hit.url ?? "").toLowerCase();
+  const meta = (hit.metadata ?? {}) as Record<string, unknown>;
+
+  const jiraKeys = resources.jira?.project_keys ?? [];
+  if (hit.source === "jira") {
+    const key = (meta.key as string | undefined) ?? "";
+    if (jiraKeys.some((k) => key.startsWith(`${k}-`))) return 2;
+  }
+  const repos = resources.github?.repos ?? [];
+  if (hit.source === "github") {
+    const repo = (meta.repo as string | undefined) ?? "";
+    if (repos.includes(repo)) return 2;
+  }
+  const channels = (resources.slack?.channels ?? []).map((c) => c.replace(/^#/, ""));
+  if (hit.source === "slack") {
+    const match = hit.title.match(/#([^\s(]+)/);
+    if (match && channels.includes(match[1])) return 2;
+  }
+  const spaces = resources.confluence?.space_keys ?? [];
+  if (hit.source === "confluence" && spaces.length > 0) {
+    if (spaces.some((k) => url.includes(`/spaces/${k.toLowerCase()}/`) || url.includes(`spacekey=${k.toLowerCase()}`))) {
+      return 2;
+    }
+  }
+  return 0;
+}
+
 function sourceAuthority(source: ContextSource): number {
   // Higher is better. Used as a ranking bonus.
   return { jira: 4, confluence: 4, github: 3, git: 3, slack: 2, fluffyjaws: 1 }[source];
 }
 
-function rankHits(hits: ContextSearchHit[], query: string): ContextSearchHit[] {
+function rankHits(
+  hits: ContextSearchHit[],
+  query: string,
+  resources?: ProjectResources,
+): ContextSearchHit[] {
   const now = Date.now();
   const q = query.toLowerCase();
   const phrases = q.split(/\s+/).filter(Boolean);
@@ -97,7 +294,7 @@ function rankHits(hits: ContextSearchHit[], query: string): ContextSearchHit[] {
     const recency = h.timestamp
       ? Math.max(0, 2 - (now - new Date(h.timestamp).getTime()) / (30 * 24 * 3600 * 1000))
       : 0;
-    return authority + exact + phraseHits * 0.5 + recency;
+    return authority + exact + phraseHits * 0.5 + recency + boostFor(h, resources);
   }
 }
 
@@ -129,12 +326,41 @@ function loadPrompt(): string {
   return cachedPrompt;
 }
 
-async function synthesize(query: string, hits: ContextSearchHit[]): Promise<string | undefined> {
-  if (hits.length === 0) return undefined;
+async function synthesize(
+  query: string,
+  hits: ContextSearchHit[],
+  scope: ResolvedScope,
+): Promise<string | undefined> {
+  // When a scope is set and zero hits came back, emit a deterministic
+  // "no activity found in scope" summary rather than asking the LLM to
+  // hallucinate corroboration.
+  if (hits.length === 0) {
+    if (scope.project_name || scope.actor?.display_name) {
+      const who = scope.actor?.display_name ?? scope.actor?.email;
+      const where = scope.project_name ? `in ${scope.project_name}` : "";
+      return `No matching activity found ${[who ? `by ${who}` : "", where].filter(Boolean).join(" ")} for this query.`.trim();
+    }
+    return undefined;
+  }
   if (!isLLMAvailable()) return undefined;
   try {
     const system = loadPrompt();
-    const prompt = JSON.stringify({ query, hits }, null, 2);
+    const prompt = JSON.stringify(
+      {
+        query,
+        hits,
+        project_scope: scope.project_name
+          ? {
+              name: scope.project_name,
+              aliases: scope.project_resources?.aliases ?? [],
+              resources: scope.project_resources,
+            }
+          : undefined,
+        actor: scope.actor,
+      },
+      null,
+      2,
+    );
     const md = await callLLM({ model: MODELS.fast, system, prompt, maxTokens: 1500 });
     return redactSecrets(md).text;
   } catch (err) {
@@ -147,17 +373,23 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
   const ttlSec = parseInt(process.env.CONTEXT_SEARCH_CACHE_TTL_SEC ?? String(DEFAULT_CACHE_TTL_SEC), 10);
   const useCache = req.use_cache !== false;
 
-  const key = cacheKey(req);
+  const scope = await resolveScope(req);
+
+  const key = cacheKey(req, scope);
   if (useCache) {
     const cached = readCache(key, ttlSec);
     if (cached) return { ...cached, from_cache: true };
   }
 
   const integrationOpts: IntegrationSearchOpts = {
-    query: req.query,
+    query: scope.cleaned_query ?? req.query,
     time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
     max_hits_per_source: req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE,
     pod_id: req.pod_id,
+    project_id: scope.project_id,
+    project_name: scope.project_name,
+    project_resources: scope.project_resources,
+    actor: scope.actor,
   };
 
   const selected = (req.sources ?? CONTEXT_SOURCES).filter((s) => s in INTEGRATIONS);
@@ -174,20 +406,26 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
       return;
     }
     const res = r.value;
-    if (res.missing) missing_sources.push({ source, reason: res.missing });
-    if (res.hits.length > 0) {
-      sources_used.push(source);
-      allHits.push(...res.hits);
+    if (res.missing) {
+      missing_sources.push({ source, reason: res.missing });
+      return;
     }
+    // Success (no error) → report as used even when 0 hits, so callers
+    // can distinguish "searched, nothing matched" from "never ran".
+    sources_used.push(source);
+    if (res.hits.length > 0) allHits.push(...res.hits);
   });
 
-  const ranked = rankHits(dedupe(scrubHits(allHits)), req.query);
+  const ranked = rankHits(dedupe(scrubHits(allHits)), req.query, scope.project_resources);
 
   const summary_md =
-    req.synthesize !== false ? await synthesize(req.query, ranked) : undefined;
+    req.synthesize !== false ? await synthesize(req.query, ranked, scope) : undefined;
 
   const result: ContextSearchResult = {
     query: req.query,
+    project_id: scope.project_id,
+    project_name: scope.project_name,
+    actor: scope.actor,
     summary_md,
     hits: ranked,
     sources_used,

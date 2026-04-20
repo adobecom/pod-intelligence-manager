@@ -5,6 +5,7 @@ import {
   type ArchivedProject,
   type Project,
   type ProjectContextUpdate,
+  type ProjectResources,
   EMPTY_PROJECT_ANATOMY,
 } from "@pim/shared";
 import { validateBody } from "../middleware/validation.js";
@@ -13,9 +14,24 @@ import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 import { getOrgScopeIds } from "../services/org-settings.js";
 
+const ResourcesSchema = z.object({
+  jira: z
+    .object({
+      project_keys: z.array(z.string()).optional(),
+      team: z.string().optional(),
+    })
+    .optional(),
+  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
+  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
+  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  aliases: z.array(z.string()).optional(),
+});
+
 const CreateProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()),
   description: z.string().optional(),
+  resources: ResourcesSchema.optional(),
 });
 
 const ProjectAnatomyBodySchema = z.object({
@@ -44,19 +60,32 @@ const PatchProjectSchema = z
     { message: "Each anatomy.internal.scope_id must exist in org scopes", path: ["anatomy"] },
   );
 
-function rowToProject(row: {
+function parseResources(raw: string | null | undefined): ProjectResources | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw) as ProjectResources;
+  } catch {
+    return undefined;
+  }
+}
+
+type ProjectRow = {
   project_id: string;
   name: string;
   description: string | null;
   created_at: string;
   anatomy_json?: string | null;
-}): Project {
+  resources_json?: string | null;
+};
+
+function rowToProject(row: ProjectRow): Project {
   return {
     project_id: row.project_id,
     name: row.name,
     description: row.description,
     created_at: row.created_at,
     anatomy: parseProjectAnatomy(row.anatomy_json),
+    resources: parseResources(row.resources_json),
   };
 }
 
@@ -80,28 +109,20 @@ function rowToArchivedProject(row: {
 
 export default async function projectRoutes(app: FastifyInstance) {
   app.get("/api/projects", async () => {
-    const rows = db.prepare("SELECT project_id, name, description, created_at, anatomy_json FROM projects ORDER BY name").all() as Array<{
-      project_id: string;
-      name: string;
-      description: string | null;
-      created_at: string;
-      anatomy_json: string | null;
-    }>;
+    const rows = db
+      .prepare(
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects ORDER BY name",
+      )
+      .all() as ProjectRow[];
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const row = db
-      .prepare("SELECT project_id, name, description, created_at, anatomy_json FROM projects WHERE project_id = ?")
-      .get(req.params.projectId) as
-      | {
-          project_id: string;
-          name: string;
-          description: string | null;
-          created_at: string;
-          anatomy_json: string | null;
-        }
-      | undefined;
+      .prepare(
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE project_id = ?",
+      )
+      .get(req.params.projectId) as ProjectRow | undefined;
     if (!row) {
       reply.code(404);
       return { error: "Project not found" };
@@ -109,19 +130,57 @@ export default async function projectRoutes(app: FastifyInstance) {
     return rowToProject(row);
   });
 
+  app.get<{ Params: { projectId: string } }>(
+    "/api/projects/:projectId/resources",
+    async (req, reply) => {
+      const row = db
+        .prepare("SELECT resources_json FROM projects WHERE project_id = ?")
+        .get(req.params.projectId) as { resources_json: string | null } | undefined;
+      if (!row) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return parseResources(row.resources_json) ?? {};
+    },
+  );
+
+  app.put<{
+    Params: { projectId: string };
+    Body: z.infer<typeof ResourcesSchema>;
+  }>(
+    "/api/projects/:projectId/resources",
+    { preHandler: validateBody(ResourcesSchema) },
+    async (req, reply) => {
+      const exists = db
+        .prepare("SELECT project_id FROM projects WHERE project_id = ?")
+        .get(req.params.projectId);
+      if (!exists) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const json = JSON.stringify(req.body);
+      db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ?").run(
+        json,
+        req.params.projectId,
+      );
+      return req.body;
+    },
+  );
+
   app.post<{ Body: z.infer<typeof CreateProjectSchema> }>(
     "/api/projects",
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
-      const { name, description } = req.body;
+      const { name, description, resources } = req.body;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
       const created_at = new Date().toISOString();
       const anatomyJson = JSON.stringify(EMPTY_PROJECT_ANATOMY);
+      const resourcesJson = resources ? JSON.stringify(resources) : null;
       db.prepare(
-        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json) VALUES (?, ?, ?, ?, ?)",
-      ).run(projectId, name, description ?? null, created_at, anatomyJson);
+        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, resources_json) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(projectId, name, description ?? null, created_at, anatomyJson, resourcesJson);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
@@ -129,6 +188,7 @@ export default async function projectRoutes(app: FastifyInstance) {
         description: description ?? null,
         created_at,
         anatomy_json: anatomyJson,
+        resources_json: resourcesJson,
       });
     },
   );
@@ -138,13 +198,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     Body: z.infer<typeof PatchProjectSchema>;
   }>("/api/projects/:projectId", { preHandler: validateBody(PatchProjectSchema) }, async (req, reply) => {
     const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(req.params.projectId) as
-      | {
-          project_id: string;
-          name: string;
-          description: string | null;
-          created_at: string;
-          anatomy_json: string | null;
-        }
+      | ProjectRow
       | undefined;
     if (!row) {
       reply.code(404);
@@ -153,7 +207,9 @@ export default async function projectRoutes(app: FastifyInstance) {
     const name = req.body.name ?? row.name;
     const description = req.body.description !== undefined ? req.body.description : row.description;
     const anatomyJson =
-      req.body.anatomy !== undefined ? JSON.stringify(req.body.anatomy) : row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
+      req.body.anatomy !== undefined
+        ? JSON.stringify(req.body.anatomy)
+        : row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
     db.prepare("UPDATE projects SET name = ?, description = ?, anatomy_json = ? WHERE project_id = ?").run(
       name,
       description,
