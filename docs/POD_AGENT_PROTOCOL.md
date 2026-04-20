@@ -69,3 +69,14 @@ External context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git) is ava
 - **MCP:** `context_search` tool.
 
 All calls hit `POST /api/context-search` on the PIM server. Sources without credentials configured are silently skipped and listed under `missing_sources`. Results are cached (default 1h TTL, keyed by normalized query + filters) and run through secret redaction before being returned or synthesized.
+
+### Project and actor scoping
+
+Both `searchContext()` and the `/api/context-search` route accept two optional scoping inputs that dramatically improve result precision:
+
+- `project_id` — scopes Jira to configured project keys + Team, GitHub to configured repos, Slack to configured channels, Confluence to configured space keys, and local git to configured repo paths. Configure these once via `pim project create` or the `create_project` / `configure_project_resources` MCP tools.
+- `actor` — filters hits to a specific person (`email`, `slack_user_id`, `github_login`, or `display_name`). Usually auto-detected from query phrases like `"what has rea01581@adobe.com been up to"`, but can be passed explicitly.
+
+Project detection also runs from query text (project name or any configured alias, word-boundary match, longest wins). Release tokens like `T3-26.16` are extracted and emitted as a Jira `fixVersion` clause; the default time window is skipped when `fixVersion` is set.
+
+The response echoes `project_id`, `project_name`, and `actor` so agents can surface the narrowing to the user ("searched within **T3 Events**, scoped to **Rayyan**…").

@@ -40,6 +40,27 @@ const ProjectAnatomySchema = z.object({
   ),
 });
 
+const ProjectResourcesSchema = z.object({
+  jira: z
+    .object({
+      project_keys: z.array(z.string()).optional(),
+      team: z.string().optional().describe("Jira 'Team' custom field value (e.g. 'Strata')"),
+    })
+    .optional(),
+  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
+  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
+  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  aliases: z.array(z.string()).optional(),
+});
+
+const ActorSchema = z.object({
+  email: z.string().email().optional(),
+  slack_user_id: z.string().optional(),
+  github_login: z.string().optional(),
+  display_name: z.string().optional(),
+});
+
 /* ------------------------------------------------------------------ */
 /*  Registration                                                      */
 /* ------------------------------------------------------------------ */
@@ -84,14 +105,30 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_project",
-    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy.",
+    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy. Pass optional `resources` (Jira keys, GitHub repos, Slack channels, Confluence spaces, local git paths, aliases) to scope downstream context_search calls — this improves result precision dramatically vs. a broad query.",
     {
       name: z.string().min(1).describe("Project display name"),
       description: z.string().optional().describe("Optional description"),
+      resources: ProjectResourcesSchema.optional().describe(
+        "External resources to scope searches. Any subset can be supplied.",
+      ),
     },
-    async ({ name, description }) => {
-      const project = await apiPost("/api/projects", { name, description });
+    async ({ name, description, resources }) => {
+      const project = await apiPost("/api/projects", { name, description, resources });
       return json(project);
+    },
+  );
+
+  server.tool(
+    "configure_project_resources",
+    "Replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
+    {
+      project_id: ProjectId,
+      resources: ProjectResourcesSchema,
+    },
+    async ({ project_id, resources }) => {
+      const result = await apiPut(`/api/projects/${encodeURIComponent(project_id)}/resources`, resources);
+      return json(result);
     },
   );
 
@@ -433,6 +470,15 @@ export function registerTools(server: McpServer) {
         .string()
         .optional()
         .describe("Optional — enables local git search for the pod's repo and biases ranking"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Optional — scope the fan-out to the project's configured Jira keys, GitHub repos, Slack channels, and Confluence spaces. Pass this when you know the project up-front; improves precision dramatically vs. a broad query.",
+        ),
+      actor: ActorSchema.optional().describe(
+        "Optional — filter hits to a specific person (email / Slack user id / GitHub login). Usually auto-detected from the query text ('what has rea01581@adobe.com been up to') but can be passed explicitly for programmatic callers.",
+      ),
       time_window_days: z.number().optional().describe("Default 90"),
       max_hits_per_source: z.number().optional().describe("Default 10"),
       synthesize: z.boolean().optional().describe("Default true. Set false to skip LLM summarization."),

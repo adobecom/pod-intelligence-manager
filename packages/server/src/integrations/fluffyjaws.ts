@@ -24,7 +24,9 @@ const DEFAULT_MODEL = "gpt-5.1";
 // Must be at least "low" — Fluffyjaws auto-attaches code_interpreter as a tool,
 // which rejects "minimal". "medium" matches fj's default "thinking" CLI mode.
 const DEFAULT_REASONING_EFFORT: string = "medium";
-const STREAM_TIMEOUT_MS = 60_000;
+// Fluffyjaws streams reasoning + tool output before assistant text; at
+// `medium` effort a cold conversation can take 60-90s. Allow 2 minutes.
+const STREAM_TIMEOUT_MS = 120_000;
 
 interface ConversationCreateResponse {
   conversationUuid?: string;
@@ -164,6 +166,23 @@ async function streamAssistantText(
   }
 }
 
+function decorateQueryWithScope(opts: IntegrationSearchOpts): string {
+  const parts: string[] = [];
+  const r = opts.project_resources;
+  if (opts.project_name || r) {
+    const name = opts.project_name ? `"${opts.project_name}"` : "the configured project";
+    const aliases = r?.aliases?.length ? ` (aliases: ${r.aliases.join(", ")})` : "";
+    parts.push(`Scope: ${name}${aliases}.`);
+  }
+  if (opts.actor?.display_name || opts.actor?.email) {
+    parts.push(
+      `Person of interest: ${opts.actor.display_name ?? opts.actor.email}.`,
+    );
+  }
+  parts.push(`Question: ${opts.query}`);
+  return parts.join(" ");
+}
+
 export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<IntegrationResult> {
   const sessionId = process.env.FLUFFYJAWS_SESSION_ID;
   if (!sessionId) {
@@ -179,7 +198,8 @@ export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<Int
 
   try {
     await createConversation(base, sessionId);
-    const text = await streamAssistantText(base, sessionId, opts.query);
+    const scopedQuery = decorateQueryWithScope(opts);
+    const text = await streamAssistantText(base, sessionId, scopedQuery);
 
     if (!text.trim()) {
       return { source: "fluffyjaws", hits: [], missing: "Fluffyjaws returned empty response" };

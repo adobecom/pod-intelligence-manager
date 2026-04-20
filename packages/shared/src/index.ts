@@ -9,6 +9,7 @@ export type {
 export type {
   Project,
   ProjectContextUpdate,
+  ProjectResources,
   ProjectAnatomy,
   ProjectAnatomyInternalSlot,
   ProjectAnatomyExternalTeam,
@@ -88,6 +89,7 @@ export type {
   ContextSearchHit,
   ContextSearchMissingSource,
   ContextSearchResult,
+  ContextSearchActor,
 } from "./types/context-search";
 
 export { CONTEXT_SOURCES } from "./types/context-search";

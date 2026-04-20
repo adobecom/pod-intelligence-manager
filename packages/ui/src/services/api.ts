@@ -19,6 +19,7 @@ import type {
   CurationRequest,
   ContextSearchRequest,
   ContextSearchResult,
+  ProjectResources,
 } from "@pim/shared";
 
 // Module-level getters injected by the Auth/Org contexts at mount so the
@@ -251,6 +252,26 @@ export async function patchProject(
 export async function getProjectContextUpdates(projectId: string): Promise<ProjectContextUpdate[]> {
   return fetchJSON<ProjectContextUpdate[]>(
     `/api/projects/${encodeURIComponent(projectId)}/context-updates`,
+  );
+}
+
+export async function getProjectResources(projectId: string): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/resources`,
+  );
+}
+
+export async function putProjectResources(
+  projectId: string,
+  resources: ProjectResources,
+): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/resources`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(resources),
+    },
   );
 }
 

@@ -20,10 +20,19 @@ export const CONTEXT_SOURCES: ContextSource[] = [
   "git",
 ];
 
+export interface ContextSearchActor {
+  email?: string;
+  slack_user_id?: string;
+  github_login?: string;
+  display_name?: string;
+}
+
 export interface ContextSearchRequest {
   query: string;
   sources?: ContextSource[];
   pod_id?: string;
+  project_id?: string;
+  actor?: ContextSearchActor;
   time_window_days?: number;
   max_hits_per_source?: number;
   synthesize?: boolean;
@@ -47,6 +56,14 @@ export interface ContextSearchMissingSource {
 
 export interface ContextSearchResult {
   query: string;
+  /** Project the search was scoped to, if any. Populated whether the
+   * project came from an explicit project_id, a pod lookup, or
+   * query-text detection against name/aliases. */
+  project_id?: string;
+  project_name?: string;
+  /** Actor the search was scoped to, if one was resolved (explicit or
+   * auto-detected from the query text). */
+  actor?: ContextSearchActor;
   summary_md?: string;
   hits: ContextSearchHit[];
   sources_used: ContextSource[];

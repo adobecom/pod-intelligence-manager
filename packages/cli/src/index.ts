@@ -19,6 +19,7 @@ import { registerInitCommand } from "./commands/init.js";
 import { registerLeaveCommand } from "./commands/leave.js";
 import { registerSearchCommand } from "./commands/search.js";
 import { registerLoginCommand } from "./commands/login.js";
+import { registerProjectCommands } from "./commands/project.js";
 
 setOrgSlug(resolveOrgSlug());
 // Best-effort auth priming for every command: if creds exist on disk we attach
@@ -40,6 +41,7 @@ program
   .option("-s, --server <url>", "Server base URL", process.env.PIM_SERVER_URL ?? "http://localhost:4000");
 
 registerPodCommands(program);
+registerProjectCommands(program);
 registerReportCommand(program);
 registerDocCommand(program);
 registerTunnelCommands(program);
