@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import chalk from "chalk";
 import type { Tunnel } from "@pim/shared";
-import { getBaseUrl, fetchJSON } from "../util.js";
+import { getBaseUrl, fetchJSON, apiFetch } from "../util.js";
 import { TunnelClient } from "../tunnel/client.js";
 
 export function registerTunnelCommands(program: Command) {
@@ -51,7 +51,7 @@ export function registerTunnelCommands(program: Command) {
       // HTTP heartbeat loop (keeps DB last_activity updated)
       const heartbeat = setInterval(async () => {
         try {
-          await fetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/heartbeat`, {
+          await apiFetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/heartbeat`, {
             method: "PUT",
           });
         } catch {
@@ -64,7 +64,7 @@ export function registerTunnelCommands(program: Command) {
         clearInterval(heartbeat);
         client.disconnect();
         try {
-          await fetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/disconnect`, {
+          await apiFetch(`${base}/api/pods/${opts.pod}/tunnels/${tunnel.tunnel_id}/disconnect`, {
             method: "PUT",
           });
           console.log(chalk.yellow("\n  Tunnel disconnected.\n"));

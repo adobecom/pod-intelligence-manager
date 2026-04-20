@@ -45,20 +45,11 @@ const ProjectAnatomyBodySchema = z.object({
   ),
 });
 
-const PatchProjectSchema = z
-  .object({
-    name: z.string().min(1).transform(s => s.trim()).optional(),
-    description: z.union([z.string(), z.null()]).optional(),
-    anatomy: ProjectAnatomyBodySchema.optional(),
-  })
-  .refine(
-    body => {
-      if (!body.anatomy) return true;
-      const ids = getOrgScopeIds();
-      return body.anatomy.internal.every(s => ids.has(s.scope_id));
-    },
-    { message: "Each anatomy.internal.scope_id must exist in org scopes", path: ["anatomy"] },
-  );
+const PatchProjectSchema = z.object({
+  name: z.string().min(1).transform(s => s.trim()).optional(),
+  description: z.union([z.string(), z.null()]).optional(),
+  anatomy: ProjectAnatomyBodySchema.optional(),
+});
 
 function parseResources(raw: string | null | undefined): ProjectResources | undefined {
   if (!raw) return undefined;
@@ -108,21 +99,21 @@ function rowToArchivedProject(row: {
 }
 
 export default async function projectRoutes(app: FastifyInstance) {
-  app.get("/api/projects", async () => {
+  app.get("/api/projects", async (req) => {
     const rows = db
       .prepare(
-        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects ORDER BY name",
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE org_id = ? ORDER BY name",
       )
-      .all() as ProjectRow[];
+      .all(req.org!.org_id) as ProjectRow[];
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const row = db
       .prepare(
-        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE project_id = ?",
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE project_id = ? AND org_id = ?",
       )
-      .get(req.params.projectId) as ProjectRow | undefined;
+      .get(req.params.projectId, req.org!.org_id) as ProjectRow | undefined;
     if (!row) {
       reply.code(404);
       return { error: "Project not found" };
@@ -172,6 +163,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
       const { name, description, resources } = req.body;
+      const orgId = req.org!.org_id;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
@@ -179,8 +171,8 @@ export default async function projectRoutes(app: FastifyInstance) {
       const anatomyJson = JSON.stringify(EMPTY_PROJECT_ANATOMY);
       const resourcesJson = resources ? JSON.stringify(resources) : null;
       db.prepare(
-        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, resources_json) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(projectId, name, description ?? null, created_at, anatomyJson, resourcesJson);
+        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, resources_json, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(projectId, name, description ?? null, created_at, anatomyJson, resourcesJson, orgId, req.userRecord.user_id);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
@@ -197,12 +189,21 @@ export default async function projectRoutes(app: FastifyInstance) {
     Params: { projectId: string };
     Body: z.infer<typeof PatchProjectSchema>;
   }>("/api/projects/:projectId", { preHandler: validateBody(PatchProjectSchema) }, async (req, reply) => {
-    const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(req.params.projectId) as
+    const row = db.prepare("SELECT * FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id) as
       | ProjectRow
       | undefined;
     if (!row) {
       reply.code(404);
       return { error: "Project not found" };
+    }
+    if (req.body.anatomy) {
+      const ids = getOrgScopeIds(req.org!.org_id);
+      for (const s of req.body.anatomy.internal) {
+        if (!ids.has(s.scope_id)) {
+          reply.code(400);
+          return { error: `anatomy.internal.scope_id "${s.scope_id}" is not a valid org scope` };
+        }
+      }
     }
     const name = req.body.name ?? row.name;
     const description = req.body.description !== undefined ? req.body.description : row.description;
@@ -210,11 +211,12 @@ export default async function projectRoutes(app: FastifyInstance) {
       req.body.anatomy !== undefined
         ? JSON.stringify(req.body.anatomy)
         : row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
-    db.prepare("UPDATE projects SET name = ?, description = ?, anatomy_json = ? WHERE project_id = ?").run(
+    db.prepare("UPDATE projects SET name = ?, description = ?, anatomy_json = ? WHERE project_id = ? AND org_id = ?").run(
       name,
       description,
       anatomyJson,
       req.params.projectId,
+      req.org!.org_id,
     );
     return rowToProject({
       ...row,
@@ -225,7 +227,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/context-updates", async (req, reply) => {
-    const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(req.params.projectId);
+    const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id);
     if (!project) {
       reply.code(404);
       return { error: "Project not found" };
@@ -278,6 +280,11 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/context-updates",
     { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
     async (req, reply) => {
+      const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id);
+      if (!project) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
       const result = await ingestProjectContextUpdate(req.params.projectId, req.body);
       if (!result.success) {
         reply.code(result.secretFindings ? 422 : 400);
@@ -294,7 +301,8 @@ export default async function projectRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
     const projectId = req.params.projectId;
-    const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(projectId) as
+    const orgId = req.org!.org_id;
+    const row = db.prepare("SELECT * FROM projects WHERE project_id = ? AND org_id = ?").get(projectId, orgId) as
       | {
           project_id: string;
           name: string;
@@ -315,9 +323,9 @@ export default async function projectRoutes(app: FastifyInstance) {
       db.prepare("DELETE FROM project_context_updates WHERE project_id = ?").run(projectId);
       db.prepare("UPDATE pods SET project_id = NULL WHERE project_id = ?").run(projectId);
       db.prepare(
-        `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate);
+        `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate, orgId);
       db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
     };
     db.transaction(run)();

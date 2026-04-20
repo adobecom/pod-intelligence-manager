@@ -27,6 +27,11 @@ interface ViewRow {
 
 export default async function livingDocRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return "# Pod not found.";
+    }
     const row = db.prepare("SELECT markdown FROM living_docs WHERE pod_id = ?").get(req.params.podId) as LivingDocRow | undefined;
     if (!row) {
       return "# No living doc available for this pod.";
@@ -41,6 +46,12 @@ export default async function livingDocRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const { podId } = req.params;
       const { viewer_id: viewerId } = req.body;
+
+      const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id);
+      if (!pod) {
+        reply.code(404);
+        return { error: "Pod not found" };
+      }
 
       const now = new Date().toISOString();
 
@@ -61,8 +72,13 @@ export default async function livingDocRoutes(app: FastifyInstance) {
   );
 
   // Get living doc consumption stats
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc/stats", async (req) => {
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc/stats", async (req, reply) => {
     const { podId } = req.params;
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
 
     const doc = db.prepare(
       "SELECT last_regenerated_at, regen_count FROM living_docs WHERE pod_id = ?"

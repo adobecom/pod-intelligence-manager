@@ -247,72 +247,6 @@ export function OrgDashboard() {
           Organization Dashboard
         </Heading>
 
-        <div className={createFormCard}>
-          <Heading level={3} styles={style({ marginY: 0 })}>
-            Org configuration
-          </Heading>
-          <Text styles={style({ font: "body-sm", color: "neutral-subdued", marginBottom: 12 })}>
-            Scopes drive pod workstreams, context updates, and internal team slots on project anatomy.
-          </Text>
-          {orgConfigSaveError && (
-            <InlineAlert variant="negative">
-              <Content>{orgConfigSaveError}</Content>
-            </InlineAlert>
-          )}
-          <div className={style({ display: "flex", flexDirection: "column", gap: 16 })}>
-            <div>
-              <Text styles={style({ fontWeight: "bold", font: "body-sm" })}>Scopes</Text>
-              <div className={style({ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 })}>
-                {scopeDraft.map((row, i) => (
-                  <div key={i} className={style({ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" })}>
-                    <TextField
-                      label="Id"
-                      value={row.id}
-                      onChange={(v) => {
-                        const next = [...scopeDraft];
-                        next[i] = { ...next[i], id: v };
-                        setScopeDraft(next);
-                      }}
-                    />
-                    <TextField
-                      label="Label"
-                      value={row.label}
-                      onChange={(v) => {
-                        const next = [...scopeDraft];
-                        next[i] = { ...next[i], label: v };
-                        setScopeDraft(next);
-                      }}
-                    />
-                    <Button
-                      variant="secondary"
-                      isDisabled={scopeDraft.length <= 1}
-                      onPress={() => setScopeDraft(scopeDraft.filter((_, j) => j !== i))}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  variant="secondary"
-                  onPress={() => setScopeDraft([...scopeDraft, { id: "", label: "" }])}
-                >
-                  Add scope
-                </Button>
-              </div>
-            </div>
-            <div className={createFormActions}>
-              <Button
-                variant="accent"
-                onPress={handleSaveOrgConfig}
-                isPending={savingOrgConfig}
-                isDisabled={scopeDraft.length < 1}
-              >
-                Save org configuration
-              </Button>
-            </div>
-          </div>
-        </div>
-
         {/* Projects (long-lived initiatives) */}
         <div className={sectionHeader}>
           <Heading level={3}>Projects ({projects.length})</Heading>
@@ -568,6 +502,73 @@ export function OrgDashboard() {
             </div>
           </>
         )}
+
+        <Divider />
+        <div className={createFormCard}>
+          <Heading level={3} styles={style({ marginY: 0 })}>
+            Org configuration
+          </Heading>
+          <Text styles={style({ font: "body-sm", color: "neutral-subdued", marginBottom: 12 })}>
+            Scopes drive pod workstreams, context updates, and internal team slots on project anatomy.
+          </Text>
+          {orgConfigSaveError && (
+            <InlineAlert variant="negative">
+              <Content>{orgConfigSaveError}</Content>
+            </InlineAlert>
+          )}
+          <div className={style({ display: "flex", flexDirection: "column", gap: 16 })}>
+            <div>
+              <Text styles={style({ fontWeight: "bold", font: "body-sm" })}>Scopes</Text>
+              <div className={style({ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 })}>
+                {scopeDraft.map((row, i) => (
+                  <div key={i} className={style({ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" })}>
+                    <TextField
+                      label="Id"
+                      value={row.id}
+                      onChange={(v) => {
+                        const next = [...scopeDraft];
+                        next[i] = { ...next[i], id: v };
+                        setScopeDraft(next);
+                      }}
+                    />
+                    <TextField
+                      label="Label"
+                      value={row.label}
+                      onChange={(v) => {
+                        const next = [...scopeDraft];
+                        next[i] = { ...next[i], label: v };
+                        setScopeDraft(next);
+                      }}
+                    />
+                    <Button
+                      variant="secondary"
+                      isDisabled={scopeDraft.length <= 1}
+                      onPress={() => setScopeDraft(scopeDraft.filter((_, j) => j !== i))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  variant="secondary"
+                  onPress={() => setScopeDraft([...scopeDraft, { id: "", label: "" }])}
+                >
+                  Add scope
+                </Button>
+              </div>
+            </div>
+            <div className={createFormActions}>
+              <Button
+                variant="accent"
+                onPress={handleSaveOrgConfig}
+                isPending={savingOrgConfig}
+                isDisabled={scopeDraft.length < 1}
+              >
+                Save org configuration
+              </Button>
+            </div>
+          </div>
+        </div>
 
         {archiveFlow !== null && (
           <DialogTrigger

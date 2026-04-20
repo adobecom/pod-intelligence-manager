@@ -343,13 +343,15 @@ Rules:
 }
 
 function persistLintFindings(podId: string, findings: LintFinding[]): void {
+  const podRow = db.prepare("SELECT org_id FROM pods WHERE pod_id = ?").get(podId) as { org_id: string | null } | undefined;
+  const orgId = podRow?.org_id ?? null;
   db.prepare("DELETE FROM lint_findings WHERE pod_id = ?").run(podId);
   const insert = db.prepare(
-    `INSERT INTO lint_findings (id, pod_id, timestamp, type, severity, summary, area, suggestion)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO lint_findings (id, pod_id, timestamp, type, severity, summary, area, suggestion, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const f of findings) {
-    insert.run(f.id, f.pod_id, f.timestamp, f.type, f.severity, f.summary, f.area, f.suggestion);
+    insert.run(f.id, f.pod_id, f.timestamp, f.type, f.severity, f.summary, f.area, f.suggestion, orgId);
   }
 }
 

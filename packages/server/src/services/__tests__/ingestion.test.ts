@@ -27,6 +27,18 @@ vi.mock("../pod-snapshot.js", () => ({
   refreshPodSnapshotFromContext: vi.fn(),
 }));
 
+vi.mock("../async-quality-score.js", () => ({
+  scheduleAsyncQualityScore: vi.fn(),
+}));
+
+vi.mock("../org-settings.js", () => ({
+  getOrgScopeIds: vi.fn().mockReturnValue(new Set(["frontend", "backend", "design", "qa", "infra", "pm"])),
+}));
+
+vi.mock("../orgs.js", () => ({
+  getOrgIdForPod: vi.fn().mockReturnValue("org_demo"),
+}));
+
 import { ingestContextUpdate } from "../ingestion.js";
 import { refreshPodSnapshotFromContext } from "../pod-snapshot.js";
 import db from "../../db/connection.js";
@@ -34,6 +46,7 @@ import { broadcast } from "../../ws/index.js";
 import { scanForSecrets } from "../secret-scan.js";
 import { scoreUpdate } from "../quality-scoring.js";
 import { processUpdate } from "../../pim/master.js";
+import { getOrgIdForPod } from "../orgs.js";
 
 function validInput() {
   return {
@@ -73,6 +86,8 @@ function setupDefaultMocks() {
     merged: true,
     conflictCreated: false,
   });
+
+  vi.mocked(getOrgIdForPod).mockReturnValue("org_demo");
 }
 
 describe("ingestContextUpdate", () => {

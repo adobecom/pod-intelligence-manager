@@ -13,6 +13,7 @@ import contextUpdateRoutes from "./routes/context-updates.js";
 import tunnelRoutes from "./routes/tunnels.js";
 import livingDocRoutes from "./routes/living-doc.js";
 import orgRoutes from "./routes/org.js";
+import orgsRoutes from "./routes/orgs.js";
 import pendingWorkRoutes from "./routes/pending-work.js";
 import graphRoutes from "./routes/graph.js";
 import contextSearchRoutes from "./routes/context-search.js";
@@ -23,6 +24,7 @@ import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
 import { createAuthHook } from "./middleware/auth.js";
+import { resolveRequestOrg } from "./middleware/org-context.js";
 import db from "./db/connection.js";
 
 const app = Fastify({ logger: true });
@@ -59,12 +61,34 @@ await app.register(rateLimit, {
   timeWindow: "1 minute",
 });
 
-// Auth — protect write routes (POST/PUT/DELETE/PATCH)
+// Auth — attach `req.user` on every request so routes can rely on it.
+// Phase 1: trust mode upserts a dev user; ims mode verifies IMS JWT.
+// Public routes (health, static) short-circuit via allowlist below.
 const authMode = (process.env.AUTH_MODE ?? "trust") as "trust" | "ims";
 const authenticate = createAuthHook(authMode);
+
+// Paths that must bypass auth + org-context entirely.
+// WebSocket upgrades authenticate in-handler via token param or first frame.
+const PUBLIC_PATHS = new Set<string>(["/api/health"]);
+const PUBLIC_PREFIXES = ["/ws"];
+const isPublic = (url: string) => {
+  const path = url.split("?")[0];
+  return PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some(p => path === p || path.startsWith(p + "/"));
+};
+
+// Paths that need auth but NOT org-context resolution (user-level surfaces).
+const ORG_BYPASS_PREFIXES = ["/api/me", "/api/orgs"];
+const needsOrgContext = (url: string) => {
+  const path = url.split("?")[0];
+  return !ORG_BYPASS_PREFIXES.some(p => path === p || path.startsWith(p + "/"));
+};
+
 app.addHook("onRequest", async (req, reply) => {
-  if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
-    await authenticate(req, reply);
+  if (isPublic(req.url)) return;
+  await authenticate(req, reply);
+  if (reply.sent) return;
+  if (needsOrgContext(req.url)) {
+    await resolveRequestOrg(req, reply);
   }
 });
 
@@ -76,6 +100,7 @@ app.register(contextUpdateRoutes);
 app.register(tunnelRoutes);
 app.register(livingDocRoutes);
 app.register(orgRoutes);
+app.register(orgsRoutes);
 app.register(pendingWorkRoutes);
 app.register(graphRoutes);
 app.register(contextSearchRoutes);
@@ -83,7 +108,7 @@ app.register(wsRoutes);
 app.register(wsTunnelRoutes);
 app.register(tunnelProxyRoutes);
 
-// Health check — verifies DB connectivity, returns uptime and pod count
+// Health check — verifies DB connectivity, returns uptime, pod count, and auth mode
 const serverStartedAt = new Date().toISOString();
 app.get("/api/health", async (_req, reply) => {
   try {
@@ -92,6 +117,15 @@ app.get("/api/health", async (_req, reply) => {
       status: "ok",
       started_at: serverStartedAt,
       uptime_seconds: Math.floor(process.uptime()),
+      auth_mode: authMode,
+      ims_client_id: process.env.IMS_CLIENT_ID ?? null,
+      ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
+      // CLI login settings — advertised so users need no env vars to run `pim login`.
+      // client_secret is intentionally public: CLI clients are inherently not secret
+      // (distributed to all users), so advertising it is equivalent to shipping it in the binary.
+      ims_cli_client_id: process.env.IMS_CLI_CLIENT_ID ?? process.env.IMS_CLIENT_ID ?? null,
+      ims_cli_client_secret: process.env.IMS_CLI_CLIENT_SECRET ?? null,
+      ims_cli_scopes: process.env.IMS_CLI_SCOPES ?? "AdobeID,openid",
       db: { connected: true, active_pods: row.count },
     };
   } catch {

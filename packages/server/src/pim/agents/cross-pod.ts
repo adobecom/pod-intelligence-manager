@@ -11,6 +11,7 @@ interface UpdateRow {
 interface PodRow {
   pod_id: string;
   name: string;
+  org_id: string | null;
 }
 
 const STOP_WORDS = new Set([
@@ -35,7 +36,7 @@ function extractKeywords(text: string): string[] {
 export async function detectOverlaps(): Promise<void> {
   // Get all active pods
   const pods = db.prepare(
-    "SELECT pod_id, name FROM pods WHERE pod_id IN (SELECT pod_id FROM org_pod_summaries)",
+    "SELECT pod_id, name, org_id FROM pods WHERE pod_id IN (SELECT pod_id FROM org_pod_summaries)",
   ).all() as PodRow[];
 
   if (pods.length < 2) return;
@@ -60,15 +61,16 @@ export async function detectOverlaps(): Promise<void> {
   db.prepare("DELETE FROM cross_pod_overlaps").run();
 
   const insert = db.prepare(
-    `INSERT INTO cross_pod_overlaps (id, pod_a, pod_b, description, advisory)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO cross_pod_overlaps (id, pod_a, pod_b, description, advisory, org_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
-  // Compare each pair of pods
+  // Compare each pair of pods — only within the same org
   for (let i = 0; i < pods.length; i++) {
     for (let j = i + 1; j < pods.length; j++) {
       const podA = pods[i];
       const podB = pods[j];
+      if (!podA.org_id || podA.org_id !== podB.org_id) continue;
       const kwA = podKeywords.get(podA.pod_id)!;
       const kwB = podKeywords.get(podB.pod_id)!;
 
@@ -94,6 +96,7 @@ export async function detectOverlaps(): Promise<void> {
           podB.name,
           `Shared context: ${topTerms}`,
           advisory,
+          podA.org_id,
         );
       }
     }

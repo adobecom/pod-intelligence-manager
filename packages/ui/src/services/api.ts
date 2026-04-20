@@ -22,8 +22,45 @@ import type {
   ProjectResources,
 } from "@pim/shared";
 
+// Module-level getters injected by the Auth/Org contexts at mount so the
+// network layer can read the current IMS token + selected org slug without
+// taking React context as a dependency.
+let authTokenGetter: (() => string | null) | null = null;
+let orgSlugGetter: (() => string | null) | null = null;
+
+export function setAuthTokenGetter(getter: (() => string | null) | null): void {
+  authTokenGetter = getter;
+}
+
+export function setOrgSlugGetter(getter: (() => string | null) | null): void {
+  orgSlugGetter = getter;
+}
+
+/** Read current auth token — exposed for consumers that don't use apiFetch (e.g. WebSocket URL). */
+export function getAuthToken(): string | null {
+  return authTokenGetter?.() ?? null;
+}
+
+/** Read current org slug — exposed for consumers that don't use apiFetch (e.g. WebSocket URL). */
+export function getOrgSlug(): string | null {
+  return orgSlugGetter?.() ?? null;
+}
+
+function withAuthHeaders(init?: RequestInit): RequestInit {
+  const headers = new Headers(init?.headers);
+  const token = authTokenGetter?.();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const slug = orgSlugGetter?.();
+  if (slug) headers.set("X-Pim-Org", slug);
+  return { ...init, headers };
+}
+
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, withAuthHeaders(init));
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const res = await apiFetch(url, init);
   if (!res.ok) {
     if (res.status === 404) return null as T;
     throw new Error(`API error: ${res.status} ${res.statusText}`);
@@ -61,13 +98,13 @@ export async function getTunnels(podId: string): Promise<Tunnel[]> {
 }
 
 export async function getLivingDoc(podId: string): Promise<string> {
-  const res = await fetch(`/api/pods/${podId}/living-doc`);
+  const res = await apiFetch(`/api/pods/${podId}/living-doc`);
   if (!res.ok) return "# No living doc available for this pod.";
   return res.text();
 }
 
 export async function recordLivingDocView(podId: string, viewerId: string): Promise<void> {
-  await fetch(`/api/pods/${podId}/living-doc/views`, {
+  await apiFetch(`/api/pods/${podId}/living-doc/views`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ viewer_id: viewerId }),
@@ -369,6 +406,115 @@ export async function searchContext(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
+}
+
+// --- Orgs (user-facing) ---
+
+export interface UserOrgSummary {
+  org_id: string;
+  slug: string;
+  name: string;
+  role: "owner" | "admin" | "member";
+  created_at: string;
+}
+
+export async function createUserOrg(input: { slug: string; name: string }): Promise<UserOrgSummary> {
+  const res = await apiFetch("/api/orgs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Failed to create org (${res.status})`);
+  }
+  return res.json() as Promise<UserOrgSummary>;
+}
+
+export type OrgRole = "owner" | "admin" | "member";
+
+export interface OrgMember {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  role: OrgRole;
+  created_at: string;
+}
+
+export interface OrgPendingInvite {
+  invite_id: string;
+  email: string;
+  role: Exclude<OrgRole, "owner">;
+  created_at: string;
+}
+
+export interface OrgMembersResponse {
+  members: OrgMember[];
+  invites: OrgPendingInvite[];
+}
+
+export async function getOrgMembers(slug: string): Promise<OrgMembersResponse> {
+  return fetchJSON<OrgMembersResponse>(`/api/orgs/${encodeURIComponent(slug)}/members`);
+}
+
+/**
+ * Wraps a 4xx body-returning API call with a throwing helper so the caller
+ * gets the server's actual error text (e.g. "Cannot demote the last owner").
+ */
+async function postOrThrow<T>(url: string, init: RequestInit): Promise<T> {
+  const res = await apiFetch(url, init);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(body.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function inviteMember(
+  slug: string,
+  input: { email: string; role: Exclude<OrgRole, "owner"> },
+): Promise<OrgPendingInvite> {
+  return postOrThrow<OrgPendingInvite>(`/api/orgs/${encodeURIComponent(slug)}/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function revokeInvite(slug: string, inviteId: string): Promise<void> {
+  await postOrThrow<{ ok: boolean }>(
+    `/api/orgs/${encodeURIComponent(slug)}/invites/${inviteId}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function updateMemberRole(
+  slug: string,
+  userId: string,
+  role: OrgRole,
+): Promise<OrgMember> {
+  return postOrThrow<OrgMember>(
+    `/api/orgs/${encodeURIComponent(slug)}/members/${userId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    },
+  );
+}
+
+export async function removeMember(slug: string, userId: string): Promise<void> {
+  await postOrThrow<{ ok: boolean }>(
+    `/api/orgs/${encodeURIComponent(slug)}/members/${userId}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function acceptInvite(inviteId: string): Promise<{ org_id: string; role: OrgRole }> {
+  return postOrThrow<{ org_id: string; role: OrgRole }>(
+    `/api/orgs/accept/${encodeURIComponent(inviteId)}`,
+    { method: "POST" },
+  );
 }
 
 export async function submitProjectContextUpdate(

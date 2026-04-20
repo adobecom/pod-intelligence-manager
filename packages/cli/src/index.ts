@@ -5,6 +5,9 @@ import { ensureCliPackageRootEnv } from "./cli-root.js";
 
 ensureCliPackageRootEnv();
 
+import { resolveOrgSlug } from "./config.js";
+import { setOrgSlug, setAuthToken } from "./util.js";
+import { loadCredentials } from "@pim/shared/auth";
 import { registerPodCommands } from "./commands/pod.js";
 import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";
@@ -15,7 +18,19 @@ import { registerHooksCommand } from "./commands/hooks.js";
 import { registerInitCommand } from "./commands/init.js";
 import { registerLeaveCommand } from "./commands/leave.js";
 import { registerSearchCommand } from "./commands/search.js";
+import { registerLoginCommand } from "./commands/login.js";
 import { registerProjectCommands } from "./commands/project.js";
+
+setOrgSlug(resolveOrgSlug());
+// Best-effort auth priming for every command: if creds exist on disk we attach
+// the access token to outbound requests. If the server is in trust mode the
+// token is ignored; if it's in IMS mode and the token is expired the server
+// returns 401 and the user is prompted to re-login. The login command itself
+// does not depend on this (it reads/writes creds directly).
+{
+  const creds = loadCredentials();
+  if (creds) setAuthToken(creds.access_token);
+}
 
 const program = new Command();
 
@@ -36,5 +51,6 @@ registerContextCommand(program);
 registerSearchCommand(program);
 registerInitCommand(program);
 registerLeaveCommand(program);
+registerLoginCommand(program);
 
 program.parse();

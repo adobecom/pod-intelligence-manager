@@ -46,13 +46,18 @@ function rowToConflict(row: ConflictRow): Conflict {
 }
 
 export default async function conflictRoutes(app: FastifyInstance) {
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/conflicts", async (req) => {
-    const rows = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? ORDER BY created_at DESC").all(req.params.podId) as ConflictRow[];
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/conflicts", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return [];
+    }
+    const rows = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND org_id = ? ORDER BY created_at DESC").all(req.params.podId, req.org!.org_id) as ConflictRow[];
     return rows.map(rowToConflict);
   });
 
   app.get<{ Params: { podId: string; conflictId: string } }>("/api/pods/:podId/conflicts/:conflictId", async (req, reply) => {
-    const row = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND id = ?").get(req.params.podId, req.params.conflictId) as ConflictRow | undefined;
+    const row = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND id = ? AND org_id = ?").get(req.params.podId, req.params.conflictId, req.org!.org_id) as ConflictRow | undefined;
     if (!row) {
       reply.code(404);
       return null;
@@ -69,8 +74,8 @@ export default async function conflictRoutes(app: FastifyInstance) {
     const now = new Date().toISOString();
 
     const result = db.prepare(
-      "UPDATE conflicts SET status = 'resolved', resolution = ?, resolved_by = ?, resolution_date = ? WHERE pod_id = ? AND id = ?"
-    ).run(resolution, resolved_by, now, podId, conflictId);
+      "UPDATE conflicts SET status = 'resolved', resolution = ?, resolved_by = ?, resolution_date = ? WHERE pod_id = ? AND id = ? AND org_id = ?"
+    ).run(resolution, resolved_by, now, podId, conflictId, req.org!.org_id);
 
     if (result.changes === 0) {
       reply.code(404);

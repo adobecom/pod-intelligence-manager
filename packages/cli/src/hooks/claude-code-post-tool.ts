@@ -45,10 +45,12 @@ function contextUpdatesUrl(config: PimConfig): string {
 
 async function reportToPim(config: PimConfig, payload: Record<string, unknown>): Promise<void> {
   const url = contextUpdatesUrl(config);
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.orgSlug) headers["X-Pim-Org"] = config.orgSlug;
   try {
     await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         agent_id: config.agentId,
         scope: config.scope,

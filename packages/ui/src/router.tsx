@@ -13,6 +13,7 @@ import { ContextSearch } from "./views/ContextSearch/ContextSearch";
 import { ProjectLayout } from "./layouts/ProjectLayout";
 import { ProjectDashboard } from "./views/ProjectDashboard/ProjectDashboard";
 import { ProjectContextFeed } from "./views/ProjectContextFeed/ProjectContextFeed";
+import { MemberManagement } from "./views/OrgSettings/MemberManagement";
 
 export const router = createBrowserRouter([
   {
@@ -20,6 +21,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: <Navigate to="/org" replace /> },
       { path: "/org", element: <OrgDashboard /> },
+      { path: "/org/members", element: <MemberManagement /> },
       { path: "/knowledge", element: <KnowledgeGraphView /> },
       { path: "/search", element: <ContextSearch /> },
       {

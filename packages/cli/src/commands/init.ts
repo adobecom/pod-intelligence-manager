@@ -4,7 +4,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { confirm, input, select } from "@inquirer/prompts";
 import type { OrgConfig } from "@pim/shared";
-import { getBaseUrl } from "../util.js";
+import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
 import { installHooks, resolveRunnerPath } from "./hooks.js";
 import {
@@ -18,9 +18,11 @@ import {
   fetchOrgConfig,
   fetchOrgPods,
   fetchProjects,
+  fetchUserOrgs,
   formatScopeChoicesForError,
   scopeIdsFromConfig,
   verifyProjectExists,
+  type UserOrgSummary,
 } from "../org-config.js";
 
 export interface RunInitOptions {
@@ -28,6 +30,7 @@ export interface RunInitOptions {
   root: string;
   podId: string;
   projectId?: string;
+  orgSlug: string;
   scope?: string;
   agentId?: string;
   /** Used in templates when scope is omitted (first org scope). */
@@ -49,6 +52,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     root,
     podId,
     projectId: projectIdOpt,
+    orgSlug,
     scope,
     agentId,
     defaultScopeId,
@@ -62,6 +66,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
   // 3. Write .pim.json
   const configPath = path.join(root, ".pim.json");
   const configData: Record<string, unknown> = {
+    orgSlug,
     podId,
     serverUrl,
     autoReport: { gitHook: true, claudeCodeHook: true },
@@ -283,6 +288,7 @@ export function registerInitCommand(program: Command): void {
     .command("init")
     .description("Initialize PIM integration for this repo (hooks, Claude Code config, CLAUDE.md)")
     .option("-p, --pod <podId>", "Pod ID to connect to")
+    .option("--org <slug>", "Org slug to bind this repo to (else picked interactively)")
     .option("--project <projectId>", "Optional project ID for long-lived memory (must exist on server)")
     .option("--scope <scope>", "Agent scope id (must exist in org config; see GET /api/org/config)")
     .option("--agent <id>", "Agent ID (default: git user.name)")
@@ -304,7 +310,7 @@ export function registerInitCommand(program: Command): void {
 
       console.log(chalk.dim("  Checking server..."));
       try {
-        const healthRes = await fetch(`${serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
+        const healthRes = await apiFetch(`${serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
         if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
       } catch (e) {
         console.error(chalk.red(`  Cannot reach PIM server at ${serverUrl}`));
@@ -312,6 +318,48 @@ export function registerInitCommand(program: Command): void {
         process.exit(1);
       }
       console.log(chalk.green("  Server OK"));
+
+      // Resolve org (GET /api/orgs is org-context-bypass, so no header needed here).
+      let orgs: UserOrgSummary[];
+      try {
+        orgs = await fetchUserOrgs(serverUrl);
+      } catch (e) {
+        console.error(chalk.red("  Cannot list orgs."));
+        console.error(chalk.dim(`  ${e instanceof Error ? e.message : e}\n`));
+        process.exit(1);
+      }
+
+      if (orgs.length === 0) {
+        console.error(chalk.red("\n  You are not a member of any org."));
+        console.error(chalk.dim("  Create one in the UI first, or ask a teammate to invite you.\n"));
+        process.exit(1);
+      }
+
+      let orgSlug: string;
+      if (opts.org) {
+        const match = orgs.find(o => o.slug === opts.org);
+        if (!match) {
+          console.error(
+            chalk.red(`\n  You are not a member of org "${opts.org}". Available: ${orgs.map(o => o.slug).join(", ")}\n`),
+          );
+          process.exit(1);
+        }
+        orgSlug = match.slug;
+      } else if (orgs.length === 1) {
+        orgSlug = orgs[0].slug;
+        console.log(chalk.green(`  Org: ${orgs[0].name} (${orgSlug})`));
+      } else if (interactive) {
+        orgSlug = await select({
+          message: "Which org should this repo use?",
+          choices: orgs.map(o => ({ name: `${o.name} (${o.slug}) — ${o.role}`, value: o.slug })),
+        });
+      } else {
+        console.error(chalk.red("\n  Multiple orgs available — pass --org <slug> in non-interactive mode.\n"));
+        process.exit(1);
+      }
+
+      // Pin the selected org for all subsequent requests in this process.
+      setOrgSlug(orgSlug);
 
       let orgConfig: OrgConfig;
       try {
@@ -356,7 +404,7 @@ export function registerInitCommand(program: Command): void {
 
       console.log(chalk.dim("  Verifying pod..."));
       try {
-        const podRes = await fetch(`${serverUrl}/api/pods/${encodeURIComponent(podId!)}`, {
+        const podRes = await apiFetch(`${serverUrl}/api/pods/${encodeURIComponent(podId!)}`, {
           signal: AbortSignal.timeout(5000),
         });
         if (!podRes.ok) throw new Error(`HTTP ${podRes.status}`);
@@ -383,6 +431,7 @@ export function registerInitCommand(program: Command): void {
         root,
         podId: podId!,
         projectId: projectIdOpt,
+        orgSlug,
         scope,
         agentId,
         defaultScopeId,

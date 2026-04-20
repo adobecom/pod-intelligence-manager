@@ -68,7 +68,7 @@ function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
 
 export default async function podRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId", async (req, reply) => {
-    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(req.params.podId) as PodRow | undefined;
+    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id) as PodRow | undefined;
     if (!row) {
       reply.code(404);
       return null;
@@ -84,21 +84,21 @@ export default async function podRoutes(app: FastifyInstance) {
     const { podId } = req.params;
     const { project_id } = req.body;
 
-    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id) as PodRow | undefined;
     if (!row) {
       reply.code(404);
       return { error: `Pod not found: ${podId}` };
     }
 
     if (project_id !== null) {
-      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(project_id);
+      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(project_id, req.org!.org_id);
       if (!proj) {
         reply.code(400);
         return { error: `Project not found: ${project_id}` };
       }
     }
 
-    db.prepare("UPDATE pods SET project_id = ? WHERE pod_id = ?").run(project_id, podId);
+    db.prepare("UPDATE pods SET project_id = ? WHERE pod_id = ? AND org_id = ?").run(project_id, podId, req.org!.org_id);
 
     const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
     const updated = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow;
@@ -110,7 +110,7 @@ export default async function podRoutes(app: FastifyInstance) {
     Body: z.infer<typeof PatchMilestoneSchema>;
   }>("/api/pods/:podId/milestone", { preHandler: validateBody(PatchMilestoneSchema) }, async (req, reply) => {
     const { podId } = req.params;
-    const row = db.prepare("SELECT milestone_json FROM pods WHERE pod_id = ?").get(podId) as { milestone_json: string } | undefined;
+    const row = db.prepare("SELECT milestone_json FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id) as { milestone_json: string } | undefined;
     if (!row) {
       reply.code(404);
       return { error: `Pod not found: ${podId}` };
@@ -135,8 +135,10 @@ export default async function podRoutes(app: FastifyInstance) {
       Boolean(db.prepare("SELECT pod_id FROM pods WHERE pod_id = ?").get(id)),
     );
 
+    const orgId = req.org!.org_id;
+
     if (project_id) {
-      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(project_id);
+      const proj = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(project_id, orgId);
       if (!proj) {
         reply.code(400);
         return { error: `Project not found: ${project_id}` };
@@ -154,8 +156,8 @@ export default async function podRoutes(app: FastifyInstance) {
     };
 
     db.prepare(
-      `INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id)
-       VALUES (?, ?, ?, ?, 1, ?, 0.0, ?, ?)`,
+      `INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id, org_id, created_by_user_id)
+       VALUES (?, ?, ?, ?, 1, ?, 0.0, ?, ?, ?, ?)`,
     ).run(
       podId,
       name,
@@ -164,28 +166,30 @@ export default async function podRoutes(app: FastifyInstance) {
       sprint_days,
       JSON.stringify(milestone),
       project_id ?? null,
+      orgId,
+      req.userRecord.user_id,
     );
 
     // Create default areas
     const insertArea = db.prepare(
       "INSERT INTO pod_areas (pod_id, scope, owner, status) VALUES (?, ?, 'unassigned', 'waiting')",
     );
-    for (const scope of getOrgScopeIdsOrdered()) {
+    for (const scope of getOrgScopeIdsOrdered(orgId)) {
       insertArea.run(podId, scope);
     }
 
     // Create org summary entry
     db.prepare(
-      `INSERT INTO org_pod_summaries (pod_id, name, day_number, total_days, conflict_pressure, open_conflicts, active_tunnels, agent_count)
-       VALUES (?, ?, 1, ?, 0.0, 0, 0, 0)`,
-    ).run(podId, name, sprint_days);
+      `INSERT INTO org_pod_summaries (pod_id, name, day_number, total_days, conflict_pressure, open_conflicts, active_tunnels, agent_count, org_id)
+       VALUES (?, ?, 1, ?, 0.0, 0, 0, 0, ?)`,
+    ).run(podId, name, sprint_days, orgId);
 
     // Generate initial living doc
     regenerateLivingDoc(podId);
 
     // Seed with knowledge from past pods
     try {
-      const allScopes = getOrgScopeIdsOrdered();
+      const allScopes = getOrgScopeIdsOrdered(orgId);
       const learnings = await getRelevantLearnings(allScopes, [], 3000, project_id ?? null);
       if (learnings.nodes.length > 0) {
         let knowledgeSection = "\n## Historical Knowledge Context\n\n";
@@ -233,11 +237,21 @@ export default async function podRoutes(app: FastifyInstance) {
   });
 
   // Lint pass routes
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/lint-findings", async (req) => {
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/lint-findings", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
     return db.prepare("SELECT * FROM lint_findings WHERE pod_id = ? ORDER BY severity DESC, timestamp DESC").all(req.params.podId);
   });
 
-  app.post<{ Params: { podId: string } }>("/api/pods/:podId/lint", async (req) => {
+  app.post<{ Params: { podId: string } }>("/api/pods/:podId/lint", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
     const { findings, meta } = await runLintPass(req.params.podId);
     return { findings, meta };
   });
