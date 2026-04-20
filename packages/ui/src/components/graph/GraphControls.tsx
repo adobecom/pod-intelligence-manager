@@ -1,6 +1,9 @@
+import { useEffect } from "react";
 import { SearchField, Switch } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@council/shared";
+import type { KnowledgeQueryFilters, KnowledgeNodeType } from "@pim/shared";
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
+import { useOrgStore } from "../../stores/orgStore";
 
 const controlsContainer = style({
   display: "flex",
@@ -16,14 +19,21 @@ const NODE_TYPES: { value: KnowledgeNodeType; label: string }[] = [
   { value: "scope_insight", label: "Scope Insights" },
 ];
 
-const DOMAINS = ["frontend", "backend", "design", "qa", "infra", "pm"];
-
 interface GraphControlsProps {
   filters: KnowledgeQueryFilters;
   onChange: (filters: KnowledgeQueryFilters) => void;
 }
 
 export function GraphControls({ filters, onChange }: GraphControlsProps) {
+  const orgConfig = useOrgStore((s) => s.orgConfig);
+  const loadOrgConfig = useOrgStore((s) => s.loadOrgConfig);
+
+  useEffect(() => {
+    void loadOrgConfig();
+  }, [loadOrgConfig]);
+
+  const domainScopes = orgConfig?.scopes ?? DEFAULT_ORG_CONFIG.scopes;
+
   const toggleType = (type: KnowledgeNodeType) => {
     const current = filters.types ?? [];
     const next = current.includes(type)
@@ -69,14 +79,14 @@ export function GraphControls({ filters, onChange }: GraphControlsProps) {
       <div>
         <div style={{ fontWeight: 600, fontSize: "12px", marginBottom: "4px" }}>Domains</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
-          {DOMAINS.map((d) => (
-            <label key={d} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", cursor: "pointer" }}>
+          {domainScopes.map((d) => (
+            <label key={d.id} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", cursor: "pointer" }}>
               <input
                 type="checkbox"
-                checked={!filters.domains || filters.domains.includes(d)}
-                onChange={() => toggleDomain(d)}
+                checked={!filters.domains || filters.domains.includes(d.id)}
+                onChange={() => toggleDomain(d.id)}
               />
-              {d}
+              {d.label}
             </label>
           ))}
         </div>

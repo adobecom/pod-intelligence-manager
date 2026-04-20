@@ -1,7 +1,15 @@
+import { DEFAULT_ORG_CONFIG } from "@pim/shared";
 import db from "./connection.js";
+
+export const ORG_CONFIG_ROW_KEY = "org_config";
 
 export function createTables() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS org_settings (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       project_id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -42,6 +50,7 @@ export function createTables() {
       artifacts_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
       quality_score REAL NOT NULL DEFAULT 0.0,
+      quality_rationale TEXT,
       blocks_json TEXT NOT NULL DEFAULT '[]',
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
       needs_input_from_json TEXT NOT NULL DEFAULT '[]',
@@ -111,6 +120,15 @@ export function createTables() {
       final_pressure REAL NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS archived_projects (
+      project_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL,
+      anatomy_json TEXT NOT NULL,
+      archived_date TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS lint_findings (
       id TEXT PRIMARY KEY,
       pod_id TEXT NOT NULL REFERENCES pods(pod_id),
@@ -150,7 +168,8 @@ export function createTables() {
       confidence_score REAL NOT NULL,
       created_at TEXT NOT NULL,
       curated INTEGER NOT NULL DEFAULT 0,
-      community_id TEXT
+      community_id TEXT,
+      embedding_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS project_context_updates (
@@ -174,6 +193,18 @@ export function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time
       ON project_context_updates(project_id, timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS ingestion_queue (
+      id TEXT PRIMARY KEY,
+      pod_id TEXT NOT NULL REFERENCES pods(pod_id),
+      org_id TEXT,
+      payload_json TEXT NOT NULL,
+      queued_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status
+      ON ingestion_queue(pod_id, status);
   `);
 
   // Migration guards for existing databases
@@ -183,6 +214,7 @@ export function createTables() {
   try { db.exec("ALTER TABLE context_updates ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN commit_sha TEXT"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_rationale TEXT"); } catch { /* already exists */ }
 
   // Projects + pod membership (existing DBs) — projects table must exist before ALTER pods
   try {
@@ -238,4 +270,42 @@ export function createTables() {
       "CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time ON project_context_updates(project_id, timestamp DESC)",
     );
   } catch { /* already exists */ }
+
+  try {
+    db.exec("ALTER TABLE projects ADD COLUMN anatomy_json TEXT");
+  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archived_projects (
+        project_id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        created_at TEXT NOT NULL,
+        anatomy_json TEXT NOT NULL,
+        archived_date TEXT NOT NULL
+      )
+    `);
+  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS ingestion_queue (
+        id TEXT PRIMARY KEY,
+        pod_id TEXT NOT NULL,
+        org_id TEXT,
+        payload_json TEXT NOT NULL,
+        queued_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+      )
+    `);
+  } catch { /* already exists */ }
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status ON ingestion_queue(pod_id, status)");
+  } catch { /* already exists */ }
+
+  db.prepare("INSERT OR IGNORE INTO org_settings (key, value_json) VALUES (?, ?)").run(
+    ORG_CONFIG_ROW_KEY,
+    JSON.stringify(DEFAULT_ORG_CONFIG),
+  );
 }

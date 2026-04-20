@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Tunnel } from "@council/shared";
+import type { Tunnel } from "@pim/shared";
 import { broadcast } from "../ws/index.js";
 import { validateBody } from "../middleware/validation.js";
 import { ingestContextUpdate } from "../services/ingestion.js";

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db from "../../db/connection.js";
 import { callLLM, isLLMAvailable, MODELS } from "../llm.js";
-import type { EnhancedPodLearning, KnowledgeNodeType } from "@council/shared";
+import type { EnhancedPodLearning, KnowledgeNodeType } from "@pim/shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

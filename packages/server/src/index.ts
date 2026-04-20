@@ -20,7 +20,7 @@ import wsRoutes from "./routes/ws.js";
 import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
-import { runLintPass } from "./council/agents/lint.js";
+import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
 import { createAuthHook } from "./middleware/auth.js";
 import db from "./db/connection.js";
@@ -43,7 +43,7 @@ seedDatabase();
 
 // Initialize knowledge graph (load from disk into memory)
 initializeKnowledgeGraph("default");
-seedKnowledgeGraph();
+await seedKnowledgeGraph();
 
 // Register WebSocket support
 await app.register(websocket);

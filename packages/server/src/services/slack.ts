@@ -1,5 +1,5 @@
 import { WebClient } from "@slack/web-api";
-import type { Conflict } from "@council/shared";
+import type { Conflict } from "@pim/shared";
 import db from "../db/connection.js";
 
 // ── Configuration ──────────────────────────────────────────────────
@@ -34,7 +34,7 @@ function podName(podId: string): string {
   return row?.name ?? podId;
 }
 
-const UI_BASE = process.env.COUNCIL_UI_URL ?? "http://localhost:5173";
+const UI_BASE = process.env.PIM_UI_URL ?? "http://localhost:5173";
 
 function conflictUrl(podId: string, conflictId: string): string {
   return `${UI_BASE}/pod/${podId}/conflict/${conflictId}`;
@@ -91,7 +91,7 @@ export function notifyConflictCreated(conflict: Conflict): void {
           elements: [
             {
               type: "button",
-              text: { type: "plain_text", text: "View in Council" },
+              text: { type: "plain_text", text: "View in PIM" },
               url,
             },
           ],
@@ -228,7 +228,7 @@ export function notifyPressureThreshold(
           text: {
             type: "mrkdwn",
             text: crossedCritical
-              ? ":no_entry: *Ingestion halted.* All context updates are blocked until conflicts are resolved."
+              ? ":hourglass_flowing_sand: *Context updates queued.* Intake still accepted but processing is paused until conflicts are resolved."
               : ":pause_button: *Contested areas held.* Merges in overlapping areas are paused.",
           },
         },
@@ -240,6 +240,36 @@ export function notifyPressureThreshold(
               text: { type: "plain_text", text: "Open pod" },
               url: `${UI_BASE}/pod/${podId}/conflicts`,
               style: color === "danger" ? "danger" : undefined,
+            },
+          ],
+        },
+      ],
+    });
+  });
+}
+
+export function notifyQueueBacklog(podId: string, queueSize: number): void {
+  send(async () => {
+    const pod = podName(podId);
+    await slack!.chat.postMessage({
+      channel: defaultChannel!,
+      text: `:hourglass_flowing_sand: Queue backlog alert — ${pod} has ${queueSize} updates waiting`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `:hourglass_flowing_sand: *Queue backlog alert — ${pod}*\n\n*${queueSize} context updates* are waiting to be processed. Resolve the blocking conflicts to drain the queue.`,
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "View Conflicts" },
+              url: `${UI_BASE}/pod/${podId}/conflicts`,
+              style: "danger",
             },
           ],
         },

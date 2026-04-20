@@ -1,0 +1,21 @@
+---
+description: Mandatory PIM pod agent behavior — pull session context before work, report after lock-in
+alwaysApply: true
+---
+
+# PIM pod agent (required)
+
+When this workspace participates in a **PIM pod**, you must:
+
+1. **Before substantive coding** — Pull full session context so you align with the living doc, conflicts, and org learnings:
+   - MCP: `get_agent_session_context` with `pod_id`, `agent_id`, and `scope`
+   - CLI: `pim context` (env: `PIM_POD_ID`, `PIM_AGENT_ID`, `PIM_SCOPE`, `PIM_SERVER_URL`)
+   - SDK: `PimClient.pullSessionContext()` from `@pim/sdk`
+
+   If conflict pressure is critical (≥ 0.8) or ingestion is halted, stop and surface conflicts before changing contested areas.
+
+2. **After meaningful lock-in** — Report to PIM (commits, reverts, spec changes, decisions):
+   - MCP: `submit_context_update`
+   - CLI: `pim report` or install git hooks with `pim hooks install` (sets `post-commit` / `post-rewrite`)
+
+Normative reference: [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md).

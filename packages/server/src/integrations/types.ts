@@ -3,7 +3,7 @@ import type {
   ContextSearchHit,
   ContextSource,
   ProjectResources,
-} from "@council/shared";
+} from "@pim/shared";
 
 export interface IntegrationSearchOpts {
   query: string;

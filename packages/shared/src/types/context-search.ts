@@ -1,7 +1,7 @@
 // Context search — cross-source query across Slack, Fluffyjaws, Jira,
 // Confluence, GitHub, and local git. Executed server-side by
 // /api/context-search; surfaced via the context_search MCP tool,
-// CouncilClient.searchContext, and the `council search` CLI.
+// PimClient.searchContext, and the `pim search` CLI.
 
 export type ContextSource =
   | "slack"

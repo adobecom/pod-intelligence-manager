@@ -1,51 +1,65 @@
-# Integrating AI Council MCP into ADO
+# Integrating PIM MCP into ADO
 
-This guide is for anyone working in the `ado-mcp` repo who wants to add AI Council as a sidecar MCP so that ADO users get Council tools directly in their Claude chat.
+This guide is for anyone working in the `ado-mcp` repo who wants to add PIM as a sidecar MCP so that ADO users get PIM tools directly in their Claude chat.
 
-## What AI Council MCP provides
+## What PIM MCP provides
 
-The MCP server is stdio-based and connects to a running Council Fastify server over HTTP. It has one configuration value: the Council server URL.
+The MCP server is stdio-based and connects to a running PIM Fastify server over HTTP. It has one configuration value: the PIM server URL.
 
-### Tools (12)
+### Tools (22)
 
-Full CRUD for pod-scoped operations:
+Org configuration, long-lived projects, pod lifecycle, agent session bundle, conflicts, tunnels, knowledge graph, and maintenance:
 
 | Tool | Input | Output |
 |------|-------|--------|
-| `list_pods` | (none) | JSON array of active pods with IDs, names, pressure scores, conflict counts |
-| `render_pod_dashboard` | `pod_id` | Single-file React component (~36KB) rendered as a Claude artifact |
+| `get_org_config` | (none) | Org scope list (ids + labels) |
+| `update_org_config` | `scopes` (full replacement list) | Patched org config |
+| `list_projects` | (none) | All active projects with anatomy |
+| `create_project` | `name`, `description?` | Created project |
+| `get_project` | `project_id` | Single project + anatomy |
+| `update_project` | `project_id`, `name?`, `description?`, `anatomy?` | Patched project |
+| `archive_project` | `project_id` | Archived project snapshot (removes active row; deletes project context stream; unlinks pods; no pod knowledge extraction) |
+| `list_pods` | (none) | Active pod summaries |
+| `render_pod_dashboard` | `pod_id` | Single-file React component rendered as a Claude artifact |
 | `create_pod` | `name`, `sprint_days?`, `milestone_name?` | Created pod with generated ID and default areas |
 | `archive_pod` | `pod_id` | Archived pod record + knowledge learnings extracted count |
-| `submit_context_update` | `pod_id`, `agent_id`, `type`, `scope`, `summary`, `details`, `status`, ... | Created update + Council analysis |
+| `get_agent_session_context` | `pod_id`, `agent_id`, `scope`, optional budgets / `external_query` | Bundled session context (living doc, conflicts, learnings, recent updates) |
+| `submit_context_update` | `pod_id`, `agent_id`, `type`, `scope`, `summary`, `details`, `status`, ... | Created pod update + PIM analysis |
+| `submit_project_context_update` | `project_id`, same fields as pod context | Created project-level update |
 | `get_conflict_details` | `pod_id`, `conflict_id` | Conflict details + downstream pending work |
 | `resolve_conflict` | `pod_id`, `conflict_id`, `resolution`, `resolved_by` | Updated conflict record |
 | `create_tunnel` | `pod_id`, `dev_name`, `branch`, `port` | Created tunnel record |
 | `disconnect_tunnel` | `pod_id`, `tunnel_id` | Disconnected tunnel record |
 | `query_knowledge` | `domains?`, `types?`, `text_search?`, `max_tokens?`, ... | Token-budgeted knowledge graph results |
+| `context_search` | `query`, `sources?`, `pod_id?`, ... | Cross-source search summary + hits |
 | `curate_knowledge_node` | `node_id`, `action`, `edits?` | Curation confirmation |
 | `trigger_lint` | `pod_id` | Lint findings array |
 
-### Resources (11)
+### Resources (15)
 
 URI-addressable read-only data that MCP clients can attach to conversations:
 
 | URI | Description |
 |-----|-------------|
-| `council://org/pods` | All active pod summaries |
-| `council://org/overlaps` | Cross-pod overlap advisories |
-| `council://org/archived` | Archived pod history |
-| `council://knowledge/stats` | Knowledge graph statistics |
-| `council://knowledge/graph` | Full knowledge graph (may be large) |
-| `council://pods/{pod_id}` | Pod metadata, areas, milestone, pressure |
-| `council://pods/{pod_id}/living-doc` | Living document markdown |
-| `council://pods/{pod_id}/conflicts` | All conflicts for a pod |
-| `council://pods/{pod_id}/context-updates` | Context update feed |
-| `council://pods/{pod_id}/tunnels` | Active dev tunnels |
-| `council://pods/{pod_id}/lint-findings` | Lint findings |
+| `pim://org/pods` | All active pod summaries |
+| `pim://org/overlaps` | Cross-pod overlap advisories |
+| `pim://org/archived` | Archived pod history |
+| `pim://org/archived-projects` | Archived initiatives (snapshot + dates) |
+| `pim://org/config` | Org-wide scope definitions |
+| `pim://org/projects` | Same payload as `GET /api/projects` (active projects) |
+| `pim://knowledge/stats` | Knowledge graph statistics |
+| `pim://knowledge/graph` | Full knowledge graph (may be large) |
+| `pim://projects/{project_id}` | Project metadata and anatomy (listable per active project) |
+| `pim://pods/{pod_id}` | Pod metadata, areas, milestone, pressure |
+| `pim://pods/{pod_id}/living-doc` | Living document markdown |
+| `pim://pods/{pod_id}/conflicts` | All conflicts for a pod |
+| `pim://pods/{pod_id}/context-updates` | Context update feed |
+| `pim://pods/{pod_id}/tunnels` | Active dev tunnels |
+| `pim://pods/{pod_id}/lint-findings` | Lint findings |
 
-Pod-scoped templates support listing — MCP clients can enumerate available pods automatically.
+Pod- and project-scoped templates support listing — MCP clients can enumerate available pods and projects automatically.
 
-### Prompts (6)
+### Prompts (7)
 
 Reusable workflow templates that fetch relevant data and construct structured prompts:
 
@@ -55,6 +69,7 @@ Reusable workflow templates that fetch relevant data and construct structured pr
 | `conflict_resolution_guide` | `pod_id`, `conflict_id` | Resolution walkthrough with pending work + precedents |
 | `pod_health_check` | `pod_id` | Health assessment with blocked areas, lint, recommendations |
 | `knowledge_search` | `query`, `domains?` | Search org knowledge graph for learnings |
+| `session_context` | `pod_id`, `scope?` | Bundled session start context (living doc, conflicts, learnings, recent updates) |
 | `sprint_kickoff` | `name`, `sprint_days?`, `focus_areas?` | Kickoff briefing from org history |
 | `pod_retrospective` | `pod_id` | Retrospective before archival |
 
@@ -65,68 +80,68 @@ Claude Desktop
   ↓ stdio
 ADO MCP Server
   ↓ spawns sidecar (bridge mode via mcp-proxy)
-AI Council MCP (stdio → HTTP via mcp-proxy on port 3105)
+PIM MCP (stdio → HTTP via mcp-proxy on port 3105)
   ↓ fetch
-Council Fastify Server (default http://localhost:4000)
+PIM Fastify Server (default http://localhost:4000)
 ```
 
-ADO's `SidecarManager` wraps the stdio-based Council MCP with `mcp-proxy`, which exposes it as an HTTP endpoint. ADO's `ClientRegistry` then connects to it like any other sidecar.
+ADO's `SidecarManager` wraps the stdio-based PIM MCP with `mcp-proxy`, which exposes it as an HTTP endpoint. ADO's `ClientRegistry` then connects to it like any other sidecar.
 
 ## Prerequisites
 
-- The `ai-council` repo must be cloned and built:
+- The `pim` repo must be cloned and built:
   ```bash
-  cd /path/to/ai-council
+  cd /path/to/pim
   pnpm install
-  pnpm --filter @council/mcp-server build
+  pnpm --filter @pim/mcp-server build
   ```
-- The Council server must be running for the tools to return data:
+- The PIM server must be running for the tools to return data:
   ```bash
-  pnpm --filter @council/server dev   # port 4000
+  pnpm --filter @pim/server dev   # port 4000
   ```
 
 ### Evergreen local development (no manual `vendor/` copy)
 
-ADO resolves the AI Council MCP entry in this order:
+ADO resolves the PIM MCP entry in this order:
 
-1. **`COUNCIL_MCP_ENTRY`** — absolute path to `packages/mcp-server/dist/index.js`
-2. **`AI_COUNCIL_ROOT`** — absolute path to the `ai-council` repo root; uses `packages/mcp-server/dist/index.js` if that file exists (after you run `pnpm --filter @council/mcp-server build`)
-3. **`node_modules/@council/mcp-server/dist/index.js`** — if you `npm link` / `pnpm link` the package or add a `file:` dependency
-4. **`vendor/ai-council/dist/index.js`** — fallback for distribution
+1. **`PIM_MCP_ENTRY`** — absolute path to `packages/mcp-server/dist/index.js`
+2. **`PIM_ROOT`** — absolute path to the `pim` repo root; uses `packages/mcp-server/dist/index.js` if that file exists (after you run `pnpm --filter @pim/mcp-server build`)
+3. **`node_modules/@pim/mcp-server/dist/index.js`** — if you `npm link` / `pnpm link` the package or add a `file:` dependency
+4. **`vendor/pim/dist/index.js`** — fallback for distribution
 
-Set `AI_COUNCIL_ROOT` in the environment where Claude spawns ADO (e.g. `ado-mcp/.env` loaded by `dotenv`, or your shell profile). Rebuild the MCP after Council changes:
+Set `PIM_ROOT` in the environment where Claude spawns ADO (e.g. `ado-mcp/.env` loaded by `dotenv`, or your shell profile). Rebuild the MCP after PIM changes:
 
 ```bash
-pnpm --filter @council/mcp-server build
+pnpm --filter @pim/mcp-server build
 ```
 
 ## Integration steps
 
 ### 1. Create the vendor package
 
-Create `vendor/ai-council/` in the ADO repo. Unlike other vendors that install an npm package, this one points to the local build output from the `ai-council` repo.
+Create `vendor/pim/` in the ADO repo. Unlike other vendors that install an npm package, this one points to the local build output from the `pim` repo.
 
-**`vendor/ai-council/package.json`:**
+**`vendor/pim/package.json`:**
 
 ```json
 {
-  "name": "ai-council",
+  "name": "pim",
   "version": "1.0.0",
-  "description": "AI Council MCP server — pod dashboard artifacts for Claude",
+  "description": "PIM MCP server — pod dashboard artifacts for Claude",
   "private": true
 }
 ```
 
-**Entry file:** The registry entry (step 2) should set `vendorPath` to point at the built `dist/index.js` in the `ai-council` repo. For example:
+**Entry file:** The registry entry (step 2) should set `vendorPath` to point at the built `dist/index.js` in the `pim` repo. For example:
 
 ```
-vendorPath: "/absolute/path/to/ai-council/packages/mcp-server/dist/index.js"
+vendorPath: "/absolute/path/to/pim/packages/mcp-server/dist/index.js"
 ```
 
-Alternatively, copy the built `dist/` directory into `vendor/ai-council/dist/` and use a relative path:
+Alternatively, copy the built `dist/` directory into `vendor/pim/dist/` and use a relative path:
 
 ```
-vendorPath: "vendor/ai-council/dist/index.js"
+vendorPath: "vendor/pim/dist/index.js"
 ```
 
 The second approach is better for distribution since it doesn't depend on a sibling repo clone.
@@ -137,24 +152,24 @@ Add this entry to `src/setup/tool-registry.json`:
 
 ```json
 {
-  "id": "ai-council",
-  "name": "AI Council",
+  "id": "pim",
+  "name": "PIM",
   "description": "Full pod management: create/archive pods, submit updates, resolve conflicts, manage tunnels, search org knowledge, and view dashboards as Claude artifacts.",
   "status": "available",
-  "vendorPath": "vendor/ai-council/dist/index.js",
+  "vendorPath": "vendor/pim/dist/index.js",
   "sidecarPort": 3105,
   "sidecarMode": "bridge",
   "credentials": [
     {
-      "id": "council_api_url",
-      "label": "Council Server URL",
+      "id": "pim_api_url",
+      "label": "PIM Server URL",
       "type": "url",
       "required": true,
-      "helpText": "URL of the running Council server (e.g. http://localhost:4000)"
+      "helpText": "URL of the running PIM server (e.g. http://localhost:4000)"
     }
   ],
   "credentialEnvMap": {
-    "council_api_url": "COUNCIL_API_URL"
+    "pim_api_url": "PIM_API_URL"
   }
 }
 ```
@@ -162,23 +177,23 @@ Add this entry to `src/setup/tool-registry.json`:
 Key decisions in this config:
 
 - **`sidecarPort: 3105`** — Pick any unused port. Existing vendors use 3101–3103. Port 3105 avoids collisions.
-- **`sidecarMode: "bridge"`** — The Council MCP uses stdio transport. ADO's `SidecarManager` will wrap it with `mcp-proxy` to expose `/mcp` (StreamableHTTP) and `/ping` endpoints automatically.
-- **`credentials`** — Only one field: the Council server URL. No API keys or tokens are needed (the Council server has no auth in v1).
-- **`credentialEnvMap`** — Maps the credential key to the `COUNCIL_API_URL` environment variable that the MCP server reads at startup.
+- **`sidecarMode: "bridge"`** — The PIM MCP uses stdio transport. ADO's `SidecarManager` will wrap it with `mcp-proxy` to expose `/mcp` (StreamableHTTP) and `/ping` endpoints automatically.
+- **`credentials`** — Only one field: the PIM server URL. No API keys or tokens are needed (the PIM server has no auth in v1).
+- **`credentialEnvMap`** — Maps the credential key to the `PIM_API_URL` environment variable that the MCP server reads at startup.
 
 ### 3. Add a connection tester (recommended)
 
-The connection tester validates the user's input before saving credentials. It pings the Council server's health endpoint.
+The connection tester validates the user's input before saving credentials. It pings the PIM server's health endpoint.
 
-**Create `src/integrations/council.ts`:**
+**Create `src/integrations/pim.ts`:**
 
 ```typescript
-export async function testCouncilConnection(
-  creds: { council_api_url: string }
+export async function testPimConnection(
+  creds: { pim_api_url: string }
 ): Promise<{ success: boolean; error?: string }> {
-  const url = creds.council_api_url?.replace(/\/+$/, "");
+  const url = creds.pim_api_url?.replace(/\/+$/, "");
   if (!url) {
-    return { success: false, error: "Council Server URL is required" };
+    return { success: false, error: "PIM Server URL is required" };
   }
 
   try {
@@ -197,7 +212,7 @@ export async function testCouncilConnection(
     const msg = err instanceof Error ? err.message : String(err);
     return {
       success: false,
-      error: `Cannot reach Council server at ${url}: ${msg}`,
+      error: `Cannot reach PIM server at ${url}: ${msg}`,
     };
   }
 }
@@ -208,7 +223,7 @@ export async function testCouncilConnection(
 Add the import at the top:
 
 ```typescript
-import { testCouncilConnection } from "../integrations/council";
+import { testPimConnection } from "../integrations/pim";
 ```
 
 Add to the `CONNECTION_TESTERS` object:
@@ -221,7 +236,7 @@ const CONNECTION_TESTERS: Record<
   "corp-jira": (c) => testJiraConnection(c as Parameters<typeof testJiraConnection>[0]),
   "figma-mcp": (c) => testFigmaConnection(c as Parameters<typeof testFigmaConnection>[0]),
   github:      (c) => testGithubConnection(c as Parameters<typeof testGithubConnection>[0]),
-  "ai-council": (c) => testCouncilConnection(c as Parameters<typeof testCouncilConnection>[0]),
+  "pim": (c) => testPimConnection(c as Parameters<typeof testPimConnection>[0]),
 };
 ```
 
@@ -235,23 +250,23 @@ npm run build
 npm start
 ```
 
-When ADO starts, if the user hasn't configured AI Council yet, the Setup UI at `http://localhost:3001` will show an "AI Council" card with a URL field. The user enters their Council server URL (e.g. `http://localhost:4000`), the connection tester pings `/api/health`, and on success the credential is encrypted and saved.
+When ADO starts, if the user hasn't configured PIM yet, the Setup UI at `http://localhost:3001` will show a "PIM" card with a URL field. The user enters their PIM server URL (e.g. `http://localhost:4000`), the connection tester pings `/api/health`, and on success the credential is encrypted and saved.
 
-Once connected, ADO spawns the Council MCP as a bridge sidecar on port 3105. Claude can then call:
+Once connected, ADO spawns the PIM MCP as a bridge sidecar on port 3105. Claude can then call:
 
-- `list_mcp_tools({ tool_id: "ai-council" })` — to see available tools
+- `list_mcp_tools({ tool_id: "pim" })` — to see available tools
 - Or the tools are available through `mcp.call` workflow steps
 
 ## Using in workflows
 
-AI Council tools can be used in ADO workflows via the `mcp.call` step type. Example workflow step that renders a pod dashboard:
+PIM tools can be used in ADO workflows via the `mcp.call` step type. Example workflow step that renders a pod dashboard:
 
 ```json
 {
   "id": "show_pod_dashboard",
   "type": "mcp.call",
   "config": {
-    "mcp_id": "ai-council",
+    "mcp_id": "pim",
     "tool": "render_pod_dashboard",
     "args": {
       "pod_id": "{{ inputs.pod_id }}"
@@ -261,7 +276,7 @@ AI Council tools can be used in ADO workflows via the `mcp.call` step type. Exam
 }
 ```
 
-This calls the Council MCP's `render_pod_dashboard` tool with a pod ID from the workflow inputs. The returned React code can be used by Claude to render an artifact.
+This calls the PIM MCP's `render_pod_dashboard` tool with a pod ID from the workflow inputs. The returned React code can be used by Claude to render an artifact.
 
 ## Using directly in chat
 
@@ -275,36 +290,37 @@ Once the sidecar is running, users can ask Claude things like:
 - *"Search org knowledge for auth patterns"* — calls `query_knowledge`
 - *"Run a health check on pod-checkout"* — invokes the `pod_health_check` prompt
 - *"Generate a retro for pod-auth before archiving"* — invokes `pod_retrospective` prompt then `archive_pod`
+- *"Archive initiative project-checkout after pods are done"* — calls `archive_project` (or read `pim://org/archived-projects` afterward)
 
 Claude sees tools, resources, and prompts through ADO's `list_mcp_tools` output and routes calls through the `ClientRegistry`.
 
 ## Distribution considerations
 
-For local development, use an absolute `vendorPath` pointing at the `ai-council` repo's built output. For distribution:
+For local development, use an absolute `vendorPath` pointing at the `pim` repo's built output. For distribution:
 
-1. Copy the built files into `vendor/ai-council/`:
+1. Copy the built files into `vendor/pim/`:
    ```bash
-   mkdir -p vendor/ai-council/dist
-   cp /path/to/ai-council/packages/mcp-server/dist/*.js vendor/ai-council/dist/
-   cp /path/to/ai-council/packages/mcp-server/package.json vendor/ai-council/
-   cd vendor/ai-council && npm install --omit=dev
+   mkdir -p vendor/pim/dist
+   cp /path/to/pim/packages/mcp-server/dist/*.js vendor/pim/dist/
+   cp /path/to/pim/packages/mcp-server/package.json vendor/pim/
+   cd vendor/pim && npm install --omit=dev
    ```
 
 2. Use a relative `vendorPath` in the registry:
    ```json
-   "vendorPath": "vendor/ai-council/dist/index.js"
+   "vendorPath": "vendor/pim/dist/index.js"
    ```
 
-3. Add `vendor/ai-council/` to ADO's `setup.sh` or build script so it gets installed alongside the other vendors.
+3. Add `vendor/pim/` to ADO's `setup.sh` or build script so it gets installed alongside the other vendors.
 
 ## File changes summary
 
 | File | Action | Description |
 |------|--------|-------------|
-| `vendor/ai-council/package.json` | Create | Vendor package shell |
-| `vendor/ai-council/dist/` | Create | Copied build output from ai-council repo |
-| `src/setup/tool-registry.json` | Edit | Add `ai-council` entry |
-| `src/integrations/council.ts` | Create | Connection tester (pings `/api/health`) |
+| `vendor/pim/package.json` | Create | Vendor package shell |
+| `vendor/pim/dist/` | Create | Copied build output from pim repo |
+| `src/setup/tool-registry.json` | Edit | Add `pim` entry |
+| `src/integrations/pim.ts` | Create | Connection tester (pings `/api/health`) |
 | `src/setup/server.ts` | Edit | Import tester + add to `CONNECTION_TESTERS` |
 
 No changes needed to `executor.ts`, `ClientRegistry.ts`, `SidecarManager.ts`, or any other ADO core files. The existing infrastructure handles everything through the registry-driven sidecar pattern.

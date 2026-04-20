@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import db from "../db/connection.js";
-import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@council/shared";
-import { ingestContextUpdate } from "../services/ingestion.js";
+import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from "@pim/shared";
+import { ingestContextUpdate, preValidateAndScan } from "../services/ingestion.js";
+import { enqueueUpdate, getQueueSize, QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPods } from "../services/ingestion-queue.js";
+import { notifyQueueBacklog } from "../services/slack.js";
 
 interface ContextUpdateRow {
   id: string;
@@ -15,6 +17,7 @@ interface ContextUpdateRow {
   artifacts_json: string;
   status: string;
   quality_score: number;
+  quality_rationale?: string | null;
   blocks_json: string;
   blocked_by_json: string;
   needs_input_from_json: string;
@@ -34,6 +37,7 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
     artifacts: JSON.parse(row.artifacts_json) as Artifact[],
     status: row.status as ContextUpdate["status"],
     quality_score: row.quality_score ?? 0,
+    quality_rationale: row.quality_rationale ?? null,
     blocks: JSON.parse(row.blocks_json) as string[],
     blocked_by: JSON.parse(row.blocked_by_json) as string[],
     needs_input_from: JSON.parse(row.needs_input_from_json) as InputRequest[],
@@ -65,13 +69,32 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", {
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
   }, async (req, reply) => {
-    // Gate: reject ingestion when pod is in critical conflict state (pressure >= 0.8)
     const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(req.params.podId) as { conflict_pressure: number } | undefined;
-    if (pod && pod.conflict_pressure >= 0.8) {
-      reply.code(423);
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
+
+    // When pressure is critical, intake is still accepted but processing is queued
+    if (pod.conflict_pressure >= 0.8) {
+      const check = preValidateAndScan(req.body);
+      if (!check.success) {
+        reply.code(check.secretFindings ? 422 : 400);
+        return { error: check.error, secretFindings: check.secretFindings };
+      }
+      const queueId = enqueueUpdate(req.params.podId, undefined, req.body);
+      const queueSize = getQueueSize(req.params.podId);
+      if (queueSize >= QUEUE_BACKLOG_THRESHOLD && !notifiedBacklogPods.has(req.params.podId)) {
+        notifiedBacklogPods.add(req.params.podId);
+        notifyQueueBacklog(req.params.podId, queueSize);
+      }
+      reply.code(202);
       return {
-        error: "Pod is in critical conflict state — ingestion paused. Resolve blocking conflicts first.",
+        queued: true,
+        queue_id: queueId,
+        queue_size: queueSize,
         conflict_pressure: pod.conflict_pressure,
+        message: "Pod is in critical conflict state — context queued for processing once conflicts are resolved.",
       };
     }
 
@@ -85,6 +108,6 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
       return { deduplicated: true, message: "Commit already reported by another source" };
     }
     reply.code(201);
-    return { id: result.update!.id, update: result.update, council: result.council };
+    return { id: result.update!.id, update: result.update, pim: result.pim };
   });
 }

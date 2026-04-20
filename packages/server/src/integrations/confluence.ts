@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@council/shared";
+import type { ContextSearchHit } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 // Atlassian Confluence REST /content/search with CQL. Supports two flavors:

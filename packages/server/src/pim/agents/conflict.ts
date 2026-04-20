@@ -1,7 +1,7 @@
 import db from "../../db/connection.js";
 import { randomUUID } from "crypto";
 import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
-import type { ContextUpdate, Conflict } from "@council/shared";
+import type { ContextUpdate, Conflict } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";
@@ -56,7 +56,7 @@ export async function createConflict(
   let precedentsContext = "";
   try {
     const conflictDesc = `${update.summary} vs ${conflicting.summary} in ${update.scope}`;
-    const precedents = getPrecedents(conflictDesc, 500);
+    const precedents = await getPrecedents(conflictDesc, 500);
     if (precedents.nodes.length > 0) {
       precedentsContext = "\n\n## Historical Precedents\n";
       for (const p of precedents.nodes.slice(0, 3)) {

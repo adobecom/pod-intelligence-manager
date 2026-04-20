@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import type {
   TunnelResponse,
   TunnelResponseChunk,
-} from "@council/shared";
+} from "@pim/shared";
 import db from "../db/connection.js";
 import { broadcast } from "./index.js";
 

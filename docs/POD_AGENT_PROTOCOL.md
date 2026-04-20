@@ -1,6 +1,6 @@
-# Pod agent protocol (AI Council)
+# Pod agent protocol (PIM)
 
-Every agent and human contributor working in a **pod** overseen by AI Council must follow this contract. Enforcement is via tooling (SDK, CLI, MCP, optional git hooks) and team discipline; the server does not cryptographically prove that a session “pulled first.”
+Every agent and human contributor working in a **pod** overseen by PIM must follow this contract. Enforcement is via tooling (SDK, CLI, MCP, optional git hooks) and team discipline; the server does not cryptographically prove that a session “pulled first.”
 
 ## 1. Pull full context before substantive work
 
@@ -16,8 +16,8 @@ Every agent and human contributor working in a **pod** overseen by AI Council mu
 
 **How:**
 
-- **SDK:** `CouncilClient.pullSessionContext()` from `@council/sdk`
-- **CLI:** `council context` (uses `COUNCIL_POD_ID`, `COUNCIL_AGENT_ID`, `COUNCIL_SCOPE`, `COUNCIL_SERVER_URL`)
+- **SDK:** `PimClient.pullSessionContext()` from `@pim/sdk`
+- **CLI:** `pim context` (uses `PIM_POD_ID`, `PIM_AGENT_ID`, `PIM_SCOPE`, `PIM_SERVER_URL`)
 - **MCP:** `get_agent_session_context` tool
 
 **If conflict pressure is critical (≥ 0.8)** or ingestion is halted: stop and surface open conflicts; do not proceed with changes that add contested context until humans resolve blocking items.
@@ -34,7 +34,7 @@ Treat these as lock-in events:
 - **Git revert** or history rewrite that undoes locked-in work (`post-rewrite` hook where applicable)
 - Any other event your pod defines as irreversible (e.g. published artifact), if not using git
 
-**What to send:** A structured **context update** via `CouncilClient.report()`, `council report`, MCP `submit_context_update`, or git hooks installed with `council hooks install`.
+**What to send:** A structured **context update** via `PimClient.report()`, `pim report`, MCP `submit_context_update`, or git hooks installed with `pim hooks install`.
 
 - Use `progress` for shipped increments; `spec_change` when the agreed surface changes; `decision` when a decision is recorded.
 - Include **artifacts** with **repo-relative paths** when files changed.
@@ -42,10 +42,10 @@ Treat these as lock-in events:
 
 ## 3. Git hooks (optional)
 
-Teams may run `council hooks install` so **post-commit** and **post-rewrite** submit a minimal progress update from the last commit metadata. Hooks read `COUNCIL_POD_ID`, `COUNCIL_AGENT_ID`, `COUNCIL_SCOPE`, and `COUNCIL_SERVER_URL`.
+Teams may run `pim hooks install` so **post-commit** and **post-rewrite** submit a minimal progress update from the last commit metadata. Hooks read `PIM_POD_ID`, `PIM_AGENT_ID`, `PIM_SCOPE`, and `PIM_SERVER_URL`.
 
-- Default: hooks **do not fail** the git operation if the Council API is down (`COUNCIL_HOOK_STRICT=0`).
-- Set `COUNCIL_HOOK_STRICT=1` to fail the hook when reporting fails (stricter teams).
+- Default: hooks **do not fail** the git operation if the PIM API is down (`PIM_HOOK_STRICT=0`).
+- Set `PIM_HOOK_STRICT=1` to fail the hook when reporting fails (stricter teams).
 
 Amend and interactive rebase can produce multiple hook invocations; that is expected.
 
@@ -53,10 +53,10 @@ Amend and interactive rebase can produce multiple hook invocations; that is expe
 
 | Variable | Purpose |
 |----------|---------|
-| `COUNCIL_SERVER_URL` | Council API base (default `http://localhost:4000`) |
-| `COUNCIL_POD_ID` | Pod id for CLI/hooks |
-| `COUNCIL_AGENT_ID` | Stable id for this agent or developer |
-| `COUNCIL_SCOPE` | One of `frontend`, `backend`, `design`, `qa`, `infra`, `pm` |
+| `PIM_SERVER_URL` | PIM API base (default `http://localhost:4000`) |
+| `PIM_POD_ID` | Pod id for CLI/hooks |
+| `PIM_AGENT_ID` | Stable id for this agent or developer |
+| `PIM_SCOPE` | One of `frontend`, `backend`, `design`, `qa`, `infra`, `pm` |
 
 See `.env.example` in the repo root.
 
@@ -64,8 +64,19 @@ See `.env.example` in the repo root.
 
 External context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git) is available any time via:
 
-- **SDK:** `CouncilClient.searchContext(query, opts?)` or the pod-less `searchContext(baseUrl, request)` helper.
-- **CLI:** `council search "query"` (no pod id required).
+- **SDK:** `PimClient.searchContext(query, opts?)` or the pod-less `searchContext(baseUrl, request)` helper.
+- **CLI:** `pim search "query"` (no pod id required).
 - **MCP:** `context_search` tool.
 
-All calls hit `POST /api/context-search` on the Council server. Sources without credentials configured are silently skipped and listed under `missing_sources`. Results are cached (default 1h TTL, keyed by normalized query + filters) and run through secret redaction before being returned or synthesized.
+All calls hit `POST /api/context-search` on the PIM server. Sources without credentials configured are silently skipped and listed under `missing_sources`. Results are cached (default 1h TTL, keyed by normalized query + filters) and run through secret redaction before being returned or synthesized.
+
+### Project and actor scoping
+
+Both `searchContext()` and the `/api/context-search` route accept two optional scoping inputs that dramatically improve result precision:
+
+- `project_id` — scopes Jira to configured project keys + Team, GitHub to configured repos, Slack to configured channels, Confluence to configured space keys, and local git to configured repo paths. Configure these once via `pim project create` or the `create_project` / `configure_project_resources` MCP tools.
+- `actor` — filters hits to a specific person (`email`, `slack_user_id`, `github_login`, or `display_name`). Usually auto-detected from query phrases like `"what has rea01581@adobe.com been up to"`, but can be passed explicitly.
+
+Project detection also runs from query text (project name or any configured alias, word-boundary match, longest wins). Release tokens like `T3-26.16` are extracted and emitted as a Jira `fixVersion` clause; the default time window is skipped when `fixVersion` is set.
+
+The response echoes `project_id`, `project_name`, and `actor` so agents can surface the narrowing to the user ("searched within **T3 Events**, scoped to **Rayyan**…").

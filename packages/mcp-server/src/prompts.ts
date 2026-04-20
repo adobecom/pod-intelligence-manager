@@ -240,7 +240,7 @@ Synthesize these learnings into actionable guidance. Highlight:
     "Pull bundled session context for an agent starting work. Returns living doc, pod state, open conflicts, recent activity, and relevant org learnings. Use this at the start of every work session.",
     {
       pod_id: z.string().describe("Pod ID"),
-      scope: z.string().optional().describe("Agent scope (frontend|backend|design|qa|infra|pm) for filtered learnings"),
+      scope: z.string().optional().describe("Agent scope: org-defined scope id (see GET /api/org/config) for filtered learnings"),
     },
     async ({ pod_id, scope }) => {
       const scopeParam = scope ? `&scopes=${encodeURIComponent(scope)}` : "";
@@ -291,7 +291,7 @@ Based on this context:
 1. Identify any open conflicts or blockers that affect your work
 2. Note recent updates from other agents that you should be aware of
 3. Check if any org learnings are relevant to your planned work
-4. Proceed with your task, knowing that commits will auto-report to the Council`);
+4. Proceed with your task, knowing that commits will auto-report to PIM`);
     },
   );
 

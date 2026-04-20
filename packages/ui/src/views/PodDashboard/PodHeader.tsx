@@ -1,7 +1,7 @@
 import { Heading, Text, Badge, Button } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { useNavigate } from "react-router-dom";
-import type { Pod } from "@council/shared";
+import type { Pod } from "@pim/shared";
 
 const row = style({
   display: "flex",

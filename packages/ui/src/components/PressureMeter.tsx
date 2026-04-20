@@ -4,7 +4,7 @@ import {
   getPressureLevel,
   getPressureLabel,
   type PressureLevel,
-} from "@council/shared";
+} from "@pim/shared";
 
 function meterVariant(
   level: PressureLevel,

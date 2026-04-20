@@ -3,6 +3,7 @@ import type { WebSocket } from "ws";
 export interface WSEvent {
   type:
     | "context_update_added"
+    | "context_update_quality_revised"
     | "conflict_created"
     | "conflict_resolved"
     | "conflict_escalated"
@@ -12,7 +13,8 @@ export interface WSEvent {
     | "lint_completed"
     | "knowledge_updated"
     | "living_doc_viewed"
-    | "project_context_update_added";
+    | "project_context_update_added"
+    | "queue_drained";
   podId: string;
   payload: unknown;
 }

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   TUNNEL_REQUEST_TIMEOUT_MS,
   type TunnelRequest,
-} from "@council/shared";
+} from "@pim/shared";
 import db from "../db/connection.js";
 import {
   getTunnelConnection,

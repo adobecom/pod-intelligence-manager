@@ -9,7 +9,7 @@ import {
   Text,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { PodArea } from "@council/shared";
+import type { PodArea } from "@pim/shared";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { RelativeTime } from "../../components/RelativeTime";
 

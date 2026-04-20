@@ -1,4 +1,4 @@
-import type { ContextSearchActor, ContextSearchHit } from "@council/shared";
+import type { ContextSearchActor, ContextSearchHit } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 function stripPersonTokens(query: string, actor?: ContextSearchActor): string {

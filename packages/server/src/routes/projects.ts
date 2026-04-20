@@ -1,10 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import db from "../db/connection.js";
-import type { Project, ProjectContextUpdate, ProjectResources } from "@council/shared";
+import {
+  type ArchivedProject,
+  type Project,
+  type ProjectContextUpdate,
+  type ProjectResources,
+  EMPTY_PROJECT_ANATOMY,
+} from "@pim/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
+import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
+import { getOrgScopeIds } from "../services/org-settings.js";
 
 const ResourcesSchema = z.object({
   jira: z
@@ -26,10 +34,31 @@ const CreateProjectSchema = z.object({
   resources: ResourcesSchema.optional(),
 });
 
-const PatchProjectSchema = z.object({
-  name: z.string().min(1).transform(s => s.trim()).optional(),
-  description: z.union([z.string(), z.null()]).optional(),
+const ProjectAnatomyBodySchema = z.object({
+  internal: z.array(z.object({ scope_id: z.string().min(1) })),
+  external: z.array(
+    z.object({
+      name: z.string().min(1),
+      role: z.string().min(1),
+      notes: z.string().optional(),
+    }),
+  ),
 });
+
+const PatchProjectSchema = z
+  .object({
+    name: z.string().min(1).transform(s => s.trim()).optional(),
+    description: z.union([z.string(), z.null()]).optional(),
+    anatomy: ProjectAnatomyBodySchema.optional(),
+  })
+  .refine(
+    body => {
+      if (!body.anatomy) return true;
+      const ids = getOrgScopeIds();
+      return body.anatomy.internal.every(s => ids.has(s.scope_id));
+    },
+    { message: "Each anatomy.internal.scope_id must exist in org scopes", path: ["anatomy"] },
+  );
 
 function parseResources(raw: string | null | undefined): ProjectResources | undefined {
   if (!raw) return undefined;
@@ -40,41 +69,59 @@ function parseResources(raw: string | null | undefined): ProjectResources | unde
   }
 }
 
-function rowToProject(row: {
+type ProjectRow = {
   project_id: string;
   name: string;
   description: string | null;
   created_at: string;
+  anatomy_json?: string | null;
   resources_json?: string | null;
-}): Project {
+};
+
+function rowToProject(row: ProjectRow): Project {
   return {
     project_id: row.project_id,
     name: row.name,
     description: row.description,
     created_at: row.created_at,
+    anatomy: parseProjectAnatomy(row.anatomy_json),
     resources: parseResources(row.resources_json),
   };
 }
 
-export default async function projectRoutes(app: FastifyInstance) {
-  type ProjectRow = {
-    project_id: string;
-    name: string;
-    description: string | null;
-    created_at: string;
-    resources_json: string | null;
+function rowToArchivedProject(row: {
+  project_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  anatomy_json: string;
+  archived_date: string;
+}): ArchivedProject {
+  return {
+    project_id: row.project_id,
+    name: row.name,
+    description: row.description,
+    created_at: row.created_at,
+    archived_date: row.archived_date,
+    anatomy: parseProjectAnatomy(row.anatomy_json),
   };
+}
 
+export default async function projectRoutes(app: FastifyInstance) {
   app.get("/api/projects", async () => {
     const rows = db
-      .prepare("SELECT project_id, name, description, created_at, resources_json FROM projects ORDER BY name")
+      .prepare(
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects ORDER BY name",
+      )
       .all() as ProjectRow[];
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
     const row = db
-      .prepare("SELECT project_id, name, description, created_at, resources_json FROM projects WHERE project_id = ?")
+      .prepare(
+        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE project_id = ?",
+      )
       .get(req.params.projectId) as ProjectRow | undefined;
     if (!row) {
       reply.code(404);
@@ -129,17 +176,19 @@ export default async function projectRoutes(app: FastifyInstance) {
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
       const created_at = new Date().toISOString();
-      const resources_json = resources ? JSON.stringify(resources) : null;
+      const anatomyJson = JSON.stringify(EMPTY_PROJECT_ANATOMY);
+      const resourcesJson = resources ? JSON.stringify(resources) : null;
       db.prepare(
-        "INSERT INTO projects (project_id, name, description, created_at, resources_json) VALUES (?, ?, ?, ?, ?)",
-      ).run(projectId, name, description ?? null, created_at, resources_json);
+        "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, resources_json) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(projectId, name, description ?? null, created_at, anatomyJson, resourcesJson);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
         name,
         description: description ?? null,
         created_at,
-        resources_json,
+        anatomy_json: anatomyJson,
+        resources_json: resourcesJson,
       });
     },
   );
@@ -157,15 +206,21 @@ export default async function projectRoutes(app: FastifyInstance) {
     }
     const name = req.body.name ?? row.name;
     const description = req.body.description !== undefined ? req.body.description : row.description;
-    db.prepare("UPDATE projects SET name = ?, description = ? WHERE project_id = ?").run(
+    const anatomyJson =
+      req.body.anatomy !== undefined
+        ? JSON.stringify(req.body.anatomy)
+        : row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
+    db.prepare("UPDATE projects SET name = ?, description = ?, anatomy_json = ? WHERE project_id = ?").run(
       name,
       description,
+      anatomyJson,
       req.params.projectId,
     );
     return rowToProject({
       ...row,
       name,
       description,
+      anatomy_json: anatomyJson,
     });
   });
 
@@ -233,7 +288,47 @@ export default async function projectRoutes(app: FastifyInstance) {
         return { deduplicated: true, message: "Commit already reported by another source" };
       }
       reply.code(201);
-      return { id: result.update!.id, update: result.update, council: result.council };
+      return { id: result.update!.id, update: result.update, pim: result.pim };
     },
   );
+
+  app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
+    const projectId = req.params.projectId;
+    const row = db.prepare("SELECT * FROM projects WHERE project_id = ?").get(projectId) as
+      | {
+          project_id: string;
+          name: string;
+          description: string | null;
+          created_at: string;
+          anatomy_json: string | null;
+        }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: "Project not found" };
+    }
+
+    const archivedDate = new Date().toISOString().split("T")[0];
+    const anatomyJson = row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
+
+    const run = () => {
+      db.prepare("DELETE FROM project_context_updates WHERE project_id = ?").run(projectId);
+      db.prepare("UPDATE pods SET project_id = NULL WHERE project_id = ?").run(projectId);
+      db.prepare(
+        `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate);
+      db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
+    };
+    db.transaction(run)();
+
+    return rowToArchivedProject({
+      project_id: row.project_id,
+      name: row.name,
+      description: row.description,
+      created_at: row.created_at,
+      anatomy_json: anatomyJson,
+      archived_date: archivedDate,
+    });
+  });
 }

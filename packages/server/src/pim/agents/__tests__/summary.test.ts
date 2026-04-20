@@ -12,7 +12,7 @@ vi.mock("../../../ws/index.js", () => ({
 }));
 
 vi.mock("../../../services/knowledge-graph.js", () => ({
-  getRelevantLearnings: vi.fn().mockReturnValue({
+  getRelevantLearnings: vi.fn().mockResolvedValue({
     nodes: [],
     truncated: false,
     total_matching: 0,
@@ -53,7 +53,7 @@ const MOCK_DECISIONS = [
 ];
 
 const MOCK_TUNNELS = [
-  { dev_name: "alice", branch: "feature/checkout", url: "https://alpha-alice.council.adobe.com", status: "active" },
+  { dev_name: "alice", branch: "feature/checkout", url: "https://alpha-alice.pim.adobe.com", status: "active" },
 ];
 
 // The summary function calls db.prepare many times in sequence.
@@ -101,86 +101,86 @@ describe("regenerateLivingDoc", () => {
     vi.clearAllMocks();
   });
 
-  it("returns not-found message for nonexistent pod", () => {
+  it("returns not-found message for nonexistent pod", async () => {
     setupDb({ pod: undefined });
-    const md = regenerateLivingDoc("pod-missing");
+    const md = await regenerateLivingDoc("pod-missing");
     expect(md).toContain("Pod not found");
   });
 
-  it("generates markdown with pod name as heading", () => {
+  it("generates markdown with pod name as heading", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("# Pod: Alpha Pod");
   });
 
-  it("includes conflict pressure and sprint day", () => {
+  it("includes conflict pressure and sprint day", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("0.20");
     expect(md).toContain("Day 3 of 5");
   });
 
-  it("includes active milestone section", () => {
+  it("includes active milestone section", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Active Milestone");
     expect(md).toContain("MVP Launch");
     expect(md).toContain("60%");
   });
 
-  it("renders open conflicts with severity labels", () => {
+  it("renders open conflicts with severity labels", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Open Conflicts");
     expect(md).toContain("C-0001");
     expect(md).toContain("BLOCKING");
   });
 
-  it("shows 'None' for open conflicts when all resolved", () => {
+  it("shows 'None' for open conflicts when all resolved", async () => {
     setupDb({ conflicts: [{ id: "C-0001", summary: "old", severity: "blocking", status: "resolved" }] });
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("None");
   });
 
-  it("includes decisions log", () => {
+  it("includes decisions log", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Decisions Log");
     expect(md).toContain("Use Zod for validation");
   });
 
-  it("includes context stream", () => {
+  it("includes context stream", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Context Stream");
     expect(md).toContain("Form implemented");
   });
 
-  it("includes active tunnels", () => {
+  it("includes active tunnels", async () => {
     setupDb({});
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Active Tunnels");
     expect(md).toContain("alice");
     expect(md).toContain("feature/checkout");
   });
 
-  it("writes to living_docs table via upsert", () => {
+  it("writes to living_docs table via upsert", async () => {
     const runMock = setupDb({});
-    regenerateLivingDoc("pod-1");
+    await regenerateLivingDoc("pod-1");
     expect(runMock).toHaveBeenCalled();
   });
 
-  it("broadcasts living_doc_updated event", () => {
+  it("broadcasts living_doc_updated event", async () => {
     setupDb({});
-    regenerateLivingDoc("pod-1");
+    await regenerateLivingDoc("pod-1");
     expect(broadcast).toHaveBeenCalledWith(
       expect.objectContaining({ type: "living_doc_updated", podId: "pod-1" }),
     );
   });
 
-  it("includes knowledge context when learnings exist", () => {
+  it("includes knowledge context when learnings exist", async () => {
     setupDb({});
-    vi.mocked(getRelevantLearnings).mockReturnValue({
+    vi.mocked(getRelevantLearnings).mockResolvedValue({
       nodes: [
         { id: "n1", type: "pattern", summary: "Use shared schemas", source_pod_name: "Beta Pod", confidence_score: 0.8, details: "", domain_tags: [], created_at: "", source_pod_id: "" },
       ],
@@ -188,7 +188,7 @@ describe("regenerateLivingDoc", () => {
       total_matching: 1,
     } as any);
 
-    const md = regenerateLivingDoc("pod-1");
+    const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Knowledge Context");
     expect(md).toContain("Use shared schemas");
   });

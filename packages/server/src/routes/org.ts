@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import db from "../db/connection.js";
-import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "@council/shared";
-import { extractKnowledgeEnhanced } from "../council/agents/knowledge-extraction.js";
+import type { OrgPodSummary, CrossPodOverlap, ArchivedPod, ArchivedProject } from "@pim/shared";
+import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
+import { validateBody } from "../middleware/validation.js";
+import { getOrgConfig, setOrgConfig } from "../services/org-settings.js";
+import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { addLearningsToGraph } from "../services/knowledge-graph.js";
 import { broadcastToAll } from "../ws/index.js";
 
@@ -14,7 +18,35 @@ interface PodRow {
   project_id?: string | null;
 }
 
+const OrgConfigBodySchema = z.object({
+  scopes: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+    }),
+  ),
+});
+
 export default async function orgRoutes(app: FastifyInstance) {
+  app.get("/api/org/config", async () => {
+    return getOrgConfig();
+  });
+
+  app.patch<{ Body: z.infer<typeof OrgConfigBodySchema> }>(
+    "/api/org/config",
+    {
+      preHandler: validateBody(OrgConfigBodySchema),
+    },
+    async (req, reply) => {
+      try {
+        return setOrgConfig(req.body);
+      } catch (e) {
+        reply.code(400);
+        return { error: e instanceof Error ? e.message : "Invalid org config" };
+      }
+    },
+  );
+
   app.get("/api/org/pods", async () => {
     return db.prepare("SELECT * FROM org_pod_summaries").all() as OrgPodSummary[];
   });
@@ -25,6 +57,31 @@ export default async function orgRoutes(app: FastifyInstance) {
 
   app.get("/api/org/archived", async () => {
     return db.prepare("SELECT * FROM archived_pods").all() as ArchivedPod[];
+  });
+
+  app.get("/api/org/archived-projects", async () => {
+    const rows = db
+      .prepare(
+        "SELECT project_id, name, description, created_at, anatomy_json, archived_date FROM archived_projects ORDER BY archived_date DESC",
+      )
+      .all() as Array<{
+      project_id: string;
+      name: string;
+      description: string | null;
+      created_at: string;
+      anatomy_json: string;
+      archived_date: string;
+    }>;
+    return rows.map(
+      (r): ArchivedProject => ({
+        project_id: r.project_id,
+        name: r.name,
+        description: r.description,
+        created_at: r.created_at,
+        archived_date: r.archived_date,
+        anatomy: parseProjectAnatomy(r.anatomy_json),
+      }),
+    );
   });
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/archive", async (req, reply) => {
@@ -62,7 +119,7 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = addLearningsToGraph(learnings, podId, pod.name, projectMeta);
+        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

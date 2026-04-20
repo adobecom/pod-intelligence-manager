@@ -1,5 +1,5 @@
 import { StatusLight } from "@react-spectrum/s2";
-import type { TunnelStatus } from "@council/shared";
+import type { TunnelStatus } from "@pim/shared";
 
 const statusConfig: Record<
   TunnelStatus,

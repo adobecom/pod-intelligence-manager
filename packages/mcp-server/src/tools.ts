@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildArtifact } from "./artifact-template.js";
-import { apiFetch, apiFetchText, apiPost, apiPut } from "./api.js";
+import { apiFetch, apiFetchText, apiPatch, apiPost, apiPut } from "./api.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -15,9 +15,30 @@ const json = (data: unknown) => ({
 /*  Zod schemas (reusable fragments)                                  */
 /* ------------------------------------------------------------------ */
 
-const PodId = z.string().describe("Pod ID (e.g. 'pod-checkout-redesign')");
-const ProjectId = z.string().describe("Project ID (e.g. 'project-demo')");
-const Scope = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
+const PodId = z.string().describe("Pod ID (e.g. 'pod-emc-rbac')");
+const ProjectId = z.string().describe("Project ID (e.g. 'project-emc')");
+const Scope = z
+  .string()
+  .min(1)
+  .describe("Org-defined scope id (must match a scopes[].id from GET /api/org/config on the PIM server)");
+
+const OrgScopeEntrySchema = z.object({
+  id: z.string().min(1).describe("Stable scope id (e.g. frontend, security-review)"),
+  label: z.string().min(1).describe("Human-readable label for UIs and reports"),
+});
+
+const ProjectAnatomySchema = z.object({
+  internal: z
+    .array(z.object({ scope_id: Scope }))
+    .describe("Internal initiative slots; each scope_id must exist in org config scopes"),
+  external: z.array(
+    z.object({
+      name: z.string().min(1).describe("Team or group name"),
+      role: z.string().min(1).describe("Free-text relationship or capacity (not an org scope id)"),
+      notes: z.string().optional(),
+    }),
+  ),
+});
 
 const ProjectResourcesSchema = z.object({
   jira: z
@@ -45,6 +66,111 @@ const ActorSchema = z.object({
 /* ------------------------------------------------------------------ */
 
 export function registerTools(server: McpServer) {
+  // ── org config & projects ───────────────────────────────────────
+
+  server.tool(
+    "get_org_config",
+    "Read the org-wide scope list (ids + labels). Scope ids drive pod areas, context updates, and project anatomy internal slots. Call this before pick_scope-dependent tools or when validating scope strings.",
+    {},
+    async () => {
+      const config = await apiFetch("/api/org/config");
+      return json(config);
+    },
+  );
+
+  server.tool(
+    "update_org_config",
+    "Replace the entire org scope list (PATCH /api/org/config). Must include at least one scope with non-empty id and label; ids must be unique. Affects new pods and validation of future context updates — existing pod_areas rows are unchanged.",
+    {
+      scopes: z
+        .array(OrgScopeEntrySchema)
+        .min(1)
+        .describe("Complete new scope list (full replacement, not a diff)"),
+    },
+    async ({ scopes }) => {
+      const config = await apiPatch("/api/org/config", { scopes });
+      return json(config);
+    },
+  );
+
+  server.tool(
+    "list_projects",
+    "List all long-lived projects (initiatives). Each includes project_id, name, description, created_at, and anatomy.",
+    {},
+    async () => {
+      const projects = await apiFetch<unknown[]>("/api/projects");
+      return json(projects);
+    },
+  );
+
+  server.tool(
+    "create_project",
+    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy. Pass optional `resources` (Jira keys, GitHub repos, Slack channels, Confluence spaces, local git paths, aliases) to scope downstream context_search calls — this improves result precision dramatically vs. a broad query.",
+    {
+      name: z.string().min(1).describe("Project display name"),
+      description: z.string().optional().describe("Optional description"),
+      resources: ProjectResourcesSchema.optional().describe(
+        "External resources to scope searches. Any subset can be supplied.",
+      ),
+    },
+    async ({ name, description, resources }) => {
+      const project = await apiPost("/api/projects", { name, description, resources });
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "configure_project_resources",
+    "Replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
+    {
+      project_id: ProjectId,
+      resources: ProjectResourcesSchema,
+    },
+    async ({ project_id, resources }) => {
+      const result = await apiPut(`/api/projects/${encodeURIComponent(project_id)}/resources`, resources);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "get_project",
+    "Fetch a single project by ID including anatomy (internal scope slots and external collaborator rows).",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const project = await apiFetch(`/api/projects/${encodeURIComponent(project_id)}`);
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "update_project",
+    "PATCH a project: update name, description, and/or anatomy. At least one field must be provided. Anatomy internal.scope_id values must exist in org config scopes (use get_org_config).",
+    {
+      project_id: ProjectId,
+      name: z.string().min(1).optional().describe("New project display name"),
+      description: z.union([z.string(), z.null()]).optional().describe("Set or clear (null) description"),
+      anatomy: ProjectAnatomySchema.optional().describe("Replace project anatomy (internal + external)"),
+    },
+    async ({ project_id, ...patch }) => {
+      const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
+      if (Object.keys(body).length === 0) {
+        throw new Error("Provide at least one of: name, description, anatomy");
+      }
+      const project = await apiPatch(`/api/projects/${encodeURIComponent(project_id)}`, body);
+      return json(project);
+    },
+  );
+
+  server.tool(
+    "archive_project",
+    "Archive a long-lived project: deletes project-level context updates, detaches linked pods (project_id cleared), stores a snapshot in archived_projects, and removes the active project row. Does not run pod knowledge extraction.",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const result = await apiPost(`/api/projects/${encodeURIComponent(project_id)}/archive`);
+      return json(result);
+    },
+  );
+
   // ── existing read tools ──────────────────────────────────────────
 
   server.tool(
@@ -116,7 +242,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled Council context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
@@ -165,7 +291,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_context_update",
-    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and Council analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
+    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and PIM analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
     {
       pod_id: PodId,
       agent_id: z.string().describe("ID of the submitting agent or human"),
@@ -187,7 +313,7 @@ export function registerTools(server: McpServer) {
       needs_input_from: z
         .array(z.object({ role: Scope, question: z.string() }))
         .optional()
-        .describe("Input requests from other roles"),
+        .describe("Input requests targeting another org scope"),
     },
     async ({ pod_id, ...body }) => {
       const result = await apiPost(`/api/pods/${pod_id}/context-updates`, { ...body, source: "mcp" });
@@ -197,7 +323,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_project_context_update",
-    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full Council Master. High-signal types (decision, spec_change) may be added to the knowledge graph.",
+    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full PIM orchestrator. High-signal types (decision, spec_change) may be added to the knowledge graph.",
     {
       project_id: ProjectId,
       agent_id: z.string().describe("ID of the submitting agent or human"),
@@ -330,37 +456,6 @@ export function registerTools(server: McpServer) {
   );
 
   // ── context search (cross-source external context) ──────────────
-
-  // ── project onboarding ──────────────────────────────────────────
-
-  server.tool(
-    "create_project",
-    "Create a new project with optional external resources (Jira keys, GitHub repos, Slack channels, Confluence spaces, local git repo paths, aliases). Configuring resources at creation narrows all downstream context_search calls that reference this project, dramatically improving result precision.",
-    {
-      name: z.string().describe("Project name (e.g. 'T3 Events')"),
-      description: z.string().optional(),
-      resources: ProjectResourcesSchema.optional().describe(
-        "External resources to scope searches. Any subset can be supplied.",
-      ),
-    },
-    async (args) => {
-      const project = await apiPost("/api/projects", args);
-      return json(project);
-    },
-  );
-
-  server.tool(
-    "configure_project_resources",
-    "Replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
-    {
-      project_id: ProjectId,
-      resources: ProjectResourcesSchema,
-    },
-    async ({ project_id, resources }) => {
-      const result = await apiPut(`/api/projects/${project_id}/resources`, resources);
-      return json(result);
-    },
-  );
 
   server.tool(
     "context_search",

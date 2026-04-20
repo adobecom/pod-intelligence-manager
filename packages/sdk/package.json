@@ -1,5 +1,5 @@
 {
-  "name": "@council/sdk",
+  "name": "@pim/sdk",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@council/shared": "workspace:*"
+    "@pim/shared": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

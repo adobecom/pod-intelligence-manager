@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { Tunnel } from "@council/shared";
+import type { Tunnel } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
 import { TunnelClient } from "../tunnel/client.js";
 

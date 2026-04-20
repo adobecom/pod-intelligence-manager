@@ -6,7 +6,23 @@ export type {
   Scope,
 } from "./types/pod";
 
-export type { Project, ProjectContextUpdate, ProjectResources } from "./types/project";
+export type {
+  Project,
+  ProjectContextUpdate,
+  ProjectResources,
+  ProjectAnatomy,
+  ProjectAnatomyInternalSlot,
+  ProjectAnatomyExternalTeam,
+} from "./types/project";
+
+export { EMPTY_PROJECT_ANATOMY } from "./types/project";
+
+export type {
+  OrgConfig,
+  OrgScopeDefinition,
+} from "./types/org-settings";
+
+export { DEFAULT_ORG_CONFIG } from "./types/org-settings";
 
 export type {
   ContextUpdate,
@@ -64,6 +80,7 @@ export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  ArchivedProject,
 } from "./types/org";
 
 export type {

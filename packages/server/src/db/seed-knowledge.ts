@@ -1,206 +1,244 @@
 /**
- * Seeds the knowledge graph with realistic mock learnings from the two
- * archived pods (Onboarding Flow v2, Notification System) so the
+ * Seeds the knowledge graph with realistic learnings from the two
+ * archived EMC pods (Event CRUD v1, Registration Forms v1) so the
  * /knowledge UI has data to display out of the box.
  */
 
-import type { EnhancedPodLearning } from "@council/shared";
+import type { EnhancedPodLearning } from "@pim/shared";
 import { getGraph, addLearningsToGraph } from "../services/knowledge-graph.js";
 
-// --- Onboarding Flow v2 (pod-onboarding-v2, completed 2026-03-28) ---
+// --- Event CRUD v1 (pod-emc-event-crud, completed 2026-04-04) ---
 
-const onboardingLearnings: EnhancedPodLearning[] = [
+const eventCrudLearnings: EnhancedPodLearning[] = [
   {
     type: "decision",
-    summary: "Use progressive disclosure for onboarding steps instead of a single long form",
+    summary:
+      "Use REST endpoints for event CRUD instead of GraphQL — simpler for the current team and aligns with ESP platform conventions",
     details:
-      "Decision by design-lead: Multi-step wizard with progress indicator outperformed single-page form in internal usability testing. Each step validates independently before proceeding. Reduces perceived complexity for new users.",
-    domains: ["frontend", "design"],
+      "Decision by be-agent-events: GraphQL was considered for flexibility but the team has stronger REST experience and the ESP platform's other services are REST-based. Standard REST endpoints: POST /events, GET /events/:id, PUT /events/:id, DELETE /events/:id. Query params for filtering/pagination on the list endpoint.",
+    domains: ["backend"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "decision",
-    summary: "Store onboarding progress server-side so users can resume across devices",
+    summary:
+      "Event status lifecycle: draft → published → active → completed → archived with explicit transitions",
     details:
-      "Decision by be-agent-05: Onboarding state persisted in DynamoDB with TTL of 30 days. Keyed by user_id. Enables resume-on-any-device and prevents data loss on browser crash.",
-    domains: ["backend", "infra"],
+      "Decision by be-agent-events: Events follow a strict status lifecycle. Each transition has validation rules (e.g., draft→published requires at least one session, published→active requires a start date in the past). Status transitions exposed as POST /events/:id/transition with the target status in the body. Invalid transitions return 422.",
+    domains: ["backend", "pm"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "pattern",
-    summary: "Skeleton screens during API calls improve perceived performance on onboarding pages",
+    summary:
+      "Optimistic concurrency via modificationTime prevents lost updates on concurrent event edits",
     details:
-      "Implemented by fe-agent-05: Replaced spinner with skeleton placeholders for the org-setup and team-invite steps. User feedback was significantly more positive. Skeleton components are reusable across other flows.",
+      "Implemented by be-agent-events: Every PUT /events/:id requires a modificationTime field matching the server's last-known value. If they differ, the update returns 409 Conflict with the current server state. The frontend shows a diff dialog allowing the user to merge or overwrite. This pattern prevents the classic 'last write wins' problem when two admins edit the same event.",
+    domains: ["backend", "frontend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "resolved_conflict",
+    summary:
+      "Event slug generation: auto-generated from title vs. user-specified — resolved: auto-generated with manual override",
+    details:
+      "Conflict between fe-agent-events (wanted user-specified slugs for SEO control) and be-agent-events (wanted auto-generation for consistency and uniqueness guarantee). Resolution: slugs are auto-generated from the event title using kebab-case + random suffix, but users can override the slug in the event settings. Uniqueness enforced at the database level.",
+    domains: ["backend", "frontend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "anti_pattern",
+    summary:
+      "Loading all event sessions in the event detail API response caused 4s load times for events with 200+ sessions",
+    details:
+      "Reported by qa-agent-events: The initial GET /events/:id response included a full sessions array. For large conferences with 200+ sessions, this payload was 1.5MB and took 4 seconds to parse client-side. Fixed by making sessions a separate paginated endpoint: GET /events/:id/sessions?page=1&limit=25. Event detail now loads in <200ms.",
+    domains: ["backend", "frontend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "pattern",
+    summary:
+      "Event cloning as a first-class API operation saves organizers from recreating recurring events",
+    details:
+      "Implemented by be-agent-events: POST /events/:id/clone creates a deep copy of an event including its config overrides (but not sessions or registrations). The clone is created in draft status with '(Copy)' appended to the title. Organizers use this for recurring annual events — clone last year's event and update dates/sessions.",
+    domains: ["backend", "pm"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "scope_insight",
+    summary:
+      "Event creation-to-publish time is the key organizer productivity metric — target under 15 minutes",
+    details:
+      "Analysis by pm-lead: Tracking data from the existing EMC shows average event creation-to-publish time of 35 minutes. Most time is spent on session scheduling and RSVP form configuration. Reducing this to 15 minutes requires: (1) cloning from templates, (2) default configs at org level, (3) bulk session creation. These insights should inform the Sessions and Configs pods.",
+    domains: ["pm"],
+    confidence: "inferred",
+    confidence_score: 0.75,
+  },
+  {
+    type: "decision",
+    summary:
+      "Use Adobe IMS org_id as the tenant isolation boundary for all event data",
+    details:
+      "Decision by infra-agent-events: All event data is partitioned by IMS org_id. Every query includes org_id in the WHERE clause. Row-level security ensures one org cannot access another org's events even with a valid event ID. The org_id is extracted from the IMS token on every request.",
+    domains: ["backend", "infra"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "anti_pattern",
+    summary:
+      "Client-side date validation without timezone awareness caused events to appear with wrong dates for cross-timezone organizers",
+    details:
+      "Reported by qa-agent-events: The event creation form validated dates using JavaScript Date() which uses the browser's local timezone. An organizer in PST creating a Tokyo event entered '2026-06-15' as the start date, but the API received '2026-06-14T07:00:00Z' due to timezone offset. Fix: all date inputs explicitly paired with timezone selector, validation runs against the event's timezone, not the browser's.",
+    domains: ["frontend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "pattern",
+    summary:
+      "Soft-delete with 30-day retention for events prevents accidental permanent data loss",
+    details:
+      "Implemented by be-agent-events: DELETE /events/:id sets a deleted_at timestamp and a purge_after date 30 days out. A nightly cleanup job permanently removes events past their purge_after date. Deleted events are excluded from all queries by default but can be listed via GET /events?include_deleted=true for recovery. Organizers have accidentally deleted events and this saved multiple incidents.",
+    domains: ["backend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+];
+
+// --- Registration Forms v1 (pod-emc-registration, completed 2026-03-28) ---
+
+const registrationLearnings: EnhancedPodLearning[] = [
+  {
+    type: "decision",
+    summary:
+      "RSVP form fields defined as a JSON schema stored at scope level, rendered dynamically by a generic FormRenderer component",
+    details:
+      "Decision by be-agent-registration: Each RSVP form is a JSON schema defining field types, labels, placeholders, validation rules, and ordering. The schema is stored in the Configs service at the scope level. A generic FormRenderer component on the frontend interprets the schema and renders the form. This decouples form layout from code — organizers can customize forms without developer involvement.",
+    domains: ["backend", "frontend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "decision",
+    summary:
+      "Registration data stored separately from RSVP form schema — registrations are immutable once submitted",
+    details:
+      "Decision by be-agent-registration: Submitted registration records reference the form schema version they were submitted against. If the form schema changes after submission, existing registrations retain their original field values and validation. This prevents data integrity issues when organizers update forms mid-event.",
+    domains: ["backend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "pattern",
+    summary:
+      "Localization overlays on RSVP forms: base field definitions + per-locale label/placeholder overrides",
+    details:
+      "Implemented by fe-agent-registration: The RSVP form schema has a base layer (field types, ordering, validation rules) and per-locale overlays that override only label and placeholder strings. The FormRenderer selects the overlay matching the user's locale, falling back to the base layer. This keeps form structure consistent across locales while allowing full translation of user-facing text.",
     domains: ["frontend", "design"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "resolved_conflict",
-    summary: "Email verification: blocking gate vs. soft reminder — resolved: blocking gate with grace period",
+    summary:
+      "Registration confirmation: email-only vs. email + in-app notification — resolved: email always, in-app optional per event config",
     details:
-      "Conflict between pm-lead (wanted non-blocking to reduce drop-off) and infra-agent-03 (required verified email for SSO downstream). Resolution: blocking gate but users get a 24-hour grace period to explore the product before verification is enforced.",
+      "Conflict between pm-lead (wanted in-app notification for all registrations for engagement) and be-agent-registration (wanted email-only for simplicity and reliability). Resolution: email confirmation is always sent via SES. In-app notification is configurable per event via a boolean in event config. Default: email-only. This avoids over-notifying attendees at events that don't use the in-app experience.",
     domains: ["backend", "pm"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "anti_pattern",
-    summary: "Loading the full team directory on the invite step caused 3s delay for large orgs",
+    summary:
+      "Validating registration form submissions only on the frontend allowed invalid data to reach the database",
     details:
-      "Reported by qa-agent-04: The team-invite step fetched the entire org directory upfront (up to 10k users). This caused a 3-second blocking load on the invite step. Fixed by switching to typeahead search with debounced API calls.",
-    domains: ["frontend", "backend"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-  {
-    type: "scope_insight",
-    summary: "Onboarding completion rate correlates strongly with first-value-moment speed",
-    details:
-      "Analysis by pm-lead: Users who reached their first meaningful action (creating a project or inviting a teammate) within 2 minutes of signup had 4x higher 30-day retention. Onboarding should optimize for time-to-first-value above all else.",
-    domains: ["pm", "design"],
-    confidence: "inferred",
-    confidence_score: 0.75,
-  },
-  {
-    type: "pattern",
-    summary: "Feature flags on onboarding steps allow A/B testing without redeployment",
-    details:
-      "Implemented by infra-agent-03: Each onboarding step wrapped in a LaunchDarkly flag. Enabled rapid iteration on step order and content without code deploys. Recommend this pattern for any user-facing wizard.",
-    domains: ["infra", "frontend"],
-    confidence: "inferred",
-    confidence_score: 0.7,
-  },
-  {
-    type: "decision",
-    summary: "Use Adobe IMS tokens directly instead of minting separate onboarding session tokens",
-    details:
-      "Decision by be-agent-05: Eliminated a redundant token layer. Onboarding API validates the existing IMS access token directly. Reduces auth complexity and avoids token-refresh edge cases during multi-step flows.",
-    domains: ["backend", "infra"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-];
-
-// --- Notification System (pod-notifications, completed 2026-03-21) ---
-
-const notificationLearnings: EnhancedPodLearning[] = [
-  {
-    type: "decision",
-    summary: "Fan-out via SNS+SQS instead of direct Lambda invocation for notification delivery",
-    details:
-      "Decision by infra-agent-04: SNS topic fans out to per-channel SQS queues (email, Slack, in-app). Each channel has its own consumer Lambda. Decouples channel logic, allows independent scaling and retry policies per channel.",
-    domains: ["infra", "backend"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-  {
-    type: "decision",
-    summary: "Notification preferences stored per-user with channel-level granularity",
-    details:
-      "Decision by be-agent-06: Users can opt in/out per channel (email, Slack, in-app) and per notification category (mentions, assignments, system alerts). Stored in DynamoDB with GSI on user_id. Default: all channels enabled.",
-    domains: ["backend"],
+      "Reported by qa-agent-registration: Initial implementation validated RSVP form inputs only in the FormRenderer component. Direct API calls (e.g., from third-party integrations or curl) bypassed validation entirely. One test submission had an email field with 'not-an-email'. Fix: server-side validation against the JSON schema on every POST /registrations. Frontend validation is for UX only.",
+    domains: ["backend", "frontend"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "pattern",
-    summary: "Exponential backoff with jitter on notification delivery retries prevents thundering herd",
+    summary:
+      "Idempotent registration submissions using email + event_id composite key prevent duplicate registrations",
     details:
-      "Implemented by infra-agent-04: SQS consumers use exponential backoff (base 2s, max 5min) with random jitter (0-500ms). After 5 retries, messages go to DLQ for manual inspection. Prevents cascading failures when Slack or email APIs are degraded.",
-    domains: ["infra", "backend"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-  {
-    type: "resolved_conflict",
-    summary: "In-app notification badge: real-time WebSocket vs. polling — resolved: WebSocket with polling fallback",
-    details:
-      "Conflict between fe-agent-06 (preferred polling for simplicity) and be-agent-06 (wanted WebSocket for real-time UX). Resolution: primary delivery via WebSocket push, with 30-second polling fallback for clients that lose WS connection. Badge count endpoint is cheap (single DynamoDB query).",
-    domains: ["frontend", "backend"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-  {
-    type: "anti_pattern",
-    summary: "Sending notification emails synchronously in the request path caused 2s API latency spikes",
-    details:
-      "Reported by qa-agent-05: Initial implementation called SES directly in the API handler. Under load, SES throttling caused P99 latency to spike to 2s. Fixed by moving to async SNS publish (P99 dropped to 50ms).",
-    domains: ["backend", "infra"],
-    confidence: "extracted",
-    confidence_score: 0.9,
-  },
-  {
-    type: "pattern",
-    summary: "Idempotency keys on notification sends prevent duplicate delivery during retries",
-    details:
-      "Implemented by be-agent-06: Each notification gets a deterministic idempotency key (hash of user_id + event_type + entity_id + timestamp_bucket). Consumers check DynamoDB before sending. Eliminated duplicate emails during SQS retry storms.",
+      "Implemented by be-agent-registration: POST /registrations uses a composite unique key of (email, event_id). If a duplicate is submitted, the endpoint returns the existing registration with a 200 (not 409) to gracefully handle double-clicks and page refreshes. The registration record is updated only if the form data differs (upsert semantics).",
     domains: ["backend"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "scope_insight",
-    summary: "Slack notifications have 3x higher engagement than email for time-sensitive alerts",
+    summary:
+      "90% of registrations happen within 48 hours of event announcement — registration form load time is critical in that window",
     details:
-      "Analysis by pm-lead: Tracking data showed Slack notifications for mentions and assignment changes had a 68% click-through rate vs. 22% for email. Recommend defaulting to Slack for action-required notifications and email for digests.",
-    domains: ["pm"],
-    confidence: "inferred",
-    confidence_score: 0.65,
-  },
-  {
-    type: "anti_pattern",
-    summary: "Rendering notification templates at send-time caused Lambda cold start timeouts",
-    details:
-      "Reported by infra-agent-04: Handlebars template compilation on cold Lambda starts added 800ms. Fixed by pre-compiling templates at build time and bundling compiled output. Cold start dropped to under 200ms.",
-    domains: ["infra", "backend"],
+      "Analysis by pm-lead: Data from existing EMC shows a sharp registration spike in the 48 hours after an event is announced via email blast. The registration form must handle burst traffic and load in under 2 seconds. This informed the decision to CDN-cache the form schema and pre-warm the registration API Lambda.",
+    domains: ["pm", "infra"],
     confidence: "inferred",
     confidence_score: 0.7,
   },
   {
     type: "decision",
-    summary: "Use DynamoDB TTL to auto-expire read in-app notifications after 90 days",
+    summary:
+      "Export registrations as CSV with configurable column mapping — no Excel format to avoid dependency",
     details:
-      "Decision by be-agent-06: In-app notifications marked as read get a TTL of 90 days. Unread notifications persist indefinitely. Keeps the notifications table lean without manual cleanup jobs.",
-    domains: ["backend", "infra"],
+      "Decision by be-agent-registration: Registration export uses CSV format with a column mapping configuration (which form fields become which CSV columns, in what order). Excel (.xlsx) was considered but requires a heavy library (exceljs) and most organizers import into Google Sheets anyway. CSV is universal and keeps the export Lambda fast.",
+    domains: ["backend", "pm"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+  },
+  {
+    type: "anti_pattern",
+    summary:
+      "Rendering registration counts as a live counter on the event page caused N+1 query issues",
+    details:
+      "Reported by qa-agent-registration: The event list page showed a live registration count per event. Each event row triggered a separate COUNT query against the registrations table. For an org with 50 active events, this produced 50 queries per page load. Fix: maintain a registration_count column on the events table, updated via a database trigger on registration insert/delete.",
+    domains: ["backend", "frontend"],
     confidence: "extracted",
     confidence_score: 0.9,
   },
   {
     type: "pattern",
-    summary: "Notification content should be self-contained — never require a second API call to render",
+    summary:
+      "Registration form preview mode renders the form with sample data without creating records — essential for organizer testing",
     details:
-      "Implemented by fe-agent-06: Each notification payload includes all display-ready data (actor name, action verb, entity title, deep link URL). The frontend renders directly from the payload without fetching additional context. Improves render speed and reduces API load.",
-    domains: ["frontend", "backend"],
-    confidence: "inferred",
-    confidence_score: 0.75,
+      "Implemented by fe-agent-registration: The RSVP form editor includes a 'Preview' button that renders the FormRenderer in read-only mode with sample data. The preview uses the same rendering path as the live form but submits to a no-op endpoint. This lets organizers see exactly how their form will look before publishing, including locale overlays and custom attributes.",
+    domains: ["frontend", "design"],
+    confidence: "extracted",
+    confidence_score: 0.9,
   },
 ];
 
-export function seedKnowledgeGraph(): void {
+export async function seedKnowledgeGraph(): Promise<void> {
   const graph = getGraph();
   if (graph.nodes.length > 0) return; // Already seeded
 
-  console.log("[knowledge-graph] Seeding mock knowledge from archived pods...");
+  console.log("[knowledge-graph] Seeding mock knowledge from archived EMC pods...");
 
-  const result1 = addLearningsToGraph(
-    onboardingLearnings,
-    "pod-onboarding-v2",
-    "Onboarding Flow v2",
+  const result1 = await addLearningsToGraph(
+    eventCrudLearnings,
+    "pod-emc-event-crud",
+    "Event CRUD v1",
   );
   console.log(
-    `[knowledge-graph] Onboarding Flow v2: ${result1.nodesAdded} nodes, ${result1.edgesAdded} edges`,
+    `[knowledge-graph] Event CRUD v1: ${result1.nodesAdded} nodes, ${result1.edgesAdded} edges`,
   );
 
-  const result2 = addLearningsToGraph(
-    notificationLearnings,
-    "pod-notifications",
-    "Notification System",
+  const result2 = await addLearningsToGraph(
+    registrationLearnings,
+    "pod-emc-registration",
+    "Registration Forms v1",
   );
   console.log(
-    `[knowledge-graph] Notification System: ${result2.nodesAdded} nodes, ${result2.edgesAdded} edges`,
+    `[knowledge-graph] Registration Forms v1: ${result2.nodesAdded} nodes, ${result2.edgesAdded} edges`,
   );
 
   console.log(

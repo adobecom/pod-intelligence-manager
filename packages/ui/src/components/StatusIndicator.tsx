@@ -1,5 +1,5 @@
 import { StatusLight } from "@react-spectrum/s2";
-import type { AreaStatus } from "@council/shared";
+import type { AreaStatus } from "@pim/shared";
 
 const statusConfig: Record<
   AreaStatus,

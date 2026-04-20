@@ -20,7 +20,7 @@ import type {
   CurationAction,
   ContextUpdateType,
   Scope,
-} from "@council/shared";
+} from "@pim/shared";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
@@ -29,6 +29,13 @@ import {
   keywordsFromTexts,
   scoreRelevance,
 } from "./graph-analysis.js";
+import {
+  generateEmbedding,
+  embedText,
+  batchEmbedWithRateLimit,
+  cosineSimilarity,
+  isEmbeddingAvailable,
+} from "./embeddings.js";
 
 // --- In-Memory Cache ---
 
@@ -54,6 +61,15 @@ export function initializeKnowledgeGraph(orgId: string): void {
   console.log(
     `[knowledge-graph] Loaded graph for org "${orgId}": ${graph.nodes.length} nodes, ${graph.edges.length} edges`,
   );
+
+  const unembeddedCount = graph.nodes.filter((n) => !n.embedding).length;
+  if (unembeddedCount > 0 && isEmbeddingAvailable()) {
+    console.log(`[knowledge-graph] Scheduling background embedding backfill for ${unembeddedCount} nodes`);
+    // Fire-and-forget: does not block server startup
+    batchEmbedWithRateLimit(graph.nodes, () => {
+      if (graph) saveGraph(graph.org_id, graph);
+    }).catch((err) => console.error("[knowledge-graph] Backfill failed:", err));
+  }
 }
 
 export function getGraph(): KnowledgeGraph {
@@ -73,12 +89,12 @@ function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): numbe
 
 // --- Add Learnings ---
 
-export function addLearningsToGraph(
+export async function addLearningsToGraph(
   learnings: EnhancedPodLearning[],
   podId: string,
   podName: string,
   project?: { project_id: string; project_name: string },
-): { nodesAdded: number; edgesAdded: number } {
+): Promise<{ nodesAdded: number; edgesAdded: number }> {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
   const now = new Date().toISOString();
@@ -101,6 +117,10 @@ export function addLearningsToGraph(
       created_at: now,
       curated: false,
     };
+
+    // Generate embedding immediately so edges built below can use cosine similarity
+    node.embedding = (await generateEmbedding(embedText(node))) ?? undefined;
+
     newNodes.push(node);
   }
 
@@ -168,6 +188,15 @@ export function maybeAddProjectContextSignalToGraph(
   graph.communities = detectCommunities(graph);
   hubIds = new Set(identifyHubs(graph));
   saveGraph(graph.org_id, graph);
+
+  // Generate embedding async without blocking the caller
+  generateEmbedding(embedText(node)).then((emb) => {
+    if (emb && graph) {
+      node.embedding = emb;
+      saveGraph(graph.org_id, graph);
+    }
+  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
+
   return { added: true };
 }
 
@@ -195,7 +224,7 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string
 export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryResult {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
-  const { filters, max_tokens, include_details = false, include_edges = false, limit } = options;
+  const { filters, max_tokens, include_details = false, include_edges = false, limit, query_embedding } = options;
 
   // Step 1: Filter nodes
   let candidates = graph.nodes.filter((node) => {
@@ -237,10 +266,16 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
   const scopes = filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters);
 
-  const scored = candidates.map((node) => ({
-    node,
-    score: scoreRelevance(node, { scopes, keywords }, hubIds),
-  }));
+  const scored = candidates.map((node) => {
+    const querySimilarity =
+      query_embedding && node.embedding
+        ? cosineSimilarity(query_embedding, node.embedding)
+        : undefined;
+    return {
+      node,
+      score: scoreRelevance(node, { scopes, keywords, querySimilarity }, hubIds),
+    };
+  });
   scored.sort((a, b) => b.score - a.score);
 
   // Step 3: Apply token budget and/or limit
@@ -286,13 +321,19 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
 
 // --- Convenience: Get Relevant Learnings ---
 
-export function getRelevantLearnings(
+export async function getRelevantLearnings(
   scopes: string[],
   activeConflictSummaries: string[],
   maxTokens: number,
   projectId?: string | null,
-): KnowledgeQueryResult {
+): Promise<KnowledgeQueryResult> {
   const keywords = keywordsFromTexts(activeConflictSummaries, 40);
+
+  // Use conflict summaries as the semantic query (scopes are handled by domain filter)
+  const queryText = activeConflictSummaries.filter(Boolean).join(" ");
+  const queryEmbedding = queryText.trim()
+    ? await generateEmbedding(queryText)
+    : null;
 
   return queryKnowledge({
     filters: {
@@ -302,22 +343,28 @@ export function getRelevantLearnings(
     },
     max_tokens: maxTokens,
     include_details: false,
+    query_embedding: queryEmbedding,
   });
 }
 
 // --- Convenience: Get Precedents ---
 
-export function getPrecedents(
+export async function getPrecedents(
   conflictSummary: string,
   maxTokens: number,
-): KnowledgeQueryResult {
+): Promise<KnowledgeQueryResult> {
+  const queryEmbedding = conflictSummary.trim()
+    ? await generateEmbedding(conflictSummary)
+    : null;
+
   return queryKnowledge({
     filters: {
       types: ["resolved_conflict"],
-      text_search: conflictSummary.slice(0, 100), // Use first 100 chars for matching
+      text_search: conflictSummary.slice(0, 100),
     },
     max_tokens: maxTokens,
     include_details: true,
+    query_embedding: queryEmbedding,
   });
 }
 

@@ -9,7 +9,7 @@ interface WSEvent {
 export type WSStatus = "connecting" | "connected" | "disconnected";
 
 /**
- * Subscribe to real-time council events. The server multiplexes rooms by `podId` query param;
+ * Subscribe to real-time PIM events. The server multiplexes rooms by `podId` query param;
  * use roomId `"global"` for org-wide broadcasts (e.g. project context updates).
  */
 export function useWebSocket(

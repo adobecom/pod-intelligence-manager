@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# AI Council — CLI Demo
+# PIM — CLI Demo
 #
-# Demonstrates the full Council workflow using CLI commands.
+# Demonstrates the full PIM workflow using CLI commands.
 #
 # Prerequisites:
-#   1. Start the server: pnpm --filter @council/server dev
-#   2. Optionally start the UI: pnpm --filter @council/ui dev
+#   1. Start the server: pnpm --filter @pim/server dev
+#   2. Optionally start the UI: pnpm --filter @pim/ui dev
 #
 # Usage:
 #   bash examples/demo-cli.sh
@@ -18,7 +18,7 @@ DIVIDER="═══════════════════════�
 
 echo ""
 echo "$DIVIDER"
-echo "  AI Council — CLI Demo"
+echo "  PIM — CLI Demo"
 echo "$DIVIDER"
 
 echo ""

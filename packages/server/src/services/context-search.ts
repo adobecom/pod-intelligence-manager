@@ -8,9 +8,9 @@ import type {
   ContextSearchResult,
   ContextSource,
   ProjectResources,
-} from "@council/shared";
-import { CONTEXT_SOURCES } from "@council/shared";
-import { callLLM, isLLMAvailable, MODELS } from "../council/llm.js";
+} from "@pim/shared";
+import { CONTEXT_SOURCES } from "@pim/shared";
+import { callLLM, isLLMAvailable, MODELS } from "../pim/llm.js";
 import { redactSecrets } from "./secret-scan.js";
 import { searchSlack } from "../integrations/slack.js";
 import { searchFluffyjaws } from "../integrations/fluffyjaws.js";

@@ -9,16 +9,17 @@ import {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "@council/shared";
+  EMPTY_PROJECT_ANATOMY,
+} from "@pim/shared";
 
-const DEFAULT_PROJECT_ID = "project-demo";
+const DEFAULT_PROJECT_ID = "project-emc";
 
 export function seedDatabase() {
   const podCount = db.prepare("SELECT COUNT(*) as count FROM pods").get() as { count: number };
   if (podCount.count > 0) return; // Already seeded
 
   const insertProject = db.prepare(
-    "INSERT INTO projects (project_id, name, description, created_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO projects (project_id, name, description, created_at, anatomy_json) VALUES (?, ?, ?, ?, ?)",
   );
   const insertPod = db.prepare(
     "INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -54,9 +55,10 @@ export function seedDatabase() {
   const transaction = db.transaction(() => {
     insertProject.run(
       DEFAULT_PROJECT_ID,
-      "Demo initiative",
-      "Shared project for seed pods",
+      "EMC Platform",
+      "Event Management Console for Adobe events — RBAC, sessions, and scope-level configs",
       new Date().toISOString(),
+      JSON.stringify(EMPTY_PROJECT_ANATOMY),
     );
 
     // Pods + areas

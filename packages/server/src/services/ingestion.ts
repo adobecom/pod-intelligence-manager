@@ -4,11 +4,15 @@ import db from "../db/connection.js";
 import { scanForSecrets } from "./secret-scan.js";
 import { scoreUpdate } from "./quality-scoring.js";
 import { broadcast } from "../ws/index.js";
-import { processUpdate, type CouncilResult } from "../council/master.js";
-import type { ContextUpdate } from "@council/shared";
+import { processUpdate, type PimResult } from "../pim/master.js";
+import type { ContextUpdate } from "@pim/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
+import { scheduleAsyncQualityScore } from "./async-quality-score.js";
+import { getOrgScopeIds } from "./org-settings.js";
 
-const ScopeSchema = z.enum(["frontend", "backend", "design", "qa", "infra", "pm"]);
+const ScopeSchema = z.string().min(1).refine(s => getOrgScopeIds().has(s), {
+  message: "scope must be one of the org-defined scope ids",
+});
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
 const WorkStatusSchema = z.enum(["completed", "in_progress", "blocked"]);
 
@@ -41,10 +45,28 @@ export type ContextUpdateInput = z.infer<typeof ContextUpdateInputSchema>;
 export interface IngestionResult {
   success: boolean;
   update?: ContextUpdate;
-  council?: CouncilResult;
+  pim?: PimResult;
   error?: string;
   secretFindings?: string[];
   deduplicated?: boolean;
+}
+
+export type PreValidateResult =
+  | { success: true }
+  | { success: false; error: string; secretFindings?: string[] };
+
+export function preValidateAndScan(input: unknown): PreValidateResult {
+  const parsed = ContextUpdateInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: `Validation failed: ${parsed.error.message}` };
+  }
+  const data = parsed.data;
+  const textToScan = [data.summary, data.details, ...data.artifacts.map(a => a.path ?? a.url ?? "")].join(" ");
+  const scanResult = scanForSecrets(textToScan);
+  if (!scanResult.clean) {
+    return { success: false, error: "Context update rejected: potential secrets detected", secretFindings: scanResult.findings };
+  }
+  return { success: true };
 }
 
 export async function ingestContextUpdate(podId: string, input: unknown): Promise<IngestionResult> {
@@ -88,7 +110,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
        AND timestamp > datetime('now', '-60 seconds')`
     ).get(podId, commitSha) as { id: string } | undefined;
     if (recent) {
-      return { success: true, update: undefined, council: undefined, deduplicated: true };
+      return { success: true, update: undefined, pim: undefined, deduplicated: true };
     }
   }
 
@@ -137,8 +159,11 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     payload: update,
   });
 
-  // 8. Run through Council Master (classify, route, regenerate living doc)
-  const councilResult = await processUpdate(update);
+  // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
+  const pimResult = await processUpdate(update);
 
-  return { success: true, update, council: councilResult };
+  // 9. Async AI quality score (non-blocking; updates row + WS when done)
+  scheduleAsyncQualityScore(podId, update.id);
+
+  return { success: true, update, pim: pimResult };
 }

@@ -1,4 +1,4 @@
-# AI Council System — Living Doc
+# PIM System — Living Doc
 
 > **Status:** v1 Spec Complete — Ready for Implementation Planning
 > **Last Updated:** 2026-04-03
@@ -12,15 +12,15 @@
 
 ## 1. Vision
 
-An **AI Council** is the connective tissue of a cross-functional pod. It is a persistent, living orchestration layer that ensures every agent (AI or human) contributing to a project shares one source of truth — automatically, in real time, with zero manual sync overhead.
+An **PIM** is the connective tissue of a cross-functional pod. It is a persistent, living orchestration layer that ensures every agent (AI or human) contributing to a project shares one source of truth — automatically, in real time, with zero manual sync overhead.
 
 The system has three pillars:
 
 | Pillar | Core Idea |
 |---|---|
 | **FE Tunneling** | Expo-style localhost tunneling so anyone can visit a dev's running app remotely. Multiple tunnels per pod. |
-| **AI Council (Brain)** | An autonomous context bus with a Council Master orchestrator and specialized Committee agents. Maintains a canonical read-only living doc. |
-| **Council UI (Surface)** | A Spectrum 2 dashboard where all pod members observe progress, contribute context by talking to the Council, and resolve conflicts. |
+| **PIM (Brain)** | An autonomous context bus with a PIM orchestrator orchestrator and specialized Committee agents. Maintains a canonical read-only living doc. |
+| **PIM UI (Surface)** | A Spectrum 2 dashboard where all pod members observe progress, contribute context by talking to PIM, and resolve conflicts. |
 
 ---
 
@@ -37,7 +37,7 @@ The mental model is Expo's tunnel mode: a dev runs their local dev server, a CLI
 ```
 Dev's localhost:3000
        │
-  Council CLI (tunnel start)
+  PIM CLI (tunnel start)
        │
   WebSocket/HTTP tunnel client
        │  ── outbound connection (no port forwarding needed) ──
@@ -46,7 +46,7 @@ Dev's localhost:3000
        │
   Lambda@Edge / Lambda (connection broker)
        │
-  Route: {pod-id}-{dev-alias}.council.{org}.aws
+  Route: {pod-id}-{dev-alias}.pim.{org}.aws
        │
   ──► Proxied back to dev's localhost in real time
 ```
@@ -54,23 +54,23 @@ Dev's localhost:3000
 **AWS Services Used:**
 - **API Gateway (WebSocket API)** — Persistent connection endpoint. Each tunnel is a WebSocket session.
 - **Lambda** — Connection broker that maps incoming HTTP requests to the correct dev tunnel session.
-- **Route 53** — Stable subdomain routing: `{pod}-{dev}.council.yourdomain.com`
+- **Route 53** — Stable subdomain routing: `{pod}-{dev}.pim.yourdomain.com`
 - **DynamoDB** — Tunnel registry: tracks which dev tunnels are live, their pod, branch, and health status.
 - **CloudFront** — CDN layer in front of API Gateway for the tunnel URLs.
 - **Cognito** — Auth for tunnel URLs. Pod members get access automatically; external stakeholders via invite link.
-- **ACM** — Wildcard cert on `*.council.{org}.com`, auto-provisioned, zero config per tunnel.
+- **ACM** — Wildcard cert on `*.pim.{org}.com`, auto-provisioned, zero config per tunnel.
 
 ### Multi-Tunnel Support
 
 Multiple FE devs can tunnel simultaneously. Each gets their own stable URL:
 
 ```
-checkout-redesign-alice.council.acme.com  ← Alice's local branch
-checkout-redesign-bob.council.acme.com    ← Bob's local branch
-checkout-redesign-carol.council.acme.com  ← Carol's local branch
+checkout-redesign-alice.pim.acme.com  ← Alice's local branch
+checkout-redesign-bob.pim.acme.com    ← Bob's local branch
+checkout-redesign-carol.pim.acme.com  ← Carol's local branch
 ```
 
-The Council UI shows a **tunnel dashboard** listing all active tunnels for the pod:
+The PIM UI shows a **tunnel dashboard** listing all active tunnels for the pod:
 
 | Dev | Branch | URL | Status | Last Activity |
 |-----|--------|-----|--------|---------------|
@@ -83,7 +83,7 @@ The Council UI shows a **tunnel dashboard** listing all active tunnels for the p
 Starting a tunnel should be one command:
 
 ```bash
-npx council tunnel start --pod checkout-redesign --port 3000
+npx pim tunnel start --pod checkout-redesign --port 3000
 ```
 
 The CLI:
@@ -91,22 +91,22 @@ The CLI:
 2. Registers the tunnel in DynamoDB with pod ID, dev identity, branch name.
 3. Opens outbound WebSocket to API Gateway (works behind NAT/firewalls, no port forwarding).
 4. Prints the live URL.
-5. Council Master is automatically notified → logs "tunnel active" in the living doc context stream.
+5. PIM orchestrator is automatically notified → logs "tunnel active" in the living doc context stream.
 
-**No infra setup required by the team.** The org deploys the Council infra stack once (CDK), and any pod just uses it.
+**No infra setup required by the team.** The org deploys PIM infra stack once (CDK), and any pod just uses it.
 
 ### Key Design Decisions (Resolved)
 
 - **Latency:** 200ms is acceptable. The tunnel is for designers/PMs to observe real-time progress, not for the dev's own workflow. No regional edge nodes needed.
 - **Asset handling:** Tunnel everything through the WebSocket connection as-is. The dev's local bundler already serves optimized dev builds. No S3/CloudFront asset splitting — it adds complexity for a marginal gain that reviewers won't notice.
-- **HTTPS:** Wildcard cert on `*.council.{org}.com` via ACM, attached to the CloudFront distribution / API Gateway custom domain. Auto-provisioned, zero config per tunnel.
-- **Tunnel health:** Heartbeat every 60 seconds from the CLI client. A tunnel is marked **idle** (yellow in the dashboard) after 20 minutes of no HTTP requests flowing through it. A tunnel is **disconnected** only if the heartbeat stops (dev closes laptop, kills terminal, network drops). We do NOT auto-disconnect idle tunnels — in AI pod workflows, a dev might be waiting 15+ minutes for code generation with no localhost changes, but the tunnel should stay up so reviewers can still access the last-served state. Tunnels are cleaned up only on explicit `council tunnel stop`, terminal exit, or heartbeat failure.
+- **HTTPS:** Wildcard cert on `*.pim.{org}.com` via ACM, attached to the CloudFront distribution / API Gateway custom domain. Auto-provisioned, zero config per tunnel.
+- **Tunnel health:** Heartbeat every 60 seconds from the CLI client. A tunnel is marked **idle** (yellow in the dashboard) after 20 minutes of no HTTP requests flowing through it. A tunnel is **disconnected** only if the heartbeat stops (dev closes laptop, kills terminal, network drops). We do NOT auto-disconnect idle tunnels — in AI pod workflows, a dev might be waiting 15+ minutes for code generation with no localhost changes, but the tunnel should stay up so reviewers can still access the last-served state. Tunnels are cleaned up only on explicit `pim tunnel stop`, terminal exit, or heartbeat failure.
 - **State injection:** Out of scope for v1.
 - **Multi-device / responsiveness:** Not a tunneling concern. The tunnel serves whatever the dev's localhost serves.
 
 ### Decided Out of Scope (v1)
-- ~~Embed tunnel preview inside Council UI~~ — Nice-to-have, revisit post-v1.
-- ~~Auto-record visual diffs~~ — Token cost too high for the Council Master to process screenshots on every push.
+- ~~Embed tunnel preview inside PIM UI~~ — Nice-to-have, revisit post-v1.
+- ~~Auto-record visual diffs~~ — Token cost too high for the PIM orchestrator to process screenshots on every push.
 - ~~Side-by-side tunnel comparison~~ — Users can open two browser tabs if needed.
 
 ### Future Exploration: Annotation Layer on Live Preview
@@ -115,23 +115,23 @@ The CLI:
 The idea: reviewers visiting a tunnel URL see a floating toolbar that lets them click any element on the page and leave a comment, anchored to that DOM node. Think Figma comments but on the live running app.
 
 How it would work:
-- The Council CLI injects a lightweight script tag into the tunneled response (a ~5KB overlay).
+- The PIM CLI injects a lightweight script tag into the tunneled response (a ~5KB overlay).
 - Clicking "annotate mode" dims the page and makes elements hoverable/clickable.
 - A comment is saved with a CSS selector path + viewport coordinates + screenshot snippet of the target area.
-- Comments are posted to the Council as context updates (type: `feedback`, scope: `design` or `qa`).
-- The Council Master includes them in the living doc under a "Review Feedback" section.
-- The dev sees the comments as a list in their terminal (via CLI) or in the Council UI.
+- Comments are posted to PIM as context updates (type: `feedback`, scope: `design` or `qa`).
+- The PIM orchestrator includes them in the living doc under a "Review Feedback" section.
+- The dev sees the comments as a list in their terminal (via CLI) or in the PIM UI.
 
 ---
 
-## 3. Pillar 2 — AI Council (The Brain)
+## 3. Pillar 2 — PIM (The Brain)
 
 ### 3.1 Core Loop
 
 ```
-Agent does work ──► Agent reports context delta to Council
+Agent does work ──► Agent reports context delta to PIM
                               │
-                    Council Master receives delta
+                    PIM orchestrator receives delta
                               │
                     Master routes to appropriate Committee agent
                               │
@@ -146,9 +146,9 @@ Agent does work ──► Agent reports context delta to Council
                     Agents fetch latest context before next action
 ```
 
-### 3.2 Council Master — Responsibilities
+### 3.2 PIM orchestrator — Responsibilities
 
-The Council Master is a dedicated lightweight orchestrator. It does NOT do feature work and does NOT hold large context windows. Its job:
+The PIM orchestrator is a dedicated lightweight orchestrator. It does NOT do feature work and does NOT hold large context windows. Its job:
 
 1. **Receive** — Accept context updates from any agent or human.
 2. **Route** — Delegate processing to the appropriate Committee agent (Merge, Conflict, Summary, Cross-Pod).
@@ -187,7 +187,7 @@ context_update:
 
 ### 3.4 Living Doc Structure
 
-The living doc is a **read-only output** assembled from DynamoDB state by the Summary Agent. No one edits it directly — humans and agents alike contribute by talking to the Council (submitting context updates), and the doc reflects the current state.
+The living doc is a **read-only output** assembled from DynamoDB state by the Summary Agent. No one edits it directly — humans and agents alike contribute by talking to PIM (submitting context updates), and the doc reflects the current state.
 
 ```
 # Pod: Checkout Redesign — Living Doc
@@ -223,18 +223,18 @@ v0.1 — Cart + Summary Page (Target: Apr 4)
 - [Apr 1 17:45] design-lead: Uploaded revised cart mockups v3...
 
 ## Active Tunnels
-- 🟢 alice: feat/cart-summary → checkout-alice.council.acme.com
-- 🟢 bob: feat/checkout-flow → checkout-bob.council.acme.com
+- 🟢 alice: feat/cart-summary → checkout-alice.pim.acme.com
+- 🟢 bob: feat/checkout-flow → checkout-bob.pim.acme.com
 ```
 
 ### 3.5 Conflict Resolution Protocol
 
-The Council Master encounters contradictions — two agents making incompatible assumptions, a design spec that conflicts with an engineering decision. The Master does NOT silently pick a winner. It operates on a **confidence threshold model**:
+The PIM orchestrator encounters contradictions — two agents making incompatible assumptions, a design spec that conflicts with an engineering decision. The Master does NOT silently pick a winner. It operates on a **confidence threshold model**:
 
 ```
 Incoming context delta
        │
-  Council Master routes to Merge Agent
+  PIM orchestrator routes to Merge Agent
        │
   ┌────┴──────────────────────────┐
   │  Can I merge this confidently? │
@@ -247,7 +247,7 @@ Incoming context delta
   Log decision         Identify contributors on each side
   with reasoning       │
                   Notify contributors
-                  (Council UI + optional Slack)
+                  (PIM UI + optional Slack)
                         │
                   Await human resolution
                         │
@@ -294,7 +294,7 @@ conflict:
 
 ### 3.6 Slack Integration for Conflict Escalation
 
-When the Council Master creates a conflict record, it can optionally push a notification to a Slack channel via the Slack API.
+When the PIM orchestrator creates a conflict record, it can optionally push a notification to a Slack channel via the Slack API.
 
 **AWS Implementation:**
 - **EventBridge rule** triggers on `conflict.created` events.
@@ -311,22 +311,22 @@ C-007: Discount display approach [BLOCKING]
 @alice (fe-agent-01) says: Strikethrough on original price
 @dana (design-lead) says: Separate "You save" line item
 
-Council Master's take:
+PIM orchestrator's take:
 > Approaches are mutually exclusive. One side's work
 > will need revision. Blocks QA sign-off.
 
-→ Resolve in Council UI: [link]
+→ Resolve in PIM UI: [link]
   or react here:
   :one: Strikethrough   :two: Separate line   :three: Need to discuss
 ```
 
 **Slack Resolution Flow (Optional Enhancement):**
 - If a tagged person reacts with an emoji vote, Lambda picks it up via Slack Events API.
-- If consensus is reached (e.g., both parties pick the same option), the Council Master auto-resolves the conflict and merges the decision into the living doc.
+- If consensus is reached (e.g., both parties pick the same option), the PIM orchestrator auto-resolves the conflict and merges the decision into the living doc.
 - If reactions conflict or someone picks `:three:`, the Master keeps it open and suggests a sync.
 - All Slack interactions are logged back into the context stream so nothing is lost outside the system.
 
-### 3.6.1 Conflict Accumulation & Council Health
+### 3.6.1 Conflict Accumulation & PIM Health
 
 **The Problem:**
 Open conflicts aren't just a backlog — they're **ambiguity in the spec**. Every unresolved conflict means the Master doesn't know which version of reality is true. When a new context update arrives, the Master has to reason about whether it depends on, assumes, or is affected by any open conflict. With N open conflicts, the reconciliation complexity grows combinatorially — the Master can't confidently place new updates against a spec that has multiple contested forks.
@@ -339,10 +339,10 @@ Both are failure modes. The system jams.
 
 **Solution: Conflict Pressure System**
 
-The Council tracks a **conflict pressure score** — a health metric for the pod:
+PIM tracks a **conflict pressure score** — a health metric for the pod:
 
 ```yaml
-council_health:
+pim_health:
   pod_id: "pod-checkout-redesign"
   open_conflicts: 4
   blocking_conflicts: 2
@@ -365,10 +365,10 @@ council_health:
 | 0.0–0.3 | **Normal** | Auto-merge with full confidence. Business as usual. |
 | 0.3–0.6 | **Cautious** | Master adds disclaimers to merges that touch areas near open conflicts. Flags potential entanglement but still merges. |
 | 0.6–0.8 | **Degraded** | Master stops auto-merging anything that could be affected by an open conflict. New updates in contested areas are held in a **pending queue** with a note: "Cannot merge until C-007, C-012 are resolved." |
-| 0.8–1.0 | **Critical / Paused** | Master pauses all non-trivial ingestion. Posts an urgent alert to Council UI + Slack: "Pod checkout-redesign is blocked. X conflicts must be resolved before work can continue." |
+| 0.8–1.0 | **Critical / Queued** | Context intake is still accepted (validation + secret scan run as normal) but PIM orchestration is paused. Incoming updates are written to an `ingestion_queue` and replayed automatically once conflicts are resolved and pressure drops below 0.8. If the queue grows past the backlog threshold (default: 10), an escalation alert fires to Slack. |
 
 **Escalation Ladder (Compressed for 5-Day Pods):**
-- Conflict created → Ping contributors immediately (Council UI + Slack).
+- Conflict created → Ping contributors immediately (PIM UI + Slack).
 - Unresolved >4h → Re-ping contributors, mark as urgent.
 - Unresolved >8h → Escalate to pod lead.
 - Unresolved >16h → Escalate to eng manager + flag in org dashboard.
@@ -376,10 +376,10 @@ council_health:
 
 **What Happens in Degraded/Critical Mode:**
 - Agents that submit updates in contested areas receive a **warning with full context** — which conflict their work touches, what the competing positions are, and what assumptions they'd be making by proceeding. The agent (and the developer driving it) decides whether to continue. The system does not block them.
-- If the agent proceeds and reports completed work, the update is held in the pending queue with a **presumption tag**: "This update assumes conflict C-007 resolves in favor of Position A (strikethrough). If Position B is chosen, this work will need revision." The Council Master runs a **conflict alignment analysis** — a brief assessment of how much rework each pending update would require under each possible resolution.
+- If the agent proceeds and reports completed work, the update is held in the pending queue with a **presumption tag**: "This update assumes conflict C-007 resolves in favor of Position A (strikethrough). If Position B is chosen, this work will need revision." The PIM orchestrator runs a **conflict alignment analysis** — a brief assessment of how much rework each pending update would require under each possible resolution.
 - The living doc shows a visible health banner at the top:
   ```
-  ⛔ COUNCIL HEALTH: CRITICAL (4 open conflicts, 2 blocking)
+  ⛔ PIM HEALTH: CRITICAL (4 open conflicts, 2 blocking)
   Ingestion is paused for contested areas. Resolve conflicts to unblock.
   ```
 - The Slack bot escalates to the pod lead / eng manager, not just the individual contributors.
@@ -393,18 +393,18 @@ council_health:
 **Decided Design Questions:**
 - **Pressure thresholds:** Bands stay as-is (0.3/0.6/0.8) but the escalation ladder is compressed for 5-day pod sprints. 4h/8h/16h/24h instead of 24h/48h/72h.
 - **Agent behavior under pressure:** Agents are warned with full conflict context but NOT blocked. If they proceed, their completed work is tagged with presumption metadata and the Master runs a conflict alignment analysis showing rework cost per resolution outcome.
-- **Conflict dependency graph:** Yes — delegated to a Council Committee sub-agent (see 3.8) to keep the Master's context window manageable.
+- **Conflict dependency graph:** Yes — delegated to a PIM Committee sub-agent (see 3.8) to keep the Master's context window manageable.
 - **Pressure visibility:** Visible to all — agents, humans, and the org dashboard. Full transparency.
 
 ### 3.7 Key Design Decisions
 (Resolved — see 3.10)
 
-### 3.8 Council Committee Architecture
+### 3.8 PIM Committee Architecture
 
-The Council Master can't do everything in a single context window. As the living doc grows and conflict graphs get complex, we decompose the Master's responsibilities across **sub-agents** — the Council Committee.
+The PIM orchestrator can't do everything in a single context window. As the living doc grows and conflict graphs get complex, we decompose the Master's responsibilities across **sub-agents** — PIM Committee.
 
 ```
-                    Council Master (Orchestrator)
+                    PIM orchestrator (Orchestrator)
                     ├── Delegates, routes, owns DynamoDB state
                     │
         ┌───────────┼──────────────┬──────────────────┬──────────────────┐
@@ -440,7 +440,7 @@ The Council Master can't do everything in a single context window. As the living
 Pods within the same org can share knowledge and context. If two pods run concurrently and touch related systems, they shouldn't operate in total isolation.
 
 **How it works:**
-- Each pod's Council Master registers its living doc scope in a shared **org-level context registry** (DynamoDB table scoped to the org).
+- Each pod's PIM orchestrator registers its living doc scope in a shared **org-level context registry** (DynamoDB table scoped to the org).
 - When a context update arrives that references a system or component owned by another pod, the **Cross-Pod Agent** detects the overlap and fetches a summary from the other pod's living doc.
 - Cross-pod context is read-only — Pod A can't modify Pod B's living doc. But it can surface: "Pod B has an active decision about the user auth token format that may affect your API contract."
 
@@ -469,9 +469,9 @@ When the checkout pod's BE agent reports an update touching the auth token forma
 
 ### 3.10 Proactive Linting Pass
 
-The Council shouldn't only react to incoming context updates — it should actively scan the living doc for problems that no one has explicitly reported. This is inspired by the pattern of running health checks and consistency lints against a knowledge base, rather than waiting for contradictions to surface organically.
+PIM shouldn't only react to incoming context updates — it should actively scan the living doc for problems that no one has explicitly reported. This is inspired by the pattern of running health checks and consistency lints against a knowledge base, rather than waiting for contradictions to surface organically.
 
-**The Summary Agent runs a periodic lint pass** (every 2 hours, or triggered manually from the Council UI). It scans the current DynamoDB state and flags:
+**The Summary Agent runs a periodic lint pass** (every 2 hours, or triggered manually from the PIM UI). It scans the current DynamoDB state and flags:
 
 ```yaml
 lint_results:
@@ -529,7 +529,7 @@ lint_results:
 - Added to the living doc under a "Lint Findings" section (auto-cleared when addressed).
 - Shown in the Pod Dashboard as a collapsible panel alongside the conflict list.
 - High-severity findings trigger notifications via the same per-user preference system as conflicts.
-- Findings are NOT conflicts — they're advisory. They don't create conflict records or affect pressure score. But if a lint finding goes unaddressed and later becomes an actual conflict, the Council Master can reference it: "This conflict was flagged as a dependency risk 6 hours ago."
+- Findings are NOT conflicts — they're advisory. They don't create conflict records or affect pressure score. But if a lint finding goes unaddressed and later becomes an actual conflict, the PIM orchestrator can reference it: "This conflict was flagged as a dependency risk 6 hours ago."
 
 **Cost:** The lint pass is a single Summary Agent call (Haiku-class) reading the current state. At once per 2 hours across a 5-day pod, that's ~60 calls — roughly $0.30 total. Negligible.
 
@@ -611,7 +611,7 @@ API endpoints:
 - `POST /api/knowledge/nodes/:id/curate` — human approval/rejection/editing of learnings
 
 **How learnings are used:**
-- **New pod seeding:** When `npx council pod create` runs, the server queries the knowledge graph for learnings matching the pod's scopes (3000 token budget) and appends a "Historical Knowledge Context" section to the initial living doc.
+- **New pod seeding:** When `npx PIM pod create` runs, the server queries the knowledge graph for learnings matching the pod's scopes (3000 token budget) and appends a "Historical Knowledge Context" section to the initial living doc.
 - **Living doc enrichment:** The Summary Agent includes a "Knowledge Context" section in every living doc regeneration (1500 token budget, confidence >= 0.6). This evolves as the pod's scopes and conflicts narrow.
 - **Conflict precedents:** When the Conflict Agent creates a conflict, it queries `getPrecedents()` and includes historical resolutions in its LLM analysis prompt, enabling it to say: "A similar conflict in the Onboarding pod was resolved by adopting approach X."
 - **Cross-pod historical enrichment:** The Cross-Pod Agent enriches overlap advisories with historical learnings from the knowledge graph, connecting current inter-pod overlaps to organizational memory.
@@ -621,13 +621,13 @@ API endpoints:
 After 10 pods, the knowledge graph has a rich network of patterns, anti-patterns, and scope insights with semantic relationships between them. Community detection groups related learnings, hub identification highlights the most interconnected organizational patterns. New pods start with increasingly useful context. The Cross-Pod Agent gets smarter because it draws on historical data, not just active pod overlap.
 
 **Human curation:**
-The Knowledge Graph UI (`/knowledge` route in the Council UI) lets humans inspect, approve, reject, and edit extracted learnings before they become trusted organizational memory. Uncurated learnings are still queryable but can be filtered out with `curated_only: true`.
+The Knowledge Graph UI (`/knowledge` route in the PIM UI) lets humans inspect, approve, reject, and edit extracted learnings before they become trusted organizational memory. Uncurated learnings are still queryable but can be filtered out with `curated_only: true`.
 
 **Cost:** One Knowledge Extraction Agent call per completed pod (Sonnet for LLM extraction + Haiku for edge inference). ~$0.05–0.15 per pod. Deterministic extraction (from DB) is free. The system gracefully degrades: no API key = deterministic-only extraction, which still provides useful knowledge.
 
 ### 3.12 Key Design Decisions (Resolved)
 
-- **Storage:** S3 for the living doc files (versioned bucket), DynamoDB for all structured state — conflict records, tunnel registry, pod metadata, context index, org registry. DynamoDB is the right choice because the Council agents need fast, structured reads/writes constantly (conflict lookups, pressure calculations, cross-pod registry scans). S3 is for the rendered `.md` artifact that humans read. The living doc is *assembled* from DynamoDB state, not the other way around.
+- **Storage:** S3 for the living doc files (versioned bucket), DynamoDB for all structured state — conflict records, tunnel registry, pod metadata, context index, org registry. DynamoDB is the right choice because PIM agents need fast, structured reads/writes constantly (conflict lookups, pressure calculations, cross-pod registry scans). S3 is for the rendered `.md` artifact that humans read. The living doc is *assembled* from DynamoDB state, not the other way around.
 - **Conflict resolution:** Semantic merge handled by the Merge Agent (committee member). Before any merge that touches a previously contested area, the resolution is presented to the human who resolved the conflict for a quick confirmation: "You decided strikethrough. This merge applies that decision to CartSummary.tsx. Confirm?" One-click approval.
 - **Context window:** Full doc for now. Agents fetch the entire living doc when requesting context. As docs grow, we can scope by role/area later — but for 5-day pods the doc won't get unmanageably large.
 - **Retention:** Manual for now. The org dashboard includes a pod management view where admins can archive completed pods. Archived pods move the living doc to S3 (cheaper tier) and tombstone the DynamoDB records. No automatic lifecycle policies yet.
@@ -635,14 +635,14 @@ The Knowledge Graph UI (`/knowledge` route in the Council UI) lets humans inspec
 
 ---
 
-## 4. Pillar 3 — Council UI
+## 4. Pillar 3 — PIM UI
 
 ### 4.1 Core Surfaces
 
 | Surface | Purpose | Priority |
 |---|---|---|
 | **Pod Dashboard** | Pod health at a glance — conflict pressure, milestone progress, active blockers, tunnel status, last activity per area. | v1 |
-| **Live Doc View** | The rendered living doc — **read-only**. The doc is the Council's output, not an editable surface. To change it, talk to the Council. | v1 |
+| **Live Doc View** | The rendered living doc — **read-only**. The doc is PIM's output, not an editable surface. To change it, talk to PIM. | v1 |
 | **Context Feed** | Real-time stream of all agent/human contributions, filterable by scope/type/agent. Think GitHub activity feed for the pod. | v1 |
 | **Conflict Center** | Dedicated view for open conflicts — full detail, Master's analysis, presumption-tagged pending work, one-click resolution. | v1 |
 | **Tunnel Dashboard** | All active tunnels for the pod with status, branch, and clickable URLs. | v1 |
@@ -652,13 +652,13 @@ The Knowledge Graph UI (`/knowledge` route in the Council UI) lets humans inspec
 
 ### 4.2 Interaction Model
 
-- **Humans** contribute by talking to the Council — they submit context updates, resolve conflicts, and adjust milestones through the Council UI's input interface. The Council Master processes every input identically whether it came from a human or an AI agent.
+- **Humans** contribute by talking to PIM — they submit context updates, resolve conflicts, and adjust milestones through the PIM UI's input interface. The PIM orchestrator processes every input identically whether it came from a human or an AI agent.
 - **AI agents** contribute via the SDK/API — they post structured context updates after each work unit.
-- **Council Master** is the single merge authority — it treats human and agent inputs identically.
+- **PIM orchestrator** is the single merge authority — it treats human and agent inputs identically.
 
-**The living doc is read-only.** No one — human or agent — edits the `.md` directly. The canonical living doc is an output assembled from DynamoDB state by the Summary Agent. If you want to change something in the doc, you talk to the Council: submit a context update, a spec change request, or a conflict resolution. The Master processes it and the doc reflects the new state.
+**The living doc is read-only.** No one — human or agent — edits the `.md` directly. The canonical living doc is an output assembled from DynamoDB state by the Summary Agent. If you want to change something in the doc, you talk to PIM: submit a context update, a spec change request, or a conflict resolution. The Master processes it and the doc reflects the new state.
 
-This is the same model as a conversation with an AI — you don't edit the AI's output, you give it new input and it produces updated output. The living doc is the Council's output. The context stream is the input.
+This is the same model as a conversation with an AI — you don't edit the AI's output, you give it new input and it produces updated output. The living doc is PIM's output. The context stream is the input.
 
 ### 4.3 Real-Time Architecture — AWS Stack
 ```
@@ -670,7 +670,7 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
                     │         │                            │
                     │  EventBridge (Event Bus)              │
                     │         │                            │
-                    │  Lambda (Council Master Router)       │
+                    │  Lambda (PIM orchestrator Router)       │
                     │    ├── Lambda (Merge Agent)           │
                     │    ├── Lambda (Conflict Agent)        │
                     │    ├── Lambda (Summary Agent)         │
@@ -683,7 +683,7 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
                     └──────────────────────────────────────┘
                               │
                     ┌─────────┴─────────┐
-                    │   Council UI       │
+                    │   PIM UI       │
                     │   (CloudFront +    │
                     │    S3 static       │
                     │    hosting)        │
@@ -697,8 +697,8 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
 | Agent/Human API | API Gateway (REST + WebSocket) |
 | Event routing | EventBridge |
 | Compute (stateless) | Lambda |
-| Council Master AI | Bedrock (Claude) or external Claude API |
-| Council Committee Agents | Lambda (per-agent) + Bedrock |
+| PIM orchestrator AI | Bedrock (Claude) or external Claude API |
+| PIM Committee Agents | Lambda (per-agent) + Bedrock |
 | Living doc storage | S3 (versioned bucket) |
 | State & metadata | DynamoDB |
 | Tunnel registry | DynamoDB + API Gateway WebSocket |
@@ -742,8 +742,8 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
 │  └──────────────────────────────────────────────────────┘    │
 │                                                              │
 │  ┌─── Active Tunnels (2) ───────────────────────────────┐    │
-│  │ 🟢 alice  feat/cart-summary   checkout-alice.council…  │    │
-│  │ 🟢 bob    feat/checkout-flow  checkout-bob.council…    │    │
+│  │ 🟢 alice  feat/cart-summary   checkout-alice.pim…  │    │
+│  │ 🟢 bob    feat/checkout-flow  checkout-bob.pim…    │    │
 │  └──────────────────────────────────────────────────────┘    │
 │                                                              │
 │  ┌─── Recent Activity ──────────────────────────────────┐    │
@@ -775,7 +775,7 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
 │  │ Artifact: CartSummary.tsx   │ │ Artifact: mockup-v3.fig ││
 │  └─────────────────────────────┘ └─────────────────────────┘│
 │                                                              │
-│  ┌─── Council Master Analysis ──────────────────────────┐    │
+│  ┌─── PIM orchestrator Analysis ──────────────────────────┐    │
 │  │ These approaches are mutually exclusive in the        │    │
 │  │ current CartSummary layout. fe-agent-01 has already   │    │
 │  │ shipped strikethrough (lines 42-78). design-lead's    │    │
@@ -805,7 +805,7 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Acme Corp — AI Pod Council                                  │
+│  Acme Corp — AI Pod (PIM)                                    │
 │  Active Pods: 3    Archived: 12    Total Agents: 14          │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
@@ -864,27 +864,27 @@ This is the same model as a conversation with an AI — you don't edit the AI's 
 ## 5. Architecture Decisions (All Resolved)
 
 ### 5.1 Agent Protocol
-Formal protocol via the `@council/sdk`. The SDK wraps REST calls to API Gateway. The context update schema (section 3.3) is the contract. Agents that don't use the SDK can post raw JSON to the API Gateway endpoint following the same schema. MCP-adjacent in spirit but purpose-built for the council use case.
+Formal protocol via the `@pim/sdk`. The SDK wraps REST calls to API Gateway. The context update schema (section 3.3) is the contract. Agents that don't use the SDK can post raw JSON to the API Gateway endpoint following the same schema. MCP-adjacent in spirit but purpose-built for the PIM use case.
 
-### 5.2 Council Master Model
+### 5.2 PIM orchestrator Model
 Hybrid. The Master is a lightweight Lambda orchestrator (deterministic routing logic) that delegates AI reasoning to the Committee agents (section 3.8) running on Bedrock/Claude. The Master itself does NOT hold a large context window — it reads structured state from DynamoDB and routes to the right sub-agent.
 
-### 5.3 Multi-Council Topology
-Org-level context registry in DynamoDB (section 3.9). Cross-Pod Agent handles inter-pod awareness. No meta-council — the org dashboard gives humans the cross-pod view, and the Cross-Pod Agent handles automated advisory.
+### 5.3 Multi-PIM Topology
+Org-level context registry in DynamoDB (section 3.9). Cross-Pod Agent handles inter-pod awareness. No meta-PIM — the org dashboard gives humans the cross-pod view, and the Cross-Pod Agent handles automated advisory.
 
 ### 5.4 Security Boundary
 
-**Code access:** No. The Council never has read access to the actual codebase. Agents report summaries, metadata, and artifact references (file paths, tunnel URLs) — not source code. The Council reasons about *what changed and why*, not implementation details. Trust verification is handled by the tunnel (reviewers see live results) and normal code review processes. If a future need arises for code-aware reasoning, it would be a scoped, opt-in Committee agent — not blanket repo access.
+**Code access:** No. PIM never has read access to the actual codebase. Agents report summaries, metadata, and artifact references (file paths, tunnel URLs) — not source code. PIM reasons about *what changed and why*, not implementation details. Trust verification is handled by the tunnel (reviewers see live results) and normal code review processes. If a future need arises for code-aware reasoning, it would be a scoped, opt-in Committee agent — not blanket repo access.
 
 **Secret handling — Defense in Depth:**
 
 The responsibility is shared across two layers:
 
 **Layer 1 — Agent self-diligence (pod-level):**
-Agents running in pods are expected to be self-diligent about never committing or reporting secrets in their own processes. The `@council/sdk` documentation and agent onboarding make this expectation explicit. Agents strip secrets from their own outputs before reporting to the Council.
+Agents running in pods are expected to be self-diligent about never committing or reporting secrets in their own processes. The `@pim/sdk` documentation and agent onboarding make this expectation explicit. Agents strip secrets from their own outputs before reporting to PIM.
 
-**Layer 2 — Council-wide ironclad diligence (system-level):**
-The Council as a whole — every component in the pipeline — treats secret prevention as a non-negotiable invariant:
+**Layer 2 — PIM-wide ironclad diligence (system-level):**
+PIM as a whole — every component in the pipeline — treats secret prevention as a non-negotiable invariant:
 
 ```
 Agent submits context update
@@ -905,7 +905,7 @@ Agent submits context update
   └────┬────────────────────────────────┘
        │
   ┌────▼────────────────────────────────┐
-  │  Council Master / Committee Agents  │
+  │  PIM orchestrator / Committee Agents  │
   │  System prompts include explicit    │
   │  instruction: "If you encounter     │
   │  anything that appears to be a      │
@@ -945,7 +945,7 @@ Every context update triggers at minimum a DynamoDB write + EventBridge event. L
 - **Total: ~$5-8 per pod per sprint.** Negligible.
 
 ### 5.6 Bootstrap Flow
-One CLI command (section 6). `npx council pod create` initializes everything from a template. The CDK stack is the org-level one-time setup.
+One CLI command (section 6). `npx PIM pod create` initializes everything from a template. The CDK stack is the org-level one-time setup.
 
 ---
 
@@ -959,7 +959,7 @@ This is an Adobe internal tool. The stack decisions in this doc are recommendati
 The system uses a **monorepo** with clear package boundaries. The core reason: the context update schema (3.3) is a shared contract across the SDK, ingestion Lambda, every Committee agent, and the UI's type definitions. In a polyrepo setup, keeping that contract in sync across 4-5 repos is a constant source of drift, especially at sprint speed. A monorepo gives you shared types, atomic PRs when the schema changes, and one CI pipeline.
 
 ```
-council/
+pim/
 ├── packages/
 │   ├── shared/                    # Shared types, schemas, constants
 │   │   ├── src/
@@ -968,14 +968,14 @@ council/
 │   │   │   └── constants/         # Status enums, pressure thresholds, etc.
 │   │   └── package.json
 │   │
-│   ├── sdk/                       # @council/sdk — agent-facing client
+│   ├── sdk/                       # @pim/sdk — agent-facing client
 │   │   ├── src/
-│   │   │   ├── client.ts          # CouncilClient: report(), getContext()
+│   │   │   ├── client.ts          # PimClient: report(), getContext()
 │   │   │   ├── auth.ts            # IMS token handling for agents
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
-│   ├── cli/                       # npx council — tunnel + pod management
+│   ├── cli/                       # npx pim — tunnel + pod management
 │   │   ├── src/
 │   │   │   ├── commands/
 │   │   │   │   ├── tunnel.ts      # tunnel start/stop
@@ -987,7 +987,7 @@ council/
 │   │   │   └── index.ts
 │   │   └── package.json
 │   │
-│   ├── ui/                        # Council UI — Vite + React + Spectrum 2
+│   ├── ui/                        # PIM UI — Vite + React + Spectrum 2
 │   │   ├── src/
 │   │   │   ├── views/
 │   │   │   │   ├── PodDashboard/
@@ -1013,7 +1013,7 @@ council/
 │
 ├── lambdas/                       # Lambda function source code
 │   ├── ingestion/                 # Context update intake + secret scan
-│   ├── master/                    # Council Master router
+│   ├── master/                    # PIM orchestrator router
 │   ├── agents/
 │   │   ├── merge/                 # Merge Agent + Bedrock prompt
 │   │   ├── conflict/              # Conflict Agent + Bedrock prompt
@@ -1044,15 +1044,15 @@ council/
 - **pnpm workspaces** for dependency management — strict, fast, disk-efficient.
 
 ### Org-Level Setup (One-Time)
-1. Deploy the Council CDK stack to the org's AWS account.
-2. Configure Route 53 domain (`council.{org}.com`).
+1. Deploy PIM CDK stack to the org's AWS account.
+2. Configure Route 53 domain (`pim.{org}.com`).
 3. Configure Adobe IMS integration (client ID, allowed scopes, redirect URIs).
 4. Configure org-level roles and permissions in DynamoDB.
 5. Done. All pods share this infra.
 
 ### Pod-Level Setup (Per Team)
 ```bash
-npx council pod create --name "checkout-redesign" --members alice,bob,carol
+npx PIM pod create --name "checkout-redesign" --members alice,bob,carol
 ```
 
 This command:
@@ -1060,25 +1060,25 @@ This command:
 2. Provisions an S3 prefix for the pod's living doc and artifacts.
 3. Initializes the living doc from a template.
 4. Registers the pod in the org-level context registry with scope tags.
-5. Spins up the Council Master context (system prompt + pod config).
-6. Returns a Council UI link and invite codes for members.
+5. Spins up the PIM orchestrator context (system prompt + pod config).
+6. Returns a PIM UI link and invite codes for members.
 
 **No Terraform, no YAML, no infra tickets.** A PM or eng lead runs one command and the pod is live.
 
 ### Agent Integration (Plug-In)
-Any AI agent joins the council by adding a lightweight SDK:
+Any AI agent joins PIM by adding a lightweight SDK:
 
 ```typescript
-import { CouncilClient } from '@council/sdk';
+import { PimClient } from '@pim/sdk';
 
-const council = new CouncilClient({
+const pim = new PimClient({
   podId: 'checkout-redesign',
   agentId: 'fe-agent-01',
   scope: 'frontend'
 });
 
 // Report progress
-await council.report({
+await pim.report({
   type: 'progress',
   summary: 'Implemented CartSummary component',
   artifacts: [{ type: 'component', path: 'src/components/CartSummary.tsx' }],
@@ -1086,7 +1086,7 @@ await council.report({
 });
 
 // Fetch latest context before starting work
-const context = await council.getContext();
+const context = await pim.getContext();
 ```
 
 ---
@@ -1107,24 +1107,24 @@ These are independent workstreams that can be built in parallel on Day 1.
 - [ ] DynamoDB schema: pods, context_updates, conflicts, tunnels, org_registry, users, permissions, org_knowledge
 - [ ] Context ingestion Lambda: receives updates via API Gateway, validates against shared schema, writes to DynamoDB
 - [ ] Secret scan in ingestion Lambda: pattern-match rejection for common secret formats
-- [ ] Council Master Lambda (v0): deterministic router — receives EventBridge events, classifies update type, logs routing decision. No LLM yet.
-- [ ] `@council/sdk` v0: `report()` and `getContext()` over REST, imports types from `packages/shared`
-- [ ] `npx council pod create` CLI command: provisions DynamoDB entries + S3 prefix
+- [ ] PIM orchestrator Lambda (v0): deterministic router — receives EventBridge events, classifies update type, logs routing decision. No LLM yet.
+- [ ] `@pim/sdk` v0: `report()` and `getContext()` over REST, imports types from `packages/shared`
+- [ ] `npx PIM pod create` CLI command: provisions DynamoDB entries + S3 prefix
 - [ ] Adobe IMS auth integration: CLI login flow (browser-based), token caching, API Gateway authorizer validates IMS tokens
 
 **Tunneling (Days 1–2):**
-- [ ] Tunnel CLI: `npx council tunnel start --pod X --port Y`
+- [ ] Tunnel CLI: `npx pim tunnel start --pod X --port Y`
 - [ ] WebSocket tunnel client in the CLI: outbound connection to API Gateway
 - [ ] Lambda connection broker: maps inbound HTTP requests to the correct tunnel WebSocket session
-- [ ] Route 53 wildcard DNS + ACM wildcard cert for `*.council.{org}.com`
+- [ ] Route 53 wildcard DNS + ACM wildcard cert for `*.pim.{org}.com`
 - [ ] DynamoDB tunnel registry: tracks active tunnels, branch, heartbeat
 - [ ] Heartbeat mechanism: 60s ping from CLI, idle detection at 20 min, disconnect on heartbeat failure
-- [ ] Tunnel status reported as context updates to the Council
+- [ ] Tunnel status reported as context updates to PIM
 
 **Exit criteria:** An agent can submit a context update via the SDK, it passes the secret scan, lands in DynamoDB, and can be fetched back. Two devs can each tunnel their localhost and a third person can visit both URLs.
 
-### Milestone 2: Council Intelligence (Days 3–4)
-**Goal:** The Council Master can do semantic merging and detect conflicts.
+### Milestone 2: PIM Intelligence (Days 3–4)
+**Goal:** The PIM orchestrator can do semantic merging and detect conflicts.
 
 - [ ] Merge Agent Lambda + Bedrock prompt: semantic merge of context deltas, confidence scoring
 - [ ] Conflict Agent Lambda + Bedrock prompt: conflict detection, record creation, analysis generation
@@ -1138,7 +1138,7 @@ These are independent workstreams that can be built in parallel on Day 1.
 
 **Exit criteria:** Two contradictory updates produce a conflict record with analysis. Additive updates merge without LLM. Living doc renders correctly from state.
 
-### Milestone 3: Council UI (Days 4–6)
+### Milestone 3: PIM UI (Days 4–6)
 **Goal:** Humans can see pod health, read the living doc, and resolve conflicts.
 
 - [ ] Vite + React + Spectrum 2 project setup in `packages/ui`, S3 + CloudFront hosting
@@ -1149,7 +1149,7 @@ These are independent workstreams that can be built in parallel on Day 1.
 - [ ] Context Feed view: filterable real-time stream
 - [ ] Live Doc View: read-only rendered `.md` from S3
 - [ ] Tunnel Dashboard: active tunnels with status and clickable URLs
-- [ ] Human context input: talk-to-the-council interface
+- [ ] Human context input: talk-to-PIM interface
 
 **Exit criteria:** A PM can open the dashboard, see pod health, view a conflict, read the Master's analysis, and resolve it. Living doc updates within seconds.
 
@@ -1175,7 +1175,7 @@ These are independent workstreams that can be built in parallel on Day 1.
 **Goal:** Run a real pod on the system. Fix what breaks.
 
 - [ ] Select a real internal pod to dogfood
-- [ ] Agent integration: connect actual AI agents via `@council/sdk`
+- [ ] Agent integration: connect actual AI agents via `@pim/sdk`
 - [ ] Tunnel stress testing under realistic load
 - [ ] Conflict pressure calibration with real data
 - [ ] LLM prompt tuning based on real context updates
@@ -1184,7 +1184,7 @@ These are independent workstreams that can be built in parallel on Day 1.
 - [ ] Cost validation against $5-8/pod/sprint estimate
 - [ ] SDK docs, CLI docs, onboarding guide
 
-**Exit criteria:** A real pod completes a 5-day sprint using the Council. Post-mortem identifies what worked and what needs iteration.
+**Exit criteria:** A real pod completes a 5-day sprint using PIM. Post-mortem identifies what worked and what needs iteration.
 
 ---
 
@@ -1193,12 +1193,12 @@ These are independent workstreams that can be built in parallel on Day 1.
 | Term | Definition |
 |---|---|
 | **Pod** | A cross-functional team running a time-boxed sprint (typically 5 days). |
-| **Council** | The AI orchestration layer for a pod — Master + Committee + living doc. |
-| **Council Master** | The lightweight Lambda orchestrator that routes context updates to Committee agents. |
+| **PIM** | The AI orchestration layer for a pod — Master + Committee + living doc. |
+| **PIM orchestrator** | The lightweight Lambda orchestrator that routes context updates to Committee agents. |
 | **Committee** | Specialized sub-agents (Merge, Conflict, Summary, Cross-Pod, Knowledge Extraction) that handle specific reasoning tasks. |
-| **Living Doc** | The read-only canonical `.md` file assembled from DynamoDB state. The Council's output. |
+| **Living Doc** | The read-only canonical `.md` file assembled from DynamoDB state. PIM's output. |
 | **Context Update** | A structured report from an agent or human describing work done, decisions made, or blockers encountered. |
-| **Conflict** | A detected contradiction between two or more context updates that the Council cannot confidently resolve. |
+| **Conflict** | A detected contradiction between two or more context updates that PIM cannot confidently resolve. |
 | **Conflict Pressure** | A 0.0–1.0 health score reflecting how many open conflicts exist and how long they've been unresolved. |
 | **Lint Pass** | A periodic proactive scan of the living doc state for staleness, implicit assumptions, coverage gaps, dependency risks, and spec drift. |
 | **Tunnel** | An Expo-style outbound WebSocket connection from a dev's localhost to a stable remote URL. |

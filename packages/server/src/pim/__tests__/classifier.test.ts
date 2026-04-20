@@ -9,7 +9,7 @@ vi.mock("../../db/connection.js", () => ({
 
 import { classifyUpdate } from "../classifier.js";
 import db from "../../db/connection.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 
 function makeUpdate(overrides: Partial<ContextUpdate> = {}): ContextUpdate {
   return {

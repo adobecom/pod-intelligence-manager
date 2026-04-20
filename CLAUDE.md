@@ -4,38 +4,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Pod agent requirement
 
-When working **in a Council pod** (yours or a consumer repo using `@council/sdk`), you **must**:
+When working **in a pod managed by PIM** (yours or a consumer repo using `@pim/sdk`), you **must**:
 
-1. **Pull session context before substantive work** — use `CouncilClient.pullSessionContext()`, the MCP tool `get_agent_session_context`, or `council context` (see `docs/POD_AGENT_PROTOCOL.md`).
-2. **Report to the Council after lock-in** — commits, reverts, or equivalent; use `report()`, `council report`, MCP `submit_context_update`, or install git hooks with `council hooks install`.
+1. **Pull session context before substantive work** — use `PimClient.pullSessionContext()`, the MCP tool `get_agent_session_context`, or `pim context` (see `docs/POD_AGENT_PROTOCOL.md`).
+2. **Report to PIM after lock-in** — commits, reverts, or equivalent; use `report()`, `pim report`, MCP `submit_context_update`, or install git hooks with `pim hooks install`.
 
 Full normative text: [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md).
 
 ## Project Status
 
-Active implementation. Core backend (Fastify server, SQLite, WebSocket), Council Master, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. Running locally on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.
+Active implementation. Core backend (Fastify server, SQLite, WebSocket), PIM orchestrator, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. Running locally on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.
 
 ## What This Is
 
-**AI Council** is an Adobe-internal orchestration layer for cross-functional AI+human "pods" (5-day sprints). It keeps every agent (AI or human) synchronized via a canonical read-only "living doc" — automatically, in real time. Three pillars:
+**PIM** is an Adobe-internal orchestration layer for cross-functional AI+human "pods" (5-day sprints). It keeps every agent (AI or human) synchronized via a canonical read-only "living doc" — automatically, in real time. Three pillars:
 
 1. **FE Tunneling** — Expo-style localhost tunneling (one CLI command exposes a dev's local server to a stable URL for designers/PMs)
-2. **AI Council (Brain)** — A context bus: agents submit structured updates, a Council Master routes to Committee agents, a living `.md` is assembled from DynamoDB state and written to S3
-3. **Council UI (Surface)** — React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc
+2. **PIM (Brain)** — A context bus: agents submit structured updates, a PIM orchestrator routes to Committee agents, a living `.md` is assembled from DynamoDB state and written to S3
+3. **PIM UI (Surface)** — React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc
 
 ## Intended Monorepo Layout
 
 ```
-council/
+pim/
 ├── packages/
 │   ├── shared/        # Schemas, types, constants — single source of truth
-│   ├── sdk/           # @council/sdk (agent-facing client)
-│   ├── cli/           # npx council (tunnel + pod management)
+│   ├── sdk/           # @pim/sdk (agent-facing client)
+│   ├── cli/           # npx pim (tunnel + pod management)
 │   ├── ui/            # React Vite SPA + Adobe Spectrum 2
 │   └── infra/         # AWS CDK stack
 ├── lambdas/
 │   ├── ingestion/     # Context intake + secret scanning
-│   ├── master/        # Council Master router
+│   ├── master/        # PIM orchestrator router
 │   ├── agents/
 │   │   ├── merge/
 │   │   ├── conflict/
@@ -52,7 +52,7 @@ council/
 
 ## Key Architectural Decisions (from SPEC.md)
 
-### Council Master
+### PIM orchestrator
 - Lightweight Lambda orchestrator — deterministic routing only, no large context window
 - Does NOT do feature work; delegates reasoning to Committee agents
 - Enforces role-based permissions for spec changes and conflict resolutions
@@ -66,12 +66,12 @@ council/
 
 ### Living Doc
 - **Read-only output** assembled from DynamoDB state — never edited directly
-- Humans/agents influence it by submitting context updates to the Council
+- Humans/agents influence it by submitting context updates to PIM
 - Conflict Pressure score (0.0–1.0) gates merge behavior:
   - 0.0–0.3: Auto-merge freely
   - 0.3–0.6: Merge with disclaimers
   - 0.6–0.8: Hold contested areas
-  - 0.8–1.0: Ingestion halted
+  - 0.8–1.0: Intake queued (validation + secret scan still run; PIM orchestration paused until conflicts resolve; backlog alerts fire via Slack at threshold)
 
 ### Context Update Schema
 Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type` (progress|blocker|spec_change|question|decision), `scope` (frontend|backend|design|qa|infra|pm), `summary`, `details`, `artifacts`, `status`, `blocks`, `blocked_by`, `needs_input_from`.
@@ -79,7 +79,7 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 ### Tunneling
 - Outbound WebSocket from CLI to API Gateway (NAT-friendly, no port forwarding)
 - Tunnel health: heartbeat every 60s; idle after 20min of no traffic (yellow in UI); only disconnected on heartbeat failure — do NOT auto-disconnect idle tunnels
-- Stable URLs: `{pod}-{dev}.council.{org}.com` via Route 53 wildcard + ACM cert
+- Stable URLs: `{pod}-{dev}.pim.{org}.com` via Route 53 wildcard + ACM cert
 
 ### Security (Three Checkpoints)
 1. Ingestion Lambda: deterministic pattern scan for secrets (AWS keys, JWTs, connection strings)
@@ -87,7 +87,7 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 3. Summary Agent: pattern scan before every S3 write
 
 ### Knowledge Graph (Persistent Org Memory)
-- **Purpose:** The AI Council is the org's persistent knowledge base. Learnings accumulate across all pod lifecycles. Agents in new pods query it with token budgets to get relevant historical context without context window bloat.
+- **Purpose:** The PIM is the org's persistent knowledge base. Learnings accumulate across all pod lifecycles. Agents in new pods query it with token budgets to get relevant historical context without context window bloat.
 - **Storage:** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries. Local dev uses filesystem at `.data/knowledge-graph/`. The storage interface is 3 functions — swapping to S3 is a single-file change.
 - **Graph structure:** Nodes (decision, pattern, anti_pattern, resolved_conflict, scope_insight) + Edges (relates_to, supersedes, contradicts, builds_on, resolved_by) + Communities (label propagation clustering) + Hubs (high-degree nodes).
 - **Confidence levels:** `extracted` (deterministic from DB, score 0.9) vs `inferred` (LLM-generated, score 0.4–0.85). Inspired by graphify's approach.
@@ -124,14 +124,14 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 | Observability | CloudWatch + X-Ray |
 
 ## V1 Out of Scope
-- Tunnel preview embedded in Council UI
+- Tunnel preview embedded in PIM UI
 - Auto-recorded visual diffs
 - Side-by-side tunnel comparison
 - State injection into tunneled apps
 - Annotation layer on live preview (interesting, flagged for post-v1)
 
 ## Implementation Milestones (from SPEC.md)
-1. **Days 1–2:** Monorepo scaffold, shared types, CDK, DynamoDB schema, ingestion Lambda, secret scan, Council Master v0, SDK v0, CLI pod create, IMS auth
+1. **Days 1–2:** Monorepo scaffold, shared types, CDK, DynamoDB schema, ingestion Lambda, secret scan, PIM orchestrator v0, SDK v0, CLI pod create, IMS auth
 2. **Days 3–4:** Merge/Conflict/Summary agents + Bedrock prompts, lint pass, conflict pressure
 3. **Days 4–6:** React Vite app, Pod Dashboard, Conflict Center, Live Doc View, WebSocket real-time
 4. **Days 6–8:** Slack integration, escalation ladder, Org Dashboard, Cross-Pod Agent, Knowledge Extraction, pod archival

@@ -4,14 +4,14 @@ import { ContextUpdateInputSchema } from "./ingestion.js";
 import { scanForSecrets } from "./secret-scan.js";
 import { scoreProjectUpdate } from "./quality-scoring.js";
 import { broadcastToAll } from "../ws/index.js";
-import type { ProjectContextUpdate } from "@council/shared";
+import type { ProjectContextUpdate } from "@pim/shared";
 import { maybeAddProjectContextSignalToGraph } from "./knowledge-graph.js";
-import type { CouncilResult } from "../council/master.js";
+import type { PimResult } from "../pim/master.js";
 
 export interface ProjectIngestionResult {
   success: boolean;
   update?: ProjectContextUpdate;
-  council?: CouncilResult;
+  pim?: PimResult;
   error?: string;
   secretFindings?: string[];
   deduplicated?: boolean;
@@ -57,7 +57,7 @@ export async function ingestProjectContextUpdate(
        AND timestamp > datetime('now', '-60 seconds')`,
     ).get(projectId, commitSha) as { id: string } | undefined;
     if (recent) {
-      return { success: true, update: undefined, council: undefined, deduplicated: true };
+      return { success: true, update: undefined, pim: undefined, deduplicated: true };
     }
   }
 
@@ -121,11 +121,11 @@ export async function ingestProjectContextUpdate(
   return {
     success: true,
     update,
-    council: {
+    pim: {
       classification: "additive",
       merged: true,
       conflictCreated: false,
-      note: "Project context recorded (no pod Council Master run)",
+      note: "Project context recorded (no pod PIM orchestrator run)",
     },
   };
 }

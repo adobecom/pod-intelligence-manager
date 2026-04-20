@@ -3,11 +3,14 @@ import type {
   Conflict,
   ContextUpdate,
   Project,
+  ProjectAnatomy,
+  OrgConfig,
   ProjectContextUpdate,
   Tunnel,
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  ArchivedProject,
   PendingWork,
   KnowledgeGraph,
   KnowledgeStats,
@@ -16,7 +19,8 @@ import type {
   CurationRequest,
   ContextSearchRequest,
   ContextSearchResult,
-} from "@council/shared";
+  ProjectResources,
+} from "@pim/shared";
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -141,6 +145,28 @@ export async function getArchivedPods(): Promise<ArchivedPod[]> {
   return fetchJSON<ArchivedPod[]>("/api/org/archived");
 }
 
+export async function getArchivedProjects(): Promise<ArchivedProject[]> {
+  return fetchJSON<ArchivedProject[]>("/api/org/archived-projects");
+}
+
+export async function archiveProject(projectId: string): Promise<ArchivedProject> {
+  return fetchJSON<ArchivedProject>(`/api/projects/${encodeURIComponent(projectId)}/archive`, {
+    method: "POST",
+  });
+}
+
+export async function getOrgConfig(): Promise<OrgConfig> {
+  return fetchJSON<OrgConfig>("/api/org/config");
+}
+
+export async function patchOrgConfig(body: OrgConfig): Promise<OrgConfig> {
+  return fetchJSON<OrgConfig>("/api/org/config", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createPod(input: {
   name: string;
   sprint_days?: number;
@@ -177,7 +203,7 @@ export async function createProject(input: {
 
 export async function patchProject(
   projectId: string,
-  input: { name?: string; description?: string | null },
+  input: { name?: string; description?: string | null; anatomy?: ProjectAnatomy },
 ): Promise<Project> {
   return fetchJSON<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
     method: "PATCH",
@@ -189,6 +215,26 @@ export async function patchProject(
 export async function getProjectContextUpdates(projectId: string): Promise<ProjectContextUpdate[]> {
   return fetchJSON<ProjectContextUpdate[]>(
     `/api/projects/${encodeURIComponent(projectId)}/context-updates`,
+  );
+}
+
+export async function getProjectResources(projectId: string): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/resources`,
+  );
+}
+
+export async function putProjectResources(
+  projectId: string,
+  resources: ProjectResources,
+): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/resources`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(resources),
+    },
   );
 }
 
@@ -262,7 +308,7 @@ export async function curateKnowledgeNode(
 export interface ContextUpdateInput {
   agent_id?: string;
   type: "progress" | "blocker" | "spec_change" | "question" | "decision";
-  scope: "frontend" | "backend" | "design" | "qa" | "infra" | "pm";
+  scope: string;
   summary: string;
   details: string;
   status: "completed" | "in_progress" | "blocked";
@@ -271,7 +317,7 @@ export interface ContextUpdateInput {
 export interface SubmitResult {
   id: string;
   update: ContextUpdate;
-  council: {
+  pim: {
     classification: string;
     merged: boolean;
     conflictCreated: boolean;
@@ -305,7 +351,7 @@ export async function submitContextUpdate(
 export interface ProjectSubmitResult {
   id: string;
   update: ProjectContextUpdate;
-  council: {
+  pim: {
     classification: string;
     merged: boolean;
     conflictCreated: boolean;

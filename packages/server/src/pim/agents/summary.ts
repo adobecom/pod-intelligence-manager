@@ -1,5 +1,5 @@
 import db from "../../db/connection.js";
-import { getPressureLabel, getPressureLevel } from "@council/shared";
+import { getPressureLabel, getPressureLevel } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { getRelevantLearnings } from "../../services/knowledge-graph.js";
 
@@ -58,7 +58,7 @@ function capitalizeStatus(status: string): string {
 }
 
 // Template-based living doc generation from database state
-export function regenerateLivingDoc(podId: string): string {
+export async function regenerateLivingDoc(podId: string): Promise<string> {
   const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
   if (!pod) return `# Pod not found: ${podId}`;
 
@@ -129,7 +129,7 @@ export function regenerateLivingDoc(podId: string): string {
   try {
     const activeScopes = areas.map(a => a.scope);
     const conflictSummaries = openConflicts.map(c => c.summary);
-    const knowledgeResult = getRelevantLearnings(
+    const knowledgeResult = await getRelevantLearnings(
       activeScopes,
       conflictSummaries,
       1500,

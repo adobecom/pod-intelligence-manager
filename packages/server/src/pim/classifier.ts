@@ -1,5 +1,5 @@
 import db from "../db/connection.js";
-import type { ContextUpdate } from "@council/shared";
+import type { ContextUpdate } from "@pim/shared";
 
 export type Classification = "additive" | "overlapping" | "contradictory";
 
