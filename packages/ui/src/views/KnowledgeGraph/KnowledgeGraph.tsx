@@ -6,6 +6,7 @@ import { GraphLegend } from "../../components/graph/GraphLegend";
 import { GraphControls } from "../../components/graph/GraphControls";
 import { NodeDetailPanel } from "../../components/graph/NodeDetailPanel";
 import { CommunityOverview } from "../../components/graph/CommunityOverview";
+import { CurationQueue } from "../../components/graph/CurationQueue";
 
 // Lazy-load vis-network heavy component
 const NetworkGraph = lazy(() =>
@@ -160,6 +161,9 @@ export function KnowledgeGraphView() {
           </div>
         ) : (
           <>
+            {/* Curation queue: uncurated nodes first, so humans don't have to hunt for them in the graph. */}
+            <CurationQueue graph={graph} onCurate={curateNode} />
+
             {/* Controls + Legend card */}
             <div className={controlsCard}>
               <GraphControls filters={filters} onChange={setFilters} />
