@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import db from "../db/connection.js";
 import type { Tunnel } from "@pim/shared";
@@ -57,13 +58,17 @@ export default async function tunnelRoutes(app: FastifyInstance) {
       return { error: "Pod not found" };
     }
     const tunnel_id = `tunnel-${dev_name}-${Date.now()}`;
+    // share_token embedded in the URL path means anyone with the full link can reach
+    // the preview (Expo/ngrok-style) without holding an IMS session. Guessing a
+    // UUIDv4 128-bit token is infeasible; revocation is `status='disconnected'`.
+    const share_token = randomUUID();
     const serverBase = process.env.TUNNEL_BASE_URL ?? `http://localhost:${process.env.PORT ?? "4000"}`;
-    const url = `${serverBase}/tunnel/${tunnel_id}`;
+    const url = `${serverBase}/tunnel/${tunnel_id}/${share_token}`;
     const now = new Date().toISOString();
 
     db.prepare(
-      "INSERT INTO tunnels (tunnel_id, pod_id, dev_name, branch, url, status, last_activity, org_id) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)"
-    ).run(tunnel_id, podId, dev_name, branch, url, now, req.org!.org_id);
+      "INSERT INTO tunnels (tunnel_id, pod_id, dev_name, branch, url, status, last_activity, org_id, share_token) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)"
+    ).run(tunnel_id, podId, dev_name, branch, url, now, req.org!.org_id, share_token);
 
     // Update org summary tunnel count
     db.prepare(

@@ -71,8 +71,11 @@ const authenticate = createAuthHook(authMode);
 
 // Paths that must bypass auth + org-context entirely.
 // WebSocket upgrades authenticate in-handler via token param or first frame.
+// The `/tunnel/` proxy authenticates via a per-tunnel share_token path segment
+// (checked in tunnel-proxy.ts) so external collaborators without IMS sessions
+// can load previews — matching Expo/ngrok semantics.
 const PUBLIC_PATHS = new Set<string>(["/api/health"]);
-const PUBLIC_PREFIXES = ["/ws"];
+const PUBLIC_PREFIXES = ["/ws", "/tunnel"];
 const isPublic = (url: string) => {
   const path = url.split("?")[0];
   return PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some(p => path === p || path.startsWith(p + "/"));

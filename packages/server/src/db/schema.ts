@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import db from "./connection.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";
@@ -331,6 +332,24 @@ export function createTables() {
   try { db.exec("ALTER TABLE cross_pod_overlaps ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE lint_findings ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE pending_work ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+
+  // Slack thread continuity — store the ts of the initial conflict message so
+  // escalations/resolutions reply in-thread instead of posting new top-level messages.
+  try { db.exec("ALTER TABLE conflicts ADD COLUMN slack_message_ts TEXT"); } catch { /* already exists */ }
+
+  // Tunnel share token — possession of the full URL (containing the token) grants
+  // proxy access; lets external collaborators reach the preview without IMS auth.
+  try { db.exec("ALTER TABLE tunnels ADD COLUMN share_token TEXT"); } catch { /* already exists */ }
+  try {
+    // Backfill tokens for any pre-existing tunnel rows so older clients don't 401.
+    const rows = db.prepare("SELECT tunnel_id FROM tunnels WHERE share_token IS NULL").all() as { tunnel_id: string }[];
+    if (rows.length > 0) {
+      const update = db.prepare("UPDATE tunnels SET share_token = ? WHERE tunnel_id = ?");
+      for (const row of rows) {
+        update.run(randomUUID(), row.tunnel_id);
+      }
+    }
+  } catch { /* tunnels table may not exist yet on brand-new DBs */ }
 
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_pods_org ON pods(org_id)"); } catch { /* already exists */ }

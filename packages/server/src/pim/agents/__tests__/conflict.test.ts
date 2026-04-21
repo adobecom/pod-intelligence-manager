@@ -27,7 +27,7 @@ vi.mock("../../../services/knowledge-graph.js", () => ({
 }));
 
 vi.mock("../../../services/slack.js", () => ({
-  notifyConflictCreated: vi.fn(),
+  notifyConflictCreated: vi.fn().mockResolvedValue(undefined),
   notifyPressureThreshold: vi.fn(),
 }));
 

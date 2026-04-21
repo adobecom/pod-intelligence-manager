@@ -28,6 +28,7 @@ interface ConflictRow {
   resolution: string | null;
   resolution_date: string | null;
   escalation_level: number | null;
+  slack_message_ts: string | null;
 }
 
 function rowToConflict(row: ConflictRow): Conflict {
@@ -100,8 +101,8 @@ export default async function conflictRoutes(app: FastifyInstance) {
       });
     }
 
-    // Slack notification
-    notifyConflictResolved(resolved);
+    // Slack notification — thread under the original conflict message when possible
+    notifyConflictResolved(resolved, row.slack_message_ts ?? undefined);
 
     // Incremental knowledge extraction: emit a resolved_conflict node immediately
     // so concurrent pods can learn from this resolution without waiting for archival.

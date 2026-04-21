@@ -10,7 +10,7 @@ import db from "../db/connection.js";
 
 const TTL_SEC = 7 * 24 * 3600;
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+export const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const SLACK_ID_RE = /\bU[A-Z0-9]{8,}\b/;
 
 export interface DetectedTokens {

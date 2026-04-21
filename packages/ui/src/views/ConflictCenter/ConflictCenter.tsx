@@ -16,6 +16,7 @@ import {
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../../stores/podStore";
 import { SeverityBadge } from "../../components/SeverityBadge";
+import { EscalationBadge } from "../../components/EscalationBadge";
 import { RelativeTime } from "../../components/RelativeTime";
 
 const column = style({
@@ -28,6 +29,12 @@ const filterRow = style({
   display: "flex",
   gap: 12,
   alignItems: "end",
+});
+
+const statusCell = style({
+  display: "flex",
+  gap: 8,
+  alignItems: "center",
 });
 
 export function ConflictCenter() {
@@ -94,9 +101,14 @@ export function ConflictCenter() {
               <Cell><Text>{conflict.summary}</Text></Cell>
               <Cell><SeverityBadge severity={conflict.severity} /></Cell>
               <Cell>
-                <Text styles={style({ textTransform: "capitalize" })}>
-                  {conflict.status.replace("_", " ")}
-                </Text>
+                <div className={statusCell}>
+                  <Text styles={style({ textTransform: "capitalize" })}>
+                    {conflict.status.replace("_", " ")}
+                  </Text>
+                  {conflict.status !== "resolved" ? (
+                    <EscalationBadge level={conflict.escalation_level ?? 0} compact />
+                  ) : null}
+                </div>
               </Cell>
               <Cell><RelativeTime timestamp={conflict.created_at} /></Cell>
               <Cell>

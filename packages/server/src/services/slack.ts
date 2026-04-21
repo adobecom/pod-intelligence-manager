@@ -1,6 +1,7 @@
 import { WebClient } from "@slack/web-api";
 import type { Conflict } from "@pim/shared";
 import db from "../db/connection.js";
+import { EMAIL_RE } from "./identity-resolver.js";
 
 // ── Configuration ──────────────────────────────────────────────────
 // Env vars:
@@ -27,6 +28,20 @@ function send(fn: () => Promise<unknown>): void {
   });
 }
 
+// Awaited variant for callers that need the posted message's `ts` (e.g. to
+// thread follow-up notifications). Returns undefined when Slack is disabled
+// or the post fails — callers should treat it as best-effort.
+async function sendAndGetTs(fn: () => Promise<{ ts?: string } | undefined>): Promise<string | undefined> {
+  if (!isEnabled()) return undefined;
+  try {
+    const res = await fn();
+    return res?.ts;
+  } catch (err) {
+    console.error("[slack] Failed to send message:", (err as Error)?.message ?? err);
+    return undefined;
+  }
+}
+
 // ── Helpers ────────────────────────────────────────────────────────
 
 function podName(podId: string): string {
@@ -51,15 +66,41 @@ function escalationEmoji(level: number): string {
   return ":mega:";
 }
 
+const SLACK_ID_RE = /^U[A-Z0-9]{8,}$/;
+
+// Best-effort: if the contributor string is a Slack user ID, email, or matches
+// a cached identity, return `<@UXXX>`. Otherwise fall back to the raw string so
+// the notification still reads naturally without a native Slack ping.
+function resolveAgentToSlackMention(contributor: string): string {
+  if (!contributor) return contributor;
+  const trimmed = contributor.trim();
+
+  if (SLACK_ID_RE.test(trimmed)) return `<@${trimmed}>`;
+
+  const emailMatch = trimmed.match(EMAIL_RE)?.[0];
+  if (emailMatch) {
+    try {
+      const row = db
+        .prepare("SELECT slack_user_id FROM identity_cache WHERE kind = 'email' AND value = ?")
+        .get(emailMatch) as { slack_user_id: string | null } | undefined;
+      if (row?.slack_user_id) return `<@${row.slack_user_id}>`;
+    } catch {
+      // identity_cache may not exist on very old DBs; ignore
+    }
+  }
+
+  return trimmed;
+}
+
 // ── Public API ─────────────────────────────────────────────────────
 
-export function notifyConflictCreated(conflict: Conflict): void {
-  send(async () => {
+export async function notifyConflictCreated(conflict: Conflict): Promise<string | undefined> {
+  return sendAndGetTs(async () => {
     const pod = podName(conflict.pod_id);
-    const sideNames = conflict.sides.map((s) => s.contributor).join(" vs ");
+    const sideNames = conflict.sides.map((s) => resolveAgentToSlackMention(s.contributor)).join(" vs ");
     const url = conflictUrl(conflict.pod_id, conflict.id);
 
-    await slack!.chat.postMessage({
+    return slack!.chat.postMessage({
       channel: defaultChannel!,
       text: `${severityEmoji(conflict.severity)} New ${conflict.severity} conflict in *${pod}*: ${conflict.summary}`,
       blocks: [
@@ -107,6 +148,7 @@ export function notifyConflictEscalated(
   level: number,
   message: string,
   ageHours: number,
+  threadTs?: string,
 ): void {
   send(async () => {
     const pod = podName(podId);
@@ -114,6 +156,7 @@ export function notifyConflictEscalated(
 
     await slack!.chat.postMessage({
       channel: defaultChannel!,
+      thread_ts: threadTs,
       text: `${escalationEmoji(level)} Escalation L${level} in *${pod}*: ${message}`,
       blocks: [
         {
@@ -146,13 +189,14 @@ export function notifyConflictEscalated(
   });
 }
 
-export function notifyConflictResolved(conflict: Conflict): void {
+export function notifyConflictResolved(conflict: Conflict, threadTs?: string): void {
   send(async () => {
     const pod = podName(conflict.pod_id);
     const url = conflictUrl(conflict.pod_id, conflict.id);
 
     await slack!.chat.postMessage({
       channel: defaultChannel!,
+      thread_ts: threadTs,
       text: `:white_check_mark: Conflict resolved in *${pod}*: ${conflict.summary}`,
       blocks: [
         {

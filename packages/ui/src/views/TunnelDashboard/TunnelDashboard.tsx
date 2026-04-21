@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Heading,
   Cell,
@@ -8,6 +9,7 @@ import {
   TableHeader,
   Text,
   Link,
+  ActionButton,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../../stores/podStore";
@@ -15,6 +17,27 @@ import { TunnelStatusLight } from "../../components/TunnelStatusLight";
 import { RelativeTime } from "../../components/RelativeTime";
 
 const column = style({ display: "flex", flexDirection: "column", gap: 20 });
+const urlCell = style({ display: "flex", gap: 8, alignItems: "center" });
+
+function CopyUrlButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <ActionButton
+      isQuiet
+      onPress={async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // clipboard unavailable (e.g. insecure context) — fall back silently
+        }
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </ActionButton>
+  );
+}
 
 export function TunnelDashboard() {
   const tunnels = usePodStore((s) => s.tunnels);
@@ -43,12 +66,15 @@ export function TunnelDashboard() {
               </Cell>
               <Cell><Text>{tunnel.branch}</Text></Cell>
               <Cell>
-                <Link
-                  href={tunnel.url}
-                  target="_blank"
-                >
-                  {tunnel.url}
-                </Link>
+                <div className={urlCell}>
+                  <Link
+                    href={tunnel.url}
+                    target="_blank"
+                  >
+                    {tunnel.url}
+                  </Link>
+                  <CopyUrlButton url={tunnel.url} />
+                </div>
               </Cell>
               <Cell>
                 <TunnelStatusLight status={tunnel.status} />

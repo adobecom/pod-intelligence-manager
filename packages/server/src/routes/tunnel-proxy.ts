@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   TUNNEL_REQUEST_TIMEOUT_MS,
   type TunnelRequest,
@@ -10,6 +10,22 @@ import {
   addPendingRequest,
   markTunnelTraffic,
 } from "../ws/tunnel-connections.js";
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+function verifyShareToken(tunnelId: string, token: string): boolean {
+  if (!token) return false;
+  const row = db
+    .prepare("SELECT share_token FROM tunnels WHERE tunnel_id = ?")
+    .get(tunnelId) as { share_token: string | null } | undefined;
+  if (!row?.share_token) return false;
+  return safeEqual(token, row.share_token);
+}
 
 async function proxyRequest(
   tunnelId: string,
@@ -127,15 +143,29 @@ export default async function tunnelProxyRoutes(app: FastifyInstance) {
     done(null, body);
   });
 
-  // Handle /tunnel/:tunnelId (root request, no sub-path)
-  app.all<{ Params: { tunnelId: string } }>(
-    "/tunnel/:tunnelId",
-    async (req, reply) => proxyRequest(req.params.tunnelId, "", req, reply),
+  // URL shape: /tunnel/:tunnelId/:shareToken[/*] — the token is a path segment
+  // so it travels with the shared link (Expo/ngrok-style). The global IMS auth
+  // hook is bypassed for /tunnel/ via PUBLIC_PREFIXES; access is gated by the
+  // per-tunnel share_token validated here.
+  const handle = (subPath: string) =>
+    async (
+      req: FastifyRequest<{ Params: { tunnelId: string; shareToken: string } }>,
+      reply: FastifyReply,
+    ) => {
+      if (!verifyShareToken(req.params.tunnelId, req.params.shareToken)) {
+        reply.code(401);
+        return { error: "Invalid or missing tunnel share token" };
+      }
+      return proxyRequest(req.params.tunnelId, subPath, req, reply);
+    };
+
+  app.all<{ Params: { tunnelId: string; shareToken: string } }>(
+    "/tunnel/:tunnelId/:shareToken",
+    async (req, reply) => handle("")(req, reply),
   );
 
-  // Handle /tunnel/:tunnelId/* (all sub-paths)
-  app.all<{ Params: { tunnelId: string; "*": string } }>(
-    "/tunnel/:tunnelId/*",
-    async (req, reply) => proxyRequest(req.params.tunnelId, req.params["*"] ?? "", req, reply),
+  app.all<{ Params: { tunnelId: string; shareToken: string; "*": string } }>(
+    "/tunnel/:tunnelId/:shareToken/*",
+    async (req, reply) => handle(req.params["*"] ?? "")(req, reply),
   );
 }
