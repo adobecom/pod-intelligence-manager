@@ -100,7 +100,30 @@ export function ConflictDetail() {
         </Heading>
         <SeverityBadge severity={conflict.severity} />
         {isResolved && <Badge variant="positive">Resolved</Badge>}
+        {!isResolved && conflict.escalation_level && conflict.escalation_level > 0 ? (
+          <Badge variant={conflict.escalation_level >= 3 ? "negative" : "notice"}>
+            Escalation L{conflict.escalation_level}
+          </Badge>
+        ) : null}
       </div>
+
+      {!isResolved && conflict.escalation_level && conflict.escalation_level >= 3 ? (
+        <InlineAlert variant={conflict.escalation_level >= 4 ? "negative" : "notice"}>
+          <Heading>
+            {conflict.escalation_level >= 4
+              ? "Conflict is force-escalated (>24h)"
+              : "Conflict requires pod lead review (>16h)"}
+          </Heading>
+          <Content>
+            <Text>
+              This conflict has aged past the L{conflict.escalation_level} threshold without resolution.
+              {conflict.escalation_level >= 4
+                ? " Pod pressure has been forced to 1.0 — new context updates are queued until this resolves."
+                : " Escalate to the pod lead or resolve before the next threshold fires."}
+            </Text>
+          </Content>
+        </InlineAlert>
+      ) : null}
 
       <Text styles={style({ color: "neutral-subdued" })}>
         Opened <RelativeTime timestamp={conflict.created_at} />

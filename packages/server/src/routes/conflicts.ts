@@ -27,6 +27,7 @@ interface ConflictRow {
   resolved_by: string | null;
   resolution: string | null;
   resolution_date: string | null;
+  escalation_level: number | null;
 }
 
 function rowToConflict(row: ConflictRow): Conflict {
@@ -43,6 +44,7 @@ function rowToConflict(row: ConflictRow): Conflict {
     resolved_by: row.resolved_by,
     resolution: row.resolution,
     resolution_date: row.resolution_date,
+    escalation_level: row.escalation_level ?? 0,
   };
 }
 

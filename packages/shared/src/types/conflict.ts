@@ -11,6 +11,11 @@ export interface Conflict {
   resolved_by: string | null;
   resolution: string | null;
   resolution_date: string | null;
+  /**
+   * Auto-incremented by the escalation service as open conflicts age
+   * (L1 at 4h, L2 at 8h, L3 at 16h, L4 at 24h). 0 = no escalation yet.
+   */
+  escalation_level?: number;
 }
 
 export interface ConflictSide {
