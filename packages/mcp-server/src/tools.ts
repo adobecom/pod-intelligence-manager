@@ -454,18 +454,25 @@ export function registerTools(server: McpServer) {
         ),
       confidence_min: z.number().optional().describe("Minimum confidence score (0.0-1.0)"),
       curated_only: z.boolean().optional().describe("Only return human-curated nodes"),
-      text_search: z.string().optional().describe("Full-text search query"),
+      text_search: z.string().optional().describe("Substring filter on summary+details (narrows candidates)."),
+      query_text: z
+        .string()
+        .optional()
+        .describe(
+          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it and ranks results by cosine similarity; unlike text_search this does not narrow candidates, only reorders them. Prefer this for concept-level lookups.",
+        ),
       max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
       include_details: z.boolean().optional().describe("Include full node details"),
       limit: z.number().optional().describe("Max number of nodes to return"),
     },
     async (args) => {
-      const { max_tokens, include_details, limit, ...filters } = args;
+      const { max_tokens, include_details, limit, query_text, ...filters } = args;
       const result = await apiPost("/api/knowledge/query", {
         filters,
         max_tokens,
         include_details,
         limit,
+        ...(query_text ? { query_text } : {}),
       });
       return json(result);
     },

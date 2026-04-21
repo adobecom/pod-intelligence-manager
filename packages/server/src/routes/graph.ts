@@ -18,6 +18,7 @@ import {
   getStats,
 } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
+import { generateEmbedding } from "../services/embeddings.js";
 
 const KnowledgeQuerySchema = z.object({
   filters: z.object({
@@ -35,6 +36,8 @@ const KnowledgeQuerySchema = z.object({
   include_details: z.boolean().optional(),
   include_edges: z.boolean().optional(),
   limit: z.number().int().positive().optional(),
+  query_embedding: z.array(z.number()).nullable().optional(),
+  query_text: z.string().min(1).optional(),
 });
 
 const CurationSchema = z.object({
@@ -57,9 +60,13 @@ export default async function graphRoutes(app: FastifyInstance) {
     return getStats();
   });
 
-  // Token-budgeted query (main agent-facing interface)
+  // Token-budgeted query (main agent-facing interface).
+  // If `query_text` is provided and `query_embedding` is not, we generate the embedding
+  // server-side so callers without Bedrock creds can still get semantic scoring.
   app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req) => {
-    return queryKnowledge(req.body);
+    const { query_text, query_embedding, ...rest } = req.body;
+    const embedding = query_embedding ?? (query_text ? await generateEmbedding(query_text) : null);
+    return queryKnowledge({ ...rest, query_embedding: embedding });
   });
 
   // Convenience: relevant learnings for given scopes.
