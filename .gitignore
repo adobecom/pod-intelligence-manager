@@ -5,3 +5,9 @@ dist/
 .env.local
 *.tsbuildinfo
 .data/
+
+# CDK build artifacts
+cdk.out/
+cdk.context.json
+packages/infra/outputs.json
+
