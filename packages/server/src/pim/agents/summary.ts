@@ -2,6 +2,7 @@ import db from "../../db/connection.js";
 import { getPressureLabel, getPressureLevel } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { getRelevantLearnings } from "../../services/knowledge-graph.js";
+import { computeCurrentDay } from "../../services/pod-day.js";
 
 interface PodRow {
   pod_id: string;
@@ -77,7 +78,8 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
 
   let md = `# Pod: ${pod.name} — Living Doc\n\n`;
   md += `## Pod Health\n`;
-  md += `**Conflict Pressure:** ${pod.conflict_pressure.toFixed(2)} (${pressureLabel}) | **Day ${pod.day_number} of ${pod.total_days}** | Sprint: ${sprintStart}–${sprintEnd}\n\n`;
+  const currentDay = computeCurrentDay(pod.sprint_start, pod.total_days);
+  md += `**Conflict Pressure:** ${pod.conflict_pressure.toFixed(2)} (${pressureLabel}) | **Day ${currentDay} of ${pod.total_days}** | Sprint: ${sprintStart}–${sprintEnd}\n\n`;
 
   md += `## Active Milestone\n`;
   md += `**${milestone.name}** (Target: ${formatDate(milestone.target_date)}) — ${milestone.percent_complete}% complete\n\n`;

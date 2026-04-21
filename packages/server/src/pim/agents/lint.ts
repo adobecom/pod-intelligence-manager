@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import db from "../../db/connection.js";
 import { broadcast } from "../../ws/index.js";
 import { callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
+import { computeCurrentDay } from "../../services/pod-day.js";
 
 /** Returned with POST /api/pods/:podId/lint so clients can see if the fast (Haiku) supplement ran. */
 export interface LintPassMeta {
@@ -43,6 +44,8 @@ interface AreaRow {
 interface PodRow {
   pod_id: string;
   day_number: number;
+  sprint_start?: string;
+  total_days?: number;
 }
 
 interface UpdateRow {
@@ -81,8 +84,13 @@ function collectDeterministicLintFindings(podId: string, timestamp: string): Lin
   const now = Date.now();
   const findings: LintFinding[] = [];
 
-  const pod = db.prepare("SELECT pod_id, day_number FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+  const pod = db.prepare("SELECT pod_id, day_number, sprint_start, total_days FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
   if (!pod) return [];
+
+  // Auto-advance day_number from sprint_start if available; fall back to stored value.
+  const currentDay = pod.sprint_start && pod.total_days
+    ? computeCurrentDay(pod.sprint_start, pod.total_days)
+    : pod.day_number;
 
   const areas = db.prepare(
     "SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?",
@@ -115,7 +123,7 @@ function collectDeterministicLintFindings(podId: string, timestamp: string): Lin
           suggestion: `Check in with ${area.owner} on ${area.scope} progress`,
         });
       }
-    } else if (pod.day_number > 1) {
+    } else if (currentDay > 1) {
       findings.push({
         id: `lint-${randomUUID().slice(0, 8)}`,
         pod_id: podId,
@@ -129,7 +137,7 @@ function collectDeterministicLintFindings(podId: string, timestamp: string): Lin
     }
   }
 
-  if (pod.day_number > 2) {
+  if (currentDay > 2) {
     for (const area of areas) {
       if (area.status === "waiting") {
         findings.push({
@@ -138,7 +146,7 @@ function collectDeterministicLintFindings(podId: string, timestamp: string): Lin
           timestamp,
           type: "coverage_gap",
           severity: "warning",
-          summary: `${area.scope} is still in "waiting" status on day ${pod.day_number}`,
+          summary: `${area.scope} is still in "waiting" status on day ${currentDay}`,
           area: area.scope,
           suggestion: `Assign an owner or mark as not needed for this sprint`,
         });
@@ -262,8 +270,11 @@ function normalizeLLMFindings(
 }
 
 function buildLintLLMContext(podId: string, deterministicSummary: string): string {
-  const pod = db.prepare("SELECT pod_id, day_number FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+  const pod = db.prepare("SELECT pod_id, day_number, sprint_start, total_days FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
   if (!pod) return "";
+  const currentDay = pod.sprint_start && pod.total_days
+    ? computeCurrentDay(pod.sprint_start, pod.total_days)
+    : pod.day_number;
 
   const areas = db.prepare(
     "SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?",
@@ -279,7 +290,7 @@ function buildLintLLMContext(podId: string, deterministicSummary: string): strin
     | undefined;
 
   const lines: string[] = [];
-  lines.push(`Pod: ${pod.pod_id}, sprint day: ${pod.day_number}`);
+  lines.push(`Pod: ${pod.pod_id}, sprint day: ${currentDay}`);
   lines.push("");
   lines.push("## Areas");
   lines.push(areas.length ? areas.map((a) => `- ${a.scope}: owner=${a.owner}, status=${a.status}`).join("\n") : "(none)");

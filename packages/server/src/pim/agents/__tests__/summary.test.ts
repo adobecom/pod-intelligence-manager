@@ -99,6 +99,8 @@ function setupDb(opts: {
 describe("regenerateLivingDoc", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Freeze time 2 days into the mock sprint so computeCurrentDay returns 3.
+    vi.useFakeTimers({ now: new Date("2026-04-12T10:00:00.000Z").getTime() });
   });
 
   it("returns not-found message for nonexistent pod", async () => {

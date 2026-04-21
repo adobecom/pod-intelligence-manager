@@ -8,6 +8,7 @@ import { getRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { getOrgScopeIdsOrdered } from "../services/org-settings.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
+import { computeCurrentDay } from "../services/pod-day.js";
 
 const CreatePodSchema = z.object({
   name: z.string().min(1, "name is required").transform(s => s.trim()),
@@ -58,7 +59,8 @@ function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
     name: row.name,
     sprint_start: row.sprint_start,
     sprint_end: row.sprint_end,
-    day_number: row.day_number,
+    // Auto-advanced from sprint_start so the value reflects real sprint progress.
+    day_number: computeCurrentDay(row.sprint_start, row.total_days),
     total_days: row.total_days,
     conflict_pressure: row.conflict_pressure,
     milestone: JSON.parse(row.milestone_json) as Milestone,

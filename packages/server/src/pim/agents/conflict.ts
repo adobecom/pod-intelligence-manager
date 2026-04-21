@@ -6,6 +6,7 @@ import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";
 import { notifyConflictCreated, notifyPressureThreshold } from "../../services/slack.js";
+import { computeCurrentDay } from "../../services/pod-day.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -24,6 +25,7 @@ interface PodRow {
   name: string;
   day_number: number;
   total_days: number;
+  sprint_start: string;
   conflict_pressure: number;
   milestone_json: string;
 }
@@ -69,7 +71,8 @@ export async function createConflict(
   }
 
   if (isLLMAvailable()) {
-    const pod = db.prepare("SELECT name, day_number, total_days, conflict_pressure, milestone_json FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    const pod = db.prepare("SELECT name, day_number, total_days, sprint_start, conflict_pressure, milestone_json FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+    const currentDay = pod ? computeCurrentDay(pod.sprint_start, pod.total_days) : undefined;
     const openConflictCount = (db.prepare("SELECT COUNT(*) as count FROM conflicts WHERE pod_id = ? AND status != 'resolved'").get(podId) as { count: number }).count;
 
     const systemPrompt = fs.readFileSync(path.resolve(__dirname, "../../../../prompts/conflict-agent.md"), "utf-8");
@@ -88,7 +91,7 @@ export async function createConflict(
 
 ## Pod Context
 - Pod: ${pod?.name ?? podId}
-- Day ${pod?.day_number ?? "?"} of ${pod?.total_days ?? "?"}
+- Day ${currentDay ?? "?"} of ${pod?.total_days ?? "?"}
 - Current conflict pressure: ${pod?.conflict_pressure ?? 0}
 - Open conflicts: ${openConflictCount}
 - Milestone: ${pod ? JSON.parse(pod.milestone_json).name : "Unknown"}${precedentsContext}`;

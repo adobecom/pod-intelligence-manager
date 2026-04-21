@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import db from "../../db/connection.js";
 import { callLLM, isLLMAvailable, MODELS } from "../llm.js";
 import type { EnhancedPodLearning, KnowledgeNodeType } from "@pim/shared";
+import { computeCurrentDay } from "../../services/pod-day.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +46,7 @@ interface PodRow {
   name: string;
   day_number: number;
   total_days: number;
+  sprint_start?: string;
   conflict_pressure: number;
   milestone_json: string;
 }
@@ -187,8 +189,11 @@ export async function extractKnowledgeEnhanced(
       .map((c) => `- [${c.severity}/${c.status}] ${c.summary}${c.resolution ? ` → Resolved: ${c.resolution}` : ""}`)
       .join("\n") || "No conflicts recorded.";
 
+    const displayDay = pod?.sprint_start && pod.total_days
+      ? computeCurrentDay(pod.sprint_start, pod.total_days)
+      : pod?.day_number ?? 0;
     const podStateText = pod
-      ? `Pod "${pod.name}" — Day ${pod.day_number}/${pod.total_days}, Final Pressure: ${pod.conflict_pressure}`
+      ? `Pod "${pod.name}" — Day ${displayDay}/${pod.total_days}, Final Pressure: ${pod.conflict_pressure}`
       : `Pod ${podId}`;
 
     const prompt = `## Pod Summary\n${podStateText}\n\n## Decisions Log\n${decisionsText}\n\n## Conflicts\n${conflictsText}\n\n## All Context Updates (${updates.length} total)\n${updates.slice(-20).map((u) => `- [${u.type}/${u.scope}/${u.status}] ${u.summary}`).join("\n")}`;
