@@ -259,12 +259,18 @@ export function registerTools(server: McpServer) {
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
 
-      const [living_doc_markdown, pod, conflicts, relevant_learnings, context_updates, external_context] =
+      // Fetch pod first so we can scope learnings by its project_id (prevents cross-project knowledge bleed).
+      const pod = await apiFetch<{ project_id?: string | null; milestone?: { name?: string } }>(`/api/pods/${pod_id}`);
+      const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
+      // Use the milestone name as a semantic query so scoring uses embedding similarity rather than keyword-only fallback.
+      const milestoneQuery = pod.milestone?.name?.trim();
+      const queryParam = milestoneQuery ? `&query=${encodeURIComponent(milestoneQuery)}` : "";
+
+      const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context] =
         await Promise.all([
           apiFetchText(`/api/pods/${pod_id}/living-doc`),
-          apiFetch(`/api/pods/${pod_id}`),
           apiFetch(`/api/pods/${pod_id}/conflicts`),
-          apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}`),
+          apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
           apiFetch(`/api/pods/${pod_id}/context-updates`),
           external_query
             ? apiPost("/api/context-search", { query: external_query, pod_id }).catch(() => null)
@@ -318,6 +324,56 @@ export function registerTools(server: McpServer) {
     async ({ pod_id, ...body }) => {
       const result = await apiPost(`/api/pods/${pod_id}/context-updates`, { ...body, source: "mcp" });
       return json(result);
+    },
+  );
+
+  server.tool(
+    "get_project_session_context",
+    "Project-scoped equivalent of get_agent_session_context for agents working between sprints or on long-lived initiatives (PM, PR review, etc.). Bundles: project metadata (anatomy, resources), recent project context updates, project-scoped org learnings, and optional external context search. Use this when you don't have an active pod but need to orient yourself on a project before acting.",
+    {
+      project_id: ProjectId,
+      agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
+      scope: Scope,
+      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
+      recent_updates_limit: z.number().optional().describe("Max recent project context updates to return (default 20)"),
+      external_query: z
+        .string()
+        .optional()
+        .describe(
+          "Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup. The project_id is passed automatically to scope the fan-out to this project's resources.",
+        ),
+    },
+    async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
+      const maxTok = learnings_max_tokens ?? 2000;
+      const recentLimit = recent_updates_limit ?? 20;
+      const scopes = encodeURIComponent(scope);
+      const projectParam = `&projectId=${encodeURIComponent(project_id)}`;
+
+      // Fetch project first so we can use its name as the semantic query (embedding scoring on learnings).
+      const project = await apiFetch<{ name?: string }>(`/api/projects/${encodeURIComponent(project_id)}`);
+      const queryParam = project.name ? `&query=${encodeURIComponent(project.name)}` : "";
+
+      const [project_updates, relevant_learnings, external_context] = await Promise.all([
+        apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),
+        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
+        external_query
+          ? apiPost("/api/context-search", { query: external_query, project_id }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      const recent_updates = Array.isArray(project_updates)
+        ? (project_updates as unknown[]).slice(0, recentLimit)
+        : [];
+
+      return json({
+        pulled_at: new Date().toISOString(),
+        agent_id,
+        scope,
+        project,
+        recent_updates,
+        relevant_learnings,
+        ...(external_context ? { external_context } : {}),
+      });
     },
   );
 
@@ -428,7 +484,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "query_knowledge",
-    "Search the org knowledge graph with token-budgeted results. Returns relevant learnings filtered by domain, type, confidence, and text search. Use this to find historical decisions, patterns, anti-patterns, and resolved conflicts.",
+    "Search the org knowledge graph with token-budgeted results. Returns relevant learnings filtered by domain, type, confidence, and text search. Use this to find historical decisions, patterns, anti-patterns, and resolved conflicts. Pass include_project_id when you know the caller's project to avoid cross-project knowledge bleed.",
     {
       domains: z.array(z.string()).optional().describe("Filter by domain tags"),
       types: z
@@ -436,20 +492,37 @@ export function registerTools(server: McpServer) {
         .optional()
         .describe("Filter by node type"),
       source_pod_ids: z.array(z.string()).optional().describe("Filter by source pod"),
+      source_project_ids: z
+        .array(z.string())
+        .optional()
+        .describe("Hard restrict to nodes tagged with ANY of these project IDs (excludes org-wide nodes)."),
+      include_project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Return org-wide nodes plus any tagged with this project; excludes nodes tagged with OTHER projects. Pass the current agent's project for clean project-scoped queries.",
+        ),
       confidence_min: z.number().optional().describe("Minimum confidence score (0.0-1.0)"),
       curated_only: z.boolean().optional().describe("Only return human-curated nodes"),
-      text_search: z.string().optional().describe("Full-text search query"),
+      text_search: z.string().optional().describe("Substring filter on summary+details (narrows candidates)."),
+      query_text: z
+        .string()
+        .optional()
+        .describe(
+          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it and ranks results by cosine similarity; unlike text_search this does not narrow candidates, only reorders them. Prefer this for concept-level lookups.",
+        ),
       max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
       include_details: z.boolean().optional().describe("Include full node details"),
       limit: z.number().optional().describe("Max number of nodes to return"),
     },
     async (args) => {
-      const { max_tokens, include_details, limit, ...filters } = args;
+      const { max_tokens, include_details, limit, query_text, ...filters } = args;
       const result = await apiPost("/api/knowledge/query", {
         filters,
         max_tokens,
         include_details,
         limit,
+        ...(query_text ? { query_text } : {}),
       });
       return json(result);
     },

@@ -8,6 +8,7 @@ import { getOrgConfig, setOrgConfig } from "../services/org-settings.js";
 import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { addLearningsToGraph } from "../services/knowledge-graph.js";
 import { broadcastToAll } from "../ws/index.js";
+import { computeCurrentDay } from "../services/pod-day.js";
 
 interface PodRow {
   pod_id: string;
@@ -48,7 +49,23 @@ export default async function orgRoutes(app: FastifyInstance) {
   );
 
   app.get("/api/org/pods", async (req) => {
-    return db.prepare("SELECT * FROM org_pod_summaries WHERE org_id = ?").all(req.org!.org_id) as OrgPodSummary[];
+    // Join against `pods` to pull sprint_start/total_days so day_number reflects real sprint
+    // progress (the denormalized org_pod_summaries.day_number is not advanced over time).
+    const rows = db.prepare(
+      `SELECT s.*, p.sprint_start AS _sprint_start, p.total_days AS _total_days
+       FROM org_pod_summaries s
+       LEFT JOIN pods p ON p.pod_id = s.pod_id
+       WHERE s.org_id = ?`,
+    ).all(req.org!.org_id) as Array<OrgPodSummary & { _sprint_start: string | null; _total_days: number | null }>;
+    return rows.map((r) => {
+      const { _sprint_start, _total_days, ...summary } = r;
+      const totalDays = _total_days ?? summary.total_days;
+      return {
+        ...summary,
+        total_days: totalDays,
+        day_number: _sprint_start ? computeCurrentDay(_sprint_start, totalDays) : summary.day_number,
+      };
+    });
   });
 
   app.get("/api/org/overlaps", async (req) => {

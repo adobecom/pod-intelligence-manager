@@ -31,6 +31,14 @@ export interface SessionContext {
   externalContext?: ContextSearchResult;
 }
 
+export interface ProjectSessionContext {
+  pulledAt: string;
+  project: Project;
+  relevantLearnings: KnowledgeQueryResult;
+  recentUpdates: ProjectContextUpdate[];
+  externalContext?: ContextSearchResult;
+}
+
 /** Merge org header (X-Pim-Org) into an init record when an org slug is present. */
 function withOrgHeader(
   init: RequestInit | undefined,
@@ -209,11 +217,23 @@ export class PimClient {
     );
   }
 
-  // Get relevant learnings for this agent's scope with a token budget
-  async getRelevantLearnings(maxTokens: number = 2000): Promise<KnowledgeQueryResult> {
+  // Get relevant learnings for this agent's scope with a token budget.
+  // Pass `projectId` to scope results to org-wide + that project only (no cross-project bleed).
+  // Pass `query` as free text to enable semantic (embedding) scoring; without it, scoring
+  // falls back to keyword + domain matching only.
+  async getRelevantLearnings(
+    maxTokens: number = 2000,
+    opts?: { projectId?: string | null; query?: string },
+  ): Promise<KnowledgeQueryResult> {
     const scopes = encodeURIComponent(this.config.scope);
+    const projectParam = opts?.projectId
+      ? `&projectId=${encodeURIComponent(opts.projectId)}`
+      : "";
+    const queryParam = opts?.query?.trim()
+      ? `&query=${encodeURIComponent(opts.query.trim())}`
+      : "";
     return fetchJSON<KnowledgeQueryResult>(
-      this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}`),
+      this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}${projectParam}${queryParam}`),
       this.withHeaders(),
     );
   }
@@ -252,11 +272,18 @@ export class PimClient {
     const maxTokens = opts?.learningsMaxTokens ?? 2000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
+    // Fetch the pod first so we can scope learnings to its project (avoids cross-project knowledge bleed).
+    // The pod response also carries the milestone name which we use as a semantic query for embedding scoring.
+    const pod = await this.getPod();
+    const learningsOpts = {
+      projectId: pod.project_id ?? null,
+      query: pod.milestone?.name,
+    };
+
     const baseFetches = [
-      this.getPod(),
       this.getContext(),
       this.getConflicts(),
-      this.getRelevantLearnings(maxTokens),
+      this.getRelevantLearnings(maxTokens, learningsOpts),
       this.getUpdates(),
     ] as const;
 
@@ -266,20 +293,15 @@ export class PimClient {
 
     const results = await Promise.allSettled([...baseFetches, externalFetch]);
 
-    const pod = results[0].status === "fulfilled" ? (results[0].value as Pod) : null;
-    if (!pod) {
-      throw new Error(`Failed to fetch pod: ${results[0].status === "rejected" ? results[0].reason : "unknown"}`);
-    }
-
-    const livingDocMarkdown = results[1].status === "fulfilled" ? (results[1].value as string) : "(unavailable)";
-    const conflicts = results[2].status === "fulfilled" ? (results[2].value as Conflict[]) : [];
-    const relevantLearnings: KnowledgeQueryResult = results[3].status === "fulfilled"
-      ? (results[3].value as KnowledgeQueryResult)
+    const livingDocMarkdown = results[0].status === "fulfilled" ? (results[0].value as string) : "(unavailable)";
+    const conflicts = results[1].status === "fulfilled" ? (results[1].value as Conflict[]) : [];
+    const relevantLearnings: KnowledgeQueryResult = results[2].status === "fulfilled"
+      ? (results[2].value as KnowledgeQueryResult)
       : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
-    const allUpdates = results[4].status === "fulfilled" ? (results[4].value as ContextUpdate[]) : [];
+    const allUpdates = results[3].status === "fulfilled" ? (results[3].value as ContextUpdate[]) : [];
     const externalContext =
-      externalFetch && results[5].status === "fulfilled"
-        ? (results[5].value as ContextSearchResult)
+      externalFetch && results[4].status === "fulfilled"
+        ? (results[4].value as ContextSearchResult)
         : undefined;
 
     return {
@@ -287,6 +309,57 @@ export class PimClient {
       pod,
       livingDocMarkdown,
       conflicts,
+      relevantLearnings,
+      recentUpdates: allUpdates.slice(0, recentLimit),
+      ...(externalContext ? { externalContext } : {}),
+    };
+  }
+
+  /**
+   * Project-scoped equivalent of pullSessionContext. Use this on project-only clients
+   * (PM, review, or between-sprint agents) to get a single bundled read: project
+   * metadata, recent project context updates, project-scoped org learnings, and an
+   * optional external context search.
+   */
+  async pullProjectSessionContext(opts?: SessionContextOptions): Promise<ProjectSessionContext> {
+    if (this.isPodMode()) {
+      throw new Error(
+        "pullProjectSessionContext requires a project-scoped client (projectId). For pod mode use pullSessionContext().",
+      );
+    }
+    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const recentLimit = opts?.recentUpdateLimit ?? 20;
+
+    // Fetch project first so its name can drive the semantic query for learnings.
+    const project = await this.getProject();
+    const learningsOpts = {
+      projectId: this.config.projectId ?? null,
+      query: project.name,
+    };
+
+    const baseFetches = [
+      this.getProjectUpdates(),
+      this.getRelevantLearnings(maxTokens, learningsOpts),
+    ] as const;
+
+    const externalFetch = opts?.externalQuery
+      ? this.searchContext(opts.externalQuery, { project_id: this.config.projectId })
+      : null;
+
+    const results = await Promise.allSettled([...baseFetches, externalFetch]);
+
+    const allUpdates = results[0].status === "fulfilled" ? (results[0].value as ProjectContextUpdate[]) : [];
+    const relevantLearnings: KnowledgeQueryResult = results[1].status === "fulfilled"
+      ? (results[1].value as KnowledgeQueryResult)
+      : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
+    const externalContext =
+      externalFetch && results[2].status === "fulfilled"
+        ? (results[2].value as ContextSearchResult)
+        : undefined;
+
+    return {
+      pulledAt: new Date().toISOString(),
+      project,
       relevantLearnings,
       recentUpdates: allUpdates.slice(0, recentLimit),
       ...(externalContext ? { externalContext } : {}),

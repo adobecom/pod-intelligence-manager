@@ -1,12 +1,7 @@
 import { randomUUID } from "crypto";
 import db from "../../db/connection.js";
 import { getRelevantLearnings } from "../../services/knowledge-graph.js";
-
-interface UpdateRow {
-  pod_id: string;
-  scope: string;
-  summary: string;
-}
+import { generateEmbedding, cosineSimilarity, isEmbeddingAvailable } from "../../services/embeddings.js";
 
 interface PodRow {
   pod_id: string;
@@ -33,31 +28,60 @@ function extractKeywords(text: string): string[] {
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 }
 
+/**
+ * Similarity threshold above which two pods are considered to overlap.
+ * Tuned loosely — cosine 0.75 on Titan embeddings generally means "same topic, different phrasing".
+ * Lower = more false positives, higher = misses semantic overlap.
+ */
+const SIMILARITY_THRESHOLD = 0.75;
+/** Keyword-overlap fallback threshold (count of shared non-stop-word tokens). */
+const KEYWORD_FALLBACK_THRESHOLD = 5;
+/** Chars of context per pod to feed the embedder — avoids Titan input-size hits on chatty pods. */
+const POD_CONTEXT_MAX_CHARS = 1500;
+
+function buildPodContext(podId: string): { text: string; keywords: Set<string>; topTerms: string[] } {
+  const updates = db.prepare(
+    "SELECT summary FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC LIMIT 20",
+  ).all(podId) as { summary: string }[];
+
+  const keywords = new Set<string>();
+  for (const u of updates) {
+    for (const kw of extractKeywords(u.summary)) {
+      keywords.add(kw);
+    }
+  }
+
+  const text = updates.map((u) => u.summary).join(" \n").slice(0, POD_CONTEXT_MAX_CHARS);
+  // Surface a few representative terms for the overlap description, regardless of
+  // whether similarity was computed via embeddings or keyword overlap.
+  const topTerms = [...keywords].slice(0, 5);
+  return { text, keywords, topTerms };
+}
+
 export async function detectOverlaps(): Promise<void> {
-  // Get all active pods
   const pods = db.prepare(
     "SELECT pod_id, name, org_id FROM pods WHERE pod_id IN (SELECT pod_id FROM org_pod_summaries)",
   ).all() as PodRow[];
 
   if (pods.length < 2) return;
 
-  // Collect keywords per pod from recent updates
-  const podKeywords = new Map<string, Set<string>>();
-  for (const pod of pods) {
-    const updates = db.prepare(
-      "SELECT summary FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC LIMIT 20",
-    ).all(pod.pod_id) as { summary: string }[];
+  const contexts = new Map<string, { text: string; keywords: Set<string>; topTerms: string[]; embedding: number[] | null }>();
+  const useEmbeddings = isEmbeddingAvailable();
 
-    const keywords = new Set<string>();
-    for (const u of updates) {
-      for (const kw of extractKeywords(u.summary)) {
-        keywords.add(kw);
+  for (const pod of pods) {
+    const ctx = buildPodContext(pod.pod_id);
+    let embedding: number[] | null = null;
+    if (useEmbeddings && ctx.text.trim()) {
+      try {
+        embedding = await generateEmbedding(ctx.text);
+      } catch {
+        // If one pod fails we keep keyword fallback for that pod only; no need to abort.
+        embedding = null;
       }
     }
-    podKeywords.set(pod.pod_id, keywords);
+    contexts.set(pod.pod_id, { ...ctx, embedding });
   }
 
-  // Clear existing overlaps and recompute
   db.prepare("DELETE FROM cross_pod_overlaps").run();
 
   const insert = db.prepare(
@@ -65,40 +89,63 @@ export async function detectOverlaps(): Promise<void> {
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
-  // Compare each pair of pods — only within the same org
   for (let i = 0; i < pods.length; i++) {
     for (let j = i + 1; j < pods.length; j++) {
       const podA = pods[i];
       const podB = pods[j];
       if (!podA.org_id || podA.org_id !== podB.org_id) continue;
-      const kwA = podKeywords.get(podA.pod_id)!;
-      const kwB = podKeywords.get(podB.pod_id)!;
 
-      const shared = [...kwA].filter((kw) => kwB.has(kw));
-      if (shared.length >= 5) {
-        const topTerms = shared.slice(0, 5).join(", ");
+      const ctxA = contexts.get(podA.pod_id)!;
+      const ctxB = contexts.get(podB.pod_id)!;
 
-        // Enrich with historical knowledge
-        let advisory = `Both pods are working on related concepts (${topTerms}). Coordinate to avoid conflicting approaches.`;
-        try {
-          const historicalLearnings = await getRelevantLearnings(shared.slice(0, 3), [], 500);
+      let overlap = false;
+      let reason = "";
+
+      if (ctxA.embedding && ctxB.embedding) {
+        const sim = cosineSimilarity(ctxA.embedding, ctxB.embedding);
+        if (sim >= SIMILARITY_THRESHOLD) {
+          overlap = true;
+          reason = `semantic similarity ${sim.toFixed(2)}`;
+        }
+      } else {
+        // Embedding unavailable for at least one pod — fall back to keyword overlap.
+        const shared = [...ctxA.keywords].filter((kw) => ctxB.keywords.has(kw));
+        if (shared.length >= KEYWORD_FALLBACK_THRESHOLD) {
+          overlap = true;
+          reason = `shared terms: ${shared.slice(0, 5).join(", ")}`;
+        }
+      }
+
+      if (!overlap) continue;
+
+      // Surface representative terms from whichever pod has more context; agents need
+      // *something* concrete in the description even when the match is semantic.
+      const description = ctxA.topTerms.length >= ctxB.topTerms.length
+        ? `Related work (${reason}): ${ctxA.topTerms.join(", ")}`
+        : `Related work (${reason}): ${ctxB.topTerms.join(", ")}`;
+
+      let advisory = `${podA.name} and ${podB.name} appear to be tackling related concepts. Coordinate to avoid conflicting approaches.`;
+      try {
+        const seedDomains = [...new Set([...ctxA.topTerms, ...ctxB.topTerms])].slice(0, 3);
+        if (seedDomains.length > 0) {
+          const historicalLearnings = await getRelevantLearnings(seedDomains, [], 500);
           if (historicalLearnings.nodes.length > 0) {
             const relevantNote = historicalLearnings.nodes[0];
             advisory += ` Historical note: "${relevantNote.summary}" (from ${relevantNote.source_pod_name}).`;
           }
-        } catch {
-          // Knowledge graph may not be initialized — skip silently
         }
-
-        insert.run(
-          `overlap-${randomUUID().slice(0, 8)}`,
-          podA.name,
-          podB.name,
-          `Shared context: ${topTerms}`,
-          advisory,
-          podA.org_id,
-        );
+      } catch {
+        // Knowledge graph may not be initialized — skip silently
       }
+
+      insert.run(
+        `overlap-${randomUUID().slice(0, 8)}`,
+        podA.name,
+        podB.name,
+        description,
+        advisory,
+        podA.org_id,
+      );
     }
   }
 }

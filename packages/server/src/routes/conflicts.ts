@@ -7,6 +7,7 @@ import { recalculatePressure } from "../services/pressure.js";
 import { notifyConflictResolved } from "../services/slack.js";
 import { validateBody } from "../middleware/validation.js";
 import { drainQueue } from "../services/ingestion-queue.js";
+import { addResolvedConflictToGraph } from "../services/knowledge-graph.js";
 
 const ResolveConflictSchema = z.object({
   resolution: z.string().min(1, "resolution is required"),
@@ -26,6 +27,7 @@ interface ConflictRow {
   resolved_by: string | null;
   resolution: string | null;
   resolution_date: string | null;
+  escalation_level: number | null;
 }
 
 function rowToConflict(row: ConflictRow): Conflict {
@@ -42,6 +44,7 @@ function rowToConflict(row: ConflictRow): Conflict {
     resolved_by: row.resolved_by,
     resolution: row.resolution,
     resolution_date: row.resolution_date,
+    escalation_level: row.escalation_level ?? 0,
   };
 }
 
@@ -99,6 +102,39 @@ export default async function conflictRoutes(app: FastifyInstance) {
 
     // Slack notification
     notifyConflictResolved(resolved);
+
+    // Incremental knowledge extraction: emit a resolved_conflict node immediately
+    // so concurrent pods can learn from this resolution without waiting for archival.
+    try {
+      const podRow = db.prepare(
+        `SELECT p.name AS pod_name, p.project_id, pr.name AS project_name
+         FROM pods p LEFT JOIN projects pr ON pr.project_id = p.project_id
+         WHERE p.pod_id = ?`,
+      ).get(podId) as { pod_name: string; project_id: string | null; project_name: string | null } | undefined;
+
+      // Pull scope from one of the referenced context updates (conflict itself has no scope column).
+      const firstUpdateId = resolved.sides[0]?.context_update_id;
+      const scopeRow = firstUpdateId
+        ? db.prepare("SELECT scope FROM context_updates WHERE id = ?").get(firstUpdateId) as { scope: string } | undefined
+        : undefined;
+
+      if (podRow) {
+        const project = podRow.project_id && podRow.project_name
+          ? { project_id: podRow.project_id, project_name: podRow.project_name }
+          : null;
+        const details = `Conflict: ${resolved.summary}\n\nResolution: ${resolution}\n\nAnalysis: ${resolved.master_analysis}`;
+        addResolvedConflictToGraph(
+          podId,
+          podRow.pod_name,
+          resolved.summary,
+          details,
+          scopeRow?.scope ?? "",
+          project,
+        );
+      }
+    } catch (err) {
+      console.warn(`[conflicts] incremental knowledge extraction failed for conflict ${conflictId}:`, err);
+    }
 
     return resolved;
   });

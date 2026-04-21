@@ -200,6 +200,114 @@ export function maybeAddProjectContextSignalToGraph(
   return { added: true };
 }
 
+/**
+ * Incremental ingestion from pod context updates: high-signal types only (decision, spec_change).
+ * Runs during active sprints so concurrent pods see each other's decisions without waiting for archival.
+ * Nodes are confidence=extracted, score=0.85 (slightly below archival's 0.9) to reflect that pod context
+ * may still shift before the sprint closes; archival-time extraction can add higher-confidence versions.
+ */
+export function maybeAddPodContextSignalToGraph(
+  podId: string,
+  podName: string,
+  type: ContextUpdateType,
+  summary: string,
+  details: string,
+  scope: Scope,
+  project?: { project_id: string; project_name: string } | null,
+): { added: boolean } {
+  if (!graph) return { added: false };
+  if (type !== "decision" && type !== "spec_change") return { added: false };
+
+  const now = new Date().toISOString();
+  const nodeType: KnowledgeNodeType = type === "decision" ? "decision" : "scope_insight";
+  const node: KnowledgeNode = {
+    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
+    type: nodeType,
+    summary,
+    details,
+    source_pod_id: podId,
+    source_pod_name: podName,
+    ...(project
+      ? { source_project_id: project.project_id, source_project_name: project.project_name }
+      : {}),
+    domains: [scope],
+    confidence: "extracted",
+    confidence_score: 0.85,
+    created_at: now,
+    curated: false,
+  };
+
+  const newEdges = buildEdges([node], graph.nodes);
+  graph.nodes.push(node);
+  graph.edges.push(...newEdges);
+  graph.version++;
+  graph.updated_at = now;
+  graph.communities = detectCommunities(graph);
+  hubIds = new Set(identifyHubs(graph));
+  saveGraph(graph.org_id, graph);
+
+  generateEmbedding(embedText(node)).then((emb) => {
+    if (emb && graph) {
+      node.embedding = emb;
+      saveGraph(graph.org_id, graph);
+    }
+  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
+
+  return { added: true };
+}
+
+/**
+ * Create a resolved_conflict node the moment a conflict is resolved.
+ * Previously this only happened at pod archival — meaning resolutions from a live sprint
+ * were invisible to other concurrent pods. High confidence (0.9) because the outcome is committed.
+ */
+export function addResolvedConflictToGraph(
+  podId: string,
+  podName: string,
+  summary: string,
+  details: string,
+  scope: Scope,
+  project?: { project_id: string; project_name: string } | null,
+): { added: boolean } {
+  if (!graph) return { added: false };
+
+  const now = new Date().toISOString();
+  const node: KnowledgeNode = {
+    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
+    type: "resolved_conflict",
+    summary,
+    details,
+    source_pod_id: podId,
+    source_pod_name: podName,
+    ...(project
+      ? { source_project_id: project.project_id, source_project_name: project.project_name }
+      : {}),
+    domains: scope ? [scope] : [],
+    confidence: "extracted",
+    confidence_score: 0.9,
+    created_at: now,
+    curated: false,
+  };
+
+  const newEdges = buildEdges([node], graph.nodes);
+  graph.nodes.push(node);
+  graph.edges.push(...newEdges);
+  graph.version++;
+  graph.updated_at = now;
+  graph.communities = detectCommunities(graph);
+  hubIds = new Set(identifyHubs(graph));
+  saveGraph(graph.org_id, graph);
+
+  generateEmbedding(embedText(node)).then((emb) => {
+    if (emb && graph) {
+      node.embedding = emb;
+      saveGraph(graph.org_id, graph);
+    }
+  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
+
+  return { added: true };
+}
+
 // --- Query Knowledge ---
 
 function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string[] {

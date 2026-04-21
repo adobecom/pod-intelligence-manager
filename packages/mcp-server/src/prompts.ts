@@ -243,13 +243,20 @@ Synthesize these learnings into actionable guidance. Highlight:
       scope: z.string().optional().describe("Agent scope: org-defined scope id (see GET /api/org/config) for filtered learnings"),
     },
     async ({ pod_id, scope }) => {
+      // Fetch pod first so learnings can be scoped by its project_id (no cross-project knowledge bleed).
+      const pod = await apiFetch<Pod & { project_id?: string | null }>(`/api/pods/${pod_id}`);
       const scopeParam = scope ? `&scopes=${encodeURIComponent(scope)}` : "";
-      const [pod, livingDoc, conflicts, updates, learnings] = await Promise.all([
-        apiFetch<Pod>(`/api/pods/${pod_id}`),
+      const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
+      const milestoneQuery = pod.milestone?.name?.trim();
+      const queryParam = milestoneQuery ? `&query=${encodeURIComponent(milestoneQuery)}` : "";
+
+      const [livingDoc, conflicts, updates, learnings] = await Promise.all([
         apiFetchText(`/api/pods/${pod_id}/living-doc`),
         apiFetch<Conflict[]>(`/api/pods/${pod_id}/conflicts`),
         apiFetch<ContextUpdate[]>(`/api/pods/${pod_id}/context-updates`),
-        apiFetch<KnowledgeQueryResult>(`/api/knowledge/relevant?maxTokens=2000${scopeParam}`),
+        apiFetch<KnowledgeQueryResult>(
+          `/api/knowledge/relevant?maxTokens=2000${scopeParam}${projectParam}${queryParam}`,
+        ),
       ]);
 
       const openConflicts = conflicts.filter((c) => c.status !== "resolved");

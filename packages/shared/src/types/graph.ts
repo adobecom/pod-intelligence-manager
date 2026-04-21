@@ -100,6 +100,12 @@ export interface KnowledgeQueryOptions {
   limit?: number;
   /** Pre-computed query embedding for hybrid semantic+keyword scoring. */
   query_embedding?: number[] | null;
+  /**
+   * Free-text query the server will embed for semantic scoring. Convenience when
+   * the caller doesn't have access to an embedding provider. Ignored if
+   * `query_embedding` is supplied.
+   */
+  query_text?: string;
 }
 
 export interface KnowledgeQueryResult {
