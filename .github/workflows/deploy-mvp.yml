@@ -1,0 +1,106 @@
+name: Deploy MVP to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mvp
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: us-west-2
+      STACK_NAME: PimEc2Stack-rkhan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build monorepo
+        run: pnpm build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy CDK stack
+        working-directory: packages/infra
+        run: npx cdk deploy "$STACK_NAME" --require-approval never --outputs-file outputs.json
+
+      - name: Extract stack outputs
+        id: outputs
+        working-directory: packages/infra
+        run: |
+          UI_BUCKET=$(jq -r ".\"$STACK_NAME\".UiBucketName" outputs.json)
+          ECR_URI=$(jq -r ".\"$STACK_NAME\".EcrRepoUri" outputs.json)
+          ASG_NAME=$(jq -r ".\"$STACK_NAME\".AutoScalingGroupName" outputs.json)
+          DIST_ID=$(jq -r ".\"$STACK_NAME\".DistributionId" outputs.json)
+          CF_URL=$(jq -r ".\"$STACK_NAME\".CloudFrontUrl" outputs.json)
+          echo "ui_bucket=$UI_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "ecr_uri=$ECR_URI" >> "$GITHUB_OUTPUT"
+          echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
+          echo "dist_id=$DIST_ID" >> "$GITHUB_OUTPUT"
+          echo "cf_url=$CF_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push server image
+        env:
+          IMAGE: ${{ steps.outputs.outputs.ecr_uri }}
+        run: |
+          docker build -f packages/server/Dockerfile -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+      - name: Redeploy on running EC2 instances
+        env:
+          ASG_NAME: ${{ steps.outputs.outputs.asg_name }}
+          ECR_URI: ${{ steps.outputs.outputs.ecr_uri }}
+        run: |
+          INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "$ASG_NAME" \
+            --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+            --output text)
+          if [ -z "$INSTANCES" ]; then
+            echo "No in-service instances yet; first boot will pull :latest via user-data"
+            exit 0
+          fi
+          CMD="aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_URI%%/*} && docker pull $ECR_URI:latest && systemctl restart pim-server"
+          for ID in $INSTANCES; do
+            aws ssm send-command \
+              --instance-ids "$ID" \
+              --document-name AWS-RunShellScript \
+              --parameters "commands=[\"$CMD\"]" \
+              --comment "deploy $GITHUB_SHA" >/dev/null
+            echo "Dispatched restart to $ID"
+          done
+
+      - name: Sync UI to S3
+        env:
+          UI_BUCKET: ${{ steps.outputs.outputs.ui_bucket }}
+        run: aws s3 sync packages/ui/dist "s3://$UI_BUCKET/" --delete
+
+      - name: Invalidate CloudFront
+        env:
+          DIST_ID: ${{ steps.outputs.outputs.dist_id }}
+        run: |
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*" >/dev/null
+          echo "Deployed: ${{ steps.outputs.outputs.cf_url }}"

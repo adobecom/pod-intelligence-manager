@@ -23,6 +23,7 @@ import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
+import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import db from "./db/connection.js";
@@ -43,7 +44,8 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
 createTables();
 seedDatabase();
 
-// Initialize knowledge graph (load from disk into memory)
+// Initialize knowledge graph (restore from S3 if local is empty, then load from disk into memory)
+await restoreGraphFromS3IfEmpty("default");
 initializeKnowledgeGraph("default");
 await seedKnowledgeGraph();
 
@@ -183,3 +185,18 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
 });
+
+// Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.
+const shutdown = async (signal: string): Promise<void> => {
+  app.log.info(`Received ${signal}, shutting down gracefully`);
+  try {
+    await app.close();
+    db.close();
+    process.exit(0);
+  } catch (err) {
+    app.log.error(err, "Graceful shutdown failed");
+    process.exit(1);
+  }
+};
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));

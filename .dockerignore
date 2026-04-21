@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/.turbo
+**/.data
+**/.next
+**/.cache
+.git
+.github
+.vscode
+.idea
+**/*.log
+**/.env
+**/.env.*
+!**/.env.example
+**/coverage
+packages/ui/dist
+packages/ui/node_modules
