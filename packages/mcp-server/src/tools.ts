@@ -598,4 +598,48 @@ export function registerTools(server: McpServer) {
       return json(result);
     },
   );
+
+  server.tool(
+    "update_pod_milestone",
+    "Update a pod's milestone: name, target date, and/or percent_complete. At least one field must be provided. Triggers a living doc regeneration. Use this as work progresses through the sprint.",
+    {
+      pod_id: PodId,
+      name: z.string().min(1).optional().describe("New milestone name"),
+      target_date: z.string().min(1).optional().describe("New target date (YYYY-MM-DD)"),
+      percent_complete: z.number().int().min(0).max(100).optional().describe("Completion percentage (0–100)"),
+    },
+    async ({ pod_id, name, target_date, percent_complete }) => {
+      const body = Object.fromEntries(
+        Object.entries({ name, target_date, percent_complete }).filter(([, v]) => v !== undefined),
+      );
+      if (Object.keys(body).length === 0) {
+        throw new Error("Provide at least one of: name, target_date, percent_complete");
+      }
+      const result = await apiPatch(`/api/pods/${encodeURIComponent(pod_id)}/milestone`, body);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "link_pod_to_project",
+    "Link or unlink a pod to a long-lived project. Pass project_id to associate the pod with a project (gates knowledge scoping and context_search precision to that project's resources). Pass null to clear the association.",
+    {
+      pod_id: PodId,
+      project_id: z.union([z.string().min(1), z.null()]).describe("Project ID to link, or null to unlink"),
+    },
+    async ({ pod_id, project_id }) => {
+      const result = await apiPatch(`/api/pods/${encodeURIComponent(pod_id)}`, { project_id });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "get_pod_quality_stats",
+    "Fetch agent quality metrics for a pod: update counts, type breakdown, status distribution, and agent contribution stats. Useful for PM and QA agents to assess sprint health and agent engagement.",
+    { pod_id: PodId },
+    async ({ pod_id }) => {
+      const result = await apiFetch(`/api/pods/${encodeURIComponent(pod_id)}/quality-stats`);
+      return json(result);
+    },
+  );
 }
