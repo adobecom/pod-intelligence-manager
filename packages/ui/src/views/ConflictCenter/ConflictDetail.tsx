@@ -22,6 +22,7 @@ import remarkGfm from "remark-gfm";
 import type { PendingWork } from "@pim/shared";
 import { MarkdownDetailsEditor } from "../../components/MarkdownDetailsEditor";
 import { SeverityBadge } from "../../components/SeverityBadge";
+import { EscalationBadge } from "../../components/EscalationBadge";
 import { RelativeTime } from "../../components/RelativeTime";
 import { usePodStore } from "../../stores/podStore";
 import * as api from "../../services/api";
@@ -100,10 +101,8 @@ export function ConflictDetail() {
         </Heading>
         <SeverityBadge severity={conflict.severity} />
         {isResolved && <Badge variant="positive">Resolved</Badge>}
-        {!isResolved && conflict.escalation_level && conflict.escalation_level > 0 ? (
-          <Badge variant={conflict.escalation_level >= 3 ? "negative" : "notice"}>
-            Escalation L{conflict.escalation_level}
-          </Badge>
+        {!isResolved ? (
+          <EscalationBadge level={conflict.escalation_level ?? 0} />
         ) : null}
       </div>
 

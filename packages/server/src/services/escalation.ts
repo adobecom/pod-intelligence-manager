@@ -10,6 +10,7 @@ interface OpenConflictRow {
   created_at: string;
   severity: string;
   escalation_level: number;
+  slack_message_ts: string | null;
 }
 
 const THRESHOLDS = [
@@ -22,7 +23,7 @@ const THRESHOLDS = [
 export function checkEscalations(): void {
   const now = Date.now();
   const conflicts = db.prepare(
-    "SELECT id, pod_id, created_at, severity, escalation_level FROM conflicts WHERE status != 'resolved'",
+    "SELECT id, pod_id, created_at, severity, escalation_level, slack_message_ts FROM conflicts WHERE status != 'resolved'",
   ).all() as OpenConflictRow[];
 
   for (const conflict of conflicts) {
@@ -72,13 +73,15 @@ export function checkEscalations(): void {
           },
         });
 
-        // Slack escalation notification
+        // Slack escalation notification — thread under the original conflict
+        // post when available so the channel sees one coherent conversation.
         notifyConflictEscalated(
           conflict.pod_id,
           conflict.id,
           threshold.level,
           threshold.message,
           Math.round(ageHours),
+          conflict.slack_message_ts ?? undefined,
         );
 
         break; // Only escalate one level at a time

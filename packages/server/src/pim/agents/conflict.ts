@@ -168,8 +168,17 @@ export async function createConflict(
   broadcast({ type: "conflict_created", podId, payload: conflict });
   broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
 
-  // Slack notifications
-  notifyConflictCreated(conflict);
+  // Slack notifications — capture the posted message ts so later escalations/
+  // resolutions can thread under it instead of posting new top-level messages.
+  // Fire-and-forget: we don't block conflict creation on Slack round-trip.
+  notifyConflictCreated(conflict).then((ts) => {
+    if (!ts) return;
+    try {
+      db.prepare("UPDATE conflicts SET slack_message_ts = ? WHERE id = ?").run(ts, conflict.id);
+    } catch (err) {
+      console.error(`[conflict] failed to persist slack_message_ts for ${conflict.id}:`, (err as Error).message);
+    }
+  });
   notifyPressureThreshold(podId, newPressure, previousPressure);
 
   return conflict;

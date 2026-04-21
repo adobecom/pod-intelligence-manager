@@ -363,6 +363,9 @@ export class PimEc2Stack extends cdk.Stack {
       additionalBehaviors: {
         "/api/*": apiBehavior,
         "/ws/*": apiBehavior,
+        // Tunnel proxy — forwards dev-preview traffic to the ALB. Matches
+        // `/tunnel/{tunnelId}/{shareToken}[/*]` served by the Fastify server.
+        "/tunnel/*": apiBehavior,
       },
       defaultRootObject: "index.html",
       errorResponses: [

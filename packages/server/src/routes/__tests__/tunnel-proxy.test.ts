@@ -2,15 +2,19 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vites
 import Fastify, { type FastifyInstance } from "fastify";
 import type { TunnelResponse } from "@pim/shared";
 
-// Mock db
+// Mock db — share_token lookup always returns the fixture token so tests
+// focus on proxy behavior rather than token plumbing (covered separately).
+// vi.mock hoists above imports, so the literal is inlined here (not shared
+// via const) to avoid TDZ errors.
 vi.mock("../../db/connection.js", () => ({
   default: {
     prepare: vi.fn().mockReturnValue({
       run: vi.fn(),
-      get: vi.fn(),
+      get: vi.fn().mockReturnValue({ share_token: "fixture-token-abc" }),
     }),
   },
 }));
+const FIXTURE_TOKEN = "fixture-token-abc";
 
 // Mock the broadcast function
 vi.mock("../../ws/index.js", () => ({
@@ -58,7 +62,7 @@ describe("tunnel-proxy routes", () => {
   it("returns 502 when tunnel is not connected", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/tunnel/nonexistent-tunnel/index.html",
+      url: `/tunnel/nonexistent-tunnel/${FIXTURE_TOKEN}/index.html`,
     });
 
     expect(res.statusCode).toBe(502);
@@ -72,7 +76,7 @@ describe("tunnel-proxy routes", () => {
     // Fire request but don't await — we need to resolve it manually
     const resPromise = app.inject({
       method: "GET",
-      url: "/tunnel/test-tunnel-1/some/path?foo=bar",
+      url: `/tunnel/test-tunnel-1/${FIXTURE_TOKEN}/some/path?foo=bar`,
     });
 
     // Give Fastify a tick to send the WS message
@@ -107,7 +111,7 @@ describe("tunnel-proxy routes", () => {
 
     const resPromise = app.inject({
       method: "GET",
-      url: "/tunnel/test-tunnel-1",
+      url: `/tunnel/test-tunnel-1/${FIXTURE_TOKEN}`,
     });
 
     await new Promise((r) => setTimeout(r, 50));
@@ -135,7 +139,7 @@ describe("tunnel-proxy routes", () => {
 
     const resPromise = app.inject({
       method: "POST",
-      url: "/tunnel/test-tunnel-1/api/data",
+      url: `/tunnel/test-tunnel-1/${FIXTURE_TOKEN}/api/data`,
       headers: { "content-type": "application/json" },
       payload,
     });
@@ -170,7 +174,7 @@ describe("tunnel-proxy routes", () => {
     // by unregistering the connection (which rejects pending requests)
     const resPromise = app.inject({
       method: "GET",
-      url: "/tunnel/test-tunnel-1/slow",
+      url: `/tunnel/test-tunnel-1/${FIXTURE_TOKEN}/slow`,
     });
 
     await new Promise((r) => setTimeout(r, 50));
@@ -181,5 +185,20 @@ describe("tunnel-proxy routes", () => {
     const res = await resPromise;
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toContain("Tunnel error");
+  });
+
+  it("rejects requests with a wrong share token", async () => {
+    const ws = createMockWs();
+    registerTunnelConnection("test-tunnel-1", "pod-1", 3000, ws);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/tunnel/test-tunnel-1/wrong-token/index.html",
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toContain("share token");
+    // The WS should never have been dispatched to
+    expect(ws.send).not.toHaveBeenCalled();
   });
 });
