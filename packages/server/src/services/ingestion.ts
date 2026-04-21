@@ -10,6 +10,7 @@ import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 import { scheduleAsyncQualityScore } from "./async-quality-score.js";
 import { getOrgScopeIds } from "./org-settings.js";
 import { getOrgIdForPod } from "./orgs.js";
+import { maybeAddPodContextSignalToGraph } from "./knowledge-graph.js";
 
 const ScopeSchema = z.string().min(1);
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
@@ -175,6 +176,36 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
 
   // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
   const pimResult = await processUpdate(update);
+
+  // 8.5 Incremental knowledge graph extraction for high-signal updates.
+  // Runs during active sprints so other concurrent pods can see these decisions/spec_changes
+  // without waiting for pod archival. Skipped silently if the graph isn't initialized.
+  if (data.type === "decision" || data.type === "spec_change") {
+    const podRow = db.prepare(
+      `SELECT p.name AS pod_name, p.project_id, pr.name AS project_name
+       FROM pods p LEFT JOIN projects pr ON pr.project_id = p.project_id
+       WHERE p.pod_id = ?`,
+    ).get(podId) as { pod_name: string; project_id: string | null; project_name: string | null } | undefined;
+
+    if (podRow) {
+      const project = podRow.project_id && podRow.project_name
+        ? { project_id: podRow.project_id, project_name: podRow.project_name }
+        : null;
+      try {
+        maybeAddPodContextSignalToGraph(
+          podId,
+          podRow.pod_name,
+          data.type,
+          data.summary,
+          data.details,
+          data.scope,
+          project,
+        );
+      } catch (err) {
+        console.warn(`[ingestion] incremental knowledge extraction failed for update ${id}:`, err);
+      }
+    }
+  }
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)
   scheduleAsyncQualityScore(podId, update.id);

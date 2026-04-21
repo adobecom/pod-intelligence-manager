@@ -10,6 +10,9 @@ import {
   queryKnowledge,
   getRelevantLearnings,
   addLearningsToGraph,
+  maybeAddPodContextSignalToGraph,
+  addResolvedConflictToGraph,
+  getGraph,
 } from "../knowledge-graph.js";
 import type { EnhancedPodLearning } from "@pim/shared";
 
@@ -125,5 +128,70 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(summaries.some(s => s.includes("Shared org"))).toBe(true);
     expect(summaries.some(s => s.includes("Project Alpha"))).toBe(true);
     expect(summaries.some(s => s.includes("Project Beta"))).toBe(false);
+  });
+
+  it("maybeAddPodContextSignalToGraph adds decision nodes from active pods", () => {
+    const orgId = `kg-test-${orgSeq++}`;
+    initializeKnowledgeGraph(orgId);
+
+    const decisionResult = maybeAddPodContextSignalToGraph(
+      "pod-live",
+      "Live Pod",
+      "decision",
+      "Switched auth flow to PKCE",
+      "Needed for SPA support.",
+      "frontend",
+      { project_id: "proj-x", project_name: "Project X" },
+    );
+    const specResult = maybeAddPodContextSignalToGraph(
+      "pod-live",
+      "Live Pod",
+      "spec_change",
+      "API contract moved /users to /v2/users",
+      "",
+      "backend",
+    );
+    const progressResult = maybeAddPodContextSignalToGraph(
+      "pod-live",
+      "Live Pod",
+      "progress",
+      "Shipped button tweak",
+      "",
+      "frontend",
+    );
+
+    expect(decisionResult.added).toBe(true);
+    expect(specResult.added).toBe(true);
+    expect(progressResult.added).toBe(false);
+
+    const nodes = getGraph().nodes;
+    const decisionNode = nodes.find(n => n.summary.includes("PKCE"));
+    expect(decisionNode?.type).toBe("decision");
+    expect(decisionNode?.source_pod_id).toBe("pod-live");
+    expect(decisionNode?.source_project_id).toBe("proj-x");
+    const specNode = nodes.find(n => n.summary.includes("API contract"));
+    expect(specNode?.type).toBe("scope_insight");
+    expect(specNode?.source_project_id).toBeUndefined();
+  });
+
+  it("addResolvedConflictToGraph adds a resolved_conflict node on resolution", () => {
+    const orgId = `kg-test-${orgSeq++}`;
+    initializeKnowledgeGraph(orgId);
+
+    const result = addResolvedConflictToGraph(
+      "pod-live",
+      "Live Pod",
+      "Two agents disagreed on token storage",
+      "Resolution: use httpOnly cookies.",
+      "security",
+      null,
+    );
+    expect(result.added).toBe(true);
+
+    const node = getGraph().nodes.find(n => n.summary.includes("token storage"));
+    expect(node?.type).toBe("resolved_conflict");
+    expect(node?.source_pod_id).toBe("pod-live");
+    expect(node?.confidence_score).toBe(0.9);
+    expect(node?.domains).toContain("security");
   });
 });
