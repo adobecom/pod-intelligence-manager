@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildArtifact } from "./artifact-template.js";
 import { apiFetch, apiFetchText, apiPatch, apiPost, apiPut } from "./api.js";
+import { registerAuthTools } from "./auth-tools.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -66,6 +67,9 @@ const ActorSchema = z.object({
 /* ------------------------------------------------------------------ */
 
 export function registerTools(server: McpServer) {
+  // ── auth ─────────────────────────────────────────────────────────
+  registerAuthTools(server);
+
   // ── org config & projects ───────────────────────────────────────
 
   server.tool(

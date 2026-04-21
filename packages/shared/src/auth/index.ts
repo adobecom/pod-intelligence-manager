@@ -17,3 +17,11 @@ export {
 } from "./ims.js";
 
 export { ensureFreshToken } from "./token.js";
+
+export {
+  type PkcePair,
+  generatePkce,
+  generateState,
+  exchangeCodeForToken,
+  fetchImsProfile,
+} from "./pkce.js";

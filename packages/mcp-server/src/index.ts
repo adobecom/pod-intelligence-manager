@@ -31,6 +31,10 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 
 ## TOOLS
 
+### Authentication
+- \`authenticate\` — Start Adobe IMS OAuth sign-in. Returns an auth URL to open in the browser. If already signed in, returns immediately. Call this if any tool returns a 401 or "run pim login" error.
+- \`complete_authentication\` — Finish sign-in after the user has visited the URL. Exchanges the code for tokens and writes \`~/.pim/credentials.json\`. Call this after the user confirms their browser shows "Signed in".
+
 ### Org & Projects
 - \`get_org_config\` — read the org scope list (ids + labels). Call this before any tool that takes a scope id.
 - \`update_org_config\` — full replacement of the org scope list.
