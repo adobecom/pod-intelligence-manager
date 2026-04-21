@@ -8,7 +8,7 @@ const TRUST_MODE_EMAIL = process.env.DEV_USER_EMAIL ?? "dev@local";
 const TRUST_MODE_NAME = process.env.DEV_USER_NAME ?? "Local Dev";
 
 export default async function wsRoutes(app: FastifyInstance) {
-  const authMode = (process.env.AUTH_MODE ?? "trust") as "trust" | "ims";
+  const authMode = (process.env.AUTH_MODE ?? "ims") as "trust" | "ims";
 
   app.get("/ws", { websocket: true }, async (socket, req) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);

@@ -19,13 +19,16 @@ export class TunnelClient {
     private serverWsUrl: string,
     private tunnelId: string,
     private localPort: number,
+    private authToken?: string,
   ) {}
 
   async connect(): Promise<void> {
     this.connected = false;
 
     return new Promise<void>((resolve, reject) => {
-      const url = `${this.serverWsUrl}?tunnelId=${this.tunnelId}`;
+      const params = new URLSearchParams({ tunnelId: this.tunnelId });
+      if (this.authToken) params.set("token", this.authToken);
+      const url = `${this.serverWsUrl}?${params.toString()}`;
       this.ws = new WebSocket(url);
 
       this.ws.onopen = () => {

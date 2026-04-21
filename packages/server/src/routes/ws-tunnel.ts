@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { TunnelMessage } from "@pim/shared";
 import db from "../db/connection.js";
+import { verifyImsToken } from "../middleware/ims-verify.js";
+import { upsertUserByIms } from "../services/users.js";
+import { getMembership } from "../services/orgs.js";
 import {
   registerTunnelConnection,
   unregisterTunnelConnection,
@@ -9,10 +12,15 @@ import {
   rejectPendingRequest,
 } from "../ws/tunnel-connections.js";
 
+const TRUST_MODE_EMAIL = process.env.DEV_USER_EMAIL ?? "dev@local";
+const TRUST_MODE_NAME = process.env.DEV_USER_NAME ?? "Local Dev";
+
 export default async function wsTunnelRoutes(app: FastifyInstance) {
-  app.get("/ws/tunnel", { websocket: true }, (socket, req) => {
+  app.get("/ws/tunnel", { websocket: true }, async (socket, req) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const tunnelId = url.searchParams.get("tunnelId");
+    const tokenParam = url.searchParams.get("token");
+    const authMode = (process.env.AUTH_MODE ?? "ims") as "trust" | "ims";
 
     if (!tunnelId) {
       socket.close(4000, "Missing tunnelId query parameter");
@@ -21,8 +29,8 @@ export default async function wsTunnelRoutes(app: FastifyInstance) {
 
     // Validate tunnel exists and is active
     const row = db
-      .prepare("SELECT pod_id, status FROM tunnels WHERE tunnel_id = ?")
-      .get(tunnelId) as { pod_id: string; status: string } | undefined;
+      .prepare("SELECT pod_id, org_id, status FROM tunnels WHERE tunnel_id = ?")
+      .get(tunnelId) as { pod_id: string; org_id: string | null; status: string } | undefined;
 
     if (!row) {
       socket.close(4001, "Tunnel not found");
@@ -32,6 +40,37 @@ export default async function wsTunnelRoutes(app: FastifyInstance) {
     if (row.status === "disconnected") {
       socket.close(4002, "Tunnel is disconnected");
       return;
+    }
+
+    // Authenticate the CLI connection and verify the user belongs to the tunnel's org.
+    if (authMode === "ims") {
+      if (!tokenParam) {
+        socket.close(1008, "Missing auth token");
+        return;
+      }
+      try {
+        const claims = await verifyImsToken(tokenParam);
+        const email = typeof claims.email === "string" ? claims.email : null;
+        const imsUserId = typeof claims.user_id === "string"
+          ? claims.user_id
+          : (typeof claims.sub === "string" ? claims.sub : null);
+        if (!imsUserId || !email) {
+          socket.close(1008, "IMS token missing user_id/email");
+          return;
+        }
+        const userRecord = upsertUserByIms({ ims_user_id: imsUserId, email,
+          display_name: typeof claims.name === "string" ? claims.name : null });
+        if (row.org_id && !getMembership(row.org_id, userRecord.user_id)) {
+          socket.close(1008, "Not a member of this tunnel's org");
+          return;
+        }
+      } catch (err) {
+        req.log.warn({ err }, "Tunnel WS IMS token verification failed");
+        socket.close(1008, "Invalid IMS token");
+        return;
+      }
+    } else {
+      upsertUserByIms({ email: TRUST_MODE_EMAIL, display_name: TRUST_MODE_NAME });
     }
 
     const podId = row.pod_id;
