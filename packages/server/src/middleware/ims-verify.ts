@@ -53,10 +53,11 @@ export async function verifyImsToken(token: string): Promise<ImsClaims> {
   });
   const claims = payload as ImsClaims;
 
-  if (process.env.IMS_REQUIRE_CLIENT_ID_MATCH === "true" && process.env.IMS_CLIENT_ID) {
-    if (claims.client_id && claims.client_id !== process.env.IMS_CLIENT_ID) {
-      throw new Error("IMS token client_id does not match IMS_CLIENT_ID");
-    }
+  // Default on when IMS_CLIENT_ID is set; opt out with IMS_REQUIRE_CLIENT_ID_MATCH=false.
+  const requireClientMatch =
+    process.env.IMS_REQUIRE_CLIENT_ID_MATCH !== "false" && !!process.env.IMS_CLIENT_ID;
+  if (requireClientMatch && claims.client_id && claims.client_id !== process.env.IMS_CLIENT_ID) {
+    throw new Error("IMS token client_id does not match IMS_CLIENT_ID");
   }
 
   if (!claims.email || !claims.user_id) {
@@ -64,6 +65,12 @@ export async function verifyImsToken(token: string): Promise<ImsClaims> {
     if (!claims.email && profile.email) claims.email = profile.email;
     if (!claims.user_id && profile.userId) claims.user_id = profile.userId;
     if (!claims.name && profile.displayName) claims.name = profile.displayName;
+  }
+
+  // Reject non-Adobe accounts. Override with IMS_ALLOWED_EMAIL_DOMAIN=@example.com.
+  const allowedDomain = (process.env.IMS_ALLOWED_EMAIL_DOMAIN ?? "@adobe.com").toLowerCase();
+  if (claims.email && !claims.email.toLowerCase().endsWith(allowedDomain)) {
+    throw new Error(`Email domain not permitted: ${claims.email}`);
   }
 
   return claims;
