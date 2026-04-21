@@ -328,6 +328,56 @@ export function registerTools(server: McpServer) {
   );
 
   server.tool(
+    "get_project_session_context",
+    "Project-scoped equivalent of get_agent_session_context for agents working between sprints or on long-lived initiatives (PM, PR review, etc.). Bundles: project metadata (anatomy, resources), recent project context updates, project-scoped org learnings, and optional external context search. Use this when you don't have an active pod but need to orient yourself on a project before acting.",
+    {
+      project_id: ProjectId,
+      agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
+      scope: Scope,
+      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
+      recent_updates_limit: z.number().optional().describe("Max recent project context updates to return (default 20)"),
+      external_query: z
+        .string()
+        .optional()
+        .describe(
+          "Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup. The project_id is passed automatically to scope the fan-out to this project's resources.",
+        ),
+    },
+    async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
+      const maxTok = learnings_max_tokens ?? 2000;
+      const recentLimit = recent_updates_limit ?? 20;
+      const scopes = encodeURIComponent(scope);
+      const projectParam = `&projectId=${encodeURIComponent(project_id)}`;
+
+      // Fetch project first so we can use its name as the semantic query (embedding scoring on learnings).
+      const project = await apiFetch<{ name?: string }>(`/api/projects/${encodeURIComponent(project_id)}`);
+      const queryParam = project.name ? `&query=${encodeURIComponent(project.name)}` : "";
+
+      const [project_updates, relevant_learnings, external_context] = await Promise.all([
+        apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),
+        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
+        external_query
+          ? apiPost("/api/context-search", { query: external_query, project_id }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      const recent_updates = Array.isArray(project_updates)
+        ? (project_updates as unknown[]).slice(0, recentLimit)
+        : [];
+
+      return json({
+        pulled_at: new Date().toISOString(),
+        agent_id,
+        scope,
+        project,
+        recent_updates,
+        relevant_learnings,
+        ...(external_context ? { external_context } : {}),
+      });
+    },
+  );
+
+  server.tool(
     "submit_project_context_update",
     "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full PIM orchestrator. High-signal types (decision, spec_change) may be added to the knowledge graph.",
     {

@@ -31,6 +31,14 @@ export interface SessionContext {
   externalContext?: ContextSearchResult;
 }
 
+export interface ProjectSessionContext {
+  pulledAt: string;
+  project: Project;
+  relevantLearnings: KnowledgeQueryResult;
+  recentUpdates: ProjectContextUpdate[];
+  externalContext?: ContextSearchResult;
+}
+
 /** Merge org header (X-Pim-Org) into an init record when an org slug is present. */
 function withOrgHeader(
   init: RequestInit | undefined,
@@ -301,6 +309,57 @@ export class PimClient {
       pod,
       livingDocMarkdown,
       conflicts,
+      relevantLearnings,
+      recentUpdates: allUpdates.slice(0, recentLimit),
+      ...(externalContext ? { externalContext } : {}),
+    };
+  }
+
+  /**
+   * Project-scoped equivalent of pullSessionContext. Use this on project-only clients
+   * (PM, review, or between-sprint agents) to get a single bundled read: project
+   * metadata, recent project context updates, project-scoped org learnings, and an
+   * optional external context search.
+   */
+  async pullProjectSessionContext(opts?: SessionContextOptions): Promise<ProjectSessionContext> {
+    if (this.isPodMode()) {
+      throw new Error(
+        "pullProjectSessionContext requires a project-scoped client (projectId). For pod mode use pullSessionContext().",
+      );
+    }
+    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const recentLimit = opts?.recentUpdateLimit ?? 20;
+
+    // Fetch project first so its name can drive the semantic query for learnings.
+    const project = await this.getProject();
+    const learningsOpts = {
+      projectId: this.config.projectId ?? null,
+      query: project.name,
+    };
+
+    const baseFetches = [
+      this.getProjectUpdates(),
+      this.getRelevantLearnings(maxTokens, learningsOpts),
+    ] as const;
+
+    const externalFetch = opts?.externalQuery
+      ? this.searchContext(opts.externalQuery, { project_id: this.config.projectId })
+      : null;
+
+    const results = await Promise.allSettled([...baseFetches, externalFetch]);
+
+    const allUpdates = results[0].status === "fulfilled" ? (results[0].value as ProjectContextUpdate[]) : [];
+    const relevantLearnings: KnowledgeQueryResult = results[1].status === "fulfilled"
+      ? (results[1].value as KnowledgeQueryResult)
+      : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
+    const externalContext =
+      externalFetch && results[2].status === "fulfilled"
+        ? (results[2].value as ContextSearchResult)
+        : undefined;
+
+    return {
+      pulledAt: new Date().toISOString(),
+      project,
       relevantLearnings,
       recentUpdates: allUpdates.slice(0, recentLimit),
       ...(externalContext ? { externalContext } : {}),
