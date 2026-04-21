@@ -7,7 +7,7 @@ ensureCliPackageRootEnv();
 
 import { resolveOrgSlug } from "./config.js";
 import { setOrgSlug, setAuthToken } from "./util.js";
-import { loadCredentials } from "@pim/shared/auth";
+import { loadCredentials, ensureFreshToken } from "@pim/shared/auth";
 import { registerPodCommands } from "./commands/pod.js";
 import { registerReportCommand } from "./commands/report.js";
 import { registerDocCommand } from "./commands/doc.js";
@@ -22,23 +22,14 @@ import { registerLoginCommand } from "./commands/login.js";
 import { registerProjectCommands } from "./commands/project.js";
 
 setOrgSlug(resolveOrgSlug());
-// Best-effort auth priming for every command: if creds exist on disk we attach
-// the access token to outbound requests. If the server is in trust mode the
-// token is ignored; if it's in IMS mode and the token is expired the server
-// returns 401 and the user is prompted to re-login. The login command itself
-// does not depend on this (it reads/writes creds directly).
-{
-  const creds = loadCredentials();
-  if (creds) setAuthToken(creds.access_token);
-}
 
 const program = new Command();
 
 program
   .name("pim")
   .description("PIM (Pod Intelligence Manager) CLI — manage pods, submit context, and tunnel dev servers")
-  .version("0.0.1")
-  .option("-s, --server <url>", "Server base URL", process.env.PIM_SERVER_URL ?? "http://localhost:4000");
+  .version("0.1.0")
+  .option("-s, --server <url>", "Server base URL", process.env.PIM_SERVER_URL ?? "https://d1ygncl0yqo6sv.cloudfront.net");
 
 registerPodCommands(program);
 registerProjectCommands(program);
@@ -52,5 +43,23 @@ registerSearchCommand(program);
 registerInitCommand(program);
 registerLeaveCommand(program);
 registerLoginCommand(program);
+
+// Refresh token before any command runs. login/logout/whoami manage their own
+// auth directly so they're excluded to avoid a chicken-and-egg loop.
+const NO_AUTH_COMMANDS = new Set(["login", "logout", "whoami"]);
+program.hook("preAction", async (thisCommand) => {
+  const name = thisCommand.name();
+  if (NO_AUTH_COMMANDS.has(name)) return;
+  const creds = loadCredentials();
+  if (!creds) return;
+  try {
+    const fresh = await ensureFreshToken(creds);
+    setAuthToken(fresh.access_token);
+  } catch {
+    // Token expired with no refresh token — let the command hit a 401 so the
+    // error message names the actual failing operation, then tell the user to re-login.
+    setAuthToken(creds.access_token);
+  }
+});
 
 program.parse();

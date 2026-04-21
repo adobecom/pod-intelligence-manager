@@ -63,7 +63,7 @@ export function resolveConfig(): PimConfig | null {
   const podId = process.env.PIM_POD_ID?.trim() || json?.podId;
   const projectId = process.env.PIM_PROJECT_ID?.trim() || json?.projectId;
   const scope = process.env.PIM_SCOPE?.trim() || json?.scope;
-  const serverUrl = (process.env.PIM_SERVER_URL ?? json?.serverUrl ?? "http://localhost:4000").replace(/\/$/, "");
+  const serverUrl = (process.env.PIM_SERVER_URL ?? json?.serverUrl ?? "https://d1ygncl0yqo6sv.cloudfront.net").replace(/\/$/, "");
   const agentId = process.env.PIM_AGENT_ID?.trim() || json?.agentId || getGitUserName();
   const orgSlug = process.env.PIM_ORG_SLUG?.trim() || json?.orgSlug;
 
