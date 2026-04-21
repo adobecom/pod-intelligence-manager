@@ -105,7 +105,7 @@ async function buildHeaders(hasBody: boolean): Promise<Record<string, string>> {
     headers["Authorization"] = `Bearer ${creds.access_token}`;
   } else if (!warnedAboutMissingCreds) {
     warnedAboutMissingCreds = true;
-    console.error("[pim-mcp] No credentials found at ~/.pim/credentials.json — run 'pim login' first.");
+    console.error("[pim-mcp] Not authenticated — call the `authenticate` tool to sign in.");
   }
 
   const orgSlug = resolveOrgSlug();

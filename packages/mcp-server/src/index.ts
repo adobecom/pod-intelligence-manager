@@ -14,6 +14,12 @@ You are connected to the PIM (Pod Intelligence Manager) MCP server. PIM is an or
 
 ## MANDATORY PROTOCOL
 
+### Authentication (check before first tool call each session)
+Call \`authenticate\` at the start of any session that will use PIM tools.
+- If it returns \`status: "already_authenticated"\` or \`status: "trust_mode"\` — proceed immediately.
+- If it returns \`status: "pending"\` — show the user the \`auth_url\`, ask them to sign in, then call \`complete_authentication\`. Wait for confirmation before continuing.
+- If any subsequent tool call returns a 401 or an error mentioning credentials — call \`authenticate\` again (the token may have expired mid-session) and repeat the flow.
+
 ### Before any substantive work
 Call one of these — they are not optional:
 - In a pod → call \`get_agent_session_context(pod_id, agent_id, scope)\`
