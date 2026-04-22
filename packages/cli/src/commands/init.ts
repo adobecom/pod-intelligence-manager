@@ -14,6 +14,7 @@ import {
   PROTOCOL_MARKER_END,
 } from "../templates/pod-agent-protocol.md.js";
 import { renderSyncCommand } from "../templates/sync-command.md.js";
+import { detectEdsProject, runEdsSetup } from "../eds-setup.js";
 import {
   defaultScopeIdFromConfig,
   fetchOrgConfig,
@@ -214,8 +215,9 @@ function escapeRegex(str: string): string {
 async function runWizard(
   serverUrl: string,
   orgConfig: OrgConfig,
+  root: string,
   initial: { project?: string; scope?: string; agent?: string },
-): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string }> {
+): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string; isEds: boolean }> {
   // Pod selection — optional; user can skip to project-only mode
   const pods = await fetchOrgPods(serverUrl);
   let podId: string | undefined;
@@ -290,6 +292,15 @@ async function runWizard(
     agentId = entered.trim() || undefined;
   }
 
+  // EDS/Milo project detection
+  const looksLikeEds = detectEdsProject(root);
+  const isEds = await confirm({
+    message: looksLikeEds
+      ? "EDS/Milo project detected. Set up EDS development tooling (Milo rules, lint hooks, permissions)?"
+      : "Set up EDS/Milo development tooling (Milo rules, lint hooks, permissions)?",
+    default: looksLikeEds,
+  });
+
   const target = podId
     ? `pod ${podId}${projectId ? `, project ${projectId}` : ""}`
     : projectId
@@ -304,7 +315,7 @@ async function runWizard(
     process.exit(0);
   }
 
-  return { podId, projectId, scope, agentId };
+  return { podId, projectId, scope, agentId, isEds };
 }
 
 export function registerInitCommand(program: Command): void {
@@ -410,8 +421,9 @@ export function registerInitCommand(program: Command): void {
       let scope: string | undefined = opts.scope;
       let agentId: string | undefined = opts.agent;
 
+      let isEds = false;
       if (interactive && !opts.pod) {
-        const w = await runWizard(serverUrl, orgConfig, {
+        const w = await runWizard(serverUrl, orgConfig, root, {
           project: projectIdOpt,
           scope,
           agent: agentId,
@@ -420,6 +432,7 @@ export function registerInitCommand(program: Command): void {
         projectIdOpt = w.projectId;
         scope = w.scope;
         agentId = w.agentId;
+        isEds = w.isEds;
       } else {
         if (!podId?.trim() && !projectIdOpt?.trim()) {
           console.error(chalk.red("\n  Missing --pod or --project (at least one required in non-interactive mode / CI).\n"));
@@ -473,5 +486,10 @@ export function registerInitCommand(program: Command): void {
         skipClaude: !!opts.skipClaude,
         skipClaudeMd: !!opts.skipClaudeMd,
       });
+
+      if (isEds && !opts.skipClaude) {
+        const settingsPath = path.join(root, ".claude", "settings.json");
+        runEdsSetup(root, settingsPath);
+      }
     });
 }

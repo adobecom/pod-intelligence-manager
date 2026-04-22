@@ -31,16 +31,18 @@ function renderPodProtocol(params: ProtocolTemplateParams & { podId: string }): 
 This project is connected to PIM pod \`${params.podId}\`.
 PIM server: \`${params.serverUrl}\`
 
-### MANDATORY: Session Start Protocol
+### Getting Current Pod Context
 
-BEFORE doing any work in this repository, you MUST:
-1. Run \`pim context --pod ${params.podId} --scope ${params.scope}\` to pull the latest pod state
-2. Review the living doc for current state of all areas
-3. Check conflict pressure — if >= 0.6, review open conflicts before proceeding
-4. Note any recent updates from other agents that affect your scope (${params.scope})
+When you need to understand the current state of the pod before making decisions
+or starting work in an unfamiliar area, pull context with:
 
-This is NOT optional. Working without current context risks creating conflicts
-and duplicating work that other agents have already completed.
+\`\`\`bash
+pim context --pod ${params.podId} --scope ${params.scope}
+\`\`\`
+
+Use \`--brief\` for a quick summary or \`--diff\` to see only what changed since
+your last pull. If conflict pressure is >= 0.6, check open conflicts before
+proceeding in contested areas.
 
 ### Automatic Reporting
 
@@ -65,16 +67,6 @@ pim report --pod ${params.podId} --type decision --scope ${params.scope} \\
   --details "Redis supports pub/sub which we need for real-time invalidation..."
 \`\`\`
 
-### Mid-Session Context Refresh
-
-If you have been working for more than 30 minutes or are about to make a major
-decision that affects other areas, re-pull context:
-\`\`\`bash
-pim context --pod ${params.podId} --scope ${params.scope} --brief
-\`\`\`
-
-Use \`--diff\` to see only what changed since your last pull.
-
 ### Quality Guidelines
 
 - Summaries should be specific and actionable (avoid "made progress" or "working on it")
@@ -84,16 +76,43 @@ Use \`--diff\` to see only what changed since your last pull.
 
 ### Conflict Awareness
 
-- Current pod pressure: check with \`PIM pod status ${params.podId}\`
+- Check pod pressure with \`pim context --pod ${params.podId} --brief\`
 - If pressure is >= 0.8, ingestion is halted — resolve conflicts first
 - When your work overlaps with another area, PIM will detect it automatically
 
-### MCP Server
+### PIM MCP Tools
 
-If the PIM MCP server is configured, you can use these tools directly:
-- \`submit_context_update\` — report progress, blockers, decisions
-- \`query_knowledge\` — search org knowledge for historical precedents
-- \`list_pods\` — see all active pods
+If the PIM MCP server is configured in Claude Code, you can use these tools
+directly instead of CLI commands. They cover the same operations plus additional
+querying and management capabilities.
+
+**Context & Session**
+
+| Tool | When to use |
+|------|-------------|
+| \`get_agent_session_context\` | Pull pod state, living doc, conflicts, and token-budgeted org learnings in one call — the MCP equivalent of \`pim context\` |
+| \`context_search\` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
+| \`query_knowledge\` | Search the org knowledge graph for historical precedents and resolved decisions |
+
+**Reporting**
+
+| Tool | When to use |
+|------|-------------|
+| \`submit_context_update\` | Report progress, blockers, decisions, spec changes, or questions |
+
+**Conflicts**
+
+| Tool | When to use |
+|------|-------------|
+| \`get_conflict_details\` | Inspect a specific open conflict and its suggested resolutions |
+| \`resolve_conflict\` | Mark a conflict as resolved with a chosen approach |
+
+**Observability**
+
+| Tool | When to use |
+|------|-------------|
+| \`render_pod_dashboard\` | Get a full interactive React artifact showing pod health, conflicts, feed, and live doc |
+| \`list_pods\` | See all active pods in the org |
 
 ${PROTOCOL_MARKER_END}`;
 }
@@ -131,11 +150,31 @@ Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\
 - Include file paths, function names, or API endpoints when relevant
 - Decisions and spec changes flow into the org knowledge graph automatically
 
-### MCP Server
+### PIM MCP Tools
 
-If the PIM MCP server is configured, you can use these tools directly:
-- \`submit_context_update\` — report progress, blockers, decisions
-- \`query_knowledge\` — search org knowledge for historical precedents
+If the PIM MCP server is configured in Claude Code, you can use these tools
+directly instead of CLI commands.
+
+**Context & Search**
+
+| Tool | When to use |
+|------|-------------|
+| \`get_project_session_context\` | Pull project state, recent updates, and token-budgeted org learnings — the MCP equivalent of \`pim context --project\` |
+| \`context_search\` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
+| \`query_knowledge\` | Search the org knowledge graph for historical precedents and resolved decisions |
+
+**Reporting**
+
+| Tool | When to use |
+|------|-------------|
+| \`submit_project_context_update\` | Report progress, blockers, decisions, spec changes, or questions to this project |
+
+**Project Management**
+
+| Tool | When to use |
+|------|-------------|
+| \`get_project\` | Fetch project details including anatomy and resource configuration |
+| \`list_projects\` | See all long-lived projects in the org |
 
 ${PROTOCOL_MARKER_END}`;
 }
