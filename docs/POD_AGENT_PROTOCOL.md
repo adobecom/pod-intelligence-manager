@@ -49,6 +49,25 @@ Teams may run `pim hooks install` so **post-commit** and **post-rewrite** submit
 
 Amend and interactive rebase can produce multiple hook invocations; that is expected.
 
+### LLM-enriched submissions
+
+The hook always submits `type: progress` with the raw commit subject as `summary` — no API key or special config required on the developer's machine. The PIM **server** asynchronously enriches the record after it lands, using its own Bedrock/Claude access (Haiku).
+
+The server-side enrichment reads the stored commit subject, body, and stat, then rewrites:
+
+| Field | Initial (from hook) | After enrichment |
+|---|---|---|
+| `type` | `progress` | Inferred: `progress` / `spec_change` / `decision` / `blocker` / `question` |
+| `summary` | Raw commit subject (≤500 chars) | PIM-quality summary ≤200 chars, past tense, with context |
+| `status` | `completed` | Inferred: `completed` / `in_progress` / `blocked` |
+| `blocks` | `[]` | Extracted from commit body if mentioned |
+| `blocked_by` | `[]` | Extracted from commit body if mentioned |
+| `needs_input_from` | `[]` | Extracted if commit body raises a question |
+
+Enrichment is non-blocking — the HTTP response returns before it runs, and if the LLM call fails the original record is left unchanged. The UI receives a `context_update_enriched` WebSocket event when enrichment completes.
+
+**Commit message guidance:** Write commit messages normally. The commit body is the highest-signal input for type inference — if you record a decision or flag a blocker there, it will be classified correctly. You do not need to follow any special format.
+
 ## 4. Session variables
 
 | Variable | Purpose |

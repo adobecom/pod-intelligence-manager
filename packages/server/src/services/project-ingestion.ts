@@ -6,6 +6,7 @@ import { scoreProjectUpdate } from "./quality-scoring.js";
 import { broadcastToAll } from "../ws/index.js";
 import type { ProjectContextUpdate } from "@pim/shared";
 import { maybeAddProjectContextSignalToGraph } from "./knowledge-graph.js";
+import { scheduleProjectGitHookEnrichment } from "./git-hook-enrichment.js";
 import type { PimResult } from "../pim/master.js";
 
 export interface ProjectIngestionResult {
@@ -118,6 +119,10 @@ export async function ingestProjectContextUpdate(
     type: "project_context_update_added",
     payload: { projectId, update },
   });
+
+  if (data.source === "git-hook") {
+    scheduleProjectGitHookEnrichment(projectId, update.id);
+  }
 
   return {
     success: true,

@@ -8,6 +8,7 @@ import { processUpdate, type PimResult } from "../pim/master.js";
 import type { ContextUpdate } from "@pim/shared";
 import { refreshPodSnapshotFromContext } from "./pod-snapshot.js";
 import { scheduleAsyncQualityScore } from "./async-quality-score.js";
+import { scheduleGitHookEnrichment } from "./git-hook-enrichment.js";
 import { getOrgScopeIds } from "./org-settings.js";
 import { getOrgIdForPod } from "./orgs.js";
 import { maybeAddPodContextSignalToGraph } from "./knowledge-graph.js";
@@ -209,6 +210,11 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)
   scheduleAsyncQualityScore(podId, update.id);
+
+  // 10. Async git-hook enrichment: upgrades type/summary/status/dependencies for raw commit submissions
+  if (update.source === "git-hook") {
+    scheduleGitHookEnrichment(podId, update.id);
+  }
 
   return { success: true, update, pim: pimResult };
 }
