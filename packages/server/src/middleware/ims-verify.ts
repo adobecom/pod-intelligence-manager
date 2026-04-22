@@ -55,13 +55,21 @@ export async function verifyImsToken(token: string): Promise<ImsClaims> {
   const claims = payload as ImsClaims;
 
   // Fail-closed client_id check: if IMS_CLIENT_ID is set, the token MUST carry a
-  // matching client_id claim. An absent claim is rejected, not silently passed.
-  // Opt out with IMS_REQUIRE_CLIENT_ID_MATCH=false when clients intentionally differ.
+  // client_id claim matching one of our configured clients. Tokens from the CLI
+  // carry IMS_CLI_CLIENT_ID; tokens from the web console carry IMS_CLIENT_ID.
+  // An absent claim is rejected, not silently passed.
+  // Opt out with IMS_REQUIRE_CLIENT_ID_MATCH=false.
   const requireClientMatch =
     process.env.IMS_REQUIRE_CLIENT_ID_MATCH !== "false" && !!process.env.IMS_CLIENT_ID;
   if (requireClientMatch) {
-    if (!claims.client_id || claims.client_id !== process.env.IMS_CLIENT_ID) {
-      throw new Error("IMS token client_id missing or does not match IMS_CLIENT_ID");
+    const allowedClientIds = [
+      process.env.IMS_CLIENT_ID,
+      process.env.IMS_CLI_CLIENT_ID,
+    ].filter((v): v is string => !!v);
+    if (!claims.client_id || !allowedClientIds.includes(claims.client_id)) {
+      throw new Error(
+        `IMS token client_id missing or not in allowed set (${allowedClientIds.join(", ")})`,
+      );
     }
   }
 

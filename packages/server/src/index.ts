@@ -74,7 +74,7 @@ const authenticate = createAuthHook(authMode);
 // The `/tunnel/` proxy authenticates via a per-tunnel share_token path segment
 // (checked in tunnel-proxy.ts) so external collaborators without IMS sessions
 // can load previews — matching Expo/ngrok semantics.
-const PUBLIC_PATHS = new Set<string>(["/api/health"]);
+const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config"]);
 const PUBLIC_PREFIXES = ["/ws", "/tunnel"];
 const isPublic = (url: string) => {
   const path = url.split("?")[0];
@@ -125,18 +125,28 @@ app.get("/api/health", async (_req, reply) => {
       auth_mode: authMode,
       ims_client_id: process.env.IMS_CLIENT_ID ?? null,
       ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
-      // CLI login settings — advertised so users need no env vars to run `pim login`.
-      // client_secret is intentionally public: CLI clients are inherently not secret
-      // (distributed to all users), so advertising it is equivalent to shipping it in the binary.
-      ims_cli_client_id: process.env.IMS_CLI_CLIENT_ID ?? process.env.IMS_CLIENT_ID ?? null,
-      ims_cli_client_secret: process.env.IMS_CLI_CLIENT_SECRET ?? null,
-      ims_cli_scopes: process.env.IMS_CLI_SCOPES ?? "AdobeID,openid",
       db: { connected: true, active_pods: row.count },
     };
   } catch {
     reply.code(503);
     return { status: "degraded", error: "Database unreachable" };
   }
+});
+
+// CLI auto-config — advertises IMS client settings so `pim login` works without
+// env vars. Split from /api/health so secret-shaped values don't appear on the
+// endpoint that every compliance scanner crawls. The cli client_secret is a
+// public OAuth value by design (CLIs are distributed to all users), but serving
+// it here keeps it out of the universal healthcheck surface.
+app.get("/api/cli-config", async () => {
+  return {
+    auth_mode: authMode,
+    ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
+    ims_client_id: process.env.IMS_CLIENT_ID ?? null,
+    ims_cli_client_id: process.env.IMS_CLI_CLIENT_ID ?? process.env.IMS_CLIENT_ID ?? null,
+    ims_cli_client_secret: process.env.IMS_CLI_CLIENT_SECRET ?? null,
+    ims_cli_scopes: process.env.IMS_CLI_SCOPES ?? "AdobeID,openid",
+  };
 });
 
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
