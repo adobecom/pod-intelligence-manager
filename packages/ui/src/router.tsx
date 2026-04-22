@@ -14,12 +14,14 @@ import { ProjectLayout } from "./layouts/ProjectLayout";
 import { ProjectDashboard } from "./views/ProjectDashboard/ProjectDashboard";
 import { ProjectContextFeed } from "./views/ProjectContextFeed/ProjectContextFeed";
 import { MemberManagement } from "./views/OrgSettings/MemberManagement";
+import { AcceptInvite } from "./views/AcceptInvite/AcceptInvite";
 
 export const router = createBrowserRouter([
   {
     element: <AppLayout />,
     children: [
       { path: "/", element: <Navigate to="/org" replace /> },
+      { path: "/accept/:inviteId", element: <AcceptInvite /> },
       { path: "/org", element: <OrgDashboard /> },
       { path: "/org/members", element: <MemberManagement /> },
       { path: "/knowledge", element: <KnowledgeGraphView /> },

@@ -26,10 +26,11 @@ function profileUrl(env: "prod" | "stg1"): string {
     : "https://ims-na1-stg1.adobelogin.com/ims/profile/v1";
 }
 
-let _jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+const _jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 function getJwks() {
-  if (!_jwks) _jwks = createRemoteJWKSet(jwksUrl(imsEnv()));
-  return _jwks;
+  const env = imsEnv();
+  if (!_jwksCache.has(env)) _jwksCache.set(env, createRemoteJWKSet(jwksUrl(env)));
+  return _jwksCache.get(env)!;
 }
 
 async function fetchImsProfile(token: string, env: "prod" | "stg1"): Promise<{ email?: string; displayName?: string; userId?: string }> {
@@ -53,9 +54,14 @@ export async function verifyImsToken(token: string): Promise<ImsClaims> {
   });
   const claims = payload as ImsClaims;
 
-  if (process.env.IMS_REQUIRE_CLIENT_ID_MATCH === "true" && process.env.IMS_CLIENT_ID) {
-    if (claims.client_id && claims.client_id !== process.env.IMS_CLIENT_ID) {
-      throw new Error("IMS token client_id does not match IMS_CLIENT_ID");
+  // Fail-closed client_id check: if IMS_CLIENT_ID is set, the token MUST carry a
+  // matching client_id claim. An absent claim is rejected, not silently passed.
+  // Opt out with IMS_REQUIRE_CLIENT_ID_MATCH=false when clients intentionally differ.
+  const requireClientMatch =
+    process.env.IMS_REQUIRE_CLIENT_ID_MATCH !== "false" && !!process.env.IMS_CLIENT_ID;
+  if (requireClientMatch) {
+    if (!claims.client_id || claims.client_id !== process.env.IMS_CLIENT_ID) {
+      throw new Error("IMS token client_id missing or does not match IMS_CLIENT_ID");
     }
   }
 
@@ -64,6 +70,18 @@ export async function verifyImsToken(token: string): Promise<ImsClaims> {
     if (!claims.email && profile.email) claims.email = profile.email;
     if (!claims.user_id && profile.userId) claims.user_id = profile.userId;
     if (!claims.name && profile.displayName) claims.name = profile.displayName;
+  }
+
+  // Fail-closed: if email is still missing after the profile fetch, reject rather
+  // than silently letting the request through without a domain check.
+  if (!claims.email) {
+    throw new Error("IMS token has no email — profile fetch failed or token has no email claim");
+  }
+
+  // Reject non-Adobe accounts. Override with IMS_ALLOWED_EMAIL_DOMAIN=@example.com.
+  const allowedDomain = (process.env.IMS_ALLOWED_EMAIL_DOMAIN ?? "@adobe.com").toLowerCase();
+  if (!claims.email.toLowerCase().endsWith(allowedDomain)) {
+    throw new Error(`Email domain not permitted: ${claims.email}`);
   }
 
   return claims;

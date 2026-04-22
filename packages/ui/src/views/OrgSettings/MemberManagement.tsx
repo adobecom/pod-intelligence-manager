@@ -112,6 +112,16 @@ export function MemberManagement() {
     }
   };
 
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyInviteLink = (inviteId: string) => {
+    const url = `${window.location.origin}/accept/${inviteId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedId(inviteId);
+      setTimeout(() => setCopiedId((prev) => (prev === inviteId ? null : prev)), 2000);
+    });
+  };
+
   const revoke = async (inviteId: string) => {
     if (!slug) return;
     setError(null);
@@ -209,12 +219,13 @@ export function MemberManagement() {
             <Heading level={3}>Pending invites</Heading>
             {data.invites.map((i) => (
               <div key={i.invite_id} className={row}>
-                <div className={grow}>
-                  <Text>
-                    <strong>{i.email}</strong>
-                    <Badge variant={roleVariant(i.role)}>{i.role}</Badge>
-                  </Text>
+                <div className={`${grow} ${row}`}>
+                  <Text><strong>{i.email}</strong></Text>
+                  <Badge variant={roleVariant(i.role)}>{i.role}</Badge>
                 </div>
+                <Button variant="secondary" onPress={() => copyInviteLink(i.invite_id)}>
+                  {copiedId === i.invite_id ? "Copied!" : "Copy link"}
+                </Button>
                 {canManage && (
                   <Button variant="secondary" onPress={() => revoke(i.invite_id)}>
                     Revoke

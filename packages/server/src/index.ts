@@ -66,7 +66,7 @@ await app.register(rateLimit, {
 // Auth — attach `req.user` on every request so routes can rely on it.
 // Phase 1: trust mode upserts a dev user; ims mode verifies IMS JWT.
 // Public routes (health, static) short-circuit via allowlist below.
-const authMode = (process.env.AUTH_MODE ?? "trust") as "trust" | "ims";
+const authMode = (process.env.AUTH_MODE ?? "ims") as "trust" | "ims";
 const authenticate = createAuthHook(authMode);
 
 // Paths that must bypass auth + org-context entirely.

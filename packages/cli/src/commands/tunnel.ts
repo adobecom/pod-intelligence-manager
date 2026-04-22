@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import chalk from "chalk";
 import type { Tunnel } from "@pim/shared";
-import { getBaseUrl, fetchJSON, apiFetch } from "../util.js";
+import { getBaseUrl, fetchJSON, apiFetch, getAuthToken } from "../util.js";
 import { TunnelClient } from "../tunnel/client.js";
 
 export function registerTunnelCommands(program: Command) {
@@ -36,7 +36,7 @@ export function registerTunnelCommands(program: Command) {
 
       // Connect the WebSocket tunnel client for request proxying
       const wsBase = base.replace(/^http/, "ws");
-      const client = new TunnelClient(`${wsBase}/ws/tunnel`, tunnel.tunnel_id, port);
+      const client = new TunnelClient(`${wsBase}/ws/tunnel`, tunnel.tunnel_id, port, getAuthToken() ?? undefined);
 
       try {
         await client.connect();
