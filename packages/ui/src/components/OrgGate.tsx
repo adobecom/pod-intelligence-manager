@@ -23,6 +23,9 @@ export function OrgGate({ children }: { children: ReactNode }) {
   const { pendingInvites } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
 
+  // Let the /accept/:inviteId route render directly — it handles its own state.
+  if (window.location.pathname.startsWith("/accept/")) return <>{children}</>;
+
   // Only open the "Create first org" modal when there are zero orgs AND zero
   // pending invites — otherwise the PendingInvitesBanner takes precedence.
   useEffect(() => {
