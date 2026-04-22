@@ -35,6 +35,7 @@ const formActions = style({ display: "flex", gap: 12, justifyContent: "end" });
 export function ContextFeed() {
   const contextUpdates = usePodStore((s) => s.contextUpdates);
   const submitContextUpdate = usePodStore((s) => s.submitContextUpdate);
+  const retractContextUpdate = usePodStore((s) => s.retractContextUpdate);
   const orgConfig = useOrgStore((s) => s.orgConfig);
   const [scopeFilter, setScopeFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -224,6 +225,7 @@ export function ContextFeed() {
             update={update}
             isExpanded={expanded.has(update.id)}
             onToggle={() => toggleExpand(update.id)}
+            onRetract={() => retractContextUpdate(update.id)}
           />
         ))}
         {filtered.length === 0 && (

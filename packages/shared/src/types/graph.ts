@@ -27,6 +27,8 @@ export interface KnowledgeNode {
   created_at: string;
   curated: boolean; // false = auto-extracted, true = human-approved
   community_id?: string;
+  /** Set when a newer node with a `supersedes` edge points to this one. Superseded nodes are excluded from queries by default. */
+  superseded_by?: string;
   /** Titan Text Embeddings v2 vector; absent on nodes created before embedding backfill. */
   embedding?: number[];
 }
@@ -83,6 +85,8 @@ export interface KnowledgeQueryFilters {
   include_project_id?: string;
   confidence_min?: number;
   curated_only?: boolean;
+  /** When false (default), nodes with `superseded_by` set are excluded. Pass true to include them. */
+  include_superseded?: boolean;
   /** Substring filter on summary + details (unchanged behavior). */
   text_search?: string;
   /**

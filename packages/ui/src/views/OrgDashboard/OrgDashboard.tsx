@@ -586,12 +586,14 @@ export function OrgDashboard() {
             >
               {archiveFlow.kind === "pod" && archiveFlow.phase === "confirm" && (
                 <>
-                  <Heading slot="title">Archive pod?</Heading>
+                  <Heading slot="title">Archive &quot;{archiveFlow.podName}&quot;?</Heading>
                   <Content>
-                    <Text>
-                      Archive &quot;{archiveFlow.podName}&quot;? This cannot be undone. Knowledge extraction may run
-                      and can take a short while.
-                    </Text>
+                    <Text>This action cannot be undone. Here&apos;s what happens:</Text>
+                    <ul>
+                      <li>The pod is hidden from your active list. Its record and all context data remain in the system.</li>
+                      <li>Knowledge extraction runs automatically — decisions, resolved conflicts, and blockers are distilled into org-level learnings. This may take a moment.</li>
+                      <li>All connected agents receive a live knowledge-updated notification.</li>
+                    </ul>
                   </Content>
                   <ButtonGroup>
                     <Button variant="secondary" onPress={() => setArchiveFlow(null)}>
@@ -615,12 +617,14 @@ export function OrgDashboard() {
               )}
               {archiveFlow.kind === "project" && archiveFlow.phase === "confirm" && (
                 <>
-                  <Heading slot="title">Archive project?</Heading>
+                  <Heading slot="title">Archive &quot;{archiveFlow.projectName}&quot;?</Heading>
                   <Content>
-                    <Text>
-                      Archive &quot;{archiveFlow.projectName}&quot;? This cannot be undone. All project-level context
-                      updates will be deleted. Pods linked to this initiative will be detached (not deleted).
-                    </Text>
+                    <Text>This action cannot be undone. Here&apos;s what happens:</Text>
+                    <ul>
+                      <li><strong>All project context updates are permanently deleted</strong> — agent insights, decisions, and progress reports for this initiative are gone and cannot be recovered.</li>
+                      <li>Associated pods are detached (their project link is removed) but not deleted.</li>
+                      <li>No knowledge extraction runs — project-level learnings are not preserved in org memory.</li>
+                    </ul>
                   </Content>
                   <ButtonGroup>
                     <Button variant="secondary" onPress={() => setArchiveFlow(null)}>

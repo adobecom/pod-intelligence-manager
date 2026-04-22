@@ -35,6 +35,7 @@ const formActions = style({ display: "flex", gap: 12, justifyContent: "end" });
 export function ProjectContextFeed() {
   const contextUpdates = useProjectStore((s) => s.contextUpdates);
   const submitProjectContextUpdate = useProjectStore((s) => s.submitProjectContextUpdate);
+  const retractProjectContextUpdate = useProjectStore((s) => s.retractProjectContextUpdate);
   const orgConfig = useOrgStore((s) => s.orgConfig);
   const [scopeFilter, setScopeFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
@@ -224,6 +225,7 @@ export function ProjectContextFeed() {
             update={update}
             isExpanded={expanded.has(update.id)}
             onToggle={() => toggleExpand(update.id)}
+            onRetract={() => retractProjectContextUpdate(update.id)}
           />
         ))}
         {filtered.length === 0 && (

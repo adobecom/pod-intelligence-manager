@@ -1,8 +1,15 @@
+import { useState } from "react";
 import {
   Text,
   Badge,
   StatusLight,
   ActionButton,
+  Button,
+  ButtonGroup,
+  Content,
+  Dialog,
+  DialogTrigger,
+  Heading,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
@@ -49,27 +56,65 @@ export function FeedItem({
   update,
   isExpanded,
   onToggle,
+  onRetract,
 }: {
   update: FeedItemUpdate;
   isExpanded: boolean;
   onToggle: () => void;
+  onRetract?: () => Promise<void>;
 }) {
+  const [retracting, setRetracting] = useState(false);
+
+  async function handleRetract(close: () => void) {
+    setRetracting(true);
+    try {
+      await onRetract?.();
+      close();
+    } finally {
+      setRetracting(false);
+    }
+  }
+
   return (
     <div className={card}>
       <div className={cardContent}>
-        <div className={tagRow}>
-          <RelativeTime timestamp={update.timestamp} />
-          <Text styles={style({ fontWeight: "bold" })}>{update.agent_id}</Text>
-          <Badge variant={typeBadgeVariant[update.type] ?? "neutral"}>
-            {update.type.replace("_", " ")}
-          </Badge>
-          <Badge variant="neutral">{update.scope}</Badge>
-          {update.quality_score != null && update.quality_score > 0 && (
-            <QualityBadge score={update.quality_score} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div className={tagRow}>
+            <RelativeTime timestamp={update.timestamp} />
+            <Text styles={style({ fontWeight: "bold" })}>{update.agent_id}</Text>
+            <Badge variant={typeBadgeVariant[update.type] ?? "neutral"}>
+              {update.type.replace("_", " ")}
+            </Badge>
+            <Badge variant="neutral">{update.scope}</Badge>
+            {update.quality_score != null && update.quality_score > 0 && (
+              <QualityBadge score={update.quality_score} />
+            )}
+            <StatusLight variant={statusVariant[update.status] ?? "neutral"}>
+              {update.status.replace("_", " ")}
+            </StatusLight>
+          </div>
+
+          {onRetract && (
+            <DialogTrigger>
+              <ActionButton isQuiet aria-label="Retract update">✕</ActionButton>
+              <Dialog isDismissible={false} isKeyboardDismissDisabled={retracting}>
+                {({ close }) => (
+                  <>
+                    <Heading slot="title">Retract this update?</Heading>
+                    <Content>
+                      <Text>
+                        &ldquo;{update.summary}&rdquo; will be removed from the feed and the living doc will regenerate. This cannot be undone.
+                      </Text>
+                    </Content>
+                    <ButtonGroup>
+                      <Button variant="secondary" onPress={close} isDisabled={retracting}>Cancel</Button>
+                      <Button variant="negative" onPress={() => handleRetract(close)} isPending={retracting}>Retract</Button>
+                    </ButtonGroup>
+                  </>
+                )}
+              </Dialog>
+            </DialogTrigger>
           )}
-          <StatusLight variant={statusVariant[update.status] ?? "neutral"}>
-            {update.status.replace("_", " ")}
-          </StatusLight>
         </div>
 
         <Text>{update.summary}</Text>

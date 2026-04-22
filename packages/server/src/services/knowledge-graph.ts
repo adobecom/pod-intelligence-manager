@@ -87,6 +87,21 @@ function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): numbe
   return TOKENS_PER_SUMMARY + (includeDetails ? TOKENS_PER_DETAILS : 0);
 }
 
+// --- Helpers ---
+
+// P1: After edges are built, mark older nodes whose decisions were superseded.
+function markSupersededEdges(edges: KnowledgeEdge[], allNodes: KnowledgeNode[]): void {
+  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  for (const edge of edges) {
+    if (edge.type === "supersedes") {
+      const older = nodeById.get(edge.target);
+      if (older && !older.superseded_by) {
+        older.superseded_by = edge.source;
+      }
+    }
+  }
+}
+
 // --- Add Learnings ---
 
 export async function addLearningsToGraph(
@@ -99,6 +114,7 @@ export async function addLearningsToGraph(
 
   const now = new Date().toISOString();
   const newNodes: KnowledgeNode[] = [];
+  let skipped = 0;
 
   for (const learning of learnings) {
     const node: KnowledgeNode = {
@@ -118,28 +134,52 @@ export async function addLearningsToGraph(
       curated: false,
     };
 
-    // Generate embedding immediately so edges built below can use cosine similarity
     node.embedding = (await generateEmbedding(embedText(node))) ?? undefined;
+
+    // P0 + P2: Skip if a near-identical node already exists in the graph.
+    // Same-pod threshold (0.85) catches incremental-signal nodes re-extracted at archival.
+    // Cross-pod threshold (0.95) catches near-verbatim patterns from different pods.
+    if (node.embedding) {
+      const samePodThreshold = 0.85;
+      const crossPodThreshold = 0.95;
+      const isDuplicate = graph.nodes.some((existing) => {
+        if (!existing.embedding) return false;
+        const sim = cosineSimilarity(node.embedding!, existing.embedding);
+        return existing.source_pod_id === podId ? sim >= samePodThreshold : sim >= crossPodThreshold;
+      });
+      if (isDuplicate) {
+        skipped++;
+        continue;
+      }
+    }
 
     newNodes.push(node);
   }
 
-  // Build edges between new nodes and existing graph
-  const newEdges = buildEdges(newNodes, graph.nodes);
+  if (skipped > 0) {
+    console.log(`[knowledge-graph] Skipped ${skipped} near-duplicate node(s) during ingestion for pod "${podId}"`);
+  }
 
-  // Also build edges among the new nodes themselves
-  const intraEdges = buildEdges(newNodes, newNodes);
+  if (newNodes.length === 0) {
+    return { nodesAdded: 0, edgesAdded: 0 };
+  }
+
+  // P3: Pass existing edges so buildEdges won't create duplicate edges for node pairs already connected.
+  const newEdges = buildEdges(newNodes, graph.nodes, graph.edges);
+  const intraEdges = buildEdges(newNodes, newNodes, [...graph.edges, ...newEdges]);
 
   graph.nodes.push(...newNodes);
   graph.edges.push(...newEdges, ...intraEdges);
+
+  // P1: Mark older nodes that are superseded by newly added ones.
+  markSupersededEdges([...newEdges, ...intraEdges], graph.nodes);
+
   graph.version++;
   graph.updated_at = now;
 
-  // Re-run community detection and hub identification
   graph.communities = detectCommunities(graph);
   hubIds = new Set(identifyHubs(graph));
 
-  // Persist
   saveGraph(graph.org_id, graph);
 
   return {
@@ -180,16 +220,16 @@ export function maybeAddProjectContextSignalToGraph(
     curated: false,
   };
 
-  const newEdges = buildEdges([node], graph.nodes);
+  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
   graph.nodes.push(node);
   graph.edges.push(...newEdges);
+  markSupersededEdges(newEdges, graph.nodes); // P1
   graph.version++;
   graph.updated_at = now;
   graph.communities = detectCommunities(graph);
   hubIds = new Set(identifyHubs(graph));
   saveGraph(graph.org_id, graph);
 
-  // Generate embedding async without blocking the caller
   generateEmbedding(embedText(node)).then((emb) => {
     if (emb && graph) {
       node.embedding = emb;
@@ -237,9 +277,10 @@ export function maybeAddPodContextSignalToGraph(
     curated: false,
   };
 
-  const newEdges = buildEdges([node], graph.nodes);
+  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
   graph.nodes.push(node);
   graph.edges.push(...newEdges);
+  markSupersededEdges(newEdges, graph.nodes); // P1
   graph.version++;
   graph.updated_at = now;
   graph.communities = detectCommunities(graph);
@@ -289,9 +330,10 @@ export function addResolvedConflictToGraph(
     curated: false,
   };
 
-  const newEdges = buildEdges([node], graph.nodes);
+  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
   graph.nodes.push(node);
   graph.edges.push(...newEdges);
+  markSupersededEdges(newEdges, graph.nodes); // P1
   graph.version++;
   graph.updated_at = now;
   graph.communities = detectCommunities(graph);
@@ -360,6 +402,8 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
     if (filters.curated_only) {
       if (!node.curated) return false;
     }
+    // P1: Exclude superseded nodes by default so agents don't receive stale decisions.
+    if (!filters.include_superseded && node.superseded_by) return false;
     if (filters.text_search) {
       const search = filters.text_search.toLowerCase();
       const text = `${node.summary} ${node.details}`.toLowerCase();
@@ -489,7 +533,11 @@ export function curateNode(
   if (nodeIndex === -1) return false;
 
   if (action === "reject") {
-    // Remove node and its edges
+    // Clear superseded_by on any nodes this node was superseding, so they
+    // become visible again rather than pointing at a deleted node.
+    for (const n of graph.nodes) {
+      if (n.superseded_by === nodeId) n.superseded_by = undefined;
+    }
     graph.nodes.splice(nodeIndex, 1);
     graph.edges = graph.edges.filter(
       (e) => e.source !== nodeId && e.target !== nodeId,

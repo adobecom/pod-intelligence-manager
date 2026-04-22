@@ -13,6 +13,7 @@ interface ProjectStore {
   submitProjectContextUpdate: (
     input: ContextUpdateInput,
   ) => Promise<ProjectSubmitResult | null>;
+  retractProjectContextUpdate: (updateId: string) => Promise<void>;
 }
 
 export const useProjectStore = create<ProjectStore>((set, get) => ({
@@ -50,5 +51,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     const result = await api.submitProjectContextUpdate(project.project_id, input);
     set({ contextUpdates: [result.update, ...contextUpdates] });
     return result;
+  },
+
+  retractProjectContextUpdate: async (updateId: string) => {
+    const { project, contextUpdates } = get();
+    if (!project) return;
+    await api.retractProjectContextUpdate(project.project_id, updateId);
+    set({ contextUpdates: contextUpdates.filter((u) => u.id !== updateId) });
   },
 }));
