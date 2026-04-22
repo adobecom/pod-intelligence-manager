@@ -28,7 +28,7 @@ import {
 export interface RunInitOptions {
   serverUrl: string;
   root: string;
-  podId: string;
+  podId?: string;
   projectId?: string;
   orgSlug: string;
   scope?: string;
@@ -67,10 +67,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
   const configPath = path.join(root, ".pim.json");
   const configData: Record<string, unknown> = {
     orgSlug,
-    podId,
     serverUrl,
     autoReport: { gitHook: true, claudeCodeHook: true },
   };
+  if (podId) configData.podId = podId;
   if (scope) configData.scope = scope;
   if (agentId) configData.agentId = agentId;
   if (projectIdOpt) configData.projectId = projectIdOpt;
@@ -139,7 +139,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     const commandsDir = path.join(claudeDir, "commands");
     fs.mkdirSync(commandsDir, { recursive: true });
     const syncPath = path.join(commandsDir, "sync.md");
-    fs.writeFileSync(syncPath, renderSyncCommand({ podId, scope: templateScope }), "utf-8");
+    fs.writeFileSync(syncPath, renderSyncCommand({ podId, projectId: projectIdOpt, scope: templateScope }), "utf-8");
     console.log(chalk.green("  Created .claude/commands/sync.md"));
   } else {
     console.log(chalk.dim("  Skipped Claude Code integration (--skip-claude)"));
@@ -150,6 +150,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     const claudeMdPath = path.join(root, "CLAUDE.md");
     const protocol = renderPodAgentProtocol({
       podId,
+      projectId: projectIdOpt,
       scope: templateScope,
       serverUrl,
     });
@@ -195,7 +196,13 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
   if (!scope) {
     console.log(chalk.dim(`    2. Set PIM_SCOPE or pass --scope to scope your reports`));
   }
-  console.log(chalk.dim(`    3. Run 'pim context --pod ${podId}' to pull initial pod state`));
+  if (podId) {
+    console.log(chalk.dim(`    3. Run 'pim context --pod ${podId}' to pull initial pod state`));
+  } else if (projectIdOpt) {
+    console.log(chalk.dim(`    3. Run 'pim report --project ${projectIdOpt}' to submit your first update`));
+  } else {
+    console.log(chalk.dim(`    3. Run 'pim init --pod <podId>' or 'pim init --project <projectId>' to link a context target`));
+  }
   console.log(chalk.dim(`    4. Start coding — commits will auto-report to PIM\n`));
 }
 
@@ -207,58 +214,69 @@ async function runWizard(
   serverUrl: string,
   orgConfig: OrgConfig,
   initial: { project?: string; scope?: string; agent?: string },
-): Promise<{ podId: string; projectId?: string; scope?: string; agentId?: string }> {
+): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string }> {
+  // Pod selection — optional; user can skip to project-only mode
   const pods = await fetchOrgPods(serverUrl);
+  let podId: string | undefined;
+
   if (pods.length === 0) {
-    console.error(chalk.red("\n  No active pods. Create one in the UI or run `pim pod create`.\n"));
-    process.exit(1);
+    console.log(chalk.yellow("  No active pods found. You can still link a long-lived project below."));
+  } else {
+    const SKIP = "__skip__";
+    const podChoices = [
+      ...pods.map(p => ({ name: `${p.name} (${p.pod_id})`, value: p.pod_id })),
+      { name: chalk.dim("─────────────────────────────────"), value: SKIP, disabled: true },
+      { name: "Skip — use project-level context only", value: SKIP },
+    ];
+    const picked = await select({
+      message: "Which pod should this repo use?",
+      choices: podChoices,
+    });
+    podId = picked === SKIP ? undefined : picked;
   }
 
-  const podChoices = pods.map(p => ({
-    name: `${p.name} (${p.pod_id})`,
-    value: p.pod_id,
-  }));
-
-  const podId = await select({
-    message: "Which pod should this repo use?",
-    choices: podChoices,
-  });
-
+  // Project selection — required if pod was skipped, optional otherwise
   let projectId = initial.project;
   if (projectId === undefined) {
-    const linkProject = await confirm({
-      message: "Link a long-lived project (optional)?",
-      default: false,
-    });
-    if (linkProject) {
-      const projects = await fetchProjects(serverUrl);
-      if (projects.length === 0) {
-        console.log(chalk.yellow("  No projects on the server; skipping project link."));
-      } else {
-        const picked = await select({
-          message: "Select project",
-          choices: [
-            { name: "(none)", value: "__none__" },
-            ...projects.map(pr => ({ name: `${pr.name} (${pr.project_id})`, value: pr.project_id })),
-          ],
-        });
-        projectId = picked === "__none__" ? undefined : picked;
-      }
+    const projects = await fetchProjects(serverUrl);
+    if (projects.length === 0 && !podId) {
+      console.log(chalk.yellow("  No projects on the server either. Continuing without a context target."));
+      console.log(chalk.dim("  Tip: create a project in the UI to give your commits long-term memory in PIM."));
+    } else if (projects.length > 0) {
+      const projectChoices = [
+        ...projects.map(pr => ({ name: `${pr.name} (${pr.project_id})`, value: pr.project_id })),
+        { name: podId ? "(none — pod context only)" : "(none)", value: "__none__" },
+      ];
+      const label = podId
+        ? "Link a long-lived project for cross-sprint memory (optional)?"
+        : "Which project should this repo report to?";
+      const picked = await select({
+        message: label,
+        choices: projectChoices,
+        default: podId ? "__none__" : projects[0].project_id,
+      });
+      projectId = picked === "__none__" ? undefined : picked;
     }
   }
 
+  if (!podId && !projectId) {
+    console.log(chalk.yellow("\n  No pod or project selected."));
+    console.log(chalk.dim("  Hooks will be installed, but commits won't report anywhere until you"));
+    console.log(chalk.dim("  run `pim init --pod <podId>` or `pim init --project <projectId>`.\n"));
+  }
+
+  // Scope — shown as a direct selector with a skip option so its purpose is clear
   let scope = initial.scope;
   if (scope === undefined) {
-    const setScope = await confirm({
-      message: "Set a default scope for this repo (optional)?",
-      default: false,
+    const scopeChoices = [
+      ...orgConfig.scopes.map(s => ({ name: `${s.label} — tags your reports to the ${s.label.toLowerCase()} workstream`, value: s.id })),
+      { name: "(skip — set later with PIM_SCOPE env var)", value: "__none__" },
+    ];
+    const picked = await select({
+      message: "Default scope for this repo (labels your auto-reports by team area):",
+      choices: scopeChoices,
     });
-    if (setScope) {
-      scope = await select({
-        message: "Scope",
-        choices: orgConfig.scopes.map(s => ({ name: `${s.label} (${s.id})`, value: s.id })),
-      });
-    }
+    scope = picked === "__none__" ? undefined : picked;
   }
 
   let agentId = initial.agent;
@@ -271,8 +289,13 @@ async function runWizard(
     agentId = entered.trim() || undefined;
   }
 
+  const target = podId
+    ? `pod ${podId}${projectId ? `, project ${projectId}` : ""}`
+    : projectId
+      ? `project ${projectId}`
+      : "no context target";
   const ok = await confirm({
-    message: `Write .pim.json for pod ${podId}${projectId ? `, project ${projectId}` : ""}?`,
+    message: `Write .pim.json (${target})?`,
     default: true,
   });
   if (!ok) {
@@ -389,8 +412,8 @@ export function registerInitCommand(program: Command): void {
         scope = w.scope;
         agentId = w.agentId;
       } else {
-        if (!podId?.trim()) {
-          console.error(chalk.red("\n  Missing --pod (required in non-interactive mode / CI).\n"));
+        if (!podId?.trim() && !projectIdOpt?.trim()) {
+          console.error(chalk.red("\n  Missing --pod or --project (at least one required in non-interactive mode / CI).\n"));
           process.exit(1);
         }
       }
@@ -402,17 +425,19 @@ export function registerInitCommand(program: Command): void {
         process.exit(1);
       }
 
-      console.log(chalk.dim("  Verifying pod..."));
-      try {
-        const podRes = await apiFetch(`${serverUrl}/api/pods/${encodeURIComponent(podId!)}`, {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!podRes.ok) throw new Error(`HTTP ${podRes.status}`);
-        const pod = (await podRes.json()) as { name: string };
-        console.log(chalk.green(`  Pod: ${pod.name} (${podId})`));
-      } catch {
-        console.error(chalk.red(`  Pod "${podId}" not found on server.\n`));
-        process.exit(1);
+      if (podId) {
+        console.log(chalk.dim("  Verifying pod..."));
+        try {
+          const podRes = await apiFetch(`${serverUrl}/api/pods/${encodeURIComponent(podId)}`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!podRes.ok) throw new Error(`HTTP ${podRes.status}`);
+          const pod = (await podRes.json()) as { name: string };
+          console.log(chalk.green(`  Pod: ${pod.name} (${podId})`));
+        } catch {
+          console.error(chalk.red(`  Pod "${podId}" not found on server.\n`));
+          process.exit(1);
+        }
       }
 
       if (projectIdOpt) {
@@ -429,7 +454,7 @@ export function registerInitCommand(program: Command): void {
       await runInit({
         serverUrl,
         root,
-        podId: podId!,
+        podId,
         projectId: projectIdOpt,
         orgSlug,
         scope,
