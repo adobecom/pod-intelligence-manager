@@ -6,6 +6,7 @@ import { confirm, input, select } from "@inquirer/prompts";
 import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
+import { loadCredentials } from "@pim/shared/auth";
 import { installHooks, resolveRunnerPath } from "./hooks.js";
 import {
   renderPodAgentProtocol,
@@ -332,15 +333,23 @@ export function registerInitCommand(program: Command): void {
       console.log(chalk.bold("\n  PIM Init\n"));
 
       console.log(chalk.dim("  Checking server..."));
+      let authMode: "trust" | "ims" | undefined;
       try {
         const healthRes = await apiFetch(`${serverUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
         if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+        const health = (await healthRes.json()) as { auth_mode?: "trust" | "ims" };
+        authMode = health.auth_mode;
       } catch (e) {
         console.error(chalk.red(`  Cannot reach PIM server at ${serverUrl}`));
         console.error(chalk.dim(`  Make sure the server is running. Error: ${e instanceof Error ? e.message : e}\n`));
         process.exit(1);
       }
       console.log(chalk.green("  Server OK"));
+
+      if (authMode === "ims" && !loadCredentials()) {
+        console.error(chalk.red("\n  Not authenticated. Run `pim login` first.\n"));
+        process.exit(1);
+      }
 
       // Resolve org (GET /api/orgs is org-context-bypass, so no header needed here).
       let orgs: UserOrgSummary[];
