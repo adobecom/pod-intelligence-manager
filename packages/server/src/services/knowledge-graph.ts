@@ -533,7 +533,11 @@ export function curateNode(
   if (nodeIndex === -1) return false;
 
   if (action === "reject") {
-    // Remove node and its edges
+    // Clear superseded_by on any nodes this node was superseding, so they
+    // become visible again rather than pointing at a deleted node.
+    for (const n of graph.nodes) {
+      if (n.superseded_by === nodeId) n.superseded_by = undefined;
+    }
     graph.nodes.splice(nodeIndex, 1);
     graph.edges = graph.edges.filter(
       (e) => e.source !== nodeId && e.target !== nodeId,
