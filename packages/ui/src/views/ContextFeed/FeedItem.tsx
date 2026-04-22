@@ -63,14 +63,13 @@ export function FeedItem({
   onToggle: () => void;
   onRetract?: () => Promise<void>;
 }) {
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [retracting, setRetracting] = useState(false);
 
-  async function handleRetract() {
+  async function handleRetract(close: () => void) {
     setRetracting(true);
     try {
       await onRetract?.();
-      setDialogOpen(false);
+      close();
     } finally {
       setRetracting(false);
     }
@@ -96,31 +95,27 @@ export function FeedItem({
           </div>
 
           {onRetract && (
-            <ActionButton isQuiet aria-label="Retract update" onPress={() => setDialogOpen(true)}>✕</ActionButton>
+            <DialogTrigger>
+              <ActionButton isQuiet aria-label="Retract update">✕</ActionButton>
+              <Dialog isDismissible={false} isKeyboardDismissDisabled={retracting}>
+                {({ close }) => (
+                  <>
+                    <Heading slot="title">Retract this update?</Heading>
+                    <Content>
+                      <Text>
+                        &ldquo;{update.summary}&rdquo; will be removed from the feed and the living doc will regenerate. This cannot be undone.
+                      </Text>
+                    </Content>
+                    <ButtonGroup>
+                      <Button variant="secondary" onPress={close} isDisabled={retracting}>Cancel</Button>
+                      <Button variant="negative" onPress={() => handleRetract(close)} isPending={retracting}>Retract</Button>
+                    </ButtonGroup>
+                  </>
+                )}
+              </Dialog>
+            </DialogTrigger>
           )}
         </div>
-
-        {onRetract && (
-          <DialogTrigger
-            isOpen={dialogOpen}
-            onOpenChange={(open) => { if (!open && !retracting) setDialogOpen(false); }}
-          >
-            {/* Invisible anchor — trigger is the ActionButton above */}
-            <Button UNSAFE_style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", pointerEvents: "none" }} aria-hidden>.</Button>
-            <Dialog isDismissible={!retracting} isKeyboardDismissDisabled={retracting}>
-              <Heading slot="title">Retract this update?</Heading>
-              <Content>
-                <Text>
-                  &ldquo;{update.summary}&rdquo; will be removed from the feed and the living doc will regenerate. This cannot be undone.
-                </Text>
-              </Content>
-              <ButtonGroup>
-                <Button variant="secondary" onPress={() => setDialogOpen(false)} isDisabled={retracting}>Cancel</Button>
-                <Button variant="negative" onPress={handleRetract} isPending={retracting}>Retract</Button>
-              </ButtonGroup>
-            </Dialog>
-          </DialogTrigger>
-        )}
 
         <Text>{update.summary}</Text>
 
