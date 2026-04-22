@@ -5,6 +5,11 @@ import {
   StatusLight,
   ActionButton,
   Button,
+  ButtonGroup,
+  Content,
+  Dialog,
+  DialogTrigger,
+  Heading,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
@@ -30,7 +35,6 @@ const detailWell = style({
   marginTop: 4,
 });
 const detailColumn = style({ display: "flex", flexDirection: "column", gap: 4 });
-const confirmRow = style({ display: "flex", alignItems: "center", gap: 8 });
 
 const typeBadgeVariant: Record<string, "positive" | "negative" | "informative" | "neutral" | "purple" | "seafoam"> = {
   progress: "positive",
@@ -59,16 +63,16 @@ export function FeedItem({
   onToggle: () => void;
   onRetract?: () => Promise<void>;
 }) {
-  const [confirming, setConfirming] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [retracting, setRetracting] = useState(false);
 
   async function handleRetract() {
     setRetracting(true);
     try {
       await onRetract?.();
+      setDialogOpen(false);
     } finally {
       setRetracting(false);
-      setConfirming(false);
     }
   }
 
@@ -91,17 +95,31 @@ export function FeedItem({
             </StatusLight>
           </div>
 
-          {onRetract && !confirming && (
-            <ActionButton isQuiet aria-label="Retract update" onPress={() => setConfirming(true)}>✕</ActionButton>
+          {onRetract && (
+            <ActionButton isQuiet aria-label="Retract update" onPress={() => setDialogOpen(true)}>✕</ActionButton>
           )}
         </div>
 
-        {confirming && (
-          <div className={confirmRow}>
-            <Text styles={style({ color: "negative", font: "body-sm" })}>Retract this update?</Text>
-            <Button variant="secondary" size="S" onPress={() => setConfirming(false)}>Cancel</Button>
-            <Button variant="negative" size="S" onPress={handleRetract} isPending={retracting}>Retract</Button>
-          </div>
+        {onRetract && (
+          <DialogTrigger
+            isOpen={dialogOpen}
+            onOpenChange={(open) => { if (!open && !retracting) setDialogOpen(false); }}
+          >
+            {/* Invisible anchor — trigger is the ActionButton above */}
+            <Button UNSAFE_style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", pointerEvents: "none" }} aria-hidden>.</Button>
+            <Dialog isDismissible={!retracting} isKeyboardDismissDisabled={retracting}>
+              <Heading slot="title">Retract this update?</Heading>
+              <Content>
+                <Text>
+                  &ldquo;{update.summary}&rdquo; will be removed from the feed and the living doc will regenerate. This cannot be undone.
+                </Text>
+              </Content>
+              <ButtonGroup>
+                <Button variant="secondary" onPress={() => setDialogOpen(false)} isDisabled={retracting}>Cancel</Button>
+                <Button variant="negative" onPress={handleRetract} isPending={retracting}>Retract</Button>
+              </ButtonGroup>
+            </Dialog>
+          </DialogTrigger>
         )}
 
         <Text>{update.summary}</Text>

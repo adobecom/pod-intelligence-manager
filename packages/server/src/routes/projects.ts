@@ -10,6 +10,7 @@ import {
 } from "@pim/shared";
 import { validateBody } from "../middleware/validation.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
+import { broadcastToAll } from "../ws/index.js";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 import { getOrgScopeIds } from "../services/org-settings.js";
@@ -226,17 +227,18 @@ export default async function projectRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/context-updates", async (req, reply) => {
+  app.get<{ Params: { projectId: string }; Querystring: { include_retracted?: string } }>("/api/projects/:projectId/context-updates", async (req, reply) => {
     const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id);
     if (!project) {
       reply.code(404);
       return { error: "Project not found" };
     }
+    const includeRetracted = req.query.include_retracted === "true";
     const rows = db
       .prepare(
         `SELECT id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score,
                 blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha
-         FROM project_context_updates WHERE project_id = ? ORDER BY timestamp DESC`,
+         FROM project_context_updates WHERE project_id = ?${includeRetracted ? "" : " AND retracted_at IS NULL"} ORDER BY timestamp DESC`,
       )
       .all(req.params.projectId) as Array<{
         id: string;
@@ -298,6 +300,26 @@ export default async function projectRoutes(app: FastifyInstance) {
       return { id: result.update!.id, update: result.update, pim: result.pim };
     },
   );
+
+  app.delete<{ Params: { projectId: string; updateId: string } }>("/api/projects/:projectId/context-updates/:updateId", async (req, reply) => {
+    const { projectId, updateId } = req.params;
+
+    const row = db.prepare(
+      "SELECT id FROM project_context_updates WHERE id = ? AND project_id = ? AND org_id = ? AND retracted_at IS NULL",
+    ).get(updateId, projectId, req.org!.org_id) as { id: string } | undefined;
+
+    if (!row) {
+      reply.code(404);
+      return { error: "Update not found or already retracted" };
+    }
+
+    const now = new Date().toISOString();
+    db.prepare("UPDATE project_context_updates SET retracted_at = ? WHERE id = ?").run(now, updateId);
+
+    broadcastToAll({ type: "update_retracted", podId: projectId, payload: { updateId, retracted_at: now } });
+
+    return { ok: true };
+  });
 
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
     const projectId = req.params.projectId;
