@@ -70,15 +70,29 @@ function domainOverlap(a: string[], b: string[]): number {
 
 // --- Edge Building ---
 
+// P3: Accept existing edges to prevent duplicate edges between the same node pair.
 export function buildEdges(
   newNodes: KnowledgeNode[],
   existingNodes: KnowledgeNode[],
+  existingEdges?: KnowledgeEdge[],
 ): KnowledgeEdge[] {
   const edges: KnowledgeEdge[] = [];
+  // Track both directions so we never create A→B when B→A (or A→B) already exists.
+  const seenPairs = new Set<string>();
+  if (existingEdges) {
+    for (const e of existingEdges) {
+      seenPairs.add(`${e.source}:${e.target}`);
+      seenPairs.add(`${e.target}:${e.source}`);
+    }
+  }
 
   for (const newNode of newNodes) {
     for (const existing of existingNodes) {
       if (newNode.id === existing.id) continue;
+
+      const pairKey = `${newNode.id}:${existing.id}`;
+      const reverseKey = `${existing.id}:${newNode.id}`;
+      if (seenPairs.has(pairKey) || seenPairs.has(reverseKey)) continue;
 
       const domOverlap = domainOverlap(newNode.domains, existing.domains);
       const combinedScore =
@@ -88,7 +102,6 @@ export function buildEdges(
 
       if (combinedScore < 0.3) continue;
 
-      // Determine edge type based on node types
       const edgeType = inferEdgeType(newNode, existing);
 
       edges.push({
@@ -97,6 +110,10 @@ export function buildEdges(
         type: edgeType,
         weight: Math.min(1, combinedScore),
       });
+
+      // Track this pair so intra-batch calls don't add the reverse edge too.
+      seenPairs.add(pairKey);
+      seenPairs.add(reverseKey);
     }
   }
 
@@ -133,6 +150,20 @@ function inferEdgeType(
   return "relates_to";
 }
 
+// --- Seeded PRNG (mulberry32) ---
+
+// P4: Deterministic shuffle in label propagation so community IDs don't shift
+// between runs of the same graph version.
+function seededRNG(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // --- Community Detection (Label Propagation) ---
 
 export function detectCommunities(graph: KnowledgeGraph): CommunitySummary[] {
@@ -156,16 +187,17 @@ export function detectCommunities(graph: KnowledgeGraph): CommunitySummary[] {
 
   // Initialize labels
   const labels = nodes.map((_, i) => i);
+  const rand = seededRNG(graph.version);
 
   // Iterate
   const MAX_ITERATIONS = 20;
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     let changed = false;
 
-    // Process nodes in random order
+    // Process nodes in deterministic-random order (seeded per graph version)
     const order = [...Array(nodes.length).keys()];
     for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(rand() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
 
