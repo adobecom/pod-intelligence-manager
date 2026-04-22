@@ -22,7 +22,7 @@ import {
   type ImsEnv,
 } from "@pim/shared/auth";
 
-interface HealthResponse {
+interface CliConfigResponse {
   auth_mode?: "trust" | "ims";
   ims_client_id?: string;
   ims_env?: ImsEnv;
@@ -31,10 +31,10 @@ interface HealthResponse {
   ims_cli_scopes?: string;
 }
 
-async function fetchServerHealth(baseUrl: string): Promise<HealthResponse> {
-  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/health`);
-  if (!res.ok) throw new Error(`Server health check failed: ${res.status}`);
-  return (await res.json()) as HealthResponse;
+async function fetchCliConfig(baseUrl: string): Promise<CliConfigResponse> {
+  const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/cli-config`);
+  if (!res.ok) throw new Error(`CLI config fetch failed: ${res.status}`);
+  return (await res.json()) as CliConfigResponse;
 }
 
 /** Best-effort open the URL in the user's default browser. */
@@ -135,22 +135,22 @@ export function registerLoginCommand(program: Command): void {
     .action(async () => {
       const baseUrl = getBaseUrl(program).replace(/\/$/, "");
 
-      let health: HealthResponse;
+      let cliConfig: CliConfigResponse;
       try {
-        health = await fetchServerHealth(baseUrl);
+        cliConfig = await fetchCliConfig(baseUrl);
       } catch (err) {
         console.error(chalk.red(`\n  Could not reach ${baseUrl}: ${err instanceof Error ? err.message : err}\n`));
         process.exit(1);
       }
 
-      if (health.auth_mode === "trust") {
+      if (cliConfig.auth_mode === "trust") {
         console.log(chalk.yellow("\n  Server is in trust mode — no login required.\n"));
         return;
       }
 
-      const clientId = process.env.PIM_IMS_CLIENT_ID ?? health.ims_cli_client_id ?? health.ims_client_id;
-      const clientSecret = process.env.PIM_IMS_CLIENT_SECRET ?? health.ims_cli_client_secret;
-      const imsEnv: ImsEnv = (process.env.PIM_IMS_ENV as ImsEnv) ?? health.ims_env ?? "stg1";
+      const clientId = process.env.PIM_IMS_CLIENT_ID ?? cliConfig.ims_cli_client_id ?? cliConfig.ims_client_id;
+      const clientSecret = process.env.PIM_IMS_CLIENT_SECRET ?? cliConfig.ims_cli_client_secret;
+      const imsEnv: ImsEnv = (process.env.PIM_IMS_ENV as ImsEnv) ?? cliConfig.ims_env ?? "stg1";
       if (!clientId) {
         console.error(
           chalk.red(
@@ -164,7 +164,7 @@ export function registerLoginCommand(program: Command): void {
       const pkce = generatePkce();
       const state = generateState();
       const scope =
-        process.env.PIM_IMS_SCOPES ?? health.ims_cli_scopes ?? "AdobeID,openid";
+        process.env.PIM_IMS_SCOPES ?? cliConfig.ims_cli_scopes ?? "AdobeID,openid";
 
       const listener = await startLoopbackListener(state);
       const redirectUri = `http://localhost:${listener.port}/callback`;
