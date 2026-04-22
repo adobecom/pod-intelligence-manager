@@ -19,6 +19,7 @@ interface PodStore {
   submitContextUpdate: (
     input: ContextUpdateInput,
   ) => Promise<SubmitResult | null>;
+  retractContextUpdate: (updateId: string) => Promise<void>;
   /** Link or unlink this pod to a project (PATCH /api/pods/:podId). */
   updatePodProject: (projectId: string | null) => Promise<void>;
 }
@@ -70,6 +71,13 @@ export const usePodStore = create<PodStore>((set, get) => ({
     const result = await api.submitContextUpdate(pod.pod_id, input);
     set({ contextUpdates: [result.update, ...contextUpdates] });
     return result;
+  },
+
+  retractContextUpdate: async (updateId: string) => {
+    const { pod, contextUpdates } = get();
+    if (!pod) return;
+    await api.retractContextUpdate(pod.pod_id, updateId);
+    set({ contextUpdates: contextUpdates.filter((u) => u.id !== updateId) });
   },
 
   updatePodProject: async (projectId: string | null) => {

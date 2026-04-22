@@ -95,7 +95,8 @@ export function createTables() {
       blocked_by_json TEXT NOT NULL DEFAULT '[]',
       needs_input_from_json TEXT NOT NULL DEFAULT '[]',
       source TEXT NOT NULL DEFAULT 'manual',
-      commit_sha TEXT
+      commit_sha TEXT,
+      retracted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS conflicts (
@@ -255,6 +256,7 @@ export function createTables() {
   try { db.exec("ALTER TABLE context_updates ADD COLUMN commit_sha TEXT"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_rationale TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN retracted_at TEXT"); } catch { /* already exists */ }
 
   // Projects + pod membership (existing DBs) — projects table must exist before ALTER pods
   try {

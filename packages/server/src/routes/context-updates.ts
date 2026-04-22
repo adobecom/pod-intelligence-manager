@@ -4,6 +4,8 @@ import type { ContextUpdate, ContextUpdateSource, Artifact, InputRequest } from 
 import { ingestContextUpdate, preValidateAndScan } from "../services/ingestion.js";
 import { enqueueUpdate, getQueueSize, QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPods } from "../services/ingestion-queue.js";
 import { notifyQueueBacklog } from "../services/slack.js";
+import { broadcast } from "../ws/index.js";
+import { regenerateLivingDoc } from "../pim/agents/summary.js";
 
 interface ContextUpdateRow {
   id: string;
@@ -46,13 +48,17 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
 }
 
 export default async function contextUpdateRoutes(app: FastifyInstance) {
-  app.get<{ Params: { podId: string } }>("/api/pods/:podId/context-updates", async (req, reply) => {
+  app.get<{ Params: { podId: string }; Querystring: { include_retracted?: string } }>("/api/pods/:podId/context-updates", async (req, reply) => {
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
       return [];
     }
-    const rows = db.prepare("SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? ORDER BY timestamp DESC").all(req.params.podId, req.org!.org_id) as ContextUpdateRow[];
+    const includeRetracted = req.query.include_retracted === "true";
+    const sql = includeRetracted
+      ? "SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? ORDER BY timestamp DESC"
+      : "SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? AND retracted_at IS NULL ORDER BY timestamp DESC";
+    const rows = db.prepare(sql).all(req.params.podId, req.org!.org_id) as ContextUpdateRow[];
     return rows.map(rowToContextUpdate);
   });
 
@@ -119,5 +125,44 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     }
     reply.code(201);
     return { id: result.update!.id, update: result.update, pim: result.pim };
+  });
+
+  app.delete<{ Params: { podId: string; updateId: string } }>("/api/pods/:podId/context-updates/:updateId", async (req, reply) => {
+    const { podId, updateId } = req.params;
+
+    const row = db.prepare(
+      "SELECT id FROM context_updates WHERE id = ? AND pod_id = ? AND org_id = ? AND retracted_at IS NULL",
+    ).get(updateId, podId, req.org!.org_id) as { id: string } | undefined;
+
+    if (!row) {
+      reply.code(404);
+      return { error: "Update not found or already retracted" };
+    }
+
+    const now = new Date().toISOString();
+    db.prepare("UPDATE context_updates SET retracted_at = ? WHERE id = ?").run(now, updateId);
+
+    // Auto-dismiss unresolved conflicts sourced from this update
+    const openConflicts = db.prepare(
+      "SELECT id, sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved' AND status != 'dismissed'",
+    ).all(podId) as { id: string; sides_json: string }[];
+
+    for (const conflict of openConflicts) {
+      const sides = JSON.parse(conflict.sides_json) as { context_update_id: string }[];
+      if (sides.some((s) => s.context_update_id === updateId)) {
+        db.prepare(
+          "UPDATE conflicts SET status = 'dismissed', resolution = 'Source update retracted', resolution_date = ? WHERE id = ?",
+        ).run(now, conflict.id);
+      }
+    }
+
+    // Regenerate living doc in the background — same fire-and-forget pattern as master.ts
+    regenerateLivingDoc(podId).catch((err) =>
+      console.error("[context-updates] Living doc regen after retraction failed:", err),
+    );
+
+    broadcast({ type: "update_retracted", podId, payload: { updateId, retracted_at: now } });
+
+    return { ok: true };
   });
 }

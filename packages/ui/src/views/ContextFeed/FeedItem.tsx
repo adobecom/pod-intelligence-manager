@@ -1,8 +1,10 @@
+import { useState } from "react";
 import {
   Text,
   Badge,
   StatusLight,
   ActionButton,
+  Button,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import Markdown from "react-markdown";
@@ -28,6 +30,7 @@ const detailWell = style({
   marginTop: 4,
 });
 const detailColumn = style({ display: "flex", flexDirection: "column", gap: 4 });
+const confirmRow = style({ display: "flex", alignItems: "center", gap: 8 });
 
 const typeBadgeVariant: Record<string, "positive" | "negative" | "informative" | "neutral" | "purple" | "seafoam"> = {
   progress: "positive",
@@ -49,28 +52,57 @@ export function FeedItem({
   update,
   isExpanded,
   onToggle,
+  onRetract,
 }: {
   update: FeedItemUpdate;
   isExpanded: boolean;
   onToggle: () => void;
+  onRetract?: () => Promise<void>;
 }) {
+  const [confirming, setConfirming] = useState(false);
+  const [retracting, setRetracting] = useState(false);
+
+  async function handleRetract() {
+    setRetracting(true);
+    try {
+      await onRetract?.();
+    } finally {
+      setRetracting(false);
+      setConfirming(false);
+    }
+  }
+
   return (
     <div className={card}>
       <div className={cardContent}>
-        <div className={tagRow}>
-          <RelativeTime timestamp={update.timestamp} />
-          <Text styles={style({ fontWeight: "bold" })}>{update.agent_id}</Text>
-          <Badge variant={typeBadgeVariant[update.type] ?? "neutral"}>
-            {update.type.replace("_", " ")}
-          </Badge>
-          <Badge variant="neutral">{update.scope}</Badge>
-          {update.quality_score != null && update.quality_score > 0 && (
-            <QualityBadge score={update.quality_score} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div className={tagRow}>
+            <RelativeTime timestamp={update.timestamp} />
+            <Text styles={style({ fontWeight: "bold" })}>{update.agent_id}</Text>
+            <Badge variant={typeBadgeVariant[update.type] ?? "neutral"}>
+              {update.type.replace("_", " ")}
+            </Badge>
+            <Badge variant="neutral">{update.scope}</Badge>
+            {update.quality_score != null && update.quality_score > 0 && (
+              <QualityBadge score={update.quality_score} />
+            )}
+            <StatusLight variant={statusVariant[update.status] ?? "neutral"}>
+              {update.status.replace("_", " ")}
+            </StatusLight>
+          </div>
+
+          {onRetract && !confirming && (
+            <ActionButton isQuiet aria-label="Retract update" onPress={() => setConfirming(true)}>✕</ActionButton>
           )}
-          <StatusLight variant={statusVariant[update.status] ?? "neutral"}>
-            {update.status.replace("_", " ")}
-          </StatusLight>
         </div>
+
+        {confirming && (
+          <div className={confirmRow}>
+            <Text styles={style({ color: "negative", font: "body-sm" })}>Retract this update?</Text>
+            <Button variant="secondary" size="S" onPress={() => setConfirming(false)}>Cancel</Button>
+            <Button variant="negative" size="S" onPress={handleRetract} isPending={retracting}>Retract</Button>
+          </div>
+        )}
 
         <Text>{update.summary}</Text>
 

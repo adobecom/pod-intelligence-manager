@@ -385,6 +385,12 @@ export async function submitContextUpdate(
   });
 }
 
+export async function retractContextUpdate(podId: string, updateId: string): Promise<void> {
+  await fetchJSON<{ ok: boolean }>(`/api/pods/${podId}/context-updates/${updateId}`, {
+    method: "DELETE",
+  });
+}
+
 export interface ProjectSubmitResult {
   id: string;
   update: ProjectContextUpdate;
