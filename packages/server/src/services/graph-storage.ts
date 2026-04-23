@@ -97,6 +97,33 @@ export function getGraphVersion(orgId: string): number {
   return graph?.version ?? 0;
 }
 
+export interface SyncWatermarks {
+  last_synced_at?: string;
+}
+
+function watermarkPath(orgId: string): string {
+  return path.join(orgDir(orgId), "sync-watermarks.json");
+}
+
+export function loadSyncWatermarks(orgId: string): SyncWatermarks {
+  const p = watermarkPath(orgId);
+  if (!fs.existsSync(p)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf-8")) as SyncWatermarks;
+  } catch {
+    return {};
+  }
+}
+
+export function saveSyncWatermarks(orgId: string, marks: SyncWatermarks): void {
+  const dir = orgDir(orgId);
+  ensureDir(dir);
+  const data = JSON.stringify(marks, null, 2);
+  const tmpPath = path.join(dir, `.sync-watermarks-${Date.now()}.tmp`);
+  fs.writeFileSync(tmpPath, data, "utf-8");
+  fs.renameSync(tmpPath, watermarkPath(orgId));
+}
+
 async function writeThroughToS3(orgId: string, version: number, body: string): Promise<void> {
   if (!S3_BUCKET) return;
   const client = getS3();

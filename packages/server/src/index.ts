@@ -24,6 +24,7 @@ import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
 import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
+import { syncExternalKnowledge } from "./services/external-knowledge-sync.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import db from "./db/connection.js";
@@ -153,6 +154,7 @@ const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
+const EXTERNAL_SYNC_INTERVAL_MS = parseInt(process.env.EXTERNAL_SYNC_INTERVAL_MS ?? "86400000", 10); // 24 hours
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -194,9 +196,21 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }
   }, GRAPH_REFRESH_INTERVAL_MS);
 
+  // Daily external knowledge sync — fan-out via context search across all configured sources
+  setInterval(() => {
+    void (async () => {
+      try {
+        await syncExternalKnowledge("default");
+      } catch (e) {
+        app.log.error(e, "External knowledge sync failed");
+      }
+    })();
+  }, EXTERNAL_SYNC_INTERVAL_MS);
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
+  app.log.info(`External knowledge sync interval: ${EXTERNAL_SYNC_INTERVAL_MS}ms`);
 });
 
 // Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.

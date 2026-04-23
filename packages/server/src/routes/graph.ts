@@ -19,6 +19,9 @@ import {
 } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { generateEmbedding } from "../services/embeddings.js";
+import { syncExternalKnowledge } from "../services/external-knowledge-sync.js";
+import { loadSyncWatermarks } from "../services/graph-storage.js";
+import { broadcastToAll } from "../ws/index.js";
 
 const KnowledgeQuerySchema = z.object({
   filters: z.object({
@@ -93,6 +96,23 @@ export default async function graphRoutes(app: FastifyInstance) {
       return getPrecedents(conflict, maxTokens);
     },
   );
+
+  // Manual trigger for external knowledge sync (all configured sources)
+  app.post("/api/knowledge/sync-external", async (_req) => {
+    const orgId = (_req as { org?: { org_id: string } }).org?.org_id ?? "default";
+    const result = await syncExternalKnowledge(orgId);
+    if (result.learnings_added > 0) {
+      broadcastToAll({ type: "knowledge_updated", payload: { learnings_extracted: result.learnings_added } });
+    }
+    return result;
+  });
+
+  // Sync status — last sync watermark
+  app.get("/api/knowledge/sync-status", async (_req) => {
+    const orgId = (_req as { org?: { org_id: string } }).org?.org_id ?? "default";
+    const watermarks = loadSyncWatermarks(orgId);
+    return { watermarks };
+  });
 
   // Node curation (human approval/rejection/editing)
   app.post<{ Params: { nodeId: string }; Body: CurationRequest }>(
