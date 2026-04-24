@@ -1,5 +1,6 @@
 import db from "../db/connection.js";
-import type { ContextUpdate } from "@pim/shared";
+import type { ContextUpdate, OrgTuning } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 
 export type Classification = "additive" | "overlapping" | "contradictory";
 
@@ -15,8 +16,9 @@ interface RecentUpdateRow {
 }
 
 // Classify whether a new context update is additive, overlapping, or contradictory
-export function classifyUpdate(update: ContextUpdate): Classification {
+export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classifier"]): Classification {
   const podId = update.pod_id;
+  const t = tuning ?? DEFAULT_ORG_TUNING.classifier;
 
   // 1. Check if this update's scope overlaps with any open conflict
   const openConflicts = db.prepare(
@@ -27,23 +29,21 @@ export function classifyUpdate(update: ContextUpdate): Classification {
     const sides = JSON.parse(conflict.sides_json) as Array<{ contributor: string }>;
     const conflictAgents = sides.map(s => s.contributor);
     if (conflictAgents.includes(update.agent_id)) {
-      // This agent is already part of an open conflict
       return "contradictory";
     }
   }
 
   // 2. Check if the update references entities from a different agent's recent work in the same scope
   const recentUpdates = db.prepare(
-    "SELECT id, agent_id, scope, summary FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT 5"
-  ).all(podId, update.scope, update.agent_id) as RecentUpdateRow[];
+    "SELECT id, agent_id, scope, summary FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT ?"
+  ).all(podId, update.scope, update.agent_id, t.peerWindow) as RecentUpdateRow[];
 
   if (recentUpdates.length > 0) {
-    // Simple keyword overlap check — look for shared significant terms
     const updateWords = extractKeywords(update.summary + " " + update.details);
     for (const recent of recentUpdates) {
       const recentWords = extractKeywords(recent.summary);
       const overlap = updateWords.filter(w => recentWords.includes(w));
-      if (overlap.length >= 3) {
+      if (overlap.length >= t.overlapKeywordMin) {
         return "overlapping";
       }
     }
@@ -51,8 +51,7 @@ export function classifyUpdate(update: ContextUpdate): Classification {
 
   // 3. Check conflict pressure
   const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number } | undefined;
-  if (pod && pod.conflict_pressure > 0.6) {
-    // In degraded/critical mode, treat everything as overlapping for caution
+  if (pod && pod.conflict_pressure > t.highPressureOverride) {
     return "overlapping";
   }
 

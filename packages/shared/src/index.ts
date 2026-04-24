@@ -20,9 +20,10 @@ export { EMPTY_PROJECT_ANATOMY } from "./types/project";
 export type {
   OrgConfig,
   OrgScopeDefinition,
+  OrgTuning,
 } from "./types/org-settings";
 
-export { DEFAULT_ORG_CONFIG } from "./types/org-settings";
+export { DEFAULT_ORG_CONFIG, DEFAULT_ORG_TUNING } from "./types/org-settings";
 
 export type {
   ContextUpdate,

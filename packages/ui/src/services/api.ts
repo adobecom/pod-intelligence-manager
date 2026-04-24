@@ -5,6 +5,7 @@ import type {
   Project,
   ProjectAnatomy,
   OrgConfig,
+  OrgTuning,
   ProjectContextUpdate,
   Tunnel,
   OrgPodSummary,
@@ -202,6 +203,29 @@ export async function patchOrgConfig(body: OrgConfig): Promise<OrgConfig> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+export async function getOrgTuning(): Promise<OrgTuning> {
+  return fetchJSON<OrgTuning>("/api/org/tuning");
+}
+
+export interface TuningHistoryEntry {
+  id: number;
+  adjusted_at: string;
+  signal_name: string;
+  signal_value: number;
+  parameter: string;
+  old_value: number;
+  new_value: number;
+  pods_analyzed: number;
+}
+
+export async function getOrgTuningHistory(): Promise<TuningHistoryEntry[]> {
+  return fetchJSON<TuningHistoryEntry[]>("/api/org/tuning/history");
+}
+
+export async function deleteOrgTuning(): Promise<OrgTuning> {
+  return fetchJSON<OrgTuning>("/api/org/tuning", { method: "DELETE" });
 }
 
 export async function createPod(input: {

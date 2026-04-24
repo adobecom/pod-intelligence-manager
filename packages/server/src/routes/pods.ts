@@ -254,7 +254,7 @@ export default async function podRoutes(app: FastifyInstance) {
       reply.code(404);
       return { error: "Pod not found" };
     }
-    const { findings, meta } = await runLintPass(req.params.podId);
+    const { findings, meta } = await runLintPass(req.params.podId, req.org?.org_id);
     return { findings, meta };
   });
 }

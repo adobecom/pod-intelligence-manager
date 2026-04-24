@@ -176,7 +176,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   });
 
   // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
-  const pimResult = await processUpdate(update);
+  const pimResult = await processUpdate(update, orgId);
 
   // 8.5 Incremental knowledge graph extraction for high-signal updates.
   // Runs during active sprints so other concurrent pods can see these decisions/spec_changes

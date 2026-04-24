@@ -4,11 +4,12 @@ import db from "../db/connection.js";
 import type { OrgPodSummary, CrossPodOverlap, ArchivedPod, ArchivedProject } from "@pim/shared";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { validateBody } from "../middleware/validation.js";
-import { getOrgConfig, setOrgConfig } from "../services/org-settings.js";
+import { getOrgConfig, setOrgConfig, getOrgTuning, deleteOrgTuning } from "../services/org-settings.js";
 import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { addLearningsToGraph } from "../services/knowledge-graph.js";
 import { broadcastToAll } from "../ws/index.js";
 import { computeCurrentDay } from "../services/pod-day.js";
+import { runTuningAgent, getOrgTuningHistory } from "../pim/agents/tuning-agent.js";
 
 interface PodRow {
   pod_id: string;
@@ -47,6 +48,20 @@ export default async function orgRoutes(app: FastifyInstance) {
       }
     },
   );
+
+  // Autonomous tuning — read-only for humans; written by runTuningAgent after pod archival
+  app.get("/api/org/tuning", async (req) => {
+    return getOrgTuning(req.org!.org_id);
+  });
+
+  app.get("/api/org/tuning/history", async (req) => {
+    return getOrgTuningHistory(req.org!.org_id);
+  });
+
+  app.delete("/api/org/tuning", async (req) => {
+    deleteOrgTuning(req.org!.org_id);
+    return getOrgTuning(req.org!.org_id);
+  });
 
   app.get("/api/org/pods", async (req) => {
     // Join against `pods` to pull sprint_start/total_days so day_number reflects real sprint
@@ -136,12 +151,19 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta);
+        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta, req.org!.org_id);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }
     } catch (err) {
       app.log.error(err, "Knowledge extraction failed during archival (non-blocking)");
+    }
+
+    // Autonomous parameter tuning: runs after knowledge extraction, silently adjusts org thresholds
+    try {
+      await runTuningAgent(req.org!.org_id);
+    } catch (err) {
+      app.log.warn(err, "Tuning agent failed during archival (non-blocking)");
     }
 
     return { ...archived, learnings_extracted: learningsExtracted };

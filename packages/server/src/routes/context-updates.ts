@@ -6,6 +6,7 @@ import { enqueueUpdate, getQueueSize, QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPo
 import { notifyQueueBacklog } from "../services/slack.js";
 import { broadcast } from "../ws/index.js";
 import { regenerateLivingDoc } from "../pim/agents/summary.js";
+import { getOrgTuning } from "../services/org-settings.js";
 
 interface ContextUpdateRow {
   id: string;
@@ -92,7 +93,8 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     }
 
     // When pressure is critical, intake is still accepted but processing is queued
-    if (pod.conflict_pressure >= 0.8) {
+    const orgTuning = getOrgTuning(req.org!.org_id);
+    if (pod.conflict_pressure >= orgTuning.pressure.degradedMax) {
       const check = preValidateAndScan(req.body);
       if (!check.success) {
         reply.code(check.secretFindings ? 422 : 400);

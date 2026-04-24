@@ -12,7 +12,9 @@ import type {
   KnowledgeEdgeType,
   KnowledgeGraph,
   CommunitySummary,
+  OrgTuning,
 } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { cosineSimilarity } from "./embeddings.js";
 
 // --- Keyword Extraction ---
@@ -325,7 +327,9 @@ export function scoreRelevance(
   node: KnowledgeNode,
   context: { scopes: string[]; keywords: string[]; querySimilarity?: number },
   hubIds: Set<string>,
+  graphTuning?: OrgTuning["graphScoring"],
 ): number {
+  const recencyDecayDays = graphTuning?.recencyDecayDays ?? DEFAULT_ORG_TUNING.graphScoring.recencyDecayDays;
   // Domain overlap
   const scopeSet = new Set(context.scopes);
   let domainMatch = 0;
@@ -346,10 +350,10 @@ export function scoreRelevance(
   // Confidence
   const confidenceScore = node.confidence_score;
 
-  // Recency — decay over 90 days
+  // Recency — decay over configured window
   const ageMs = Date.now() - new Date(node.created_at).getTime();
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  const recencyScore = Math.max(0, 1 - ageDays / 90);
+  const recencyScore = Math.max(0, 1 - ageDays / recencyDecayDays);
 
   // Hub bonus
   const hubScore = hubIds.has(node.id) ? 1 : 0;
