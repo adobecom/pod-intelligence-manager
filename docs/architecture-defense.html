@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PIM — Architecture Defense</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,300;1,8..60,400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #07090E;
+      --surface:   #0C1018;
+      --surface2:  #101520;
+      --code-bg:   #050810;
+      --border:    #141926;
+      --border2:   #1E2638;
+      --text:      #C5CDD8;
+      --muted:     #7A8599;
+      --dim:       #3E4C5E;
+      --red:       #E83229;
+      --red-bg:    rgba(232,50,41,0.08);
+      --amber:     #D4943A;
+      --amber-bg:  rgba(212,148,58,0.1);
+      --blue:      #4E8BE0;
+      --green:     #3DB87A;
+      --font-d:    'DM Serif Display', Georgia, serif;
+      --font-b:    'Source Serif 4', Georgia, serif;
+      --font-m:    'IBM Plex Mono', 'Courier New', monospace;
+      --sidebar:   272px;
+      --gap:       4.5rem;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-b);
+      font-size: 16px;
+      line-height: 1.75;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Subtle dot grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 28px 28px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* PROGRESS BAR */
+    #progress {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      width: 0%;
+      background: var(--red);
+      z-index: 1000;
+      transition: width 0.08s linear;
+      box-shadow: 0 0 8px rgba(232,50,41,0.5);
+    }
+
+    /* SIDEBAR */
+    #sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: var(--sidebar);
+      height: 100vh;
+      overflow-y: auto;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      padding: 0 0 3rem;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #sidebar::-webkit-scrollbar { width: 3px; }
+    #sidebar::-webkit-scrollbar-thumb { background: var(--border2); }
+
+    .sidebar-brand {
+      padding: 1.75rem 1.5rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1.25rem;
+      flex-shrink: 0;
+    }
+
+    .brand-pill {
+      display: inline-block;
+      font-family: var(--font-m);
+      font-size: 0.58rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--red);
+      border: 1px solid rgba(232,50,41,0.4);
+      padding: 0.2em 0.55em;
+      border-radius: 2px;
+      margin-bottom: 0.8rem;
+    }
+
+    .brand-title {
+      font-family: var(--font-d);
+      font-size: 2rem;
+      color: var(--text);
+      line-height: 1;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.3rem;
+    }
+
+    .brand-meta {
+      font-family: var(--font-m);
+      font-size: 0.65rem;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+    }
+
+    .toc-label {
+      font-family: var(--font-m);
+      font-size: 0.58rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--dim);
+      padding: 0 1.5rem;
+      margin-bottom: 0.4rem;
+      flex-shrink: 0;
+    }
+
+    .toc-list { list-style: none; flex: 1; }
+
+    .toc-item a {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      padding: 0.42rem 1.5rem;
+      text-decoration: none;
+      color: var(--muted);
+      font-family: var(--font-m);
+      font-size: 0.7rem;
+      line-height: 1.35;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+      border-left: 2px solid transparent;
+    }
+
+    .toc-item a:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+
+    .toc-item.active a {
+      color: var(--text);
+      border-left-color: var(--red);
+      background: var(--red-bg);
+    }
+
+    .toc-num {
+      font-size: 0.58rem;
+      color: var(--dim);
+      min-width: 1.4rem;
+      flex-shrink: 0;
+      padding-top: 0.05em;
+    }
+
+    .toc-item.active .toc-num { color: var(--red); }
+
+    /* MAIN */
+    #content {
+      margin-left: var(--sidebar);
+      padding: 0 4.5rem 8rem 5rem;
+      max-width: calc(var(--sidebar) + 880px);
+      position: relative;
+      z-index: 1;
+    }
+
+    /* HEADER */
+    .doc-header {
+      padding: 5.5rem 0 4rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: var(--gap);
+      opacity: 0;
+      animation: fadeUp 0.7s ease 0.1s forwards;
+    }
+
+    .doc-eyebrow {
+      font-family: var(--font-m);
+      font-size: 0.68rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--red);
+      margin-bottom: 1.25rem;
+    }
+
+    .doc-title {
+      font-family: var(--font-d);
+      font-size: 5.5rem;
+      line-height: 0.92;
+      letter-spacing: -0.025em;
+      color: var(--text);
+      margin-bottom: 0.75rem;
+    }
+
+    .doc-subtitle {
+      font-family: var(--font-d);
+      font-size: 1.5rem;
+      font-style: italic;
+      color: var(--muted);
+      margin-bottom: 2.25rem;
+    }
+
+    .doc-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-family: var(--font-m);
+      font-size: 0.7rem;
+      color: var(--muted);
+      border: 1px solid var(--border2);
+      padding: 0.5rem 1rem;
+      border-radius: 3px;
+    }
+
+    .doc-meta::before { content: '→'; color: var(--red); }
+
+    /* SECTIONS */
+    .section {
+      margin-bottom: var(--gap);
+      scroll-margin-top: 2rem;
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+
+    .section.visible { opacity: 1; transform: translateY(0); }
+
+    .section-header { margin-bottom: 2rem; }
+
+    .section-num {
+      display: block;
+      font-family: var(--font-m);
+      font-size: 0.62rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 0.55rem;
+    }
+
+    h2.section-title {
+      font-family: var(--font-d);
+      font-size: 2.35rem;
+      line-height: 1.1;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    h2.section-title em { font-style: italic; color: var(--muted); }
+
+    h3 {
+      font-family: var(--font-m);
+      font-size: 0.68rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin: 2.75rem 0 1rem;
+    }
+
+    h4 {
+      font-family: var(--font-b);
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin: 1.75rem 0 0.6rem;
+    }
+
+    p { margin-bottom: 1.2rem; }
+    p:last-child { margin-bottom: 0; }
+
+    strong { color: #D8E2EF; font-weight: 600; }
+    em { font-style: italic; }
+
+    /* LISTS */
+    ul, ol { padding-left: 1.6rem; margin-bottom: 1.2rem; }
+    li { margin-bottom: 0.45rem; }
+    li ul, li ol { margin-top: 0.35rem; margin-bottom: 0.35rem; }
+
+    /* INLINE CODE */
+    code {
+      font-family: var(--font-m);
+      font-size: 0.83em;
+      color: var(--amber);
+      background: var(--amber-bg);
+      padding: 0.12em 0.38em;
+      border-radius: 3px;
+    }
+
+    /* CODE BLOCKS */
+    .code-wrap {
+      position: relative;
+      margin: 1.75rem 0;
+    }
+
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-bottom: 1px solid var(--border);
+      padding: 0.45rem 1rem;
+      border-radius: 5px 5px 0 0;
+    }
+
+    .lang-tag {
+      font-family: var(--font-m);
+      font-size: 0.6rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    .copy-btn {
+      font-family: var(--font-m);
+      font-size: 0.6rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--dim);
+      background: none;
+      border: 1px solid var(--border2);
+      padding: 0.15em 0.6em;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border2);
+      border-top: none;
+      border-radius: 0 0 5px 5px;
+      padding: 1.25rem 1.5rem;
+      overflow-x: auto;
+      margin: 0;
+    }
+
+    pre code {
+      font-family: var(--font-m);
+      font-size: 0.79rem;
+      line-height: 1.7;
+      color: #94A8C0;
+      background: none;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    /* Standalone pre (no code-wrap) */
+    pre.standalone {
+      border: 1px solid var(--border2);
+      border-radius: 5px;
+      margin: 1.75rem 0;
+    }
+
+    /* DIAGRAM BLOCKS */
+    .diagram {
+      background: var(--code-bg);
+      border: 1px solid var(--border2);
+      border-left: 3px solid var(--border2);
+      border-radius: 0 5px 5px 0;
+      padding: 1.5rem 1.5rem 1.5rem 1.75rem;
+      margin: 1.75rem 0;
+      overflow-x: auto;
+    }
+
+    .diagram code {
+      font-family: var(--font-m);
+      font-size: 0.75rem;
+      line-height: 1.65;
+      color: #7A90AA;
+      background: none;
+      padding: 0;
+      border-radius: 0;
+      white-space: pre;
+    }
+
+    /* TABLES */
+    .table-wrap {
+      overflow-x: auto;
+      margin: 1.75rem 0;
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    thead {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border2);
+    }
+
+    th {
+      font-family: var(--font-m);
+      font-size: 0.62rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 0.7rem 1rem;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.875rem;
+      line-height: 1.55;
+      vertical-align: top;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: rgba(255,255,255,0.012); }
+
+    td code { font-size: 0.78rem; }
+
+    /* CALLOUTS */
+    .callout {
+      border-left: 3px solid var(--red);
+      background: var(--red-bg);
+      padding: 1rem 1.25rem;
+      border-radius: 0 4px 4px 0;
+      margin: 1.75rem 0;
+    }
+
+    .callout p { color: #CDD8E8; margin: 0; font-size: 0.95rem; }
+    .callout p + p { margin-top: 0.75rem; }
+
+    .callout-amber {
+      border-left-color: var(--amber);
+      background: var(--amber-bg);
+    }
+
+    /* STATUS CHIPS */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      font-family: var(--font-m);
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.18em 0.55em;
+      border-radius: 3px;
+      vertical-align: middle;
+    }
+
+    .chip-green  { background: rgba(61,184,122,0.12); color: var(--green); }
+    .chip-amber  { background: var(--amber-bg);       color: var(--amber); }
+    .chip-red    { background: var(--red-bg);          color: var(--red); }
+    .chip-blue   { background: rgba(78,139,224,0.12); color: var(--blue); }
+
+    /* PRESSURE TABLE COLORS */
+    .p-normal   td:first-child { color: var(--green);  font-weight: 600; font-family: var(--font-m); font-size: 0.8rem; }
+    .p-caution  td:first-child { color: var(--amber);  font-weight: 600; font-family: var(--font-m); font-size: 0.8rem; }
+    .p-degraded td:first-child { color: #E07A3A;       font-weight: 600; font-family: var(--font-m); font-size: 0.8rem; }
+    .p-critical td:first-child { color: var(--red);    font-weight: 600; font-family: var(--font-m); font-size: 0.8rem; }
+
+    /* BUILT GRID */
+    .built-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin: 1.75rem 0;
+    }
+
+    .built-card {
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      padding: 1.25rem;
+      background: var(--surface);
+    }
+
+    .built-card-title {
+      font-family: var(--font-m);
+      font-size: 0.62rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--amber);
+      margin-bottom: 0.85rem;
+      padding-bottom: 0.65rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .built-card ul { padding-left: 1rem; margin: 0; }
+    .built-card li { font-size: 0.82rem; line-height: 1.5; margin-bottom: 0.3rem; color: var(--muted); }
+    .built-card li code { font-size: 0.75rem; }
+
+    /* Q&A ACCORDION */
+    .qa-list { margin-top: 1.5rem; }
+
+    .qa-item {
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      margin-bottom: 0.6rem;
+      overflow: hidden;
+    }
+
+    .qa-question {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.9rem;
+      padding: 1.1rem 1.25rem;
+      cursor: pointer;
+      user-select: none;
+      background: var(--surface);
+      transition: background 0.15s;
+    }
+
+    .qa-question:hover { background: var(--surface2); }
+    .qa-item.open .qa-question { border-bottom: 1px solid var(--border2); }
+
+    .qa-icon {
+      flex-shrink: 0;
+      width: 1.1rem;
+      font-family: var(--font-m);
+      font-size: 1rem;
+      color: var(--red);
+      line-height: 1.3;
+      transition: transform 0.2s ease;
+    }
+
+    .qa-item.open .qa-icon { transform: rotate(45deg); }
+
+    .qa-q-text {
+      font-family: var(--font-b);
+      font-size: 0.93rem;
+      font-style: italic;
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    .qa-answer {
+      display: none;
+      padding: 1.35rem 1.5rem 1.35rem 3.25rem;
+      background: var(--bg);
+    }
+
+    .qa-item.open .qa-answer { display: block; }
+    .qa-answer p { font-size: 0.92rem; line-height: 1.72; }
+    .qa-answer ol, .qa-answer ul { font-size: 0.92rem; }
+
+    /* DIVIDER */
+    hr { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+
+    /* ANIMATION */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+    /* RESPONSIVE */
+    @media (max-width: 1100px) {
+      :root { --sidebar: 240px; }
+      #content { padding: 0 3rem 8rem 3.5rem; }
+    }
+    @media (max-width: 900px) {
+      .built-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+      #sidebar { display: none; }
+      #content { margin-left: 0; padding: 0 1.5rem 6rem; }
+      .doc-title { font-size: 3.5rem; }
+      h2.section-title { font-size: 1.85rem; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="progress"></div>
+
+<nav id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-pill">Architecture Defense</div>
+    <div class="brand-title">PIM</div>
+    <div class="brand-meta">Architect Review · April 2026</div>
+  </div>
+  <div class="toc-label">Contents</div>
+  <ol class="toc-list">
+    <li class="toc-item" data-s="s1"><a href="#s1"><span class="toc-num">01</span>Problem Statement</a></li>
+    <li class="toc-item" data-s="s2"><a href="#s2"><span class="toc-num">02</span>Why Existing Tools Don't Solve This</a></li>
+    <li class="toc-item" data-s="s3"><a href="#s3"><span class="toc-num">03</span>What PIM Is</a></li>
+    <li class="toc-item" data-s="s4"><a href="#s4"><span class="toc-num">04</span>Pillar 1 — FE Tunneling</a></li>
+    <li class="toc-item" data-s="s5"><a href="#s5"><span class="toc-num">05</span>Pillar 2 — The PIM Brain</a></li>
+    <li class="toc-item" data-s="s6"><a href="#s6"><span class="toc-num">06</span>Pillar 3 — PIM UI</a></li>
+    <li class="toc-item" data-s="s7"><a href="#s7"><span class="toc-num">07</span>Knowledge Graph</a></li>
+    <li class="toc-item" data-s="s8"><a href="#s8"><span class="toc-num">08</span>Security Model</a></li>
+    <li class="toc-item" data-s="s9"><a href="#s9"><span class="toc-num">09</span>Cost Model</a></li>
+    <li class="toc-item" data-s="s10"><a href="#s10"><span class="toc-num">10</span>Infrastructure Model</a></li>
+    <li class="toc-item" data-s="s11"><a href="#s11"><span class="toc-num">11</span>What Is Already Built</a></li>
+    <li class="toc-item" data-s="s12"><a href="#s12"><span class="toc-num">12</span>Architect Q&amp;A</a></li>
+  </ol>
+</nav>
+
+<main id="content">
+
+  <header class="doc-header">
+    <div class="doc-eyebrow">Pod Intelligence Manager</div>
+    <h1 class="doc-title">PIM</h1>
+    <p class="doc-subtitle">Architecture Defense</p>
+    <span class="doc-meta">Prepared for architect review, April 2026</span>
+  </header>
+
+  <!-- 01 -->
+  <section id="s1" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 01</span>
+      <h2 class="section-title">Problem Statement</h2>
+    </div>
+    <p>Cross-functional pods today run on implicit context. Agents (AI or human) each hold a local mental model of the sprint state: what's been decided, what's blocked, what assumptions are in play. When those models diverge — and they always do — the divergence is invisible until a blocker surfaces in QA or a PR review, days after the bad assumption was made.</p>
+    <p>The cost of late divergence detection in a 5-day sprint is disproportionate. A conflict discovered on Day 4 may require rewinding 2–3 days of parallel work. With multiple AI agents working concurrently, the rate of context delta production is an order of magnitude higher than humans can manually route and reconcile.</p>
+    <div class="callout">
+      <p>The problem is not agent intelligence — it is <strong>coordination infrastructure</strong>. Agents are capable of doing excellent work in isolation. What they lack is a shared, structured, real-time source of truth that they can read from and write to. Without that, every agent is effectively working in a fork of reality.</p>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section id="s2" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 02</span>
+      <h2 class="section-title">Why Existing Tools Don't Solve This</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Gap</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Slack</strong></td><td>No schema. No conflict detection. No API that agents can call to get a token-budgeted slice of relevant context. Conversations are ephemeral; decisions get buried. Search quality is poor for semantic queries.</td></tr>
+          <tr><td><strong>Confluence / Notion</strong></td><td>Write-by-humans only. No structured schema. No real-time merge semantics. No concept of "this update contradicts that one." Stale within hours on a fast-moving sprint.</td></tr>
+          <tr><td><strong>Jira</strong></td><td>Tracks tickets, not reasoning. Cannot represent "fe-agent-01 and be-agent-01 have incompatible assumptions about the cart API response shape." No living doc synthesis.</td></tr>
+          <tr><td><strong>GitHub PRs</strong></td><td>Catches code-level conflicts post-hoc, after the work is done. Does not catch semantic conflicts during work. Does not give agents a place to pull current sprint state before starting.</td></tr>
+          <tr><td><strong>Shared Google Doc</strong></td><td>No schema. No merge protocol. No conflict detection. No programmatic API. Multiple simultaneous agents editing produces chaos, not synthesis.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>None of these tools have:</p>
+    <ul>
+      <li>A structured context update schema that agents can write to</li>
+      <li>Automatic semantic merge with conflict detection</li>
+      <li>A canonical read-only living doc derived from structured state</li>
+      <li>A token-budgeted API for agents to pull relevant context without bloating their context windows</li>
+      <li>An escalation protocol tied to sprint pace (not arbitrary SLAs)</li>
+    </ul>
+  </section>
+
+  <!-- 03 -->
+  <section id="s3" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 03</span>
+      <h2 class="section-title">What PIM Is</h2>
+    </div>
+    <p>PIM (Pod Intelligence Manager) is a <strong>context bus with memory</strong>. It sits between all agents in a pod and ensures:</p>
+    <ol>
+      <li>Every agent writes structured context updates into a single system.</li>
+      <li>The system attempts to merge those updates automatically, with confidence-gated behavior.</li>
+      <li>When updates contradict, a conflict record is created with full attribution, both positions, and an automated impact analysis.</li>
+      <li>A living markdown document is continuously re-assembled from the canonical state and broadcast to all agents.</li>
+      <li>When a pod ends, durable learnings are extracted and added to an org-level knowledge graph that future pods can query.</li>
+    </ol>
+    <p>The system has three visible surfaces: <strong>FE Tunneling</strong> (for dev-to-stakeholder feedback loops), <strong>PIM Brain</strong> (the orchestration engine), and <strong>PIM UI</strong> (the human control plane).</p>
+  </section>
+
+  <!-- 04 -->
+  <section id="s4" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 04</span>
+      <h2 class="section-title">Pillar 1 — <em>FE Tunneling</em></h2>
+    </div>
+
+    <h3>The Problem</h3>
+    <p>Feature branches live on local machines or behind CI gates. Designers and PMs cannot see progress without a deploy, a screen share, or waiting for a staging environment that may be days behind the active branch. The feedback loop is asynchronous in the worst way — by the time feedback arrives, the developer has moved on.</p>
+
+    <h3>Architecture</h3>
+    <p>The mental model is Expo's tunnel mode: a dev runs their local server, a single CLI command exposes it to a stable remote URL, and any pod member can visit the live app — no deploy, no port forwarding required.</p>
+
+    <div class="diagram"><code>Dev's localhost:3000
+       │
+  pim tunnel start  (CLI outbound WebSocket — NAT/firewall friendly)
+       │
+  AWS API Gateway (WebSocket API, persistent session per dev)
+       │
+  Lambda tunnel-broker (maps incoming HTTP → correct dev tunnel via DynamoDB)
+       │
+  Route 53 wildcard: {pod}-{dev}.pim.{org}.com
+       │  (ACM wildcard cert, auto-provisioned, zero config per tunnel)
+  CloudFront distribution</code></div>
+
+    <h3>Key Decisions &amp; Reasoning</h3>
+    <ul>
+      <li><strong>Outbound WebSocket, not inbound port forwarding.</strong> Port forwarding requires network configuration that varies across Adobe's internal environments. An outbound WebSocket works behind any NAT or corporate firewall with no setup. This is the same model Expo, ngrok, and VS Code Dev Tunnels use.</li>
+      <li><strong>Stable subdomain per dev per pod.</strong> <code>checkout-alice.pim.adobe.com</code> is predictable, linkable, and bookmarkable. A random-token URL would require the designer to re-ask for the link every session. Stability is a UX property that reduces synchronous interrupts.</li>
+      <li><strong>Idle ≠ disconnected.</strong> Tunnels are marked idle (yellow in UI) after 20 minutes of no HTTP traffic but are only disconnected on heartbeat failure (heartbeat every 60 seconds). In AI-assisted development, a dev may be waiting 15+ minutes for code generation with no localhost changes — the reviewer should still be able to access the last-served state. Auto-disconnecting an idle tunnel would force the dev to re-share a link mid-session.</li>
+      <li><strong>No asset splitting.</strong> All traffic proxies through the WebSocket connection. The dev's local bundler already serves optimized dev builds. Splitting static assets to S3/CloudFront adds complexity for a marginal latency gain that reviewers won't notice at 200ms round-trip.</li>
+      <li><strong>Wildcard ACM cert, not per-tunnel cert provisioning.</strong> Per-tunnel cert provisioning via ACM/Let's Encrypt takes 30–60 seconds. A wildcard cert on <code>*.pim.{org}.com</code> is provisioned once during org setup and applies to all tunnels automatically.</li>
+    </ul>
+
+    <h3>Multi-Tunnel Support</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Dev</th><th>Branch</th><th>URL</th><th>Status</th><th>Last Activity</th></tr></thead>
+        <tbody>
+          <tr><td>alice</td><td>feat/cart-summary</td><td><code>checkout-alice.pim.adobe.com</code></td><td><span class="chip chip-green">Live</span></td><td>2 min ago</td></tr>
+          <tr><td>bob</td><td>feat/checkout-flow</td><td><code>checkout-bob.pim.adobe.com</code></td><td><span class="chip chip-green">Live</span></td><td>14 min ago</td></tr>
+          <tr><td>carol</td><td>fix/price-rounding</td><td><code>checkout-carol.pim.adobe.com</code></td><td><span class="chip chip-amber">Idle</span></td><td>1 hr ago</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Tunnel state is stored in a <code>pim-tunnels</code> DynamoDB table with a GSI on <code>pod_id</code>, so the dashboard query is a single indexed lookup — not a full-table scan.</p>
+
+    <h3>Developer Experience</h3>
+    <div class="code-wrap">
+      <div class="code-header"><span class="lang-tag">bash</span><button class="copy-btn">copy</button></div>
+      <pre><code>npx pim tunnel start --pod checkout-redesign --port 3000</code></pre>
+    </div>
+    <p>The CLI: authenticates via Adobe IMS (cached token; browser-based IMS login flow on first run), registers the tunnel in DynamoDB with <code>pod_id</code>, <code>dev_identity</code>, and <code>branch_name</code>, opens an outbound WebSocket to API Gateway, prints the stable URL, and sends a context update to PIM: <em>"Tunnel active — alice: feat/cart-summary at checkout-alice.pim.adobe.com."</em></p>
+    <p>No infra setup required per team. The org deploys the CDK stack once; any pod uses it immediately.</p>
+  </section>
+
+  <!-- 05 -->
+  <section id="s5" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 05</span>
+      <h2 class="section-title">Pillar 2 — <em>The PIM Brain</em></h2>
+    </div>
+
+    <h3>Core Loop</h3>
+    <div class="diagram"><code>Agent does work
+       │
+  POST /api/pods/{podId}/context-updates
+  (schema-validated, secret-scanned at ingestion Lambda)
+       │
+  PIM orchestrator receives delta
+       │
+  Deterministic routing → appropriate Committee agent
+       │
+  Committee agent processes → returns structured result
+       │
+  PIM orchestrator applies result to DynamoDB
+       │
+  Summary Agent re-renders living doc (.md) → S3
+       │
+  WebSocket broadcast to all connected agents/UI clients
+       │
+  Agents pull updated context before next action</code></div>
+
+    <h3>Why the Orchestrator Is Deterministic, Not Agentic</h3>
+    <div class="callout">
+      <p>This is the most important architectural decision in the system. The PIM orchestrator does <strong>no reasoning</strong>. Its job is routing, gating, and state application — not analysis. An agentic orchestrator holding a large context window would be slow (every decision involves an LLM call), expensive (LLM cost on every incoming update), and unpredictable (reasoning quality degrades as context grows). A deterministic router is fast, auditable, and scales to any throughput.</p>
+      <p>All LLM reasoning is delegated to Committee agents with <strong>scoped context windows</strong> — each Committee member only loads the slice of state it needs for its specific job.</p>
+    </div>
+
+    <div class="diagram"><code>PIM orchestrator (Lambda — no LLM)
+    │
+    ├── Merge Agent (Haiku)
+    │   Handles additive, non-overlapping updates.
+    │   ~60% of all updates never need an LLM — pure deterministic merge.
+    │   Haiku handles the ~30% that are routine but need light reasoning.
+    │
+    ├── Conflict Agent (Sonnet)
+    │   Detects contradictions. Creates conflict records with full attribution.
+    │   Queries the knowledge graph for historical precedents before analysis.
+    │   Runs rework cost analysis: what's the cost under each possible resolution?
+    │
+    ├── Summary Agent (Haiku)
+    │   Re-renders the living doc from DynamoDB state.
+    │   Runs a lint pass every 2 hours (EventBridge scheduled Lambda).
+    │   Pattern-scans the rendered doc for secrets before every S3 write.
+    │
+    ├── Cross-Pod Agent (Haiku)
+    │   Advisory only. Reads the org-level context registry to detect
+    │   when an update in this pod may affect another pod's scope.
+    │   Non-blocking. Cannot create conflicts in another pod.
+    │
+    └── Knowledge Extraction Agent (Sonnet + Haiku for edges)
+        Runs once at pod archival. Distills durable learnings from
+        decisions log, resolved conflicts, and final living doc.
+        Outputs EnhancedPodLearning[] with confidence levels and domain tags.</code></div>
+
+    <h3>Context Update Schema</h3>
+    <p>Every agent contribution must match this schema, validated at ingestion. Structure is not optional — it is what makes automatic merge and conflict detection possible. Unstructured text cannot be semantically merged without an expensive full-context LLM pass on every update.</p>
+    <div class="code-wrap">
+      <div class="code-header"><span class="lang-tag">yaml</span><button class="copy-btn">copy</button></div>
+      <pre><code>context_update:
+  agent_id: "fe-agent-01"
+  timestamp: "2026-04-02T14:32:00Z"
+  pod_id: "pod-checkout-redesign"
+  type: progress | blocker | spec_change | question | decision
+  scope: frontend | backend | design | qa | infra | pm
+  summary: "Implemented cart summary component with live price calculation"
+  details: |
+    - Component: CartSummary.tsx
+    - Reads from useCartStore hook
+    - Open question: should discounts show strikethrough or separate line?
+  artifacts:
+    - type: component
+      path: src/components/CartSummary.tsx
+    - type: screenshot
+      url: https://tunnel.pod.dev/checkout/cart
+  status: completed | in_progress | blocked
+  blocks: []
+  blocked_by: []
+  needs_input_from:
+    - role: design
+      question: "Discount display preference?"</code></pre>
+    </div>
+
+    <h3>The Living Doc</h3>
+    <p>The living doc is a <strong>read-only output</strong> assembled by the Summary Agent from DynamoDB state. No one edits it directly. This is the central architectural discipline that keeps the system coherent:</p>
+    <ul>
+      <li>There is no edit conflict on the document itself because no one writes to it.</li>
+      <li>The canonical state is always in DynamoDB — versioned, queryable, attributable.</li>
+      <li>The <code>.md</code> is a projection of that state, not a source of truth.</li>
+      <li>Any agent or human who wants to influence the doc does so by submitting a context update to PIM. The orchestrator processes it, and the Summary Agent re-renders.</li>
+    </ul>
+    <div class="callout callout-amber">
+      <p>This is analogous to event sourcing: the document is the read model, the context updates are the events, DynamoDB is the event store.</p>
+    </div>
+
+    <h3>Conflict Pressure System</h3>
+    <p>The Conflict Pressure score (0.0–1.0) quantifies orchestrator confidence and gates ingestion behavior:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Pressure</th><th>Mode</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr class="p-normal">  <td>0.0–0.3</td><td><strong>Normal</strong></td>  <td>Auto-merge freely. Business as usual.</td></tr>
+          <tr class="p-caution"> <td>0.3–0.6</td><td><strong>Cautious</strong></td> <td>Merges that touch areas near open conflicts get a disclaimer flag. Still merged.</td></tr>
+          <tr class="p-degraded"><td>0.6–0.8</td><td><strong>Degraded</strong></td> <td>Auto-merge halted for anything touching contested areas. Updates held in pending queue.</td></tr>
+          <tr class="p-critical"><td>0.8–1.0</td><td><strong>Critical</strong></td> <td>Context intake still accepted (validation + secret scan run). PIM orchestration paused. Updates written to <code>ingestion_queue</code>, replayed automatically when pressure drops below 0.8. Escalation fires to Slack if queue grows past backlog threshold.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Pressure Calculation</h4>
+    <ul>
+      <li>Each open conflict adds base pressure (blocking > non-blocking).</li>
+      <li>Pressure increases over time — a 36-hour-old unresolved conflict weighs more than a 1-hour-old one.</li>
+      <li>Conflicts touching high-dependency areas (shared data models, API contracts) apply a multiplier.</li>
+      <li>Resolved conflicts reduce pressure immediately.</li>
+    </ul>
+
+    <h4>Escalation Ladder (compressed for 5-day pods)</h4>
+    <ul>
+      <li>Created → ping contributors immediately (PIM UI + Slack).</li>
+      <li>Unresolved &gt;4h → re-ping, mark urgent.</li>
+      <li>Unresolved &gt;8h → escalate to pod lead.</li>
+      <li>Unresolved &gt;16h → escalate to eng manager.</li>
+      <li>Unresolved &gt;24h → pod health forced to critical regardless of pressure score. In a 5-day sprint, 24h = 20% of total sprint time burning.</li>
+    </ul>
+    <p><strong>Agent behavior under pressure:</strong> Agents are warned with full conflict context but NOT blocked. If they proceed, their completed work is tagged with a presumption label (<em>"This update assumes C-007 resolves in favor of Position A"</em>) and the Conflict Agent runs a rework cost analysis. The system surfaces information — it does not make decisions for humans.</p>
+
+    <h3>Proactive Lint Pass</h3>
+    <p>Beyond reactive conflict detection, the Summary Agent runs a lint pass every 2 hours scanning DynamoDB state for problems no one has explicitly reported:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Finding Type</th><th>What It Catches</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Staleness</strong></td><td>An area/agent hasn't reported in an unusually long time relative to pod pace.</td></tr>
+          <tr><td><strong>Implicit assumption</strong></td><td>An agent's work depends on something that was never formally decided.</td></tr>
+          <tr><td><strong>Coverage gap</strong></td><td>A milestone item has no owner or no reported progress.</td></tr>
+          <tr><td><strong>Dependency risk</strong></td><td>Multiple agents touching the same system without explicit coordination.</td></tr>
+          <tr><td><strong>Spec drift</strong></td><td>Agent work references concepts not present in the current spec.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Lint findings are advisory — they don't create conflict records or affect the pressure score. But if a lint finding goes unaddressed and becomes an actual conflict, the Conflict Agent references it: <em>"This conflict was flagged as a dependency risk 6 hours ago."</em> This creates an accountability loop. Cost of lint pass: ~$0.30 total over a full 5-day pod.</p>
+
+    <h3>MCP Server Integration</h3>
+    <p>PIM ships an MCP server (<code>@pim/mcp-server</code>) that exposes all PIM operations as MCP tools. Any Claude Code agent or IDE-integrated agent can call <code>submit_context_update</code>, <code>get_agent_session_context</code>, <code>list_conflicts</code>, <code>resolve_conflict</code>, and <code>query_knowledge</code> natively — without any SDK installation. The MCP server is the integration path for agents that can't or don't want to install <code>@pim/sdk</code>.</p>
+  </section>
+
+  <!-- 06 -->
+  <section id="s6" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 06</span>
+      <h2 class="section-title">Pillar 3 — <em>PIM UI</em></h2>
+    </div>
+    <p>The PIM UI is a React + Adobe Spectrum 2 SPA running against the same REST + WebSocket API. It is the human control plane for a pod:</p>
+    <ul>
+      <li><strong>Pod Dashboard</strong> — live status table by area/agent, active tunnel list, conflict count, Conflict Pressure gauge.</li>
+      <li><strong>Conflict Center</strong> — full conflict records with both positions, the orchestrator's impact analysis, and one-click resolution that writes back to PIM.</li>
+      <li><strong>Live Doc View</strong> — real-time rendered living doc, updating via WebSocket. No page refresh required.</li>
+      <li><strong>Knowledge Graph browser</strong> — the org's accumulated learnings, filterable by domain, type, and confidence level. Humans can approve, reject, or edit inferred learnings before they enter the graph.</li>
+      <li><strong>Org Dashboard</strong> — cross-pod health overview. All active pods, their conflict pressure scores, and whether any cross-pod scope overlaps are active.</li>
+    </ul>
+    <div class="callout callout-amber">
+      <p>The UI is purely a surface — it writes to PIM via the same REST API that agents use. There is no UI-specific backend. Every action a human takes in the UI is also something an agent can do programmatically.</p>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section id="s7" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 07</span>
+      <h2 class="section-title">Knowledge Graph — <em>Persistent Org Memory</em></h2>
+    </div>
+
+    <h3>The Problem with Ephemeral Pods</h3>
+    <p>Without a compounding mechanism, every new pod starts from zero context. Teams re-discover the same architectural answers, re-debate the same tradeoffs, and re-resolve the same classes of conflict. The org accumulates no institutional memory from its agentic workflows. PIM solves this at pod archival time.</p>
+
+    <h3>Extraction Pipeline</h3>
+    <p>When a pod is archived via <code>POST /api/pods/{podId}/archive</code>:</p>
+    <ol>
+      <li><strong>Deterministic extraction</strong> (confidence: 0.9) — reads the decisions log, resolved conflicts, and blocker records directly from DynamoDB. These are facts with full source attribution — no LLM needed.</li>
+      <li><strong>LLM-enhanced extraction</strong> (confidence: 0.4–0.85, Sonnet) — infers broader patterns from the pod's conflict resolution history, identifies anti-patterns from blockers, notes scope-specific insights.</li>
+      <li><strong>Edge generation</strong> (Haiku) — relationships between new learnings and existing knowledge graph nodes are computed via keyword overlap + type-specific rules, optionally enriched by LLM.</li>
+      <li><strong>Community detection</strong> — label propagation clustering identifies communities of related learnings (e.g., "all state management decisions across 8 pods").</li>
+      <li><strong>Persistence</strong> — full graph snapshot written to versioned S3. DynamoDB tables indexed by <code>type</code>, <code>domain</code>, and <code>confidence_score</code> for fast queries.</li>
+    </ol>
+
+    <h3>Graph Structure</h3>
+    <div class="code-wrap">
+      <div class="code-header"><span class="lang-tag">schema</span><button class="copy-btn">copy</button></div>
+      <pre><code>Nodes:
+  - decision        (e.g., "Zustand chosen over Redux for cart state")
+  - pattern         (e.g., "Formalize API contracts before parallel FE+BE work")
+  - anti_pattern    (e.g., "Starting parallel work without API contract → 2 blocking conflicts")
+  - resolved_conflict
+  - scope_insight   (e.g., "Discount logic: allocate 1.5x estimated time")
+
+Edges:
+  - relates_to
+  - supersedes      (a newer decision supersedes an older one in the same domain)
+  - contradicts
+  - builds_on
+  - resolved_by
+
+Communities: label propagation clusters of related learnings
+Hubs: high-degree nodes = key organizational patterns</code></pre>
+    </div>
+
+    <h3>Token-Budgeted Queries</h3>
+    <p>Agents never see the full graph. They call <code>getRelevantLearnings(maxTokens)</code> and the server returns the highest-value subset that fits the budget:</p>
+    <div class="code-wrap">
+      <div class="code-header"><span class="lang-tag">typescript</span><button class="copy-btn">copy</button></div>
+      <pre><code>// From @pim/sdk — agent calls this before starting work
+const learnings = await client.getRelevantLearnings(2000, {
+  projectId: pod.project_id,
+  query: pod.milestone?.name,   // semantic scoring via embedding
+});
+// Returns: { nodes, edges, total_matching, token_estimate, truncated }</code></pre>
+    </div>
+    <div class="callout callout-amber">
+      <p><strong>Why this matters architecturally:</strong> Without token budgets, knowledge retrieval is binary — dump everything or dump nothing. Dumping everything bloats agent context windows and degrades reasoning quality. Token-budgeted ranked retrieval is the correct middle path.</p>
+    </div>
+
+    <h3>Human Curation</h3>
+    <p>Not all LLM-inferred learnings are correct. The Knowledge Graph UI (<code>/knowledge</code>) lets humans review inferred learnings before they propagate to future pods:</p>
+    <ul>
+      <li><strong>Approve</strong> — learning enters the graph with <code>human_verified: true</code></li>
+      <li><strong>Reject</strong> — learning is discarded</li>
+      <li><strong>Edit</strong> — human corrects the learning; it enters as <code>human_edited: true</code></li>
+    </ul>
+    <p>Deterministically extracted learnings (from DB facts) enter with <code>confidence: 0.9</code> and don't require review, though humans can edit them.</p>
+  </section>
+
+  <!-- 08 -->
+  <section id="s8" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 08</span>
+      <h2 class="section-title">Security Model</h2>
+    </div>
+    <p>Security is built in at three independent checkpoints, not added as an afterthought.</p>
+
+    <h3>Checkpoint 1 — Ingestion Lambda</h3>
+    <p>Every context update passes through a secret scan before entering DynamoDB. Deterministic regex patterns cover: AWS access keys (<code>AKIA[0-9A-Z]{16}</code>), AWS secret keys, JWT tokens, common connection string patterns (PostgreSQL, MySQL, Redis, MongoDB), and generic high-entropy strings matching private key headers.</p>
+    <p>If a match is found, the update is rejected with a 422 and a sanitized error message — the matched pattern is not reflected back in the error. This checkpoint runs on <strong>100% of context updates</strong>, regardless of downstream processing path.</p>
+
+    <h3>Checkpoint 2 — LLM System Prompts</h3>
+    <p>All Committee agent system prompts include an explicit instruction: <strong>never output secrets, credentials, API keys, passwords, or connection strings in any response</strong>. This applies regardless of what appears in the context window. This is defense-in-depth against prompt injection: a malicious context update crafted to trick the Conflict Agent into repeating a stored secret would hit this guardrail.</p>
+
+    <h3>Checkpoint 3 — Summary Agent Pre-Write Scan</h3>
+    <p>Before the Summary Agent writes any content to S3, it runs the same deterministic pattern scan used at ingestion. If a match is found, the write is aborted and an alert fires. The previous living doc version remains on S3 unmodified. S3 buckets are versioned with <code>RemovalPolicy.RETAIN</code>, so any accidental write can be rolled back.</p>
+
+    <h3>Auth</h3>
+    <p>All API endpoints require Adobe IMS authentication. The server auth hook runs on every non-public route, validating IMS JWTs. Public paths (<code>/api/health</code>, <code>/api/cli-config</code>, WebSocket upgrades, tunnel proxy URLs with per-tunnel <code>share_token</code>) are explicitly allowlisted.</p>
+    <p>External stakeholders (non-IMS users) access tunnel URLs via a per-tunnel <code>share_token</code> in the path, which is time-limited and revocable.</p>
+  </section>
+
+  <!-- 09 -->
+  <section id="s9" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 09</span>
+      <h2 class="section-title">Cost Model</h2>
+    </div>
+    <p>LLM cost is the primary variable cost. The architecture is explicitly tiered to minimize LLM usage:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Frequency</th><th>Model</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Additive, non-overlapping updates</td><td>~60% of all updates</td><td><span class="chip chip-green">No LLM</span></td><td>Deterministic merge. FE agent reports a new component while BE reports a new endpoint. Zero reasoning needed.</td></tr>
+          <tr><td>Routine updates (non-conflicting, same area)</td><td>~30% of all updates</td><td><span class="chip chip-blue">Haiku</span></td><td>Light reasoning needed to confirm compatibility, add merge notes.</td></tr>
+          <tr><td>Conflict detection + analysis</td><td>~10% of all updates</td><td><span class="chip chip-amber">Sonnet</span></td><td>Contradictions require nuanced analysis, impact assessment, knowledge graph querying for precedents.</td></tr>
+          <tr><td>Lint pass</td><td>Every 2 hours</td><td><span class="chip chip-blue">Haiku</span></td><td>Single structured pass over current pod state.</td></tr>
+          <tr><td>Knowledge extraction</td><td>Once per pod lifecycle</td><td><span class="chip chip-amber">Sonnet + Haiku</span></td><td>Sonnet for insight extraction, Haiku for edge generation.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Per-Pod Cost Estimate</h3>
+    <p>Assuming 100 context updates/day × 5 days = 500 updates (5-day pod, 5 agents):</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Item</th><th>Count</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Deterministic merges</td><td>300</td><td>$0.00</td></tr>
+          <tr><td>Haiku routine merges</td><td>150</td><td>~$0.30</td></tr>
+          <tr><td>Sonnet conflict analyses</td><td>50</td><td>~$2.50</td></tr>
+          <tr><td>Lint passes (Haiku, ~60)</td><td>60 passes</td><td>~$0.30</td></tr>
+          <tr><td>Knowledge extraction (Sonnet)</td><td>1 run</td><td>~$0.05–$0.15</td></tr>
+          <tr><td colspan="2"><strong>Total</strong></td><td><strong>~$3.15–$3.25</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <p>Well within the $5–8 target. The model is predictable and scales linearly — a pod with twice as many agents producing twice as many updates costs roughly twice as much. There is no quadratic scaling lurking in the architecture.</p>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section id="s10" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 10</span>
+      <h2 class="section-title">Infrastructure Model</h2>
+    </div>
+    <p>The full AWS stack is defined in <code>packages/infra/lib/pim-stack.ts</code> as a CDK stack — one <code>cdk deploy</code> provisions the entire org infrastructure. There is no per-pod provisioning. Compute is entirely serverless Lambda — no persistent EC2, no idle compute cost.</p>
+
+    <h3>DynamoDB Tables</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Table</th><th>Key</th><th>GSIs</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>pim-pods</code></td><td><code>pod_id</code></td><td>—</td><td>Pod metadata</td></tr>
+          <tr><td><code>pim-context-updates</code></td><td><code>id</code></td><td><code>pod-timestamp-index</code></td><td>Context update stream</td></tr>
+          <tr><td><code>pim-conflicts</code></td><td><code>id</code></td><td><code>pod-status-index</code></td><td>Conflict records</td></tr>
+          <tr><td><code>pim-knowledge-nodes</code></td><td><code>id</code></td><td><code>type-confidence-index</code></td><td>Knowledge graph nodes</td></tr>
+          <tr><td><code>pim-living-docs</code></td><td><code>pod_id</code></td><td>—</td><td>Living doc metadata</td></tr>
+          <tr><td><code>pim-tunnels</code></td><td><code>tunnel_id</code></td><td><code>pod-index</code></td><td>Active tunnel registry</td></tr>
+          <tr><td><code>pim-org-summaries</code></td><td><code>pod_id</code></td><td>—</td><td>Cross-pod context registry</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>All tables use <code>PAY_PER_REQUEST</code> billing — no capacity planning required. All are <code>RETAIN</code> on stack removal, protecting against accidental data loss.</p>
+
+    <h3>S3 Buckets</h3>
+    <ul>
+      <li><code>pim-living-docs-{account}</code> — versioned, S3-managed encryption. Living doc history is never deleted.</li>
+      <li><code>pim-knowledge-graph-{account}</code> — versioned, S3-managed encryption. Full graph snapshots.</li>
+      <li><code>pim-ui-{account}</code> — SPA hosting, served via CloudFront.</li>
+    </ul>
+
+    <h3>Scheduled Lambdas (EventBridge)</h3>
+    <ul>
+      <li><code>EscalationSchedule</code> — every 5 minutes, checks for unresolved conflicts past escalation thresholds.</li>
+      <li><code>LintSchedule</code> — every 2 hours, runs the proactive lint pass.</li>
+    </ul>
+
+    <h3>Networking</h3>
+    <p>API Gateway handles all HTTP + WebSocket. CloudFront fronts both the UI and the REST API (<code>/api/*</code> passes through, cache disabled). No VPC required. Zero per-pod ops: org deploys once, any team creates a pod via <code>pim pod create</code> and immediately has access to tunneling, conflict detection, living docs, and knowledge graph queries.</p>
+  </section>
+
+  <!-- 11 -->
+  <section id="s11" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 11</span>
+      <h2 class="section-title">What Is Already Built</h2>
+    </div>
+    <div class="callout callout-amber">
+      <p>This is not a proposal — it is a running system. Server on <code>:4000</code>, UI on <code>:5173</code>. As of April 2026:</p>
+    </div>
+
+    <div class="built-grid">
+      <div class="built-card">
+        <div class="built-card-title">Backend · packages/server</div>
+        <ul>
+          <li>Fastify server with full route coverage: pods, projects, context updates, conflicts, living doc, knowledge graph, tunnels, org config, context search</li>
+          <li>SQLite for local dev with same schema as DynamoDB production target</li>
+          <li>WebSocket broadcast (<code>/ws</code>) — real-time updates on every state change</li>
+          <li>WebSocket tunnel proxy (<code>/ws-tunnel</code>, <code>/tunnel/</code>)</li>
+          <li>PIM orchestrator with all 5 Committee agents: Merge, Conflict, Summary, Cross-Pod, Knowledge Extraction</li>
+          <li>Proactive lint pass (runs on schedule)</li>
+          <li>Escalation service with time-based ladder</li>
+          <li>Knowledge graph service with community detection, confidence scoring, token-budgeted queries</li>
+          <li>Auth middleware with IMS JWT verification and dev trust mode</li>
+          <li>Rate limiting (100 req/min global, configurable per route)</li>
+        </ul>
+      </div>
+      <div class="built-card">
+        <div class="built-card-title">UI · packages/ui</div>
+        <ul>
+          <li>Pod Dashboard</li>
+          <li>Conflict Center</li>
+          <li>Live Doc View</li>
+          <li>Knowledge Graph browser</li>
+          <li>Org Dashboard</li>
+          <li>WebSocket real-time updates throughout</li>
+          <li>IMS authentication flow</li>
+          <li>Spectrum 2 design system throughout</li>
+        </ul>
+      </div>
+      <div class="built-card">
+        <div class="built-card-title">CLI · packages/cli</div>
+        <ul>
+          <li><code>pim pod create / list / join / leave</code></li>
+          <li><code>pim tunnel start / stop / list</code></li>
+          <li><code>pim context</code> — pull and display session context in terminal</li>
+          <li><code>pim report</code> — submit a context update from CLI</li>
+          <li><code>pim hooks install</code> — git hooks that auto-report to PIM on commit</li>
+          <li><code>pim search</code> — semantic context search across external sources</li>
+          <li>Adobe IMS auth flow (browser-based, token cached)</li>
+        </ul>
+      </div>
+      <div class="built-card">
+        <div class="built-card-title">Infra · packages/infra</div>
+        <ul>
+          <li>Full CDK stack: all DynamoDB tables with GSIs</li>
+          <li>S3 buckets, Lambda functions</li>
+          <li>API Gateway (REST + WebSocket)</li>
+          <li>CloudFront distribution</li>
+          <li>EventBridge scheduled rules</li>
+          <li>EC2 variant stack for orgs preferring a persistent server deployment</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>SDK API Surface · packages/sdk</h3>
+    <div class="code-wrap">
+      <div class="code-header"><span class="lang-tag">typescript</span><button class="copy-btn">copy</button></div>
+      <pre><code>// @pim/sdk — full surface shipped:
+client.report(input)                    // submit context update
+client.getContext()                     // fetch living doc markdown
+client.getPod()                         // fetch pod state
+client.getConflicts()                   // fetch active conflicts
+client.getRelevantLearnings(maxTokens)  // token-budgeted knowledge query
+client.getPrecedents(conflictSummary)   // historical conflict precedents
+client.pullSessionContext()             // bundled: pod + doc + conflicts + learnings
+client.searchContext(query)             // cross-source: Slack, Jira, Confluence, GitHub, git</code></pre>
+    </div>
+
+    <h3>MCP Server · packages/mcp-server</h3>
+    <p>Full set of MCP tools: <code>submit_context_update</code>, <code>get_agent_session_context</code>, <code>list_pods</code>, <code>get_conflict</code>, <code>resolve_conflict</code>, <code>query_knowledge</code>, <code>list_tunnels</code>, and more. Runs alongside Claude Code — agents can call PIM without any SDK installation.</p>
+  </section>
+
+  <!-- 12 -->
+  <section id="s12" class="section">
+    <div class="section-header">
+      <span class="section-num">Section 12</span>
+      <h2 class="section-title">Anticipated Architect Questions</h2>
+    </div>
+    <p>Click any question to expand the answer.</p>
+
+    <div class="qa-list">
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"Why not just use an existing agent orchestration framework (LangGraph, CrewAI, AutoGen)?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>Those frameworks are designed for orchestrating LLM reasoning pipelines — chains of AI calls producing a final output. PIM solves a different problem: coordinating the outputs of independent agents (which may use any framework or no framework) that are working in parallel over days, not seconds. PIM is the coordination layer above and orthogonal to any reasoning framework. An agent running CrewAI can call <code>pim report</code> at the end of a task.</p>
+          <p>Additionally, none of those frameworks have: conflict detection with human escalation, a persistent knowledge graph with pod lifecycle management, FE tunneling for stakeholder feedback, or Slack integration tied to sprint escalation ladders. PIM is purpose-built for Adobe's pod model.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"Why not build this on top of an existing event streaming platform (Kafka, EventBridge alone)?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>Event streaming handles event routing — it doesn't do semantic merge, conflict detection, or living doc synthesis. PIM uses EventBridge for scheduled tasks (lint pass, escalation check) exactly where it's appropriate. The context update flow runs through API Gateway + Lambda + DynamoDB, not a streaming topic, because the processing of each update is <strong>stateful</strong> — it requires reading existing DynamoDB state (open conflicts, current living doc, pod scope) to decide whether to merge or escalate. Streaming systems are designed for stateless event processing; PIM's core logic is inherently stateful.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"Why SQLite locally instead of a local DynamoDB emulator?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>DynamoDB Local requires Docker and has subtle behavioral differences from the production service (especially around GSI consistency). SQLite with a matching schema is faster to spin up, zero-dependency, and sufficient for the local development and testing use case. The production path is DynamoDB via CDK — the schema is the same, the query patterns are validated in CI. This is a developer experience trade-off, not an architectural one.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"What's the failure mode if PIM is down?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>Agents can continue working. PIM unavailability means agents can't report context updates and can't pull the living doc. Work doesn't stop — it just becomes unsynchronized, which is the pre-PIM baseline. When PIM comes back, agents resubmit any missed updates. The context update schema includes a <code>timestamp</code> field so the orchestrator can reconstruct the correct ordering from the submission time, not the receipt time.</p>
+          <p>The ingestion queue (active in degraded/critical mode) is replay-capable: all queued updates are held in DynamoDB and processed in order once the system unblocks. Nothing is dropped.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"What happens to the knowledge graph over time as the org accumulates more pods?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>The graph grows incrementally — one pod's learnings are a bounded addition. Token-budgeted queries mean agent context windows never grow with the graph; they always get a fixed-size, relevance-ranked slice. The server loads the graph into memory on startup (from the S3 snapshot), and community detection clusters it so queries can be scoped to a community rather than the full graph. High-degree hub nodes (organizational patterns referenced by many pods) naturally surface to the top of relevance rankings. The graph is designed to get more useful, not more expensive, as it grows.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"Why DynamoDB and not PostgreSQL/RDS?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>For production: no capacity planning, no connection pooling management, no database server to patch or scale. All access patterns in PIM are key-value or GSI lookups — there are no complex relational joins. The DynamoDB <code>PAY_PER_REQUEST</code> billing model means zero idle cost between pods. RDS would add a persistent server cost, maintenance overhead, and operational complexity for a use case that doesn't require relational semantics.</p>
+          <p>For local dev: SQLite sidesteps the RDS vs DynamoDB question entirely and gives developers an instant-on, zero-config experience.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"Why build the living doc as markdown on S3 rather than a structured API response?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>Markdown is universally renderable — in the PIM UI, in Slack messages, in agent context windows, in email notifications. A structured API response would require every consumer to implement its own rendering logic. Markdown is the lingua franca.</p>
+          <p>S3 versioning gives a complete history of every living doc snapshot — useful for debugging and for understanding how a pod's ground truth evolved over time.</p>
+        </div>
+      </div>
+
+      <div class="qa-item">
+        <div class="qa-question">
+          <span class="qa-icon">+</span>
+          <span class="qa-q-text">"How does PIM handle a malicious or malfunctioning agent submitting junk context updates?"</span>
+        </div>
+        <div class="qa-answer">
+          <p>Three layers:</p>
+          <ol>
+            <li><strong>Schema validation at ingestion</strong> — updates that don't match the Zod schema are rejected 422 before they reach the orchestrator or DynamoDB.</li>
+            <li><strong>Rate limiting</strong> — 100 req/min global (configurable per route). A runaway agent can't flood the system.</li>
+            <li><strong>Attribution on every update</strong> — every context update carries <code>agent_id</code> and <code>timestamp</code>. If an agent submits problematic data, it can be identified, its updates filtered from the living doc view, and the DynamoDB records corrected. Nothing is irrevocably merged — the living doc is always re-derivable from the corrected DynamoDB state.</li>
+          </ol>
+          <p>Conflict detection also acts as a natural filter: if a malfunctioning agent submits updates that contradict established decisions, the Conflict Agent will surface this immediately with full attribution, alerting humans before it affects other agents' work.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // Progress bar
+  const bar = document.getElementById('progress');
+  window.addEventListener('scroll', () => {
+    const pct = window.scrollY / (document.body.scrollHeight - window.innerHeight) * 100;
+    bar.style.width = pct + '%';
+  }, { passive: true });
+
+  // Active TOC via IntersectionObserver
+  const sections = document.querySelectorAll('.section');
+  const tocItems = document.querySelectorAll('.toc-item');
+
+  const tocObs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        tocItems.forEach(t => t.classList.toggle('active', t.dataset.s === e.target.id));
+      }
+    });
+  }, { rootMargin: '-10% 0px -65% 0px' });
+
+  sections.forEach(s => tocObs.observe(s));
+
+  // Section fade-in
+  const fadeObs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+  }, { threshold: 0.04 });
+
+  sections.forEach(s => fadeObs.observe(s));
+
+  // Q&A accordion
+  document.querySelectorAll('.qa-question').forEach(q => {
+    q.addEventListener('click', () => {
+      const item = q.closest('.qa-item');
+      const wasOpen = item.classList.contains('open');
+      document.querySelectorAll('.qa-item').forEach(i => i.classList.remove('open'));
+      if (!wasOpen) item.classList.add('open');
+    });
+  });
+
+  // Copy buttons
+  document.querySelectorAll('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.closest('.code-wrap').querySelector('code');
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+      });
+    });
+  });
+</script>
+</body>
+</html>
