@@ -143,8 +143,10 @@ The workflow is hardcoded to `STACK_NAME=PimEc2Stack-rkhan`. Update if you fork 
 
 ## Verification smoke test
 
-1. `curl https://<CloudFrontUrl>/api/health` → `{"status":"ok","db":{"connected":true,…}}`.
-2. UI loads at `https://<CloudFrontUrl>/`.
+The active deployment is at **`https://d1ygncl0yqo6sv.cloudfront.net`** (stack `PimEc2Stack-rkhan`).
+
+1. `curl https://d1ygncl0yqo6sv.cloudfront.net/api/health` → `{"status":"ok","db":{"connected":true,…}}`.
+2. UI loads at `https://d1ygncl0yqo6sv.cloudfront.net/`.
 3. Create a pod via UI; SSM into the instance and confirm: `sqlite3 /data/pim.db "SELECT * FROM pods"`.
 4. Submit a context update; check CloudWatch Logs `/aws/ec2/pim-rkhan-server` for the Bedrock invocation line.
 5. Browser devtools: `/ws?podId=<id>` WebSocket connects.

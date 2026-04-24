@@ -71,7 +71,7 @@ CloudFront distribution URL (or a branded domain, see §2d).
 # Use the CloudFront URL output by the CDK stack
 aws ssm put-parameter --name /pim/TUNNEL_BASE_URL \
   --type String \
-  --value "https://dXXXXXXXXXX.cloudfront.net" --overwrite
+  --value "https://d1ygncl0yqo6sv.cloudfront.net" --overwrite
 ```
 
 Restart the instance (see §1c).
@@ -79,7 +79,7 @@ Restart the instance (see §1c).
 ### 2b. Confirm CloudFront routing
 The stack already forwards `/tunnel/*` to the ALB. Verify:
 ```sh
-curl -I https://dXXXXXXXXXX.cloudfront.net/tunnel/does-not-exist/token
+curl -I https://d1ygncl0yqo6sv.cloudfront.net/tunnel/does-not-exist/token
 # Expect: 401 Unauthorized (tunnel-proxy handler rejects bad token)
 # NOT:    403 or a 404 HTML page from S3 (which would mean CloudFront routed to UI)
 ```
