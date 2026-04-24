@@ -1,5 +1,5 @@
 {
-  "name": "pim",
+  "name": "pim-workspace",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
@@ -8,7 +8,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "pim": "tsx packages/cli/src/index.ts",
-    "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter ado-pim build && pnpm -C packages/cli link --global && node scripts/bootstrap-reminder.mjs",
+    "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter ado-pim build && cd packages/cli && pnpm link --global && node ../../scripts/bootstrap-reminder.mjs",
     "install-cli": "pnpm bootstrap"
   },
   "engines": {
