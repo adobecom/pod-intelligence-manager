@@ -65,7 +65,7 @@ export function extractKnowledge(podId: string): PodLearning[] {
   // Extract decisions as patterns
   const decisions = db.prepare(
     "SELECT agent_id, timestamp, summary, details FROM context_updates WHERE pod_id = ? AND type = 'decision' ORDER BY timestamp ASC",
-  ).all(podId) as DecisionRow[];
+  ).all(podId) as unknown as DecisionRow[];
 
   for (const d of decisions) {
     learnings.push({
@@ -78,7 +78,7 @@ export function extractKnowledge(podId: string): PodLearning[] {
   // Extract resolved conflicts with their resolutions
   const resolved = db.prepare(
     "SELECT id, summary, resolution, severity FROM conflicts WHERE pod_id = ? AND status = 'resolved'",
-  ).all(podId) as ResolvedConflictRow[];
+  ).all(podId) as unknown as ResolvedConflictRow[];
 
   for (const r of resolved) {
     learnings.push({
@@ -91,7 +91,7 @@ export function extractKnowledge(podId: string): PodLearning[] {
   // Extract blockers as potential anti-patterns
   const blockers = db.prepare(
     "SELECT agent_id, summary, details FROM context_updates WHERE pod_id = ? AND type = 'blocker' ORDER BY timestamp ASC",
-  ).all(podId) as DecisionRow[];
+  ).all(podId) as unknown as DecisionRow[];
 
   for (const b of blockers) {
     learnings.push({
@@ -174,10 +174,10 @@ export async function extractKnowledgeEnhanced(
     const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
     const updates = db.prepare(
       "SELECT type, scope, summary, details, agent_id, status FROM context_updates WHERE pod_id = ? ORDER BY timestamp ASC",
-    ).all(podId) as ContextRow[];
+    ).all(podId) as unknown as ContextRow[];
     const conflicts = db.prepare(
       "SELECT id, summary, resolution, severity, status FROM conflicts WHERE pod_id = ?",
-    ).all(podId) as (ResolvedConflictRow & { status: string })[];
+    ).all(podId) as unknown as (ResolvedConflictRow & { status: string })[];
 
     // Build context for the LLM
     const decisionsText = updates

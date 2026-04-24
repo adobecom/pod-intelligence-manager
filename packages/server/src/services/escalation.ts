@@ -24,7 +24,7 @@ export function checkEscalations(): void {
   const now = Date.now();
   const conflicts = db.prepare(
     "SELECT id, pod_id, created_at, severity, escalation_level, slack_message_ts FROM conflicts WHERE status != 'resolved'",
-  ).all() as OpenConflictRow[];
+  ).all() as unknown as OpenConflictRow[];
 
   for (const conflict of conflicts) {
     const ageMs = now - new Date(conflict.created_at).getTime();

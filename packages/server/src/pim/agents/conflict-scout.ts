@@ -101,7 +101,7 @@ function loadPeerBundle(update: ContextUpdate): PeerRow[] {
       update.agent_id,
       update.id,
       SCOUT_PEER_WINDOW,
-    ) as PeerRow[];
+    ) as unknown as PeerRow[];
 }
 
 function normalizeScoutResponse(raw: LLMScoutResponse | null): ConflictScoutResult | null {

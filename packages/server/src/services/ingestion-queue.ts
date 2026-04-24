@@ -33,7 +33,7 @@ export function getQueueSize(podId: string): number {
 export async function drainQueue(podId: string): Promise<{ processed: number; errors: number }> {
   const rows = db.prepare(
     "SELECT id, pod_id, payload_json FROM ingestion_queue WHERE pod_id = ? AND status = 'pending' ORDER BY queued_at ASC"
-  ).all(podId) as QueueRow[];
+  ).all(podId) as unknown as QueueRow[];
 
   let processed = 0;
   let errors = 0;

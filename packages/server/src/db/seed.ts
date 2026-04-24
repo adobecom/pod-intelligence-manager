@@ -1,4 +1,4 @@
-import db from "./connection.js";
+import db, { withTransaction } from "./connection.js";
 import {
   pods,
   conflicts,
@@ -112,7 +112,7 @@ export function seedDatabase() {
     "INSERT INTO living_docs (pod_id, markdown, last_regenerated_at, regen_count, org_id) VALUES (?, ?, ?, ?, ?)",
   );
 
-  const transaction = db.transaction(() => {
+  withTransaction(() => {
     insertProject.run(
       DEFAULT_PROJECT_ID,
       "EMC Platform",
@@ -190,7 +190,5 @@ export function seedDatabase() {
       insertLivingDoc.run(podId, markdown, "2026-04-09T10:00:00Z", 1, demoOrgId);
     }
   });
-
-  transaction();
   console.log("Database seeded with fixture data (demo org).");
 }

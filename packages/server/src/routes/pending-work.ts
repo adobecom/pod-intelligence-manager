@@ -10,6 +10,6 @@ export default async function pendingWorkRoutes(app: FastifyInstance) {
       reply.code(404);
       return [];
     }
-    return db.prepare("SELECT context_update_id, agent_id, summary, presumes, rework_cost FROM pending_work WHERE conflict_id = ?").all(req.params.conflictId) as PendingWork[];
+    return db.prepare("SELECT context_update_id, agent_id, summary, presumes, rework_cost FROM pending_work WHERE conflict_id = ?").all(req.params.conflictId) as unknown as PendingWork[];
   });
 }
