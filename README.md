@@ -10,7 +10,9 @@ Three pillars:
 
 ## Quick Start
 
-Run these commands in separate terminals:
+**Hosted instance (no setup required):** Open **https://d1ygncl0yqo6sv.cloudfront.net/** to use the shared deployment.
+
+**Local development:** Run these commands in separate terminals:
 
 ```bash
 pnpm install
@@ -212,7 +214,7 @@ pnpm --filter @pim/mcp-server build
       "command": "node",
       "args": ["/absolute/path/to/pim/packages/mcp-server/dist/index.js"],
       "env": {
-        "PIM_API_URL": "http://localhost:4000",
+        "PIM_API_URL": "https://d1ygncl0yqo6sv.cloudfront.net",
         "PIM_ORG_SLUG": "your-org-slug"
       }
     }
@@ -220,7 +222,9 @@ pnpm --filter @pim/mcp-server build
 }
 ```
 
-3. Start the PIM server (`pnpm --filter @pim/server dev`), then ask Claude: *"Show me pod Auth Revamp's dashboard"*
+Use `http://localhost:4000` for `PIM_API_URL` if pointing at a local dev server instead.
+
+3. Ask Claude: *"Show me pod Auth Revamp's dashboard"*
 
 The artifact renders a read-only snapshot — no network requests from the artifact itself. To refresh, ask Claude to show it again.
 
@@ -454,10 +458,9 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 | Claude integration | MCP server (`@modelcontextprotocol/sdk`) |
 | TypeScript | Strict mode, ES2022 target |
 
-## Not Yet Implemented (Deferred to AWS Deployment)
+## Not Yet Implemented
 
 - **Production FE tunneling** — The local tunnel prototype (CLI + server routes + WS proxying) exists, but the hosted “stable URL” deployment story (custom domains, edge, auth) is still a deployment milestone.
-- **Production deployment** — `packages/infra` contains an AWS CDK stack; the remaining work is deploying and operationalizing it for real org environments (accounts, domains/certs, secrets, observability, runbooks).
 - **Adobe IMS auth** -- Currently no authentication
 - **Slack integration** -- Conflict notifications and emoji-based resolution
 - **Notification system** -- In-app, email, Slack DM per-user preferences

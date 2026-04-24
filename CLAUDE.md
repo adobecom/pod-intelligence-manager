@@ -13,7 +13,7 @@ Full normative text: [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md).
 
 ## Project Status
 
-Active implementation. Core backend (Fastify server, SQLite, WebSocket), PIM orchestrator, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. Running locally on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.
+Active implementation. Core backend (Fastify server, SQLite, WebSocket), PIM orchestrator, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. **Hosted at `https://d1ygncl0yqo6sv.cloudfront.net/`** (CloudFront + EC2 via CDK). Local dev runs on `:4000` (server) and `:5173` (UI). The full spec lives in `SPEC.md`.
 
 ## What This Is
 
