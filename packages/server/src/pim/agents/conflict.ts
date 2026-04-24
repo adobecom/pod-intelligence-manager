@@ -1,4 +1,4 @@
-import db from "../../db/connection.js";
+import db, { withTransaction } from "../../db/connection.js";
 import { randomUUID } from "crypto";
 import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
 import type { ContextUpdate, Conflict } from "@pim/shared";
@@ -147,7 +147,7 @@ export async function createConflict(
   const previousPressure = podRow?.conflict_pressure ?? 0;
   const orgId = podRow?.org_id ?? null;
 
-  const insertAndRecalculate = db.transaction(() => {
+  const newPressure = withTransaction(() => {
     db.prepare(
       `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date, org_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -161,8 +161,6 @@ export async function createConflict(
 
     return recalculatePressure(podId);
   });
-
-  const newPressure = insertAndRecalculate();
 
   // Broadcast and notify (outside transaction — side effects should not roll back)
   broadcast({ type: "conflict_created", podId, payload: conflict });

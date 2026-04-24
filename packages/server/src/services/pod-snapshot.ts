@@ -47,7 +47,7 @@ export function refreshPodSnapshotFromContext(podId: string): void {
        FROM context_updates
        WHERE pod_id = ?
      ) WHERE rn = 1`,
-  ).all(podId) as LatestRow[];
+  ).all(podId) as unknown as LatestRow[];
 
   const byScope = new Map<string, LatestRow>();
   for (const row of latestRows) {

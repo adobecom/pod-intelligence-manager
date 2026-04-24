@@ -75,7 +75,7 @@ export default async function podRoutes(app: FastifyInstance) {
       reply.code(404);
       return null;
     }
-    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(row.pod_id) as AreaRow[];
+    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(row.pod_id) as unknown as AreaRow[];
     return rowToPod(row, areas);
   });
 
@@ -102,8 +102,8 @@ export default async function podRoutes(app: FastifyInstance) {
 
     db.prepare("UPDATE pods SET project_id = ? WHERE pod_id = ? AND org_id = ?").run(project_id, podId, req.org!.org_id);
 
-    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
-    const updated = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow;
+    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as unknown as AreaRow[];
+    const updated = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as unknown as PodRow;
     return rowToPod(updated, areas);
   });
 
@@ -232,8 +232,8 @@ export default async function podRoutes(app: FastifyInstance) {
     }
 
     // Return the created pod
-    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
-    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow;
+    const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as unknown as AreaRow[];
+    const row = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as unknown as PodRow;
     reply.code(201);
     return rowToPod(row, areas);
   });

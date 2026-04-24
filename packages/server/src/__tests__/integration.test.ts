@@ -3,16 +3,18 @@ import Fastify, { type FastifyInstance } from "fastify";
 
 // vi.hoisted runs before vi.mock hoisting, so testDb is available in the factory
 const { testDb } = vi.hoisted(() => {
-  // Dynamic require to avoid ESM import issues in hoisted context
-  const Database = require("better-sqlite3");
-  const db = new Database(":memory:");
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   return { testDb: db };
 });
 
 // Mock the db connection to use in-memory database
-vi.mock("../db/connection.js", () => ({ default: testDb }));
+vi.mock("../db/connection.js", () => ({
+  default: testDb,
+  withTransaction: (fn: () => unknown) => fn(),
+}));
 
 // Mock knowledge graph (depends on filesystem state)
 vi.mock("../services/knowledge-graph.js", () => ({

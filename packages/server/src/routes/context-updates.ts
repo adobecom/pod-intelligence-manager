@@ -58,7 +58,7 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     const sql = includeRetracted
       ? "SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? ORDER BY timestamp DESC"
       : "SELECT * FROM context_updates WHERE pod_id = ? AND org_id = ? AND retracted_at IS NULL ORDER BY timestamp DESC";
-    const rows = db.prepare(sql).all(req.params.podId, req.org!.org_id) as ContextUpdateRow[];
+    const rows = db.prepare(sql).all(req.params.podId, req.org!.org_id) as unknown as ContextUpdateRow[];
     return rows.map(rowToContextUpdate);
   });
 

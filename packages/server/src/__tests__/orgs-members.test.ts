@@ -2,14 +2,17 @@ import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 
 const { testDb } = vi.hoisted(() => {
-  const Database = require("better-sqlite3");
-  const db = new Database(":memory:");
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
   return { testDb: db };
 });
 
-vi.mock("../db/connection.js", () => ({ default: testDb }));
+vi.mock("../db/connection.js", () => ({
+  default: testDb,
+  withTransaction: (fn: () => unknown) => fn(),
+}));
 
 // Knowledge graph has side-effects at import; stub it
 vi.mock("../services/knowledge-graph.js", () => ({

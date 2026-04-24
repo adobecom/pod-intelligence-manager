@@ -64,12 +64,12 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
   if (!pod) return `# Pod not found: ${podId}`;
 
   const milestone = JSON.parse(pod.milestone_json) as { name: string; target_date: string; percent_complete: number };
-  const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as AreaRow[];
-  const conflicts = db.prepare("SELECT id, summary, severity, status FROM conflicts WHERE pod_id = ? ORDER BY created_at DESC").all(podId) as ConflictRow[];
+  const areas = db.prepare("SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?").all(podId) as unknown as unknown as AreaRow[];
+  const conflicts = db.prepare("SELECT id, summary, severity, status FROM conflicts WHERE pod_id = ? ORDER BY created_at DESC").all(podId) as unknown as unknown as ConflictRow[];
   const openConflicts = conflicts.filter(c => c.status !== "resolved");
-  const updates = db.prepare("SELECT agent_id, timestamp, type, summary FROM context_updates WHERE pod_id = ? AND retracted_at IS NULL ORDER BY timestamp DESC LIMIT 10").all(podId) as ContextUpdateRow[];
-  const decisions = db.prepare("SELECT agent_id, timestamp, summary FROM context_updates WHERE pod_id = ? AND type = 'decision' AND retracted_at IS NULL ORDER BY timestamp DESC").all(podId) as ContextUpdateRow[];
-  const tunnels = db.prepare("SELECT dev_name, branch, url, status FROM tunnels WHERE pod_id = ?").all(podId) as TunnelRow[];
+  const updates = db.prepare("SELECT agent_id, timestamp, type, summary FROM context_updates WHERE pod_id = ? AND retracted_at IS NULL ORDER BY timestamp DESC LIMIT 10").all(podId) as unknown as unknown as ContextUpdateRow[];
+  const decisions = db.prepare("SELECT agent_id, timestamp, summary FROM context_updates WHERE pod_id = ? AND type = 'decision' AND retracted_at IS NULL ORDER BY timestamp DESC").all(podId) as unknown as unknown as ContextUpdateRow[];
+  const tunnels = db.prepare("SELECT dev_name, branch, url, status FROM tunnels WHERE pod_id = ?").all(podId) as unknown as unknown as TunnelRow[];
 
   const pressureLevel = getPressureLevel(pod.conflict_pressure);
   const pressureLabel = getPressureLabel(pressureLevel);

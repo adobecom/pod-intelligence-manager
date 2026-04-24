@@ -4,8 +4,8 @@ import type { Mock } from "vitest";
 vi.mock("../../../db/connection.js", () => ({
   default: {
     prepare: vi.fn(),
-    transaction: vi.fn(),
   },
+  withTransaction: vi.fn(),
 }));
 
 vi.mock("../../llm.js", () => ({
@@ -32,7 +32,7 @@ vi.mock("../../../services/slack.js", () => ({
 }));
 
 import { createConflict } from "../conflict.js";
-import db from "../../../db/connection.js";
+import db, { withTransaction } from "../../../db/connection.js";
 import { broadcast } from "../../../ws/index.js";
 import { recalculatePressure } from "../../../services/pressure.js";
 import { notifyConflictCreated, notifyPressureThreshold } from "../../../services/slack.js";
@@ -61,10 +61,7 @@ function makeUpdate(overrides: Partial<ContextUpdate> = {}): ContextUpdate {
 function setupDb(conflicting: any | undefined) {
   const runMock = vi.fn();
 
-  // transaction() returns a function that executes the callback
-  (db.transaction as Mock).mockImplementation((fn: Function) => {
-    return (...args: any[]) => fn(...args);
-  });
+  (withTransaction as Mock).mockImplementation((fn: () => unknown) => fn());
 
   (db.prepare as Mock).mockImplementation((sql: string) => {
     // Find conflicting update

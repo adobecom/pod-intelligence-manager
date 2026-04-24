@@ -21,7 +21,7 @@ export function classifyUpdate(update: ContextUpdate): Classification {
   // 1. Check if this update's scope overlaps with any open conflict
   const openConflicts = db.prepare(
     "SELECT sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'"
-  ).all(podId) as ConflictScopeRow[];
+  ).all(podId) as unknown as ConflictScopeRow[];
 
   for (const conflict of openConflicts) {
     const sides = JSON.parse(conflict.sides_json) as Array<{ contributor: string }>;
@@ -35,7 +35,7 @@ export function classifyUpdate(update: ContextUpdate): Classification {
   // 2. Check if the update references entities from a different agent's recent work in the same scope
   const recentUpdates = db.prepare(
     "SELECT id, agent_id, scope, summary FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT 5"
-  ).all(podId, update.scope, update.agent_id) as RecentUpdateRow[];
+  ).all(podId, update.scope, update.agent_id) as unknown as RecentUpdateRow[];
 
   if (recentUpdates.length > 0) {
     // Simple keyword overlap check — look for shared significant terms

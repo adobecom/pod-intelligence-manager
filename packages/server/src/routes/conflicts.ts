@@ -56,7 +56,7 @@ export default async function conflictRoutes(app: FastifyInstance) {
       reply.code(404);
       return [];
     }
-    const rows = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND org_id = ? ORDER BY created_at DESC").all(req.params.podId, req.org!.org_id) as ConflictRow[];
+    const rows = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND org_id = ? ORDER BY created_at DESC").all(req.params.podId, req.org!.org_id) as unknown as ConflictRow[];
     return rows.map(rowToConflict);
   });
 
@@ -86,7 +86,7 @@ export default async function conflictRoutes(app: FastifyInstance) {
       return null;
     }
 
-    const row = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND id = ?").get(podId, conflictId) as ConflictRow;
+    const row = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND id = ?").get(podId, conflictId) as unknown as ConflictRow;
     const resolved = rowToConflict(row);
 
     // Recalculate pressure and broadcast

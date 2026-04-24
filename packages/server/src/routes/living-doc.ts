@@ -86,7 +86,7 @@ export default async function livingDocRoutes(app: FastifyInstance) {
 
     const viewers = db.prepare(
       "SELECT viewer_id, last_viewed_at, view_count, last_viewed_regen_count FROM living_doc_views WHERE pod_id = ?"
-    ).all(podId) as ViewRow[];
+    ).all(podId) as unknown as ViewRow[];
 
     const regenCount = doc?.regen_count ?? 0;
 

@@ -139,7 +139,7 @@ function scoreContextualFit(input: ContextUpdateInput, podId: string): number {
   // Query prior updates from this agent in this pod
   const priorUpdates = db.prepare(
     "SELECT scope FROM context_updates WHERE pod_id = ? AND agent_id = ? ORDER BY timestamp DESC LIMIT 5"
-  ).all(podId, input.agent_id) as PriorUpdateRow[];
+  ).all(podId, input.agent_id) as unknown as PriorUpdateRow[];
 
   if (priorUpdates.length > 0) {
     // Scope consistency: does this match the agent's usual scope?
@@ -175,7 +175,7 @@ function scoreContextualFitProject(input: ContextUpdateInput, projectId: string)
 
   const priorUpdates = db.prepare(
     "SELECT scope FROM project_context_updates WHERE project_id = ? AND agent_id = ? ORDER BY timestamp DESC LIMIT 5",
-  ).all(projectId, input.agent_id) as PriorUpdateRow[];
+  ).all(projectId, input.agent_id) as unknown as PriorUpdateRow[];
 
   if (priorUpdates.length > 0) {
     const scopeCounts = new Map<string, number>();

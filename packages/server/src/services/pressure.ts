@@ -22,7 +22,7 @@ export function setPodPressure(podId: string, pressure: number): void {
 export function recalculatePressure(podId: string): number {
   const openConflicts = db.prepare(
     "SELECT id, severity, created_at FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
-  ).all(podId) as ConflictRow[];
+  ).all(podId) as unknown as ConflictRow[];
 
   if (openConflicts.length === 0) {
     setPodPressure(podId, 0);

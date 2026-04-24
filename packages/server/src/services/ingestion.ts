@@ -159,7 +159,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   ).run(
     update.id, update.agent_id, update.timestamp, update.pod_id,
     update.type, update.scope, update.summary, update.details,
-    JSON.stringify(update.artifacts), update.status, update.quality_score,
+    JSON.stringify(update.artifacts), update.status, update.quality_score ?? null,
     JSON.stringify(update.blocks), JSON.stringify(update.blocked_by),
     JSON.stringify(update.needs_input_from),
     update.source ?? "manual", commitSha, orgId,
