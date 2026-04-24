@@ -137,9 +137,12 @@ function inferEdgeType(
     return "resolved_by";
   }
 
-  // Newer decision in the same domain supersedes older decision
+  // Newer decision supersedes older decision only when both share the same project scope.
+  // A project-specific decision must not supersede an org-wide decision (and vice versa)
+  // — that would silently drop global knowledge from project-scoped queries.
   if (newer.type === "decision" && older.type === "decision") {
-    return "supersedes";
+    if (newer.source_project_id === older.source_project_id) return "supersedes";
+    return "relates_to";
   }
 
   // Pattern building on another pattern
