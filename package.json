@@ -11,8 +11,11 @@
     "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter ado-pim build && pnpm -C packages/cli link --global && node scripts/bootstrap-reminder.mjs",
     "install-cli": "pnpm bootstrap"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "@swc/core", "better-sqlite3"]
+    "onlyBuiltDependencies": ["esbuild", "@swc/core"]
   },
   "devDependencies": {
     "tsx": "^4.19.4",

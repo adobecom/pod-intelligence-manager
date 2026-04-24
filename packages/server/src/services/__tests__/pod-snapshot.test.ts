@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 
 const { testDb } = vi.hoisted(() => {
-  const Database = require("better-sqlite3");
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
   return { testDb: db };
 });
 
