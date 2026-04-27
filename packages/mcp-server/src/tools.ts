@@ -536,13 +536,13 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "context_search",
-    "Search Adobe-internal context across Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
+    "Search Adobe-internal context across the org knowledge graph (always queried first), Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
     {
       query: z.string().describe("Natural-language query or keywords"),
       sources: z
-        .array(z.enum(["slack", "fluffyjaws", "jira", "confluence", "github", "git"]))
+        .array(z.enum(["kg", "slack", "fluffyjaws", "jira", "confluence", "github", "git"]))
         .optional()
-        .describe("Restrict to a subset of sources. Default: all configured."),
+        .describe("Restrict to a subset of sources. Default: all configured. 'kg' is the org knowledge graph and is the first source of truth."),
       pod_id: z
         .string()
         .optional()

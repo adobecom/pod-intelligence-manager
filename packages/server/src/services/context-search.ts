@@ -18,13 +18,17 @@ import { searchJira } from "../integrations/jira.js";
 import { searchConfluence } from "../integrations/confluence.js";
 import { searchGithub } from "../integrations/github.js";
 import { searchGit } from "../integrations/git.js";
+import { searchKG } from "../integrations/kg.js";
 import type { IntegrationResult, IntegrationSearchOpts } from "../integrations/types.js";
 import db from "../db/connection.js";
-import { detectPersonTokens, resolveActor } from "./identity-resolver.js";
+import { detectPersonTokens, resolveActor, stripActivityPhrasing } from "./identity-resolver.js";
 
 const DEFAULT_TIME_WINDOW_DAYS = 90;
 const DEFAULT_MAX_HITS_PER_SOURCE = 10;
 const DEFAULT_CACHE_TTL_SEC = 3600;
+// Cap cache TTL when most sources failed, so a transient VPN/auth blip
+// doesn't poison results for the full hour.
+const PARTIAL_RESULT_CACHE_TTL_SEC = 300;
 const CACHE_DIR = path.resolve(process.cwd(), ".data", "context-search-cache");
 const PROMPT_PATH = path.resolve(
   new URL(".", import.meta.url).pathname,
@@ -34,6 +38,7 @@ const PROMPT_PATH = path.resolve(
 type Integration = (opts: IntegrationSearchOpts) => Promise<IntegrationResult>;
 
 const INTEGRATIONS: Record<ContextSource, Integration> = {
+  kg: searchKG,
   slack: searchSlack,
   fluffyjaws: searchFluffyjaws,
   jira: searchJira,
@@ -52,6 +57,12 @@ interface ResolvedScope {
    * The project scope itself is already encoded structurally via
    * project_resources. */
   cleaned_query?: string;
+  /** True when the query reads as "what has X been up to" / "X recent
+   * activity" / "X this week" — the natural-language phrasing is filler
+   * once the actor is encoded as an authorship clause. Drop it from
+   * per-integration text-match queries to avoid spurious hits on words
+   * like "recent" or "activity". */
+  is_activity_query?: boolean;
 }
 
 function cacheKey(req: ContextSearchRequest, scope: ResolvedScope): string {
@@ -87,10 +98,23 @@ function readCache(key: string, ttlSec: number): ContextSearchResult | null {
   }
 }
 
-function writeCache(key: string, result: ContextSearchResult): void {
+function writeCache(
+  key: string,
+  result: ContextSearchResult,
+  opts?: { fullTtlSec: number; effectiveTtlSec: number },
+): void {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(cachePath(key), JSON.stringify(result), "utf-8");
+    const p = cachePath(key);
+    fs.writeFileSync(p, JSON.stringify(result), "utf-8");
+    if (opts && opts.effectiveTtlSec < opts.fullTtlSec) {
+      // Back-date mtime so the next read sees an older entry and respects
+      // the shorter partial-result TTL even though readers compare against
+      // the full env TTL.
+      const offsetSec = opts.fullTtlSec - opts.effectiveTtlSec;
+      const newMtimeMs = Date.now() - offsetSec * 1000;
+      fs.utimesSync(p, new Date(), new Date(newMtimeMs));
+    }
   } catch (err) {
     console.error("[context-search] cache write failed:", (err as Error).message);
   }
@@ -229,14 +253,17 @@ async function resolveScope(req: ContextSearchRequest): Promise<ResolvedScope> {
   }
 
   // 2. Actor: explicit > detected from query text
+  const tokens = detectPersonTokens(req.query);
   if (req.actor) {
     scope.actor = req.actor;
-  } else {
-    const tokens = detectPersonTokens(req.query);
-    if (tokens.email || tokens.slack_user_id) {
-      scope.actor = await resolveActor(tokens);
-    }
+  } else if (tokens.email || tokens.slack_user_id) {
+    scope.actor = await resolveActor(tokens);
   }
+  // Activity-style queries are detected from phrasing OR from the
+  // common "<email> recent activity" shape — when present alongside an
+  // actor, integrations should rely on authorship filters rather than
+  // matching the natural-language phrasing as text.
+  scope.is_activity_query = tokens.is_activity_query;
 
   return scope;
 }
@@ -271,8 +298,9 @@ function boostFor(hit: ContextSearchHit, resources?: ProjectResources): number {
 }
 
 function sourceAuthority(source: ContextSource): number {
-  // Higher is better. Used as a ranking bonus.
-  return { jira: 4, confluence: 4, github: 3, git: 3, slack: 2, fluffyjaws: 1 }[source];
+  // Higher is better. Used as a ranking bonus. The KG sits above every
+  // other source — it is the org's curated learning, not a raw artifact.
+  return { kg: 6, jira: 4, confluence: 4, github: 3, git: 3, slack: 2, fluffyjaws: 1 }[source];
 }
 
 function rankHits(
@@ -294,7 +322,15 @@ function rankHits(
     const recency = h.timestamp
       ? Math.max(0, 2 - (now - new Date(h.timestamp).getTime()) / (30 * 24 * 3600 * 1000))
       : 0;
-    return authority + exact + phraseHits * 0.5 + recency + boostFor(h, resources);
+    // KG bonus: curated nodes beat extracted ones; high-confidence beats low.
+    let kgBonus = 0;
+    if (h.source === "kg") {
+      const meta = (h.metadata ?? {}) as Record<string, unknown>;
+      if (meta.curated === true) kgBonus += 2;
+      const confScore = typeof meta.confidence_score === "number" ? meta.confidence_score : 0;
+      kgBonus += confScore * 1.5;
+    }
+    return authority + exact + phraseHits * 0.5 + recency + kgBonus + boostFor(h, resources);
   }
 }
 
@@ -381,8 +417,19 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
     if (cached) return { ...cached, from_cache: true };
   }
 
+  // Build the per-integration query. When an actor is set and the query
+  // reads as activity ("rea01581@adobe.com recent activity", "what has X
+  // been up to"), the natural-language phrasing is filler — strip it so
+  // text-match clauses don't anchor on words like "recent" or "activity".
+  // The KG keeps the unmodified query because semantic ranking benefits
+  // from intent words.
+  let perSourceQuery = scope.cleaned_query ?? req.query;
+  if (scope.is_activity_query && scope.actor) {
+    perSourceQuery = stripActivityPhrasing(perSourceQuery, scope.actor) || "";
+  }
+
   const integrationOpts: IntegrationSearchOpts = {
-    query: scope.cleaned_query ?? req.query,
+    query: perSourceQuery,
     time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
     max_hits_per_source: req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE,
     pod_id: req.pod_id,
@@ -391,9 +438,14 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
     project_resources: scope.project_resources,
     actor: scope.actor,
   };
+  // The KG always sees the original query — semantic search benefits from
+  // the intent phrasing other integrations have to drop.
+  const kgOpts: IntegrationSearchOpts = { ...integrationOpts, query: req.query };
 
   const selected = (req.sources ?? CONTEXT_SOURCES).filter((s) => s in INTEGRATIONS);
-  const settled = await Promise.allSettled(selected.map((s) => INTEGRATIONS[s](integrationOpts)));
+  const settled = await Promise.allSettled(
+    selected.map((s) => INTEGRATIONS[s](s === "kg" ? kgOpts : integrationOpts)),
+  );
 
   const missing_sources: ContextSearchResult["missing_sources"] = [];
   const allHits: ContextSearchHit[] = [];
@@ -435,7 +487,17 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
   };
 
   if (useCache) {
-    writeCache(key, { ...result, cached_at: result.generated_at });
+    // Don't poison the cache with mostly-failed results — a transient VPN or
+    // auth blip can take down half the integrations and we don't want to
+    // serve that for an hour. When more than half of the selected sources
+    // came back missing, shorten the effective TTL.
+    const failureRatio = missing_sources.length / Math.max(1, selected.length);
+    const isPartial = failureRatio > 0.5;
+    writeCache(
+      key,
+      { ...result, cached_at: result.generated_at },
+      isPartial ? { fullTtlSec: ttlSec, effectiveTtlSec: PARTIAL_RESULT_CACHE_TTL_SEC } : undefined,
+    );
   }
 
   return result;

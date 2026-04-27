@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectPersonTokens } from "../identity-resolver.js";
+import { detectPersonTokens, stripActivityPhrasing } from "../identity-resolver.js";
 
 describe("detectPersonTokens", () => {
   it("picks out an email in free text", () => {
@@ -31,5 +31,42 @@ describe("detectPersonTokens", () => {
   it("does not confuse uppercase words that start with U with Slack IDs", () => {
     const r = detectPersonTokens("UPDATE the URL patterns");
     expect(r.slack_user_id).toBeUndefined();
+  });
+
+  it("flags noun-phrase activity queries like 'X recent activity'", () => {
+    const r = detectPersonTokens("rea01581@adobe.com recent activity");
+    expect(r.email).toBe("rea01581@adobe.com");
+    expect(r.is_activity_query).toBe(true);
+  });
+
+  it("flags 'latest commits' as an activity query", () => {
+    const r = detectPersonTokens("rayyank10 latest commits");
+    expect(r.is_activity_query).toBe(true);
+  });
+});
+
+describe("stripActivityPhrasing", () => {
+  it("strips actor tokens and activity nouns from a recent-activity query", () => {
+    const out = stripActivityPhrasing(
+      "rea01581@adobe.com recent activity",
+      { email: "rea01581@adobe.com", display_name: "Rayyan Khan" },
+    );
+    expect(out).toBe("");
+  });
+
+  it("strips verb-phrase activity questions", () => {
+    const out = stripActivityPhrasing(
+      "what has Rayyan Khan been up to this week",
+      { display_name: "Rayyan Khan" },
+    );
+    expect(out).toBe("");
+  });
+
+  it("preserves the residual subject when one exists", () => {
+    const out = stripActivityPhrasing(
+      "recent activity on the auth refactor",
+      undefined,
+    );
+    expect(out.toLowerCase()).toContain("auth refactor");
   });
 });
