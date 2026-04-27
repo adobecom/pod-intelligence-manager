@@ -8,7 +8,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "pim": "tsx packages/cli/src/index.ts",
-    "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter ado-pim build && cd packages/cli && pnpm link --global && node ../../scripts/bootstrap-reminder.mjs",
+    "bootstrap": "pnpm install && pnpm --filter @pim/mcp-server build && pnpm --filter ado-pim build && node scripts/link-pim-global.mjs && node scripts/bootstrap-reminder.mjs",
     "install-cli": "pnpm bootstrap"
   },
   "engines": {
