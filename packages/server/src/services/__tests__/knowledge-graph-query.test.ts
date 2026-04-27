@@ -66,6 +66,37 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(webhookFirstWhenRelevant).toBeLessThan(cdnFirstWhenRelevant);
   });
 
+  it("queryKnowledge omits node embeddings by default; include_embeddings restores them", async () => {
+    await seedGraph([
+      {
+        type: "pattern",
+        summary: "Embedding strip test node",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const g = getGraph();
+    const n = g.nodes.find((x) => x.summary === "Embedding strip test node");
+    expect(n).toBeDefined();
+    n!.embedding = [1, 2, 3];
+
+    const without = queryKnowledge({
+      filters: { domains: ["backend"] },
+      max_tokens: 500,
+    });
+    expect(without.nodes[0]?.embedding).toBeUndefined();
+
+    const withEmb = queryKnowledge({
+      filters: { domains: ["backend"] },
+      max_tokens: 500,
+      include_embeddings: true,
+    });
+    expect(withEmb.nodes[0]?.embedding).toEqual([1, 2, 3]);
+  });
+
   it("merges filters.keywords with text_search tokens for scoring", async () => {
     await seedGraph([
       {

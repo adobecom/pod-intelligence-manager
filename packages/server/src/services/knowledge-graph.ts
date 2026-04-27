@@ -87,6 +87,21 @@ function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): numbe
   return TOKENS_PER_SUMMARY + (includeDetails ? TOKENS_PER_DETAILS : 0);
 }
 
+/** Omit embedding from serialized query results unless explicitly requested (debug). */
+function omitEmbeddingForResponse(node: KnowledgeNode): KnowledgeNode {
+  const { embedding: _, ...rest } = node;
+  return rest as KnowledgeNode;
+}
+
+function shapeNodeForQueryResponse(
+  node: KnowledgeNode,
+  includeDetails: boolean,
+  includeEmbeddings: boolean,
+): KnowledgeNode {
+  const base = includeEmbeddings ? node : omitEmbeddingForResponse(node);
+  return includeDetails ? base : { ...base, details: "" };
+}
+
 // --- Helpers ---
 
 // P1: After edges are built, mark older nodes whose decisions were superseded.
@@ -374,7 +389,15 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string
 export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryResult {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
-  const { filters, max_tokens, include_details = false, include_edges = false, limit, query_embedding } = options;
+  const {
+    filters,
+    max_tokens,
+    include_details = false,
+    include_edges = false,
+    include_embeddings = false,
+    limit,
+    query_embedding,
+  } = options;
 
   // Step 1: Filter nodes
   let candidates = graph.nodes.filter((node) => {
@@ -444,12 +467,7 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
 
     tokenCount += nodeTokens;
 
-    // Strip details if not requested
-    if (!include_details) {
-      resultNodes.push({ ...node, details: "" });
-    } else {
-      resultNodes.push(node);
-    }
+    resultNodes.push(shapeNodeForQueryResponse(node, include_details, include_embeddings));
   }
 
   // Step 4: Include edges if requested

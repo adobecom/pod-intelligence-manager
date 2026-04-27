@@ -110,6 +110,11 @@ export interface KnowledgeQueryOptions {
    * `query_embedding` is supplied.
    */
   query_text?: string;
+  /**
+   * When true, each returned node includes the stored `embedding` vector (large).
+   * Default false — embeddings are for server-side scoring only; omit them for token-efficient agent/API responses.
+   */
+  include_embeddings?: boolean;
 }
 
 export interface KnowledgeQueryResult {
