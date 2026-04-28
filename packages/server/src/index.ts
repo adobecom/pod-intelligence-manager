@@ -22,7 +22,7 @@ import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
-import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysis } from "./services/knowledge-graph.js";
+import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
 import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
@@ -193,10 +193,12 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     })();
   }, LINT_INTERVAL_MS);
 
-  // Periodic knowledge graph community detection refresh
+  // Periodic knowledge graph community detection refresh.
+  // Only recomputes when a prior mutation marked the graph stale (e.g. ad-hoc POSTs that
+  // skip per-request analysis). No-op otherwise — cheap to call frequently.
   setInterval(() => {
     try {
-      refreshAnalysis();
+      refreshAnalysisIfStale();
     } catch (e) {
       app.log.error(e, "Knowledge graph refresh failed");
     }

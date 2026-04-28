@@ -95,12 +95,25 @@ export function buildEdges(
       if (seenPairs.has(pairKey) || seenPairs.has(reverseKey)) continue;
 
       const domOverlap = domainOverlap(newNode.domains, existing.domains);
+
+      // Hard floor: domain overlap alone never qualifies. We require some textual or
+      // semantic signal (cosine ≥ 0.2 OR keyword overlap ≥ 0.2). Two ["backend"] nodes
+      // with zero textual similarity must not get an edge — that inflates topology and
+      // skews community detection.
+      const cosine =
+        newNode.embedding && existing.embedding
+          ? cosineSimilarity(newNode.embedding, existing.embedding)
+          : 0;
+      const keyword = keywordOverlap(newNode.summary, existing.summary);
+      if (cosine < 0.2 && keyword < 0.2) continue;
+
+      // Domain becomes a tiebreaker (15% weight) rather than a primary signal.
       const combinedScore =
         newNode.embedding && existing.embedding
-          ? cosineSimilarity(newNode.embedding, existing.embedding) * 0.7 + domOverlap * 0.3
-          : keywordOverlap(newNode.summary, existing.summary) * 0.6 + domOverlap * 0.4;
+          ? cosine * 0.85 + domOverlap * 0.15
+          : keyword * 0.85 + domOverlap * 0.15;
 
-      if (combinedScore < 0.3) continue;
+      if (combinedScore < 0.35) continue;
 
       const edgeType = inferEdgeType(newNode, existing);
 

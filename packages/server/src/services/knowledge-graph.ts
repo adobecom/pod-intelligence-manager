@@ -39,6 +39,10 @@ import {
 
 let graph: KnowledgeGraph | null = null;
 let hubIds: Set<string> = new Set();
+// Set when a mutation skipped community/hub recompute; cleared by refreshAnalysis.
+// Lets ad-hoc POSTs return fast without leaving the graph permanently stale —
+// the periodic interval (or the next archival batch) picks up the work.
+let analysisStale = false;
 
 function emptyGraph(orgId: string): KnowledgeGraph {
   return {
@@ -102,11 +106,21 @@ function markSupersededEdges(edges: KnowledgeEdge[], allNodes: KnowledgeNode[]):
 
 // --- Add Learnings ---
 
+export interface AddLearningsOptions {
+  /**
+   * Skip the synchronous community-detection + hub-identification step. Used by the
+   * ad-hoc `POST /api/knowledge/nodes` hot path; the analysis is deferred to the
+   * periodic interval (or the next non-skipped mutation) instead of running per request.
+   */
+  skipAnalysis?: boolean;
+}
+
 export async function addLearningsToGraph(
   learnings: EnhancedPodLearning[],
   podId: string,
   podName: string,
   project?: { project_id: string; project_name: string },
+  options: AddLearningsOptions = {},
 ): Promise<{ nodesAdded: number; edgesAdded: number; nodeIds: string[] }> {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
@@ -175,8 +189,13 @@ export async function addLearningsToGraph(
   graph.version++;
   graph.updated_at = now;
 
-  graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
+  if (options.skipAnalysis) {
+    analysisStale = true;
+  } else {
+    graph.communities = detectCommunities(graph);
+    hubIds = new Set(identifyHubs(graph));
+    analysisStale = false;
+  }
 
   saveGraph(graph.org_id, graph);
 
@@ -452,10 +471,29 @@ export function getStats(): KnowledgeStats {
 // --- Re-run Community Detection (called periodically) ---
 
 export function refreshAnalysis(): void {
-  if (!graph || graph.nodes.length === 0) return;
+  if (!graph || graph.nodes.length === 0) {
+    analysisStale = false;
+    return;
+  }
   graph.communities = detectCommunities(graph);
   hubIds = new Set(identifyHubs(graph));
+  analysisStale = false;
   saveGraph(graph.org_id, graph);
+}
+
+/**
+ * Cheap variant of refreshAnalysis: returns immediately when nothing has marked the graph
+ * stale. Safe to call from hot paths (interval ticks, post-query lazy refresh).
+ */
+export function refreshAnalysisIfStale(): boolean {
+  if (!analysisStale) return false;
+  refreshAnalysis();
+  return true;
+}
+
+/** Test/debug helper. */
+export function isAnalysisStale(): boolean {
+  return analysisStale;
 }
 
 // --- Pruning ---

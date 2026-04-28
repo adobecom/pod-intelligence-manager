@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db from "../../db/connection.js";
-import { callLLM, isLLMAvailable, MODELS } from "../llm.js";
+import { callLLM, callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
 import type { EnhancedPodLearning, KnowledgeNodeType } from "@pim/shared";
 import { computeCurrentDay } from "../../services/pod-day.js";
 import { getGraph } from "../../services/knowledge-graph.js";
@@ -23,6 +23,17 @@ function getSystemPrompt(): string {
     );
   }
   return _systemPrompt;
+}
+
+let _durabilityPrompt: string | null = null;
+function getDurabilityPrompt(): string {
+  if (!_durabilityPrompt) {
+    _durabilityPrompt = fs.readFileSync(
+      path.resolve(__dirname, "../../../../../prompts/decision-durability-classifier.md"),
+      "utf-8",
+    );
+  }
+  return _durabilityPrompt;
 }
 
 interface DecisionRow {
@@ -69,6 +80,17 @@ export interface PodLearning {
 
 // Decisions with details shorter than this are noise (one-word edits, blank entries).
 const MIN_DECISION_DETAIL_LENGTH = 30;
+
+// Hard ceiling on per-pod learnings persisted into the graph. Sorted by confidence_score DESC.
+// Prevents pathological pods from producing 50+ pattern nodes despite the prompt's 3-8 guidance.
+export const MAX_LEARNINGS_PER_POD = 20;
+
+// Resolved conflicts are inherently substantive — keep the prior confidence floor.
+const RESOLVED_CONFLICT_SCORE = 0.9;
+
+// Score for deterministic patterns when the Haiku classifier is unavailable. Lower than the
+// previous hardcoded 0.9 — even offline we stop overclaiming durability.
+const DEFAULT_PATTERN_SCORE = 0.7;
 
 // --- Deterministic extraction (always works, no LLM) ---
 
@@ -121,11 +143,83 @@ export function extractKnowledge(podId: string): PodLearning[] {
   return learnings;
 }
 
+// --- Durability classifier (Haiku) ---
+
+type Durability = "high" | "medium" | "low" | "junk";
+
+const DURABILITY_TO_SCORE: Record<Durability, number> = {
+  high: 0.85,
+  medium: 0.7,
+  low: 0.5,
+  junk: 0.3,
+};
+
+interface DurabilityRating {
+  index: number;
+  durability: Durability;
+}
+
+interface DurabilityResponse {
+  ratings: DurabilityRating[];
+}
+
+/**
+ * Classify deterministic pattern items by durability using Haiku. Returns a Map<index, score>
+ * keyed by position in the input array. Items missing from the response (or any failure mode)
+ * fall back to DEFAULT_PATTERN_SCORE.
+ */
+export async function classifyDecisionDurability(
+  items: PodLearning[],
+): Promise<Map<number, number>> {
+  const scores = new Map<number, number>();
+  if (items.length === 0) return scores;
+
+  if (!isLLMAvailable()) {
+    // Offline: keep things safe but not over-claimed.
+    items.forEach((_, i) => scores.set(i, DEFAULT_PATTERN_SCORE));
+    return scores;
+  }
+
+  const prompt = JSON.stringify(
+    items.map((item, index) => ({
+      index,
+      scope: item.scope ?? "unknown",
+      summary: item.summary,
+      details: item.details,
+    })),
+  );
+
+  try {
+    const response = await callLLMJSON<DurabilityResponse>({
+      model: MODELS.fast,
+      system: getDurabilityPrompt(),
+      prompt,
+      maxTokens: 1024,
+    });
+    if (response?.ratings) {
+      for (const rating of response.ratings) {
+        const score = DURABILITY_TO_SCORE[rating.durability];
+        if (typeof rating.index === "number" && score !== undefined) {
+          scores.set(rating.index, score);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[knowledge-extraction] Durability classifier failed:", err);
+  }
+
+  // Fill in any items the classifier didn't return.
+  for (let i = 0; i < items.length; i++) {
+    if (!scores.has(i)) scores.set(i, DEFAULT_PATTERN_SCORE);
+  }
+  return scores;
+}
+
 // --- Enhanced extraction: deterministic base + optional LLM analysis ---
 
 interface LLMLearning {
   type: string;
-  domain: string[];
+  domain: string[] | string;
   summary: string;
   details: string;
   confidence: string;
@@ -145,48 +239,59 @@ function isValidNodeType(type: string): type is KnowledgeNodeType {
 }
 
 /**
- * Fallback domain inference for sources without an authoritative scope (e.g. LLM-generated
- * learnings whose `domain` field is missing). Prefer using the source row's `scope` directly.
+ * Normalize an LLM `domain` field into a string[]. Returns null when the field is missing,
+ * empty, or otherwise unusable — callers should drop the entry rather than guess.
  */
-function inferDomainsFromText(text: string): string[] {
-  const lower = text.toLowerCase();
-  const domains: string[] = [];
-  const scopeKeywords: Record<string, string[]> = {
-    frontend: ["frontend", "ui", "react", "component", "css", "layout"],
-    backend: ["backend", "api", "server", "database", "endpoint", "lambda"],
-    design: ["figma", "mockup", "wireframe", "ux", "user experience"],
-    qa: ["qa", "regression", "coverage", "test plan"],
-    infra: ["infra", "deploy", "ci/cd", "pipeline", "aws", "docker", "kubernetes"],
-    pm: ["roadmap", "milestone", "stakeholder", "requirement"],
-  };
-  for (const [scope, keywords] of Object.entries(scopeKeywords)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      domains.push(scope);
-    }
+function normalizeLLMDomains(raw: LLMLearning["domain"]): string[] | null {
+  if (Array.isArray(raw)) {
+    const cleaned = raw.map((d) => String(d).trim()).filter(Boolean);
+    return cleaned.length > 0 ? cleaned : null;
   }
-  if (domains.length === 0) domains.push("general");
-  return domains;
+  if (typeof raw === "string" && raw.trim()) {
+    return [raw.trim()];
+  }
+  return null;
 }
 
 export async function extractKnowledgeEnhanced(
   podId: string,
 ): Promise<EnhancedPodLearning[]> {
   // Step 1: Deterministic base extraction. Use the authoritative `scope` from the source row
-  // when present; fall back to keyword inference only when scope is missing.
+  // when present; default to "unknown" rather than keyword-bag inference (which mis-tags).
   const baseLearnings = extractKnowledge(podId);
-  const enhanced: EnhancedPodLearning[] = baseLearnings.map((l) => ({
-    type: l.type as KnowledgeNodeType,
-    summary: l.summary,
-    details: l.details,
-    domains: l.scope ? [l.scope] : inferDomainsFromText(`${l.summary} ${l.details}`),
-    confidence: "extracted" as const,
-    confidence_score: 0.9,
-  }));
 
-  // Step 2: If LLM available, run enhanced extraction
+  // Step 2: Score deterministic patterns by durability. Resolved conflicts skip the classifier
+  // and keep the higher floor — a resolved disagreement is inherently substantive.
+  const patternIndices: number[] = [];
+  const patternsForClassifier: PodLearning[] = [];
+  baseLearnings.forEach((l, i) => {
+    if (l.type === "pattern") {
+      patternIndices.push(i);
+      patternsForClassifier.push(l);
+    }
+  });
+  const durabilityScores = await classifyDecisionDurability(patternsForClassifier);
+
+  const enhanced: EnhancedPodLearning[] = baseLearnings.map((l, i) => {
+    let confidence_score = RESOLVED_CONFLICT_SCORE;
+    if (l.type === "pattern") {
+      const classifierIdx = patternIndices.indexOf(i);
+      confidence_score = durabilityScores.get(classifierIdx) ?? DEFAULT_PATTERN_SCORE;
+    }
+    return {
+      type: l.type as KnowledgeNodeType,
+      summary: l.summary,
+      details: l.details,
+      domains: l.scope ? [l.scope] : ["unknown"],
+      confidence: "extracted" as const,
+      confidence_score,
+    };
+  });
+
+  // Step 3: If LLM available, run enhanced extraction
   if (!isLLMAvailable()) {
     console.log(`[knowledge-extraction] LLM not available, returning ${enhanced.length} deterministic learnings`);
-    return enhanced;
+    return capLearnings(enhanced);
   }
 
   try {
@@ -244,6 +349,14 @@ export async function extractKnowledgeEnhanced(
       for (const l of llmLearnings) {
         const nodeType = isValidNodeType(l.type) ? l.type : "scope_insight";
 
+        // Skip entries the LLM produced without a domain. We don't keyword-infer anymore —
+        // a mis-tagged node is worse than a dropped one (mis-tags poison cross-domain queries).
+        const domains = normalizeLLMDomains(l.domain);
+        if (!domains) {
+          console.warn(`[knowledge-extraction] LLM learning skipped (missing domain): ${l.summary}`);
+          continue;
+        }
+
         // Word-overlap dedup against the current batch's deterministic learnings.
         const overlapsBatch = enhanced.some((e) => {
           const overlapWords = l.summary.toLowerCase().split(/\s+/)
@@ -268,11 +381,7 @@ export async function extractKnowledgeEnhanced(
           type: nodeType,
           summary: l.summary,
           details: l.details,
-          domains: Array.isArray(l.domain) && l.domain.length > 0
-            ? l.domain
-            : (typeof l.domain === "string" && l.domain
-              ? [l.domain]
-              : inferDomainsFromText(`${l.summary} ${l.details}`)),
+          domains,
           confidence: "inferred",
           confidence_score: mapConfidenceToScore(l.confidence),
         });
@@ -284,5 +393,18 @@ export async function extractKnowledgeEnhanced(
     console.error("[knowledge-extraction] LLM extraction failed, using deterministic only:", err);
   }
 
-  return enhanced;
+  return capLearnings(enhanced);
+}
+
+/**
+ * Apply the per-pod ceiling. We sort by confidence_score DESC so the highest-signal learnings
+ * survive truncation. Resolved conflicts (0.9) sort to the top; junk-classified patterns (0.3)
+ * are first to drop.
+ */
+function capLearnings(learnings: EnhancedPodLearning[]): EnhancedPodLearning[] {
+  if (learnings.length <= MAX_LEARNINGS_PER_POD) return learnings;
+  const sorted = [...learnings].sort((a, b) => b.confidence_score - a.confidence_score);
+  const dropped = sorted.length - MAX_LEARNINGS_PER_POD;
+  console.log(`[knowledge-extraction] Truncated ${dropped} learnings over cap (kept top ${MAX_LEARNINGS_PER_POD})`);
+  return sorted.slice(0, MAX_LEARNINGS_PER_POD);
 }

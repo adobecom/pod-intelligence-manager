@@ -135,6 +135,8 @@ export default async function graphRoutes(app: FastifyInstance) {
         [learning],
         AD_HOC_POD_ID,
         body.source_label ?? AD_HOC_DEFAULT_LABEL,
+        undefined,
+        { skipAnalysis: true },
       );
       if (result.nodesAdded === 0) {
         reply.code(409);

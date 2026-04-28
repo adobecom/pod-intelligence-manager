@@ -9,6 +9,7 @@ vi.mock("../../llm.js", () => ({
   isLLMAvailable: () => false,
   MODELS: { fast: "claude-haiku", smart: "claude-sonnet" },
   callLLM: vi.fn(),
+  callLLMJSON: vi.fn(),
 }));
 
 vi.mock("../../../services/knowledge-graph.js", () => ({
@@ -132,5 +133,61 @@ describe("extractKnowledge — deterministic extraction quality", () => {
     // Domain comes from scope, not from keyword inference (which would have included "general"
     // or other matches because "migrate" / "consumer" don't appear in the backend keyword list).
     expect(enhanced[0].domains).toEqual(["backend"]);
+  });
+
+  it("falls back to ['unknown'] when scope is missing rather than keyword-bagging", async () => {
+    setupExtractQueries(
+      [],
+      [
+        {
+          id: "conflict-1",
+          summary: "Should we cache?",
+          resolution: "Yes, with TTL",
+          severity: "low",
+          scope: null, // no scope on the conflict's referenced updates
+        },
+      ],
+    );
+    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    expect(enhanced).toHaveLength(1);
+    expect(enhanced[0].domains).toEqual(["unknown"]);
+  });
+
+  it("offline classifier fallback: deterministic patterns get DEFAULT_PATTERN_SCORE (0.7), not 0.9", async () => {
+    setupExtractQueries(
+      [
+        {
+          agent_id: "agent-a",
+          timestamp: "2026-01-01T00:00:00Z",
+          summary: "Use cookies for auth",
+          details: "Decided to use httpOnly cookies for session tokens to prevent XSS issues.",
+          scope: "backend",
+        },
+      ],
+      [],
+    );
+    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    expect(enhanced).toHaveLength(1);
+    expect(enhanced[0].confidence).toBe("extracted");
+    expect(enhanced[0].confidence_score).toBe(0.7);
+  });
+
+  it("resolved conflicts always score 0.9 (classifier-independent)", async () => {
+    setupExtractQueries(
+      [],
+      [
+        {
+          id: "conflict-1",
+          summary: "Auth approach disputed",
+          resolution: "Settled on session cookies",
+          severity: "high",
+          scope: "backend",
+        },
+      ],
+    );
+    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    expect(enhanced).toHaveLength(1);
+    expect(enhanced[0].type).toBe("resolved_conflict");
+    expect(enhanced[0].confidence_score).toBe(0.9);
   });
 });
