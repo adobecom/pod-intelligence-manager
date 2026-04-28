@@ -10,11 +10,10 @@ import {
   queryKnowledge,
   getRelevantLearnings,
   addLearningsToGraph,
-  maybeAddPodContextSignalToGraph,
-  addResolvedConflictToGraph,
   getGraph,
+  pruneStaleNodes,
 } from "../knowledge-graph.js";
-import type { EnhancedPodLearning } from "@pim/shared";
+import type { EnhancedPodLearning, KnowledgeNode } from "@pim/shared";
 
 let orgSeq = 0;
 
@@ -130,68 +129,59 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(summaries.some(s => s.includes("Project Beta"))).toBe(false);
   });
 
-  it("maybeAddPodContextSignalToGraph adds decision nodes from active pods", () => {
-    const orgId = `kg-test-${orgSeq++}`;
-    initializeKnowledgeGraph(orgId);
+});
 
-    const decisionResult = maybeAddPodContextSignalToGraph(
-      "pod-live",
-      "Live Pod",
-      "decision",
-      "Switched auth flow to PKCE",
-      "Needed for SPA support.",
-      "frontend",
-      { project_id: "proj-x", project_name: "Project X" },
-    );
-    const specResult = maybeAddPodContextSignalToGraph(
-      "pod-live",
-      "Live Pod",
-      "spec_change",
-      "API contract moved /users to /v2/users",
-      "",
-      "backend",
-    );
-    const progressResult = maybeAddPodContextSignalToGraph(
-      "pod-live",
-      "Live Pod",
-      "progress",
-      "Shipped button tweak",
-      "",
-      "frontend",
-    );
-
-    expect(decisionResult.added).toBe(true);
-    expect(specResult.added).toBe(true);
-    expect(progressResult.added).toBe(false);
-
-    const nodes = getGraph().nodes;
-    const decisionNode = nodes.find(n => n.summary.includes("PKCE"));
-    expect(decisionNode?.type).toBe("decision");
-    expect(decisionNode?.source_pod_id).toBe("pod-live");
-    expect(decisionNode?.source_project_id).toBe("proj-x");
-    const specNode = nodes.find(n => n.summary.includes("API contract"));
-    expect(specNode?.type).toBe("scope_insight");
-    expect(specNode?.source_project_id).toBeUndefined();
+describe("pruneStaleNodes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("addResolvedConflictToGraph adds a resolved_conflict node on resolution", () => {
-    const orgId = `kg-test-${orgSeq++}`;
+  it("removes only stale, low-confidence, uncurated, non-superseded nodes", async () => {
+    const orgId = `kg-prune-${orgSeq++}`;
     initializeKnowledgeGraph(orgId);
 
-    const result = addResolvedConflictToGraph(
-      "pod-live",
-      "Live Pod",
-      "Two agents disagreed on token storage",
-      "Resolution: use httpOnly cookies.",
-      "security",
-      null,
-    );
-    expect(result.added).toBe(true);
+    const old = new Date("2024-01-01T00:00:00Z").toISOString();
+    const recent = new Date().toISOString();
+    const ages: { id: string; created_at: string; confidence_score: number; curated: boolean; superseded?: boolean }[] = [
+      { id: "kn-stale-junk", created_at: old, confidence_score: 0.3, curated: false }, // SHOULD prune
+      { id: "kn-curated-old", created_at: old, confidence_score: 0.3, curated: true }, // protected (curated)
+      { id: "kn-recent-junk", created_at: recent, confidence_score: 0.3, curated: false }, // protected (recent)
+      { id: "kn-old-confident", created_at: old, confidence_score: 0.8, curated: false }, // protected (high confidence)
+      { id: "kn-old-superseded", created_at: old, confidence_score: 0.3, curated: false, superseded: true }, // protected (superseded)
+    ];
 
-    const node = getGraph().nodes.find(n => n.summary.includes("token storage"));
-    expect(node?.type).toBe("resolved_conflict");
-    expect(node?.source_pod_id).toBe("pod-live");
-    expect(node?.confidence_score).toBe(0.9);
-    expect(node?.domains).toContain("security");
+    const graph = getGraph();
+    for (const a of ages) {
+      const node: KnowledgeNode = {
+        id: a.id,
+        type: "pattern",
+        summary: a.id,
+        details: a.id,
+        source_pod_id: "pod-x",
+        source_pod_name: "Pod X",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: a.confidence_score,
+        created_at: a.created_at,
+        curated: a.curated,
+        ...(a.superseded ? { superseded_by: "kn-curated-old" } : {}),
+      };
+      graph.nodes.push(node);
+    }
+
+    const result = pruneStaleNodes();
+    expect(result.removed).toBe(1);
+    const ids = getGraph().nodes.map((n) => n.id);
+    expect(ids).not.toContain("kn-stale-junk");
+    expect(ids).toContain("kn-curated-old");
+    expect(ids).toContain("kn-recent-junk");
+    expect(ids).toContain("kn-old-confident");
+    expect(ids).toContain("kn-old-superseded");
+  });
+
+  it("returns 0 removed on an empty graph", () => {
+    const orgId = `kg-prune-empty-${orgSeq++}`;
+    initializeKnowledgeGraph(orgId);
+    expect(pruneStaleNodes().removed).toBe(0);
   });
 });

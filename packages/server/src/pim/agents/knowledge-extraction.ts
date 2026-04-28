@@ -5,6 +5,12 @@ import db from "../../db/connection.js";
 import { callLLM, isLLMAvailable, MODELS } from "../llm.js";
 import type { EnhancedPodLearning, KnowledgeNodeType } from "@pim/shared";
 import { computeCurrentDay } from "../../services/pod-day.js";
+import { getGraph } from "../../services/knowledge-graph.js";
+import {
+  generateEmbedding,
+  isEmbeddingAvailable,
+  cosineSimilarity,
+} from "../../services/embeddings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +30,7 @@ interface DecisionRow {
   timestamp: string;
   summary: string;
   details: string;
+  scope: string;
 }
 
 interface ResolvedConflictRow {
@@ -31,6 +38,7 @@ interface ResolvedConflictRow {
   summary: string;
   resolution: string;
   severity: string;
+  scope: string | null;
 }
 
 interface ContextRow {
@@ -55,29 +63,46 @@ export interface PodLearning {
   type: "pattern" | "resolved_conflict" | "anti_pattern" | "scope_insight";
   summary: string;
   details: string;
+  /** Authoritative scope from the source row, when available. */
+  scope?: string;
 }
+
+// Decisions with details shorter than this are noise (one-word edits, blank entries).
+const MIN_DECISION_DETAIL_LENGTH = 30;
 
 // --- Deterministic extraction (always works, no LLM) ---
 
 export function extractKnowledge(podId: string): PodLearning[] {
   const learnings: PodLearning[] = [];
 
-  // Extract decisions as patterns
+  // Decisions become patterns. Filter out trivial entries with no reusable signal.
   const decisions = db.prepare(
-    "SELECT agent_id, timestamp, summary, details FROM context_updates WHERE pod_id = ? AND type = 'decision' ORDER BY timestamp ASC",
-  ).all(podId) as unknown as DecisionRow[];
+    `SELECT agent_id, timestamp, summary, details, scope
+     FROM context_updates
+     WHERE pod_id = ? AND type = 'decision'
+       AND length(coalesce(details, summary)) >= ?
+     ORDER BY timestamp ASC`,
+  ).all(podId, MIN_DECISION_DETAIL_LENGTH) as unknown as DecisionRow[];
 
   for (const d of decisions) {
     learnings.push({
       type: "pattern",
       summary: d.summary,
-      details: `Decision by ${d.agent_id}: ${d.details || d.summary}`,
+      details: d.details || d.summary,
+      scope: d.scope,
     });
   }
 
-  // Extract resolved conflicts with their resolutions
+  // Resolved conflicts. Pull the scope from the first referenced context update via a LEFT JOIN
+  // when possible — falls back to NULL if the conflict's sides don't reference a known update.
   const resolved = db.prepare(
-    "SELECT id, summary, resolution, severity FROM conflicts WHERE pod_id = ? AND status = 'resolved'",
+    `SELECT c.id, c.summary, c.resolution, c.severity,
+            (SELECT cu.scope
+             FROM context_updates cu, json_each(c.sides_json) s
+             WHERE cu.id = json_extract(s.value, '$.context_update_id')
+             LIMIT 1) AS scope
+     FROM conflicts c
+     WHERE c.pod_id = ? AND c.status = 'resolved'`,
   ).all(podId) as unknown as ResolvedConflictRow[];
 
   for (const r of resolved) {
@@ -85,21 +110,13 @@ export function extractKnowledge(podId: string): PodLearning[] {
       type: "resolved_conflict",
       summary: `${r.summary} — resolved: ${r.resolution}`,
       details: `Conflict ${r.id} (${r.severity}): ${r.summary}. Resolution: ${r.resolution}`,
+      scope: r.scope ?? undefined,
     });
   }
 
-  // Extract blockers as potential anti-patterns
-  const blockers = db.prepare(
-    "SELECT agent_id, summary, details FROM context_updates WHERE pod_id = ? AND type = 'blocker' ORDER BY timestamp ASC",
-  ).all(podId) as unknown as DecisionRow[];
-
-  for (const b of blockers) {
-    learnings.push({
-      type: "anti_pattern",
-      summary: `Blocker encountered: ${b.summary}`,
-      details: `Reported by ${b.agent_id}: ${b.details || b.summary}`,
-    });
-  }
+  // Blockers are not extracted. Most are transient ("waiting on approval", "CI flaky")
+  // and don't generalize as anti-patterns. Anti-patterns must come from the LLM
+  // extraction or the explicit ad-hoc submission API.
 
   return learnings;
 }
@@ -127,24 +144,26 @@ function isValidNodeType(type: string): type is KnowledgeNodeType {
   return ["decision", "pattern", "anti_pattern", "resolved_conflict", "scope_insight"].includes(type);
 }
 
-function inferDomains(learning: PodLearning, podId: string): string[] {
-  // Infer domains from the learning text by checking for scope keywords
-  const text = `${learning.summary} ${learning.details}`.toLowerCase();
+/**
+ * Fallback domain inference for sources without an authoritative scope (e.g. LLM-generated
+ * learnings whose `domain` field is missing). Prefer using the source row's `scope` directly.
+ */
+function inferDomainsFromText(text: string): string[] {
+  const lower = text.toLowerCase();
   const domains: string[] = [];
   const scopeKeywords: Record<string, string[]> = {
-    frontend: ["frontend", "ui", "react", "component", "css", "layout", "design"],
+    frontend: ["frontend", "ui", "react", "component", "css", "layout"],
     backend: ["backend", "api", "server", "database", "endpoint", "lambda"],
-    design: ["design", "figma", "mockup", "wireframe", "ux", "user experience"],
-    qa: ["test", "qa", "quality", "bug", "regression", "coverage"],
-    infra: ["infra", "deploy", "ci", "cd", "pipeline", "aws", "docker", "kubernetes"],
-    pm: ["pm", "product", "roadmap", "milestone", "stakeholder", "requirement"],
+    design: ["figma", "mockup", "wireframe", "ux", "user experience"],
+    qa: ["qa", "regression", "coverage", "test plan"],
+    infra: ["infra", "deploy", "ci/cd", "pipeline", "aws", "docker", "kubernetes"],
+    pm: ["roadmap", "milestone", "stakeholder", "requirement"],
   };
   for (const [scope, keywords] of Object.entries(scopeKeywords)) {
-    if (keywords.some((kw) => text.includes(kw))) {
+    if (keywords.some((kw) => lower.includes(kw))) {
       domains.push(scope);
     }
   }
-  // If no domains inferred, use "general"
   if (domains.length === 0) domains.push("general");
   return domains;
 }
@@ -152,13 +171,14 @@ function inferDomains(learning: PodLearning, podId: string): string[] {
 export async function extractKnowledgeEnhanced(
   podId: string,
 ): Promise<EnhancedPodLearning[]> {
-  // Step 1: Deterministic base extraction
+  // Step 1: Deterministic base extraction. Use the authoritative `scope` from the source row
+  // when present; fall back to keyword inference only when scope is missing.
   const baseLearnings = extractKnowledge(podId);
   const enhanced: EnhancedPodLearning[] = baseLearnings.map((l) => ({
     type: l.type as KnowledgeNodeType,
     summary: l.summary,
     details: l.details,
-    domains: inferDomains(l, podId),
+    domains: l.scope ? [l.scope] : inferDomainsFromText(`${l.summary} ${l.details}`),
     confidence: "extracted" as const,
     confidence_score: 0.9,
   }));
@@ -211,26 +231,51 @@ export async function extractKnowledgeEnhanced(
     if (jsonMatch) {
       const llmLearnings = JSON.parse(jsonMatch[1]) as LLMLearning[];
 
+      // Pre-fetch existing graph nodes once so we can dedup against history, not just this batch.
+      let existingNodes: { summary: string; embedding?: number[] }[] = [];
+      try {
+        existingNodes = getGraph().nodes.map((n) => ({ summary: n.summary, embedding: n.embedding }));
+      } catch {
+        // Graph not initialized yet (e.g. test setups) — skip historical dedup.
+      }
+
+      const embeddingsAvailable = isEmbeddingAvailable();
+
       for (const l of llmLearnings) {
         const nodeType = isValidNodeType(l.type) ? l.type : "scope_insight";
 
-        // Check for overlap with deterministic learnings
-        const isDuplicate = enhanced.some((e) => {
+        // Word-overlap dedup against the current batch's deterministic learnings.
+        const overlapsBatch = enhanced.some((e) => {
           const overlapWords = l.summary.toLowerCase().split(/\s+/)
             .filter((w) => e.summary.toLowerCase().includes(w));
           return overlapWords.length / l.summary.split(/\s+/).length > 0.5;
         });
+        if (overlapsBatch) continue;
 
-        if (!isDuplicate) {
-          enhanced.push({
-            type: nodeType,
-            summary: l.summary,
-            details: l.details,
-            domains: Array.isArray(l.domain) ? l.domain : [l.domain ?? "general"],
-            confidence: "inferred",
-            confidence_score: mapConfidenceToScore(l.confidence),
-          });
+        // Embedding-based dedup against the existing graph (if embeddings available).
+        if (embeddingsAvailable && existingNodes.length > 0) {
+          const llmEmbedding = await generateEmbedding(`${l.summary}\n${l.details}`);
+          if (llmEmbedding) {
+            const overlapsHistory = existingNodes.some((e) => {
+              if (!e.embedding) return false;
+              return cosineSimilarity(llmEmbedding, e.embedding) >= 0.92;
+            });
+            if (overlapsHistory) continue;
+          }
         }
+
+        enhanced.push({
+          type: nodeType,
+          summary: l.summary,
+          details: l.details,
+          domains: Array.isArray(l.domain) && l.domain.length > 0
+            ? l.domain
+            : (typeof l.domain === "string" && l.domain
+              ? [l.domain]
+              : inferDomainsFromText(`${l.summary} ${l.details}`)),
+          confidence: "inferred",
+          confidence_score: mapConfidenceToScore(l.confidence),
+        });
       }
     }
 

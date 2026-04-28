@@ -28,7 +28,6 @@ vi.mock("../services/knowledge-graph.js", () => ({
     edges: [],
   }),
   getPrecedents: vi.fn().mockResolvedValue({ nodes: [] }),
-  maybeAddProjectContextSignalToGraph: vi.fn().mockReturnValue({ added: false }),
 }));
 
 // Mock Slack (external service)

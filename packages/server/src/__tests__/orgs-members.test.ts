@@ -20,7 +20,6 @@ vi.mock("../services/knowledge-graph.js", () => ({
   refreshAnalysis: vi.fn(),
   getRelevantLearnings: vi.fn().mockReturnValue({ nodes: [], truncated: false, total_matching: 0, token_estimate: 0, edges: [] }),
   getPrecedents: vi.fn().mockReturnValue({ nodes: [] }),
-  maybeAddProjectContextSignalToGraph: vi.fn().mockReturnValue({ added: false }),
 }));
 
 import { createTables } from "../db/schema.js";

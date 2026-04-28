@@ -48,6 +48,32 @@ function versionPath(orgId: string, version: number): string {
   return path.join(orgDir(orgId), `graph-v${version}.json`);
 }
 
+const KEEP_VERSIONS = 10;
+const VERSION_FILE_RE = /^graph-v(\d+)\.json$/;
+
+/** Keep only the most recent KEEP_VERSIONS versioned snapshots; delete older ones. */
+function pruneOldVersions(dir: string): void {
+  try {
+    const versioned: { version: number; file: string }[] = [];
+    for (const file of fs.readdirSync(dir)) {
+      const match = file.match(VERSION_FILE_RE);
+      if (!match) continue;
+      versioned.push({ version: Number(match[1]), file });
+    }
+    if (versioned.length <= KEEP_VERSIONS) return;
+    versioned.sort((a, b) => b.version - a.version);
+    for (const { file } of versioned.slice(KEEP_VERSIONS)) {
+      try {
+        fs.unlinkSync(path.join(dir, file));
+      } catch (err) {
+        console.warn(`[graph-storage] Failed to prune ${file}:`, err);
+      }
+    }
+  } catch (err) {
+    console.warn(`[graph-storage] Version pruning skipped for ${dir}:`, err);
+  }
+}
+
 function s3LatestKey(orgId: string): string {
   return `${S3_PREFIX}/${orgId}/graph-latest.json`;
 }
@@ -84,6 +110,8 @@ export function saveGraph(orgId: string, graph: KnowledgeGraph): void {
   const tmpPath = path.join(dir, `.graph-latest-${Date.now()}.tmp`);
   fs.writeFileSync(tmpPath, data, "utf-8");
   fs.renameSync(tmpPath, latestPath(orgId));
+
+  pruneOldVersions(dir);
 
   if (S3_BUCKET) {
     void writeThroughToS3(orgId, graph.version, data).catch((err) => {

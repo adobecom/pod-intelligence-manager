@@ -8,14 +8,21 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { KnowledgeQueryOptions, CurationRequest } from "@pim/shared";
+import type {
+  AdHocLearningInput,
+  ConfidenceLevel,
+  CurationRequest,
+  EnhancedPodLearning,
+  KnowledgeQueryOptions,
+} from "@pim/shared";
 import {
-  getGraph,
-  queryKnowledge,
-  getRelevantLearnings,
-  getPrecedents,
+  addLearningsToGraph,
   curateNode,
+  getGraph,
+  getPrecedents,
+  getRelevantLearnings,
   getStats,
+  queryKnowledge,
 } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { generateEmbedding } from "../services/embeddings.js";
@@ -48,6 +55,19 @@ const CurationSchema = z.object({
     domains: z.array(z.string()).optional(),
   }).optional(),
 });
+
+const AdHocLearningSchema = z.object({
+  type: z.enum(["decision", "pattern", "anti_pattern", "resolved_conflict", "scope_insight"]),
+  summary: z.string().min(10).max(500),
+  details: z.string().min(30),
+  domains: z.array(z.string().min(1)).min(1),
+  source_label: z.string().min(1).max(120).optional(),
+  confidence_score: z.number().min(0).max(1).optional(),
+});
+
+const AD_HOC_POD_ID = "adhoc";
+const AD_HOC_DEFAULT_LABEL = "Ad-Hoc Submission";
+const AD_HOC_DEFAULT_CONFIDENCE = 0.7;
 
 export default async function graphRoutes(app: FastifyInstance) {
   // Full graph (for UI visualization)
@@ -91,6 +111,40 @@ export default async function graphRoutes(app: FastifyInstance) {
       const conflict = req.query.conflict ?? "";
       const maxTokens = parseInt(req.query.maxTokens ?? "1000", 10);
       return getPrecedents(conflict, maxTokens);
+    },
+  );
+
+  // Ad-hoc learning submission. For confirmed learnings outside any active pod
+  // (bug fixes, chatbot/agent conversations, anything an operator deems worth keeping).
+  // Submitted nodes enter the curation queue (`curated: false`) and are deduplicated
+  // synchronously against existing nodes via embedding cosine similarity.
+  app.post<{ Body: AdHocLearningInput }>(
+    "/api/knowledge/nodes",
+    { preHandler: validateBody(AdHocLearningSchema) },
+    async (req, reply) => {
+      const body = req.body;
+      const learning: EnhancedPodLearning = {
+        type: body.type,
+        summary: body.summary,
+        details: body.details,
+        domains: body.domains,
+        confidence: "extracted" satisfies ConfidenceLevel,
+        confidence_score: body.confidence_score ?? AD_HOC_DEFAULT_CONFIDENCE,
+      };
+      const result = await addLearningsToGraph(
+        [learning],
+        AD_HOC_POD_ID,
+        body.source_label ?? AD_HOC_DEFAULT_LABEL,
+      );
+      if (result.nodesAdded === 0) {
+        reply.code(409);
+        return { error: "Near-duplicate of an existing node — not added." };
+      }
+      return {
+        nodesAdded: result.nodesAdded,
+        edgesAdded: result.edgesAdded,
+        nodeId: result.nodeIds[0],
+      };
     },
   );
 

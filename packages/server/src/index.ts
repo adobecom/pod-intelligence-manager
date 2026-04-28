@@ -22,7 +22,7 @@ import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
-import { initializeKnowledgeGraph, refreshAnalysis } from "./services/knowledge-graph.js";
+import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysis } from "./services/knowledge-graph.js";
 import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
@@ -48,6 +48,13 @@ seedDatabase();
 await restoreGraphFromS3IfEmpty("default");
 initializeKnowledgeGraph("default");
 await seedKnowledgeGraph();
+
+// Run a startup prune so a redeploy doesn't have to wait for the first interval tick.
+try {
+  pruneStaleNodes();
+} catch (err) {
+  app.log.error(err, "Initial knowledge graph prune failed");
+}
 
 // Register WebSocket support
 await app.register(websocket);
@@ -153,6 +160,7 @@ const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
+const GRAPH_PRUNE_INTERVAL_MS = parseInt(process.env.GRAPH_PRUNE_INTERVAL_MS ?? "86400000", 10); // 24 hours
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -194,9 +202,19 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }
   }, GRAPH_REFRESH_INTERVAL_MS);
 
+  // Periodic prune of stale low-confidence uncurated nodes
+  setInterval(() => {
+    try {
+      pruneStaleNodes();
+    } catch (e) {
+      app.log.error(e, "Knowledge graph prune failed");
+    }
+  }, GRAPH_PRUNE_INTERVAL_MS);
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
+  app.log.info(`Knowledge graph prune interval: ${GRAPH_PRUNE_INTERVAL_MS}ms`);
 });
 
 // Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.

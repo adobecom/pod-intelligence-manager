@@ -62,7 +62,7 @@ pim/
 - **Conflict Agent** — Sonnet model; detects contradictions, creates conflict records; queries knowledge graph for historical precedents
 - **Summary Agent** — Renders living doc `.md` from DB state; runs periodic lint pass every 2 hours; includes "Knowledge Context" section from org memory
 - **Cross-Pod Agent** — Inter-pod advisory (read-only, non-blocking); enriches advisories with historical learnings from the knowledge graph
-- **Knowledge Extraction Agent** — Distills learnings when a pod is archived; deterministic base (decisions, resolved conflicts, blockers from DB) + optional LLM-enhanced extraction (Sonnet). Outputs `EnhancedPodLearning[]` with confidence levels and domain tags.
+- **Knowledge Extraction Agent** — Distills learnings when a pod is archived; deterministic base (substantive decisions and resolved conflicts only — blockers are not extracted, and decisions with `details < 30 chars` are skipped) + optional LLM-enhanced extraction (Sonnet) with cross-graph dedup. Domains come from the source row's authoritative `scope`, not keyword inference. Outputs `EnhancedPodLearning[]` with confidence levels and domain tags.
 
 ### Living Doc
 - **Read-only output** assembled from DynamoDB state — never edited directly
@@ -90,9 +90,13 @@ Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type`
 - **Purpose:** The PIM is the org's persistent knowledge base. Learnings accumulate across all pod lifecycles. Agents in new pods query it with token budgets to get relevant historical context without context window bloat.
 - **Storage:** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries. Local dev uses filesystem at `.data/knowledge-graph/`. The storage interface is 3 functions — swapping to S3 is a single-file change.
 - **Graph structure:** Nodes (decision, pattern, anti_pattern, resolved_conflict, scope_insight) + Edges (relates_to, supersedes, contradicts, builds_on, resolved_by) + Communities (label propagation clustering) + Hubs (high-degree nodes).
-- **Confidence levels:** `extracted` (deterministic from DB, score 0.9) vs `inferred` (LLM-generated, score 0.4–0.85). Inspired by graphify's approach.
+- **Confidence levels:** `extracted` (deterministic from DB, score 0.9) vs `inferred` (LLM-generated, score 0.4–0.85). Ad-hoc submissions default to 0.7. Inspired by graphify's approach.
 - **Token-budgeted queries:** Agents call `getRelevantLearnings(2000)` — server filters by domain, ranks by relevance, truncates to budget. Never dumps the full graph.
-- **Extraction trigger:** Pod archival (`POST /api/pods/:podId/archive`) → `extractKnowledgeEnhanced()` → `addLearningsToGraph()` → community detection → persist.
+- **Ingestion paths (only two):**
+  1. **Pod archival** — `POST /api/pods/:podId/archive` → `extractKnowledgeEnhanced()` → `addLearningsToGraph()`. The graph crystallizes here. Live context updates do *not* flow into the graph during a sprint — that proved noisy and racy.
+  2. **Ad-hoc submission** — `POST /api/knowledge/nodes` (REST), `submitLearning()` (SDK), `submit_knowledge_learning` (MCP) for confirmed learnings outside any pod (bug fixes, chatbot/agent conversations). Synchronous embedding + dedup; entries default to `confidence_score: 0.7`, `curated: false` so they enter the curation queue.
+- **Auto-pruning:** A daily job (`pruneStaleNodes`) deletes uncurated nodes with `confidence_score < 0.5` older than 180 days. Curated and superseded nodes are protected.
+- **Storage hygiene:** Local `graph-v*.json` capped to the most recent 10 snapshots; S3 noncurrent versions expire after 30 days.
 - **Human curation:** UI at `/knowledge` lets humans approve/reject/edit learnings.
 - **Key files:** `packages/server/src/services/knowledge-graph.ts` (core), `graph-storage.ts` (S3 abstraction), `graph-analysis.ts` (algorithms), `packages/shared/src/types/graph.ts` (types)
 
