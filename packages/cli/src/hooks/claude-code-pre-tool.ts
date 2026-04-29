@@ -1,5 +1,5 @@
 /**
- * Claude Code PreToolCall hook handler.
+ * Claude Code PreToolUse hook handler.
  *
  * Checks if pod context has been pulled recently. If stale (>2 hours or missing),
  * writes a warning to stderr. Does NOT block execution.
