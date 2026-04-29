@@ -1,13 +1,24 @@
 # Adobe Artifactory (npm) — supplemental notes
 #
-# Root `.npmrc` in this repo sets `@pim:registry` (no token) so scoped packages
-# use the approved Artifactory virtual without repeating `publishConfig` per package.
-# The unscoped CLI (`ado-pim`) keeps `publishConfig.registry` in packages/cli/package.json.
+# Root `.npmrc` commits `@pim:registry` (no token) so scoped packages resolve to
+# the same registry used for publish, without repeating `publishConfig` per package.
 #
-# Add auth in your user ~/.npmrc or CI (never commit tokens). Example:
-# //artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/:_authToken=${NPM_TOKEN}
+# Writable internal npm (typical Adobe pattern): **npm-adobe-release** on Corp
+# Artifactory — requires VPN / corporate network for many environments:
+#   https://artifactory.corp.adobe.com/artifactory/api/npm/npm-adobe-release/
+#
+# UW2 cloud mirror (`.../api/npm/npmjs/`) is often read/cached only; if you see
+# "no deploy permissions" there, publish to **npm-adobe-release** (or the repo
+# your admin names) instead. Confirm the exact URL in Artifactory "Set me up"
+# for that repository.
+#
+# Unscoped `ado-pim` uses `publishConfig.registry` in packages/cli/package.json.
+#
+# Auth — user ~/.npmrc or CI (never commit tokens). Example for Corp host:
+# //artifactory.corp.adobe.com/artifactory/api/npm/npm-adobe-release/:_authToken=${NPM_TOKEN}
 # always-auth=true
 #
-# Corp registry alternatives (VPN / corporate network only) — replace the line in root `.npmrc` if needed:
-# @pim:registry=https://artifactory.corp.adobe.com/artifactory/api/npm/npmjs/
-# @pim:registry=https://artifactory-no1.corp.adobe.com/artifactory/api/npm/npmjs/
+# Other approved read mirrors (if your doc points installs here instead):
+# https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
+# https://artifactory.corp.adobe.com/artifactory/api/npm/npmjs/
+# https://artifactory-no1.corp.adobe.com/artifactory/api/npm/npmjs/
