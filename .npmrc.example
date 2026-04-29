@@ -4,8 +4,9 @@
 # Recommended cloud registry (path must include api/npm):
 # registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
 
-# Scoped packages only (keeps default registry for unscoped if you omit the line above):
-@pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
+# Scoped packages only (uncomment when publishing or installing @pim from Artifactory;
+# keep commented for local monorepo-only work without registry auth):
+# @pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
 
 # Auth (example — use your org’s token flow; never commit real values):
 # //artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/:_authToken=${NPM_TOKEN}
