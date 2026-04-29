@@ -74,6 +74,7 @@ export type {
   EnhancedPodLearning,
   CurationAction,
   CurationRequest,
+  AdHocLearningInput,
 } from "./types/graph";
 
 export type {

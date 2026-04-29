@@ -18,8 +18,6 @@ import type {
   ConfidenceLevel,
   EnhancedPodLearning,
   CurationAction,
-  ContextUpdateType,
-  Scope,
 } from "@pim/shared";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
@@ -41,6 +39,10 @@ import {
 
 let graph: KnowledgeGraph | null = null;
 let hubIds: Set<string> = new Set();
+// Set when a mutation skipped community/hub recompute; cleared by refreshAnalysis.
+// Lets ad-hoc POSTs return fast without leaving the graph permanently stale —
+// the periodic interval (or the next archival batch) picks up the work.
+let analysisStale = false;
 
 function emptyGraph(orgId: string): KnowledgeGraph {
   return {
@@ -119,12 +121,22 @@ function markSupersededEdges(edges: KnowledgeEdge[], allNodes: KnowledgeNode[]):
 
 // --- Add Learnings ---
 
+export interface AddLearningsOptions {
+  /**
+   * Skip the synchronous community-detection + hub-identification step. Used by the
+   * ad-hoc `POST /api/knowledge/nodes` hot path; the analysis is deferred to the
+   * periodic interval (or the next non-skipped mutation) instead of running per request.
+   */
+  skipAnalysis?: boolean;
+}
+
 export async function addLearningsToGraph(
   learnings: EnhancedPodLearning[],
   podId: string,
   podName: string,
   project?: { project_id: string; project_name: string },
-): Promise<{ nodesAdded: number; edgesAdded: number }> {
+  options: AddLearningsOptions = {},
+): Promise<{ nodesAdded: number; edgesAdded: number; nodeIds: string[] }> {
   if (!graph) throw new Error("Knowledge graph not initialized");
 
   const now = new Date().toISOString();
@@ -176,7 +188,7 @@ export async function addLearningsToGraph(
   }
 
   if (newNodes.length === 0) {
-    return { nodesAdded: 0, edgesAdded: 0 };
+    return { nodesAdded: 0, edgesAdded: 0, nodeIds: [] };
   }
 
   // P3: Pass existing edges so buildEdges won't create duplicate edges for node pairs already connected.
@@ -192,177 +204,21 @@ export async function addLearningsToGraph(
   graph.version++;
   graph.updated_at = now;
 
-  graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
+  if (options.skipAnalysis) {
+    analysisStale = true;
+  } else {
+    graph.communities = detectCommunities(graph);
+    hubIds = new Set(identifyHubs(graph));
+    analysisStale = false;
+  }
 
   saveGraph(graph.org_id, graph);
 
   return {
     nodesAdded: newNodes.length,
     edgesAdded: newEdges.length + intraEdges.length,
+    nodeIds: newNodes.map((n) => n.id),
   };
-}
-
-/**
- * Lightweight ingestion from project context updates: high-signal types only.
- */
-export function maybeAddProjectContextSignalToGraph(
-  projectId: string,
-  projectName: string,
-  type: ContextUpdateType,
-  summary: string,
-  details: string,
-  scope: Scope,
-): { added: boolean } {
-  if (!graph) return { added: false };
-  if (type !== "decision" && type !== "spec_change") return { added: false };
-
-  const now = new Date().toISOString();
-  const nodeType: KnowledgeNodeType = type === "decision" ? "decision" : "scope_insight";
-  const node: KnowledgeNode = {
-    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
-    type: nodeType,
-    summary,
-    details,
-    source_pod_id: "project",
-    source_pod_name: projectName,
-    source_project_id: projectId,
-    source_project_name: projectName,
-    domains: [scope],
-    confidence: "extracted",
-    confidence_score: 0.85,
-    created_at: now,
-    curated: false,
-  };
-
-  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
-  graph.nodes.push(node);
-  graph.edges.push(...newEdges);
-  markSupersededEdges(newEdges, graph.nodes); // P1
-  graph.version++;
-  graph.updated_at = now;
-  graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
-  saveGraph(graph.org_id, graph);
-
-  generateEmbedding(embedText(node)).then((emb) => {
-    if (emb && graph) {
-      node.embedding = emb;
-      saveGraph(graph.org_id, graph);
-    }
-  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
-
-  return { added: true };
-}
-
-/**
- * Incremental ingestion from pod context updates: high-signal types only (decision, spec_change).
- * Runs during active sprints so concurrent pods see each other's decisions without waiting for archival.
- * Nodes are confidence=extracted, score=0.85 (slightly below archival's 0.9) to reflect that pod context
- * may still shift before the sprint closes; archival-time extraction can add higher-confidence versions.
- */
-export function maybeAddPodContextSignalToGraph(
-  podId: string,
-  podName: string,
-  type: ContextUpdateType,
-  summary: string,
-  details: string,
-  scope: Scope,
-  project?: { project_id: string; project_name: string } | null,
-): { added: boolean } {
-  if (!graph) return { added: false };
-  if (type !== "decision" && type !== "spec_change") return { added: false };
-
-  const now = new Date().toISOString();
-  const nodeType: KnowledgeNodeType = type === "decision" ? "decision" : "scope_insight";
-  const node: KnowledgeNode = {
-    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
-    type: nodeType,
-    summary,
-    details,
-    source_pod_id: podId,
-    source_pod_name: podName,
-    ...(project
-      ? { source_project_id: project.project_id, source_project_name: project.project_name }
-      : {}),
-    domains: [scope],
-    confidence: "extracted",
-    confidence_score: 0.85,
-    created_at: now,
-    curated: false,
-  };
-
-  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
-  graph.nodes.push(node);
-  graph.edges.push(...newEdges);
-  markSupersededEdges(newEdges, graph.nodes); // P1
-  graph.version++;
-  graph.updated_at = now;
-  graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
-  saveGraph(graph.org_id, graph);
-
-  generateEmbedding(embedText(node)).then((emb) => {
-    if (emb && graph) {
-      node.embedding = emb;
-      saveGraph(graph.org_id, graph);
-    }
-  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
-
-  return { added: true };
-}
-
-/**
- * Create a resolved_conflict node the moment a conflict is resolved.
- * Previously this only happened at pod archival — meaning resolutions from a live sprint
- * were invisible to other concurrent pods. High confidence (0.9) because the outcome is committed.
- */
-export function addResolvedConflictToGraph(
-  podId: string,
-  podName: string,
-  summary: string,
-  details: string,
-  scope: Scope,
-  project?: { project_id: string; project_name: string } | null,
-): { added: boolean } {
-  if (!graph) return { added: false };
-
-  const now = new Date().toISOString();
-  const node: KnowledgeNode = {
-    id: `kn-${crypto.randomUUID().slice(0, 8)}`,
-    type: "resolved_conflict",
-    summary,
-    details,
-    source_pod_id: podId,
-    source_pod_name: podName,
-    ...(project
-      ? { source_project_id: project.project_id, source_project_name: project.project_name }
-      : {}),
-    domains: scope ? [scope] : [],
-    confidence: "extracted",
-    confidence_score: 0.9,
-    created_at: now,
-    curated: false,
-  };
-
-  const newEdges = buildEdges([node], graph.nodes, graph.edges); // P3
-  graph.nodes.push(node);
-  graph.edges.push(...newEdges);
-  markSupersededEdges(newEdges, graph.nodes); // P1
-  graph.version++;
-  graph.updated_at = now;
-  graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
-  saveGraph(graph.org_id, graph);
-
-  generateEmbedding(embedText(node)).then((emb) => {
-    if (emb && graph) {
-      node.embedding = emb;
-      saveGraph(graph.org_id, graph);
-    }
-  }).catch((err) => console.warn("[knowledge-graph] Non-blocking embedding failed:", err));
-
-  return { added: true };
 }
 
 // --- Query Knowledge ---
@@ -633,8 +489,73 @@ export function getStats(): KnowledgeStats {
 // --- Re-run Community Detection (called periodically) ---
 
 export function refreshAnalysis(): void {
-  if (!graph || graph.nodes.length === 0) return;
+  if (!graph || graph.nodes.length === 0) {
+    analysisStale = false;
+    return;
+  }
+  graph.communities = detectCommunities(graph);
+  hubIds = new Set(identifyHubs(graph));
+  analysisStale = false;
+  saveGraph(graph.org_id, graph);
+}
+
+/**
+ * Cheap variant of refreshAnalysis: returns immediately when nothing has marked the graph
+ * stale. Safe to call from hot paths (interval ticks, post-query lazy refresh).
+ */
+export function refreshAnalysisIfStale(): boolean {
+  if (!analysisStale) return false;
+  refreshAnalysis();
+  return true;
+}
+
+/** Test/debug helper. */
+export function isAnalysisStale(): boolean {
+  return analysisStale;
+}
+
+// --- Pruning ---
+
+/**
+ * Drop low-confidence, uncurated, stale nodes that no human has approved or edited.
+ * Curated and superseded nodes are protected; superseded nodes are filtered at query
+ * time and may still be useful for history. Runs once and rebuilds analysis at the end.
+ */
+const PRUNE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+
+export function pruneStaleNodes(now: Date = new Date()): { removed: number } {
+  if (!graph || graph.nodes.length === 0) return { removed: 0 };
+
+  const cutoff = now.getTime() - PRUNE_AGE_MS;
+  const toRemove = new Set<string>();
+  for (const node of graph.nodes) {
+    if (node.curated) continue;
+    if (node.confidence_score >= 0.5) continue;
+    if (node.superseded_by) continue;
+    const created = new Date(node.created_at).getTime();
+    if (Number.isNaN(created) || created > cutoff) continue;
+    toRemove.add(node.id);
+  }
+
+  if (toRemove.size === 0) return { removed: 0 };
+
+  graph.nodes = graph.nodes.filter((n) => !toRemove.has(n.id));
+  graph.edges = graph.edges.filter(
+    (e) => !toRemove.has(e.source) && !toRemove.has(e.target),
+  );
+  // Clear stale superseded_by references pointing into removed nodes.
+  for (const n of graph.nodes) {
+    if (n.superseded_by && toRemove.has(n.superseded_by)) {
+      n.superseded_by = undefined;
+    }
+  }
+
+  graph.version++;
+  graph.updated_at = now.toISOString();
   graph.communities = detectCommunities(graph);
   hubIds = new Set(identifyHubs(graph));
   saveGraph(graph.org_id, graph);
+
+  console.log(`[knowledge-graph] Pruned ${toRemove.size} stale node(s)`);
+  return { removed: toRemove.size };
 }

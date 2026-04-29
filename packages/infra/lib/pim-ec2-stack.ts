@@ -71,6 +71,12 @@ export class PimEc2Stack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       encryption: s3.BucketEncryption.S3_MANAGED,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      lifecycleRules: [
+        {
+          id: "expire-old-noncurrent-versions",
+          noncurrentVersionExpiration: cdk.Duration.days(30),
+        },
+      ],
     });
 
     const backupsBucket = new s3.Bucket(this, "BackupsBucket", {
