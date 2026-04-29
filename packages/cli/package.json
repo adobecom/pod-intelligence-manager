@@ -20,7 +20,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "publishConfig": {
-    "registry": "https://artifactory.corp.adobe.com/artifactory/api/npm/npm-adobe-release/"
+    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.5.0",
