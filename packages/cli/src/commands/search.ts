@@ -24,7 +24,7 @@ function parseSources(raw?: string): ContextSource[] | undefined {
 }
 
 function sourceInitial(source: ContextSource): string {
-  return { slack: "S", fluffyjaws: "F", jira: "J", confluence: "C", github: "G", git: "X" }[source];
+  return ({ kg: "K", slack: "S", fluffyjaws: "F", jira: "J", confluence: "C", github: "G", git: "X" } as Record<ContextSource, string>)[source] ?? "?";
 }
 
 function formatHit(hit: ContextSearchHit, index: number): string {
