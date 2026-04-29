@@ -114,7 +114,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
 
     const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
 
-    const postHooks = (hooks.PostToolCall ?? []) as Array<Record<string, string>>;
+    const postHooks = (hooks.PostToolUse ?? hooks.PostToolCall ?? []) as Array<Record<string, string>>;
     const hasPostHook = postHooks.some((h) => h.command?.includes("claude-code-post-tool"));
     if (!hasPostHook) {
       postHooks.push({
@@ -122,9 +122,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
         command: `node ${JSON.stringify(postToolScript)}`,
       });
     }
-    hooks.PostToolCall = postHooks;
+    hooks.PostToolUse = postHooks;
+    delete hooks.PostToolCall;
 
-    const preHooks = (hooks.PreToolCall ?? []) as Array<Record<string, string>>;
+    const preHooks = (hooks.PreToolUse ?? hooks.PreToolCall ?? []) as Array<Record<string, string>>;
     const hasPreHook = preHooks.some((h) => h.command?.includes("claude-code-pre-tool"));
     if (!hasPreHook) {
       preHooks.push({
@@ -132,7 +133,8 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
         command: `node ${JSON.stringify(preToolScript)}`,
       });
     }
-    hooks.PreToolCall = preHooks;
+    hooks.PreToolUse = preHooks;
+    delete hooks.PreToolCall;
 
     settings.hooks = hooks;
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");

@@ -1,5 +1,5 @@
 /**
- * Claude Code PostToolCall hook handler.
+ * Claude Code PostToolUse hook handler.
  *
  * Invoked by Claude Code after Bash tool calls. Detects git commits and
  * PR creation, then reports to the PIM API automatically.
