@@ -1,16 +1,20 @@
 {
   "name": "@pim/mcp-server",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
     "pim-mcp": "./dist/index.js"
   },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "pnpm run build"
+  },
+  "publishConfig": {
+    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

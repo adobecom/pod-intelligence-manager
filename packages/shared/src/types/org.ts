@@ -1,4 +1,4 @@
-import type { ProjectAnatomy } from "./project";
+import type { ProjectAnatomy } from "./project.js";
 
 export interface OrgPodSummary {
   pod_id: string;

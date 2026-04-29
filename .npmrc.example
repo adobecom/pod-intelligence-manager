@@ -1,0 +1,16 @@
+# Adobe Artifactory (npm) — copy relevant lines to your user ~/.npmrc or CI secrets.
+# Do not commit tokens. See internal "NPM setup and approved Artifactory npm mirror endpoints".
+
+# Recommended cloud registry (path must include api/npm):
+# registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
+
+# Scoped packages only (keeps default registry for unscoped if you omit the line above):
+@pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
+
+# Auth (example — use your org’s token flow; never commit real values):
+# //artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/:_authToken=${NPM_TOKEN}
+# always-auth=true
+
+# Corp alternatives (VPN / corporate network only):
+# @pim:registry=https://artifactory.corp.adobe.com/artifactory/api/npm/npmjs/
+# @pim:registry=https://artifactory-no1.corp.adobe.com/artifactory/api/npm/npmjs/
