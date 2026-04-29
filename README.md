@@ -35,7 +35,7 @@ Optional:
 
 | Goal | Easiest command |
 |------|----------------|
-| **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and `@pim/cli`, links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
+| **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and **`ado-pim`** (CLI package), links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
 | **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
 
 For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
@@ -247,9 +247,9 @@ To use MCP in IMS mode:
 | `PIM_API_URL` | `http://localhost:4000` | Base URL of the PIM Fastify server |
 | `PIM_ORG_SLUG` | (from `.pim.json` in cwd) | Org slug sent as `X-Pim-Org`. Required in IMS mode if no `.pim.json` is present. |
 
-### `@pim/cli`
+### CLI (`ado-pim` npm package)
 
-Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands.
+Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands. The published npm name is **`ado-pim`**; the workspace path is `packages/cli`.
 
 **Easiest install from this clone:** run **`pnpm bootstrap`** at the monorepo root (see **Setup** above). It builds the bundled CLI (`packages/cli/dist/pim.bundle.cjs`) and runs **`pnpm -C packages/cli link --global`**, so **`pim` works from any directory** (for example `pim init` in another repo) once your shell **`PATH`** includes pnpm’s global executables directory. **`pnpm install-cli`** is the same script.
 

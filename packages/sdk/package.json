@@ -1,13 +1,14 @@
 {
   "name": "@pim/sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "files": ["dist"],
@@ -16,9 +17,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prepublishOnly": "pnpm run build"
-  },
-  "publishConfig": {
-    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/"
   },
   "dependencies": {
     "@pim/shared": "workspace:*"

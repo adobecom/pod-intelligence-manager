@@ -13,9 +13,6 @@
     "start": "node dist/index.js",
     "prepublishOnly": "pnpm run build"
   },
-  "publishConfig": {
-    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/"
-  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@pim/shared": "workspace:*",

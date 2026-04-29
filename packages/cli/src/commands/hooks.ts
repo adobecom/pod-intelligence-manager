@@ -39,7 +39,7 @@ export function installHooks(): void {
   if (!fs.existsSync(runnerPath)) {
     console.error(
       chalk.red(
-        `\n  Hook runner not found at ${runnerPath}. Build the CLI first: pnpm --filter @pim/cli build\n`,
+        `\n  Hook runner not found at ${runnerPath}. Build the CLI first: pnpm --filter ado-pim build\n`,
       ),
     );
     process.exit(1);
