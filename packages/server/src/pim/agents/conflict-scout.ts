@@ -103,7 +103,7 @@ function loadPeerBundle(update: ContextUpdate, peerWindow: number): PeerRow[] {
       update.agent_id,
       update.id,
       peerWindow,
-    ) as PeerRow[];
+    ) as unknown as PeerRow[];
 }
 
 function normalizeScoutResponse(raw: LLMScoutResponse | null): ConflictScoutResult | null {

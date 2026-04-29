@@ -36,7 +36,7 @@ export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classi
   // 2. Check if the update references entities from a different agent's recent work in the same scope
   const recentUpdates = db.prepare(
     "SELECT id, agent_id, scope, summary FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT ?"
-  ).all(podId, update.scope, update.agent_id, t.peerWindow) as RecentUpdateRow[];
+  ).all(podId, update.scope, update.agent_id, t.peerWindow) as unknown as RecentUpdateRow[];
 
   if (recentUpdates.length > 0) {
     const updateWords = extractKeywords(update.summary + " " + update.details);
