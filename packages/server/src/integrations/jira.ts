@@ -1,5 +1,10 @@
 import type { ContextSearchHit } from "@pim/shared";
-import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
+import {
+  type IntegrationResult,
+  type IntegrationSearchOpts,
+  describeFetchError,
+  truncate,
+} from "./types.js";
 
 // Jira search with JQL. Supports two Jira flavors:
 //   - Adobe on-prem (jira.corp.adobe.com): Authorization: Bearer <PAT>, REST v2.
@@ -166,7 +171,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
     return {
       source: "jira",
       hits: [],
-      missing: `Jira error: ${(err as Error).message}`,
+      missing: `Jira error: ${describeFetchError(err, base)}`,
     };
   }
 }

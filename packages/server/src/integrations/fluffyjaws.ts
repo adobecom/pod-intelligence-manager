@@ -166,6 +166,34 @@ async function streamAssistantText(
   }
 }
 
+// Detect Fluffyjaws "I cannot / I don't have access" refusals. These come
+// back as well-formed assistant text and look fine to a downstream summarizer,
+// but they don't contain real corroboration and they crowd the synthesis with
+// disclaimers about what Adobe systems "don't expose". When the refusal
+// pattern is the dominant content of the response, treat the source as
+// missing rather than emitting a low-trust hit that other ranking layers
+// have to work around.
+const REFUSAL_PATTERNS: RegExp[] = [
+  /\bI\s+(?:can(?:'t| ?not)|do\s+not|don't)\s+(?:have\s+access|access|see|pull|retrieve)\b/i,
+  /\bI\s+am\s+(?:unable|not\s+able)\s+to\b/i,
+  /\bI\s+(?:can(?:'t| ?not)|do\s+not|don't)\s+(?:help|assist|provide|answer)\b/i,
+  /\bnot\s+(?:supported|exposed|available)\s+(?:by|via|through)\b/i,
+  /\bAdobe(?:'s)?\s+internal\s+systems\s+do\s+not\b/i,
+  /\bperson-level\s+activit/i,
+  /\bcross-platform\s+activity\s+logs?\b/i,
+];
+
+function looksLikeRefusal(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  // Count pattern hits in the first ~600 chars where a refusal would lead.
+  const lead = trimmed.slice(0, 600);
+  const hits = REFUSAL_PATTERNS.filter((re) => re.test(lead)).length;
+  if (hits >= 2) return true;
+  // A single strong refusal at the very start is also enough.
+  return REFUSAL_PATTERNS.slice(0, 3).some((re) => re.test(lead.slice(0, 200)));
+}
+
 function decorateQueryWithScope(opts: IntegrationSearchOpts): string {
   const parts: string[] = [];
   const r = opts.project_resources;
@@ -203,6 +231,17 @@ export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<Int
 
     if (!text.trim()) {
       return { source: "fluffyjaws", hits: [], missing: "Fluffyjaws returned empty response" };
+    }
+
+    if (looksLikeRefusal(text)) {
+      // Drop the refusal entirely — surfacing it as a hit poisons the
+      // ranked top result and the synthesis. Record it as missing with the
+      // actual refusal so the caller can debug if needed.
+      return {
+        source: "fluffyjaws",
+        hits: [],
+        missing: `Fluffyjaws declined to answer: ${truncate(text, 200)}`,
+      };
     }
 
     const hit: ContextSearchHit = {
