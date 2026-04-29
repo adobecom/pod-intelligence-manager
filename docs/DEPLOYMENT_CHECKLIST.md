@@ -19,6 +19,8 @@ functionality typically means: put a value in SSM, restart the instance.
   - `chat:write` — post messages
   - `chat:write.public` — post to channels the bot hasn't been invited to
   - `users:read` — required for `@`-mention resolution lookups
+  - `users:read.email` — [`users.lookupByEmail`](https://api.slack.com/methods/users.lookupByEmail) for org-invite DMs
+  - `im:write` — open a DM with [`conversations.open`](https://api.slack.com/methods/conversations.open) before posting the invite
 - [ ] Install the app to the workspace. Copy the **Bot User OAuth Token**
       (starts with `xoxb-`).
 - [ ] Pick a channel for conflict notifications. Invite the bot
