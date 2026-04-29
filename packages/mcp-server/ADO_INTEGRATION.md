@@ -82,7 +82,7 @@ ADO MCP Server
   ↓ spawns sidecar (bridge mode via mcp-proxy)
 PIM MCP (stdio → HTTP via mcp-proxy on port 3105)
   ↓ fetch
-PIM Fastify Server (default http://localhost:4000)
+PIM Fastify Server (hosted: https://d1ygncl0yqo6sv.cloudfront.net, or http://localhost:4000 for local dev)
 ```
 
 ADO's `SidecarManager` wraps the stdio-based PIM MCP with `mcp-proxy`, which exposes it as an HTTP endpoint. ADO's `ClientRegistry` then connects to it like any other sidecar.
@@ -95,7 +95,7 @@ ADO's `SidecarManager` wraps the stdio-based PIM MCP with `mcp-proxy`, which exp
   pnpm install
   pnpm --filter @pim/mcp-server build
   ```
-- The PIM server must be running for the tools to return data:
+- A PIM server must be reachable. Use the hosted instance at `https://d1ygncl0yqo6sv.cloudfront.net` (no local setup required), or run one locally:
   ```bash
   pnpm --filter @pim/server dev   # port 4000
   ```
@@ -165,7 +165,7 @@ Add this entry to `src/setup/tool-registry.json`:
       "label": "PIM Server URL",
       "type": "url",
       "required": true,
-      "helpText": "URL of the running PIM server (e.g. http://localhost:4000)"
+      "helpText": "URL of the PIM server (hosted: https://d1ygncl0yqo6sv.cloudfront.net; local dev: http://localhost:4000)"
     }
   ],
   "credentialEnvMap": {
@@ -250,7 +250,7 @@ npm run build
 npm start
 ```
 
-When ADO starts, if the user hasn't configured PIM yet, the Setup UI at `http://localhost:3001` will show a "PIM" card with a URL field. The user enters their PIM server URL (e.g. `http://localhost:4000`), the connection tester pings `/api/health`, and on success the credential is encrypted and saved.
+When ADO starts, if the user hasn't configured PIM yet, the Setup UI at `http://localhost:3001` will show a "PIM" card with a URL field. The user enters the PIM server URL — `https://d1ygncl0yqo6sv.cloudfront.net` for the hosted instance, or `http://localhost:4000` for local dev — the connection tester pings `/api/health`, and on success the credential is encrypted and saved.
 
 Once connected, ADO spawns the PIM MCP as a bridge sidecar on port 3105. Claude can then call:
 

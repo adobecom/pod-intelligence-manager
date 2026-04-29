@@ -816,17 +816,17 @@ The following are called on every page load. Profile before optimizing:
 
 export interface HookEntry {
   matcher: string;
-  command: string;
+  hooks: Array<{ type: "command"; command: string }>;
 }
 
 export const EDS_POST_TOOL_HOOKS: HookEntry[] = [
   {
     matcher: "Edit|Write",
-    command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if [[ "$file" == *.js ]]; then npx eslint --fix "$file" 2>/dev/null || true; fi`,
+    hooks: [{ type: "command", command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if [[ "$file" == *.js ]]; then npx eslint --fix "$file" 2>/dev/null || true; fi` }],
   },
   {
     matcher: "Edit|Write",
-    command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if [[ "$file" == *.css ]]; then npx stylelint --fix "$file" 2>/dev/null || true; fi`,
+    hooks: [{ type: "command", command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if [[ "$file" == *.css ]]; then npx stylelint --fix "$file" 2>/dev/null || true; fi` }],
   },
 ];
 
@@ -834,17 +834,17 @@ export const EDS_PRE_TOOL_HOOKS: HookEntry[] = [
   {
     // Warn before editing utils.js (highest blast-radius file)
     matcher: "Edit|Write",
-    command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if echo "$file" | grep -q "libs/utils/utils.js"; then echo "WARNING: utils.js is the most critical file in the repo (2700+ lines, imported everywhere). Search all callers before modifying any function. Run the full test suite (npm test) after changes." >&2; fi`,
+    hooks: [{ type: "command", command: `file=$(cat | jq -r '.tool_input.path // .tool_input.file_path // empty'); if echo "$file" | grep -q "libs/utils/utils.js"; then echo "WARNING: utils.js is the most critical file in the repo (2700+ lines, imported everywhere). Search all callers before modifying any function. Run the full test suite (npm test) after changes." >&2; fi` }],
   },
   {
     // Pre-commit lint gate: block commit if lint fails
     matcher: "Bash",
-    command: `cmd=$(cat | jq -r '.tool_input.command // empty'); if echo "$cmd" | grep -qE "^git commit"; then if ! npm run lint --silent 2>/dev/null; then echo "BLOCKED: Lint failed. Fix lint errors before committing." >&2; exit 2; fi; fi`,
+    hooks: [{ type: "command", command: `cmd=$(cat | jq -r '.tool_input.command // empty'); if echo "$cmd" | grep -qE "^git commit"; then if ! npm run lint --silent 2>/dev/null; then echo "BLOCKED: Lint failed. Fix lint errors before committing." >&2; exit 2; fi; fi` }],
   },
   {
     // Token file protection: prevent Claude from reading ~/.claude-tokens
     matcher: "Read|Grep",
-    command: `path=$(cat | jq -r '.tool_input.file_path // .tool_input.path // empty'); if echo "$path" | grep -q 'claude-tokens'; then echo "BLOCKED: ~/.claude-tokens contains API secrets. To verify a token is set, use: [ -n \"\$TOKEN_VAR\" ] && echo set || echo unset" >&2; exit 2; fi`,
+    hooks: [{ type: "command", command: `path=$(cat | jq -r '.tool_input.file_path // .tool_input.path // empty'); if echo "$path" | grep -q 'claude-tokens'; then echo "BLOCKED: ~/.claude-tokens contains API secrets. To verify a token is set, use: [ -n \"\$TOKEN_VAR\" ] && echo set || echo unset" >&2; exit 2; fi` }],
   },
 ];
 

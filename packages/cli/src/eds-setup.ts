@@ -75,22 +75,30 @@ export function runEdsSetup(root: string, claudeSettingsPath: string): void {
 
   const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
 
-  const postHooks = (hooks.PostToolUse ?? []) as Array<Record<string, string>>;
+  const postHooks = (hooks.PostToolUse ?? []) as Array<Record<string, unknown>>;
   let addedHooks = 0;
   for (const hook of EDS_POST_TOOL_HOOKS) {
-    const alreadyPresent = postHooks.some((h) => h.command === hook.command);
+    const cmd = hook.hooks[0].command;
+    const alreadyPresent = postHooks.some((h) => {
+      const nested = h.hooks as Array<{ command: string }> | undefined;
+      return nested?.[0]?.command === cmd || (h.command as string) === cmd;
+    });
     if (!alreadyPresent) {
-      postHooks.push({ matcher: hook.matcher, command: hook.command });
+      postHooks.push({ matcher: hook.matcher, hooks: hook.hooks });
       addedHooks++;
     }
   }
   hooks.PostToolUse = postHooks;
 
-  const preHooks = (hooks.PreToolUse ?? []) as Array<Record<string, string>>;
+  const preHooks = (hooks.PreToolUse ?? []) as Array<Record<string, unknown>>;
   for (const hook of EDS_PRE_TOOL_HOOKS) {
-    const alreadyPresent = preHooks.some((h) => h.command === hook.command);
+    const cmd = hook.hooks[0].command;
+    const alreadyPresent = preHooks.some((h) => {
+      const nested = h.hooks as Array<{ command: string }> | undefined;
+      return nested?.[0]?.command === cmd || (h.command as string) === cmd;
+    });
     if (!alreadyPresent) {
-      preHooks.push({ matcher: hook.matcher, command: hook.command });
+      preHooks.push({ matcher: hook.matcher, hooks: hook.hooks });
       addedHooks++;
     }
   }

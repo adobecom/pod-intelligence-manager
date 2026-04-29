@@ -61,7 +61,7 @@ function buildPodContext(podId: string): { text: string; keywords: Set<string>; 
 export async function detectOverlaps(): Promise<void> {
   const pods = db.prepare(
     "SELECT pod_id, name, org_id FROM pods WHERE pod_id IN (SELECT pod_id FROM org_pod_summaries)",
-  ).all() as PodRow[];
+  ).all() as unknown as unknown as PodRow[];
 
   if (pods.length < 2) return;
 

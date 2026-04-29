@@ -13,19 +13,26 @@ const TTL_SEC = 7 * 24 * 3600;
 export const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const SLACK_ID_RE = /\bU[A-Z0-9]{8,}\b/;
 
+// Two phrasings that mark a query as person-activity:
+//   "what has <person> been up to / working on / doing / done"
+//   "<person> recent activity / latest work / activity this week"
+const ACTIVITY_VERB_PHRASE_RE =
+  /\bwhat\s+(has|is|have)\s+.+?\s+(been\s+up\s+to|working\s+on|doing|done)\b/i;
+const ACTIVITY_NOUN_PHRASE_RE =
+  /\b(recent|latest|current|today's|this\s+week's?)\s+(activity|work|contributions?|commits?|prs?|tickets?)\b/i;
+
 export interface DetectedTokens {
   email?: string;
   slack_user_id?: string;
   cleaned_query: string;      // query with tokens stripped — useful for text-search fallback
-  is_activity_query: boolean; // "what has X been up to" / "what is Y working on"
+  is_activity_query: boolean; // "what has X been up to" / "X recent activity"
 }
 
 export function detectPersonTokens(query: string): DetectedTokens {
   const email = query.match(EMAIL_RE)?.[0];
   const slack_user_id = query.match(SLACK_ID_RE)?.[0];
-  const is_activity_query = /what\s+(has|is|have)\s+.+?\s+(been\s+up\s+to|working\s+on|doing|done)/i.test(
-    query,
-  );
+  const is_activity_query =
+    ACTIVITY_VERB_PHRASE_RE.test(query) || ACTIVITY_NOUN_PHRASE_RE.test(query);
 
   let cleaned = query;
   if (email) cleaned = cleaned.replace(email, "");
@@ -38,6 +45,35 @@ export function detectPersonTokens(query: string): DetectedTokens {
     cleaned_query: cleaned,
     is_activity_query,
   };
+}
+
+// Strip activity phrasing and the actor's tokens from a query so per-source
+// integrations can rely on authorship filters alone (`from:<@UXXX>`,
+// `assignee = "..."`, `author:<gh_login>`) without anchoring text-match on
+// filler words like "recent" or "activity". Returns the residual subject —
+// often empty for pure activity queries, which is the desired signal.
+export function stripActivityPhrasing(
+  query: string,
+  actor?: { email?: string; slack_user_id?: string; display_name?: string },
+): string {
+  let q = query;
+  if (actor) {
+    for (const tok of [actor.email, actor.slack_user_id, actor.display_name]) {
+      if (tok) q = q.replace(tok, " ");
+    }
+  }
+  q = q
+    .replace(ACTIVITY_VERB_PHRASE_RE, " ")
+    .replace(ACTIVITY_NOUN_PHRASE_RE, " ")
+    .replace(/\b(what|who|when|where|why|how)\b/gi, " ")
+    .replace(/\b(recent|latest|current|today|today's|this\s+week|this\s+sprint)\b/gi, " ")
+    .replace(/\b(activity|activities|work|contributions?|commits?)\b/gi, " ")
+    .replace(/\bbeen\s+up\s+to\b/gi, " ")
+    .replace(/\bworking\s+on\b/gi, " ")
+    .replace(/[?!.]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return q;
 }
 
 function readCache(kind: string, value: string): ContextSearchActor | null {

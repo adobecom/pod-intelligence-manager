@@ -11,6 +11,7 @@ import type {
   InputRequest,
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
+  AdHocLearningInput,
   ContextSearchRequest,
   ContextSearchResult,
 } from "@pim/shared";
@@ -235,6 +236,22 @@ export class PimClient {
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}${projectParam}${queryParam}`),
       this.withHeaders(),
+    );
+  }
+
+  // Submit a confirmed learning to the org knowledge graph from outside any active pod
+  // (bug fixes, chatbot/agent conversations, etc.). The node enters the curation queue.
+  // Returns 409 when a near-duplicate already exists.
+  async submitLearning(
+    input: AdHocLearningInput,
+  ): Promise<{ nodesAdded: number; edgesAdded: number; nodeId: string }> {
+    return fetchJSON<{ nodesAdded: number; edgesAdded: number; nodeId: string }>(
+      this.url("/api/knowledge/nodes"),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
     );
   }
 

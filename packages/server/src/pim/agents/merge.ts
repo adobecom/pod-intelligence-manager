@@ -53,7 +53,7 @@ export async function llmMerge(
 
   const recentUpdates = db.prepare(
     "SELECT agent_id, summary, details, timestamp FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? AND id != ? ORDER BY timestamp DESC LIMIT 5"
-  ).all(update.pod_id, update.scope, update.agent_id, update.id) as RecentUpdateRow[];
+  ).all(update.pod_id, update.scope, update.agent_id, update.id) as unknown as unknown as RecentUpdateRow[];
 
   const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(update.pod_id) as { conflict_pressure: number } | undefined;
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import db from "../db/connection.js";
+import db, { withTransaction } from "../db/connection.js";
 import { ensureOrgConfig } from "./org-settings.js";
 
 export type OrgRole = "owner" | "admin" | "member";
@@ -85,7 +85,7 @@ export function listOrgsForUser(userId: string): OrgWithRole[] {
        WHERE m.user_id = ?
        ORDER BY o.created_at ASC`,
     )
-    .all(userId) as OrgWithRole[];
+    .all(userId) as unknown as OrgWithRole[];
 }
 
 export function listMembers(orgId: string) {
@@ -124,7 +124,7 @@ export function createOrg({ slug, name, creatorUserId, orgId }: CreateOrgInput):
   const id = orgId ?? `org_${randomUUID()}`;
   const now = new Date().toISOString();
 
-  const txn = db.transaction(() => {
+  withTransaction(() => {
     db.prepare(
       "INSERT INTO orgs (org_id, slug, name, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?)",
     ).run(id, slug, name, creatorUserId, now);
@@ -133,7 +133,6 @@ export function createOrg({ slug, name, creatorUserId, orgId }: CreateOrgInput):
     ).run(id, creatorUserId, now);
     ensureOrgConfig(id);
   });
-  txn();
 
   return { org_id: id, slug, name, created_by_user_id: creatorUserId, created_at: now };
 }
@@ -174,7 +173,7 @@ export function listPendingInvitesForOrg(orgId: string): InviteRecord[] {
        WHERE org_id = ? AND accepted_at IS NULL
        ORDER BY created_at ASC`,
     )
-    .all(orgId) as InviteRecord[];
+    .all(orgId) as unknown as InviteRecord[];
 }
 
 export function listPendingInvitesForEmail(email: string): Array<InviteRecord & { org_slug: string; org_name: string }> {
@@ -186,7 +185,7 @@ export function listPendingInvitesForEmail(email: string): Array<InviteRecord & 
        WHERE lower(i.email) = lower(?) AND i.accepted_at IS NULL
        ORDER BY i.created_at ASC`,
     )
-    .all(email) as Array<InviteRecord & { org_slug: string; org_name: string }>;
+    .all(email) as unknown as Array<InviteRecord & { org_slug: string; org_name: string }>;
 }
 
 export function findInviteById(inviteId: string): InviteRecord | null {
@@ -202,14 +201,14 @@ export function createInvite(input: {
   email: string;
   role: Exclude<OrgRole, "owner">;
   invitedByUserId: string;
-}): InviteRecord {
+}): { record: InviteRecord; created: boolean } {
   // Avoid duplicate pending invites for the same email/org.
   const existing = db
     .prepare(
       "SELECT * FROM org_invites WHERE org_id = ? AND lower(email) = lower(?) AND accepted_at IS NULL",
     )
     .get(input.orgId, input.email) as InviteRecord | undefined;
-  if (existing) return existing;
+  if (existing) return { record: existing, created: false };
 
   const id = `inv_${randomUUID()}`;
   const now = new Date().toISOString();
@@ -218,13 +217,16 @@ export function createInvite(input: {
      VALUES (?, ?, ?, ?, ?, ?, NULL)`,
   ).run(id, input.orgId, input.email, input.role, input.invitedByUserId, now);
   return {
-    invite_id: id,
-    org_id: input.orgId,
-    email: input.email,
-    role: input.role,
-    invited_by_user_id: input.invitedByUserId,
-    created_at: now,
-    accepted_at: null,
+    record: {
+      invite_id: id,
+      org_id: input.orgId,
+      email: input.email,
+      role: input.role,
+      invited_by_user_id: input.invitedByUserId,
+      created_at: now,
+      accepted_at: null,
+    },
+    created: true,
   };
 }
 
@@ -237,12 +239,11 @@ export function acceptInvite(inviteId: string, userId: string): MembershipRecord
   const invite = findInviteById(inviteId);
   if (!invite || invite.accepted_at) return null;
   const now = new Date().toISOString();
-  const txn = db.transaction(() => {
+  withTransaction(() => {
     db.prepare(
       "INSERT OR REPLACE INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, ?, COALESCE((SELECT created_at FROM memberships WHERE org_id = ? AND user_id = ?), ?))",
     ).run(invite.org_id, userId, invite.role, invite.org_id, userId, now);
     db.prepare("UPDATE org_invites SET accepted_at = ? WHERE invite_id = ?").run(now, inviteId);
   });
-  txn();
   return getMembership(invite.org_id, userId);
 }

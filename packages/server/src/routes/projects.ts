@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import db from "../db/connection.js";
+import db, { withTransaction } from "../db/connection.js";
 import {
   type ArchivedProject,
   type Project,
@@ -105,7 +105,7 @@ export default async function projectRoutes(app: FastifyInstance) {
       .prepare(
         "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE org_id = ? ORDER BY name",
       )
-      .all(req.org!.org_id) as ProjectRow[];
+      .all(req.org!.org_id) as unknown as ProjectRow[];
     return rows.map(rowToProject);
   });
 
@@ -350,7 +350,7 @@ export default async function projectRoutes(app: FastifyInstance) {
       ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate, orgId);
       db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
     };
-    db.transaction(run)();
+    withTransaction(run);
 
     return rowToArchivedProject({
       project_id: row.project_id,

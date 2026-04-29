@@ -1,5 +1,45 @@
 # Knowledge Graph Efficiency Analysis
 
+> **Note (post PR #27 + archival-only rollback):** The PR #27 features around
+> *incremental / mid-sprint extraction* (`maybeAddPodContextSignalToGraph`,
+> `maybeAddProjectContextSignalToGraph`, immediate `addResolvedConflictToGraph`)
+> were rolled back. They produced double-extraction, an embedding-race that
+> bypassed dedup, and ran full community detection on the request thread for
+> every `decision` / `spec_change` submission. The current model is:
+>
+> - **Pod archival** is the only path that absorbs pod-internal context into
+>   the graph. Blockers are no longer extracted as `anti_pattern`. Decisions
+>   with `details < 30 chars` are filtered. Domains come from the source row's
+>   authoritative `scope`, not keyword inference. Deterministic patterns are
+>   scored by a Haiku **durability classifier** (high/medium/low/junk → 0.85 /
+>   0.7 / 0.5 / 0.3) instead of the previous flat 0.9; resolved conflicts keep
+>   0.9. A per-pod hard ceiling of 20 learnings (sorted by confidence_score
+>   DESC) prevents flood. LLM entries without a `domain` are dropped — no
+>   keyword-bag fallback.
+> - **Ad-hoc submission** (`POST /api/knowledge/nodes`, SDK `submitLearning`,
+>   MCP `submit_knowledge_learning`) is the deliberate door for confirmed
+>   learnings outside any pod (bug fixes, chatbot/agent conversations). Synchronous
+>   embedding + dedup; community detection is **deferred** (request marks the
+>   graph stale; the periodic interval picks it up). Nodes enter the curation
+>   queue.
+> - **Edge building** requires either cosine ≥ 0.2 or keyword overlap ≥ 0.2
+>   — domain overlap alone never qualifies. Threshold 0.35; domain weight 0.15.
+>   Two `["backend"]` nodes with no textual overlap no longer get an edge.
+> - **Auto-pruning** runs daily — uncurated, stale (>180d), low-confidence
+>   (<0.5), non-superseded nodes are removed. For legacy pre-classifier nodes
+>   that already passed 0.9, run `pnpm --filter @pim/server rescore-legacy`
+>   to reclassify them in place via Haiku.
+> - **Community detection** runs at archival and on the periodic
+>   `refreshAnalysisIfStale` interval — not on ad-hoc submissions and not on
+>   every context update.
+>
+> The token-savings and accuracy figures below remain broadly directional, but
+> the rows that implied "incremental extraction grows the denominator during
+> live sprints" or "communities recomputed mid-sprint on every mutation" are
+> historical, not current. The "Highest-ROI fix" recommendations
+> (community-aware retrieval expansion, cross-pod scope-id passing) still
+> stand.
+
 Evaluation of the org knowledge graph's token efficiency and search accuracy,
 reflecting the state after PR #27 (scope-aware queries, incremental extraction,
 semantic query_text support, embedding-based cross-pod detection, and UI

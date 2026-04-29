@@ -42,7 +42,7 @@ export default async function tunnelRoutes(app: FastifyInstance) {
       reply.code(404);
       return [];
     }
-    const rows = db.prepare("SELECT * FROM tunnels WHERE pod_id = ? AND org_id = ?").all(req.params.podId, req.org!.org_id) as TunnelRow[];
+    const rows = db.prepare("SELECT * FROM tunnels WHERE pod_id = ? AND org_id = ?").all(req.params.podId, req.org!.org_id) as unknown as TunnelRow[];
     return rows.map(rowToTunnel);
   });
 
@@ -75,7 +75,7 @@ export default async function tunnelRoutes(app: FastifyInstance) {
       "UPDATE org_pod_summaries SET active_tunnels = (SELECT COUNT(*) FROM tunnels WHERE pod_id = ? AND status = 'active') WHERE pod_id = ?"
     ).run(podId, podId);
 
-    const row = db.prepare("SELECT * FROM tunnels WHERE tunnel_id = ?").get(tunnel_id) as TunnelRow;
+    const row = db.prepare("SELECT * FROM tunnels WHERE tunnel_id = ?").get(tunnel_id) as unknown as TunnelRow;
     const tunnel = rowToTunnel(row);
 
     broadcast({ type: "tunnel_status_changed", podId, payload: tunnel });
@@ -131,7 +131,7 @@ export default async function tunnelRoutes(app: FastifyInstance) {
       "UPDATE org_pod_summaries SET active_tunnels = (SELECT COUNT(*) FROM tunnels WHERE pod_id = ? AND status = 'active') WHERE pod_id = ?"
     ).run(podId, podId);
 
-    const row = db.prepare("SELECT * FROM tunnels WHERE tunnel_id = ?").get(tunnelId) as TunnelRow;
+    const row = db.prepare("SELECT * FROM tunnels WHERE tunnel_id = ?").get(tunnelId) as unknown as TunnelRow;
     const tunnel = rowToTunnel(row);
 
     broadcast({ type: "tunnel_status_changed", podId, payload: tunnel });

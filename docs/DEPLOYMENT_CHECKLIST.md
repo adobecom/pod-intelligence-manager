@@ -19,6 +19,8 @@ functionality typically means: put a value in SSM, restart the instance.
   - `chat:write` — post messages
   - `chat:write.public` — post to channels the bot hasn't been invited to
   - `users:read` — required for `@`-mention resolution lookups
+  - `users:read.email` — [`users.lookupByEmail`](https://api.slack.com/methods/users.lookupByEmail) for org-invite DMs
+  - `im:write` — open a DM with [`conversations.open`](https://api.slack.com/methods/conversations.open) before posting the invite
 - [ ] Install the app to the workspace. Copy the **Bot User OAuth Token**
       (starts with `xoxb-`).
 - [ ] Pick a channel for conflict notifications. Invite the bot
@@ -71,7 +73,7 @@ CloudFront distribution URL (or a branded domain, see §2d).
 # Use the CloudFront URL output by the CDK stack
 aws ssm put-parameter --name /pim/TUNNEL_BASE_URL \
   --type String \
-  --value "https://dXXXXXXXXXX.cloudfront.net" --overwrite
+  --value "https://d1ygncl0yqo6sv.cloudfront.net" --overwrite
 ```
 
 Restart the instance (see §1c).
@@ -79,7 +81,7 @@ Restart the instance (see §1c).
 ### 2b. Confirm CloudFront routing
 The stack already forwards `/tunnel/*` to the ALB. Verify:
 ```sh
-curl -I https://dXXXXXXXXXX.cloudfront.net/tunnel/does-not-exist/token
+curl -I https://d1ygncl0yqo6sv.cloudfront.net/tunnel/does-not-exist/token
 # Expect: 401 Unauthorized (tunnel-proxy handler rejects bad token)
 # NOT:    403 or a 404 HTML page from S3 (which would mean CloudFront routed to UI)
 ```

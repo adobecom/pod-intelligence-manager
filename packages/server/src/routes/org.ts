@@ -71,7 +71,7 @@ export default async function orgRoutes(app: FastifyInstance) {
        FROM org_pod_summaries s
        LEFT JOIN pods p ON p.pod_id = s.pod_id
        WHERE s.org_id = ?`,
-    ).all(req.org!.org_id) as Array<OrgPodSummary & { _sprint_start: string | null; _total_days: number | null }>;
+    ).all(req.org!.org_id) as unknown as Array<OrgPodSummary & { _sprint_start: string | null; _total_days: number | null }>;
     return rows.map((r) => {
       const { _sprint_start, _total_days, ...summary } = r;
       const totalDays = _total_days ?? summary.total_days;
@@ -84,11 +84,11 @@ export default async function orgRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/org/overlaps", async (req) => {
-    return db.prepare("SELECT * FROM cross_pod_overlaps WHERE org_id = ?").all(req.org!.org_id) as CrossPodOverlap[];
+    return db.prepare("SELECT * FROM cross_pod_overlaps WHERE org_id = ?").all(req.org!.org_id) as unknown as CrossPodOverlap[];
   });
 
   app.get("/api/org/archived", async (req) => {
-    return db.prepare("SELECT * FROM archived_pods WHERE org_id = ?").all(req.org!.org_id) as ArchivedPod[];
+    return db.prepare("SELECT * FROM archived_pods WHERE org_id = ?").all(req.org!.org_id) as unknown as ArchivedPod[];
   });
 
   app.get("/api/org/archived-projects", async (req) => {
@@ -137,7 +137,7 @@ export default async function orgRoutes(app: FastifyInstance) {
     // Remove from org_pod_summaries
     db.prepare("DELETE FROM org_pod_summaries WHERE pod_id = ?").run(podId);
 
-    const archived = db.prepare("SELECT * FROM archived_pods WHERE pod_id = ?").get(podId) as ArchivedPod;
+    const archived = db.prepare("SELECT * FROM archived_pods WHERE pod_id = ?").get(podId) as unknown as ArchivedPod;
 
     // Extract knowledge and add to the persistent graph
     let learningsExtracted = 0;
@@ -151,7 +151,7 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta, req.org!.org_id);
+        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

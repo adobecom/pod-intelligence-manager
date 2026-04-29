@@ -114,25 +114,34 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
 
     const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
 
-    const postHooks = (hooks.PostToolCall ?? []) as Array<Record<string, string>>;
-    const hasPostHook = postHooks.some((h) => h.command?.includes("claude-code-post-tool"));
+    type HookRecord = Record<string, unknown>;
+    const postHooks = (hooks.PostToolUse ?? hooks.PostToolCall ?? []) as HookRecord[];
+    const hasPostHook = postHooks.some((h) => {
+      const nested = h.hooks as Array<{ command: string }> | undefined;
+      return nested?.[0]?.command?.includes("claude-code-post-tool") || (h.command as string)?.includes("claude-code-post-tool");
+    });
     if (!hasPostHook) {
       postHooks.push({
         matcher: "Bash",
-        command: `node ${JSON.stringify(postToolScript)}`,
+        hooks: [{ type: "command", command: `node ${JSON.stringify(postToolScript)}` }],
       });
     }
-    hooks.PostToolCall = postHooks;
+    hooks.PostToolUse = postHooks;
+    delete hooks.PostToolCall;
 
-    const preHooks = (hooks.PreToolCall ?? []) as Array<Record<string, string>>;
-    const hasPreHook = preHooks.some((h) => h.command?.includes("claude-code-pre-tool"));
+    const preHooks = (hooks.PreToolUse ?? hooks.PreToolCall ?? []) as HookRecord[];
+    const hasPreHook = preHooks.some((h) => {
+      const nested = h.hooks as Array<{ command: string }> | undefined;
+      return nested?.[0]?.command?.includes("claude-code-pre-tool") || (h.command as string)?.includes("claude-code-pre-tool");
+    });
     if (!hasPreHook) {
       preHooks.push({
         matcher: "Bash",
-        command: `node ${JSON.stringify(preToolScript)}`,
+        hooks: [{ type: "command", command: `node ${JSON.stringify(preToolScript)}` }],
       });
     }
-    hooks.PreToolCall = preHooks;
+    hooks.PreToolUse = preHooks;
+    delete hooks.PreToolCall;
 
     settings.hooks = hooks;
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");

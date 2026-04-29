@@ -1,9 +1,14 @@
-// Context search — cross-source query across Slack, Fluffyjaws, Jira,
-// Confluence, GitHub, and local git. Executed server-side by
-// /api/context-search; surfaced via the context_search MCP tool,
-// PimClient.searchContext, and the `pim search` CLI.
+// Context search — cross-source query across the org knowledge graph,
+// Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Executed
+// server-side by /api/context-search; surfaced via the context_search MCP
+// tool, PimClient.searchContext, and the `pim search` CLI.
+//
+// "kg" (knowledge graph) is the org's persistent learning memory and is
+// the first source of truth: every fan-out queries it before reaching out
+// to external systems, and its hits rank above all other sources.
 
 export type ContextSource =
+  | "kg"
   | "slack"
   | "fluffyjaws"
   | "jira"
@@ -12,6 +17,7 @@ export type ContextSource =
   | "git";
 
 export const CONTEXT_SOURCES: ContextSource[] = [
+  "kg",
   "slack",
   "fluffyjaws",
   "jira",

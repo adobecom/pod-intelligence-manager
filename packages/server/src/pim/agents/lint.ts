@@ -99,15 +99,15 @@ function collectDeterministicLintFindings(podId: string, timestamp: string, lint
 
   const areas = db.prepare(
     "SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?",
-  ).all(podId) as AreaRow[];
+  ).all(podId) as unknown as unknown as AreaRow[];
 
   const recentUpdates = db.prepare(
     "SELECT agent_id, scope, timestamp, summary FROM context_updates WHERE pod_id = ? ORDER BY timestamp DESC",
-  ).all(podId) as UpdateRow[];
+  ).all(podId) as unknown as UpdateRow[];
 
   const openConflicts = db.prepare(
     "SELECT id, created_at, severity, summary, sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
-  ).all(podId) as ConflictRow[];
+  ).all(podId) as unknown as unknown as ConflictRow[];
 
   for (const area of areas) {
     if (area.status === "done" || area.status === "waiting") continue;
@@ -286,12 +286,12 @@ function buildLintLLMContext(podId: string, deterministicSummary: string, lintTu
 
   const areas = db.prepare(
     "SELECT scope, owner, status, last_activity FROM pod_areas WHERE pod_id = ?",
-  ).all(podId) as AreaRow[];
+  ).all(podId) as unknown as unknown as AreaRow[];
 
   const updates = db.prepare(
     `SELECT agent_id, scope, timestamp, type, summary, details FROM context_updates
      WHERE pod_id = ? ORDER BY timestamp DESC LIMIT 30`,
-  ).all(podId) as UpdateRowWithDetails[];
+  ).all(podId) as unknown as UpdateRowWithDetails[];
 
   const livingDocRow = db.prepare("SELECT markdown FROM living_docs WHERE pod_id = ?").get(podId) as
     | { markdown: string }

@@ -18,6 +18,7 @@ import {
   type OrgRole,
 } from "../services/orgs.js";
 import { canInvite, canRemoveMember, canUpdateMemberRole } from "../services/org-permissions.js";
+import { notifyOrgInviteDM } from "../services/slack.js";
 
 const CreateOrgSchema = z.object({
   slug: z.string().min(2).max(40),
@@ -207,12 +208,22 @@ export default async function orgsRoutes(app: FastifyInstance) {
         reply.code(403);
         return { error: "Only admins and owners can invite members" };
       }
-      const invite = createInvite({
+      const { record: invite, created } = createInvite({
         orgId: resolved.org.org_id,
         email: req.body.email,
         role: req.body.role,
         invitedByUserId: req.userRecord.user_id,
       });
+      if (created) {
+        const inviterLabel = req.userRecord.display_name?.trim() || req.userRecord.email;
+        notifyOrgInviteDM({
+          inviteeEmail: invite.email,
+          inviteId: invite.invite_id,
+          orgName: resolved.org.name,
+          role: invite.role,
+          inviterLabel,
+        });
+      }
       return invite;
     },
   );

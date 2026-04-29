@@ -23,7 +23,7 @@ export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classi
   // 1. Check if this update's scope overlaps with any open conflict
   const openConflicts = db.prepare(
     "SELECT sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'"
-  ).all(podId) as ConflictScopeRow[];
+  ).all(podId) as unknown as ConflictScopeRow[];
 
   for (const conflict of openConflicts) {
     const sides = JSON.parse(conflict.sides_json) as Array<{ contributor: string }>;

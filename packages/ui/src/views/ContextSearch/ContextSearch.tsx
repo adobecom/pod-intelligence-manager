@@ -58,6 +58,7 @@ const loadingContainer = style({
 });
 
 const SOURCE_LABELS: Record<ContextSource, string> = {
+  kg: "Knowledge Graph",
   slack: "Slack",
   fluffyjaws: "Fluffyjaws",
   jira: "Jira",

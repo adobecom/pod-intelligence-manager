@@ -5,7 +5,6 @@ import { scanForSecrets } from "./secret-scan.js";
 import { scoreProjectUpdate } from "./quality-scoring.js";
 import { broadcastToAll } from "../ws/index.js";
 import type { ProjectContextUpdate } from "@pim/shared";
-import { maybeAddProjectContextSignalToGraph } from "./knowledge-graph.js";
 import { scheduleProjectGitHookEnrichment } from "./git-hook-enrichment.js";
 import type { PimResult } from "../pim/master.js";
 
@@ -104,15 +103,6 @@ export async function ingestProjectContextUpdate(
     update.source ?? "manual",
     commitSha,
     project.org_id,
-  );
-
-  maybeAddProjectContextSignalToGraph(
-    project.project_id,
-    project.name,
-    data.type,
-    data.summary,
-    data.details,
-    data.scope,
   );
 
   broadcastToAll({
