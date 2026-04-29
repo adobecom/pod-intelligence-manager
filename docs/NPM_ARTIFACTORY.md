@@ -24,8 +24,9 @@ Root **`.npmrc`** in git sets **`@pim:registry=…`** only (no secrets). **`ado-
    @pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
    //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:_authToken=<token>
    //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:email=you@adobe.com
-   //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:always-auth=true
    ```
+
+   Omit **`//.../:always-auth`** — Artifactory’s “Set me up” snippet often includes it, but **npm 11+** treats per-registry **`always-auth`** as an unknown key and will drop it in a future major. A **`_authToken`** for that host is enough for Artifactory in practice.
 
 3. Verify:
 

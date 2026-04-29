@@ -10,7 +10,7 @@
 # @<SCOPE>:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
 # //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:_authToken=<token>
 # //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:email=you@adobe.com
-# //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:always-auth=true
+# (omit //.../:always-auth — npm 11+ warns it is unsupported in that form; _authToken is enough.)
 #
 # Or use: npm login --registry=... --auth-type=web --scope=@pim
 #
