@@ -69,7 +69,7 @@ Key exports: `Pod`, `Conflict`, `ContextUpdate`, `Tunnel`, `OrgPodSummary`, `Cro
 
 ### `@pim/server`
 
-Fastify server running on `localhost:4000`. Uses SQLite (via `better-sqlite3`) for storage and WebSocket for real-time events.
+Fastify server running on `localhost:4000`. Uses SQLite via Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) (`DatabaseSync`) for storage and WebSocket for real-time events.
 
 **API endpoints:**
 
@@ -445,7 +445,7 @@ Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day 
 |---------|--------|
 | Monorepo | Turborepo + pnpm workspaces |
 | Backend | Fastify 5 |
-| Database | SQLite (better-sqlite3, WAL mode) |
+| Database | SQLite (`node:sqlite` / `DatabaseSync`, WAL mode) |
 | AI/LLM | Anthropic Claude API (Haiku + Sonnet) |
 | Validation | Zod |
 | Frontend | React 19 + Vite 6 |

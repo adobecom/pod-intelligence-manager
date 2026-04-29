@@ -11,7 +11,7 @@ FROM --platform=linux/amd64 node:22-alpine AS build
 
 WORKDIR /repo
 
-# better-sqlite3 native compile deps
+# Build toolchain for pnpm (optional native deps). The server uses Node.js built-in SQLite (`node:sqlite`).
 RUN apk add --no-cache python3 make g++ libc6-compat
 
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
