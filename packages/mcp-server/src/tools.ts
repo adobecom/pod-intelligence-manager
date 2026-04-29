@@ -383,7 +383,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_project_context_update",
-    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full PIM orchestrator. High-signal types (decision, spec_change) may be added to the knowledge graph.",
+    "Submit a context update to a project (no active pod / between sprints). Same fields as pod updates; stored in project memory and does not run the full PIM orchestrator. To add a confirmed learning to the org knowledge graph, use `submit_knowledge_learning` instead.",
     {
       project_id: ProjectId,
       agent_id: z.string().describe("ID of the submitting agent or human"),
@@ -536,13 +536,13 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "context_search",
-    "Search Adobe-internal context across Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
+    "Search Adobe-internal context across the org knowledge graph (always queried first), Slack, Fluffyjaws, Jira, Confluence, GitHub, and local git. Returns a synthesized markdown summary with citations plus raw hits for drill-down. Use any time you need background on a topic — at session start, mid-debug, before writing a PR, or to resolve 'has anyone discussed X?' questions. Pod-agnostic: works with or without pod_id. Any source with missing credentials is silently skipped and reported in missing_sources.",
     {
       query: z.string().describe("Natural-language query or keywords"),
       sources: z
-        .array(z.enum(["slack", "fluffyjaws", "jira", "confluence", "github", "git"]))
+        .array(z.enum(["kg", "slack", "fluffyjaws", "jira", "confluence", "github", "git"]))
         .optional()
-        .describe("Restrict to a subset of sources. Default: all configured."),
+        .describe("Restrict to a subset of sources. Default: all configured. 'kg' is the org knowledge graph and is the first source of truth."),
       pod_id: z
         .string()
         .optional()
@@ -587,6 +587,45 @@ export function registerTools(server: McpServer) {
         action,
         edits,
       });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "submit_knowledge_learning",
+    "Add a confirmed learning to the org knowledge graph from outside any active pod. Use this for ad-hoc bug fixes, chatbot/agent conversations, or anything an operator deems worth keeping. Submitted nodes enter the curation queue (not auto-trusted) and are deduplicated synchronously against existing nodes by embedding similarity. Returns 409 if a near-duplicate already exists. Pod-internal decisions are extracted automatically at pod archival — do not use this tool for those.",
+    {
+      type: z
+        .enum(["decision", "pattern", "anti_pattern", "resolved_conflict", "scope_insight"])
+        .describe("Node type. Most ad-hoc submissions are `pattern` or `anti_pattern`."),
+      summary: z
+        .string()
+        .min(10)
+        .max(500)
+        .describe("One-line statement of the learning (≥10 chars)."),
+      details: z
+        .string()
+        .min(30)
+        .describe("Why it matters and when it applies — at least 2-3 sentences (≥30 chars)."),
+      domains: z
+        .array(z.string().min(1))
+        .min(1)
+        .describe("Scope tags such as 'frontend', 'backend', 'infra', or a project-specific label. At least one required."),
+      source_label: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe("Free-text label describing where this learning came from (e.g. 'bug-fix-PR-1234', 'chatbot-session-abc'). Becomes the node's source name for traceability."),
+      confidence_score: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Defaults to 0.7. Use lower values for tentative learnings; humans can curate later."),
+    },
+    async (input) => {
+      const result = await apiPost("/api/knowledge/nodes", input);
       return json(result);
     },
   );

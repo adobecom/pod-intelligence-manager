@@ -5,6 +5,7 @@ import { searchContext } from "../services/context-search.js";
 import { validateBody } from "../middleware/validation.js";
 
 const ContextSourceSchema = z.enum([
+  "kg",
   "slack",
   "fluffyjaws",
   "jira",

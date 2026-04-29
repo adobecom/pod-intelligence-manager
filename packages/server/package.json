@@ -8,7 +8,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts"
   },
   "dependencies": {
     "@pim/shared": "workspace:*",

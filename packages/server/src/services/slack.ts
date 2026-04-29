@@ -5,24 +5,30 @@ import { EMAIL_RE } from "./identity-resolver.js";
 
 // ── Configuration ──────────────────────────────────────────────────
 // Env vars:
-//   SLACK_BOT_TOKEN   – xoxb-... token from a Slack app with chat:write scope
-//   SLACK_CHANNEL_ID  – default channel for all notifications
+//   SLACK_BOT_TOKEN   – xoxb-... token from a Slack app (see docs/DEPLOYMENT_CHECKLIST.md)
+//   SLACK_CHANNEL_ID  – default channel for conflict / pressure channel notifications
 //
-// Both are required. If either is missing the service silently no-ops
-// so the server works fine without Slack configured.
+// Channel posts require both token and channel id. Org-invite DMs only need
+// the bot token (users.lookupByEmail + conversations.open + chat.postMessage).
 
 const token = process.env.SLACK_BOT_TOKEN;
 const defaultChannel = process.env.SLACK_CHANNEL_ID;
 
 const slack = token ? new WebClient(token) : null;
 
-function isEnabled(): boolean {
+/** Channel notifications (conflicts, pressure, backlog) — needs token + channel. */
+function isChannelNotificationsEnabled(): boolean {
   return slack !== null && !!defaultChannel;
+}
+
+/** Bot-only features (e.g. org-invite DMs) — needs token only. */
+export function isBotAvailable(): boolean {
+  return slack !== null;
 }
 
 // Fire-and-forget — never block the pipeline on Slack delivery
 function send(fn: () => Promise<unknown>): void {
-  if (!isEnabled()) return;
+  if (!isChannelNotificationsEnabled()) return;
   fn().catch((err) => {
     console.error("[slack] Failed to send message:", err?.message ?? err);
   });
@@ -32,7 +38,7 @@ function send(fn: () => Promise<unknown>): void {
 // thread follow-up notifications). Returns undefined when Slack is disabled
 // or the post fails — callers should treat it as best-effort.
 async function sendAndGetTs(fn: () => Promise<{ ts?: string } | undefined>): Promise<string | undefined> {
-  if (!isEnabled()) return undefined;
+  if (!isChannelNotificationsEnabled()) return undefined;
   try {
     const res = await fn();
     return res?.ts;
@@ -314,6 +320,63 @@ export function notifyQueueBacklog(podId: string, queueSize: number): void {
               text: { type: "plain_text", text: "View Conflicts" },
               url: `${UI_BASE}/pod/${podId}/conflicts`,
               style: "danger",
+            },
+          ],
+        },
+      ],
+    });
+  });
+}
+
+function sendDm(fn: () => Promise<unknown>): void {
+  if (!isBotAvailable()) return;
+  fn().catch((err) => {
+    console.error("[slack] Failed to send DM:", (err as Error)?.message ?? err);
+  });
+}
+
+export interface OrgInviteDmParams {
+  inviteeEmail: string;
+  inviteId: string;
+  orgName: string;
+  /** Display label e.g. `admin` or `member` */
+  role: string;
+  inviterLabel: string;
+}
+
+/** Best-effort DM with accept link; no-ops if bot token missing or Slack errors. */
+export function notifyOrgInviteDM(params: OrgInviteDmParams): void {
+  sendDm(async () => {
+    const lookup = await slack!.users.lookupByEmail({ email: params.inviteeEmail });
+    if (!lookup.ok || !lookup.user?.id) {
+      if (!lookup.ok) console.error("[slack] lookupByEmail:", lookup.error ?? "unknown");
+      return;
+    }
+    const opened = await slack!.conversations.open({ users: lookup.user.id });
+    if (!opened.ok || !opened.channel?.id) {
+      console.error("[slack] conversations.open:", opened.error ?? "unknown");
+      return;
+    }
+    const acceptUrl = `${UI_BASE}/accept/${params.inviteId}`;
+    const roleNice = params.role === "admin" ? "admin" : "member";
+    await slack!.chat.postMessage({
+      channel: opened.channel.id,
+      text: `You've been invited to join *${params.orgName}* on PIM (${roleNice})`,
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `:incoming_envelope: *Organization invite — PIM*\n\n*${params.inviterLabel}* invited you to join *${params.orgName}* as *${roleNice}*.`,
+          },
+        },
+        {
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              text: { type: "plain_text", text: "Accept invite" },
+              url: acceptUrl,
             },
           ],
         },

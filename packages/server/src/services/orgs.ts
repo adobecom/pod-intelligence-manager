@@ -201,14 +201,14 @@ export function createInvite(input: {
   email: string;
   role: Exclude<OrgRole, "owner">;
   invitedByUserId: string;
-}): InviteRecord {
+}): { record: InviteRecord; created: boolean } {
   // Avoid duplicate pending invites for the same email/org.
   const existing = db
     .prepare(
       "SELECT * FROM org_invites WHERE org_id = ? AND lower(email) = lower(?) AND accepted_at IS NULL",
     )
     .get(input.orgId, input.email) as InviteRecord | undefined;
-  if (existing) return existing;
+  if (existing) return { record: existing, created: false };
 
   const id = `inv_${randomUUID()}`;
   const now = new Date().toISOString();
@@ -217,13 +217,16 @@ export function createInvite(input: {
      VALUES (?, ?, ?, ?, ?, ?, NULL)`,
   ).run(id, input.orgId, input.email, input.role, input.invitedByUserId, now);
   return {
-    invite_id: id,
-    org_id: input.orgId,
-    email: input.email,
-    role: input.role,
-    invited_by_user_id: input.invitedByUserId,
-    created_at: now,
-    accepted_at: null,
+    record: {
+      invite_id: id,
+      org_id: input.orgId,
+      email: input.email,
+      role: input.role,
+      invited_by_user_id: input.invitedByUserId,
+      created_at: now,
+      accepted_at: null,
+    },
+    created: true,
   };
 }
 

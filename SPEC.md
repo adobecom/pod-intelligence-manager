@@ -590,7 +590,7 @@ Learnings are stored as a **persistent knowledge graph** — a connected structu
   - **Edges** (types: `relates_to`, `supersedes`, `contradicts`, `builds_on`, `resolved_by`) — computed via keyword overlap + type-specific rules, optionally enriched by LLM.
   - **Communities** — clusters of related learnings detected via label propagation algorithm.
   - **Hubs** — high-degree nodes representing key organizational patterns.
-- **Confidence levels** (inspired by graphify): `extracted` = deterministic from DB data (0.9 confidence), `inferred` = LLM-generated insights (0.4–0.85 depending on model confidence).
+- **Confidence levels** (inspired by graphify): `extracted` = deterministic from DB data, scored by a Haiku **durability classifier** at archival (high/medium/low/junk → 0.85/0.7/0.5/0.3; resolved conflicts always 0.9; offline fallback 0.7). `inferred` = LLM-generated insights (0.4–0.85 depending on model confidence). A per-pod ceiling of 20 learnings caps pathological pods.
 
 **How agents query the graph (token-budgeted):**
 

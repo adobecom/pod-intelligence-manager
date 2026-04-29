@@ -1,5 +1,10 @@
 import type { ContextSearchHit } from "@pim/shared";
-import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
+import {
+  type IntegrationResult,
+  type IntegrationSearchOpts,
+  describeFetchError,
+  truncate,
+} from "./types.js";
 
 // Atlassian Confluence REST /content/search with CQL. Supports two flavors:
 //   - Adobe on-prem (wiki.corp.adobe.com): Authorization: Bearer <PAT>.
@@ -83,7 +88,7 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
     return {
       source: "confluence",
       hits: [],
-      missing: `Confluence error: ${(err as Error).message}`,
+      missing: `Confluence error: ${describeFetchError(err, base)}`,
     };
   }
 }

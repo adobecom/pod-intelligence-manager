@@ -36,5 +36,6 @@ Respond with ONLY a JSON array:
 - Only extract learnings that generalize beyond this specific pod
 - Avoid restating implementation details — focus on the decision-level insight
 - Tag domains accurately so the Cross-Pod Agent can surface relevant learnings to new pods
+- **`domain` is mandatory** — every learning must include at least one domain tag drawn from the pod's scopes (frontend|backend|design|qa|infra|pm) or other established team scopes. Entries without a domain are dropped.
 - High confidence = clear cause and effect; medium = likely pattern; low = single data point
-- Aim for 3-8 learnings per pod — quality over quantity
+- Aim for 3-8 learnings per pod — quality over quantity. The server enforces a hard ceiling of 20 learnings per pod (deterministic + LLM combined); excess entries are truncated by confidence_score.

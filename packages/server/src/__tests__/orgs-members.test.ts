@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 
 const { testDb } = vi.hoisted(() => {
@@ -14,13 +14,20 @@ vi.mock("../db/connection.js", () => ({
   withTransaction: (fn: () => unknown) => fn(),
 }));
 
+const { notifyOrgInviteDM } = vi.hoisted(() => ({
+  notifyOrgInviteDM: vi.fn(),
+}));
+
+vi.mock("../services/slack.js", () => ({
+  notifyOrgInviteDM,
+}));
+
 // Knowledge graph has side-effects at import; stub it
 vi.mock("../services/knowledge-graph.js", () => ({
   initializeKnowledgeGraph: vi.fn(),
   refreshAnalysis: vi.fn(),
   getRelevantLearnings: vi.fn().mockReturnValue({ nodes: [], truncated: false, total_matching: 0, token_estimate: 0, edges: [] }),
   getPrecedents: vi.fn().mockReturnValue({ nodes: [] }),
-  maybeAddProjectContextSignalToGraph: vi.fn().mockReturnValue({ added: false }),
 }));
 
 import { createTables } from "../db/schema.js";
@@ -92,6 +99,10 @@ async function call(
   });
 }
 
+beforeEach(() => {
+  notifyOrgInviteDM.mockClear();
+});
+
 describe("Org members + invites", () => {
   let inviteId = "";
 
@@ -105,6 +116,16 @@ describe("Org members + invites", () => {
     expect(body.email).toBe("newbie@example.com");
     expect(body.role).toBe("member");
     inviteId = body.invite_id;
+    expect(notifyOrgInviteDM).toHaveBeenCalledTimes(1);
+    expect(notifyOrgInviteDM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inviteeEmail: "newbie@example.com",
+        orgName: "Acme",
+        role: "member",
+        inviteId: body.invite_id,
+        inviterLabel: "Owner",
+      }),
+    );
   });
 
   it("non-member cannot list members", async () => {
@@ -230,5 +251,6 @@ describe("Org members + invites", () => {
       })
     ).json();
     expect(second.invite_id).toBe(first.invite_id);
+    expect(notifyOrgInviteDM).toHaveBeenCalledTimes(1);
   });
 });

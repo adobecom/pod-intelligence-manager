@@ -110,6 +110,11 @@ export interface KnowledgeQueryOptions {
    * `query_embedding` is supplied.
    */
   query_text?: string;
+  /**
+   * When true, each returned node includes the stored `embedding` vector (large).
+   * Default false — embeddings are for server-side scoring only; omit them for token-efficient agent/API responses.
+   */
+  include_embeddings?: boolean;
 }
 
 export interface KnowledgeQueryResult {
@@ -150,4 +155,22 @@ export type CurationAction = "approve" | "reject" | "edit";
 export interface CurationRequest {
   action: CurationAction;
   edits?: Partial<Pick<KnowledgeNode, "summary" | "details" | "domains">>;
+}
+
+// --- Ad-Hoc Submission ---
+
+/**
+ * Input for the explicit ad-hoc learning submission API. Use this for confirmed
+ * learnings outside an active pod (bug fixes, chatbot/agent conversations, etc.).
+ * Submitted nodes enter the curation queue (`curated: false`).
+ */
+export interface AdHocLearningInput {
+  type: KnowledgeNodeType;
+  summary: string;
+  details: string;
+  domains: string[];
+  /** Free-text label that becomes `source_pod_name` for traceability (e.g., chatbot/session id). */
+  source_label?: string;
+  /** Defaults to 0.7 server-side. */
+  confidence_score?: number;
 }
