@@ -38,6 +38,7 @@ const KnowledgeQuerySchema = z.object({
   limit: z.number().int().positive().optional(),
   query_embedding: z.array(z.number()).nullable().optional(),
   query_text: z.string().min(1).optional(),
+  include_embeddings: z.boolean().optional(),
 });
 
 const CurationSchema = z.object({
