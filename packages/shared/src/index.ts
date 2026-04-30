@@ -62,6 +62,8 @@ export {
 export type {
   KnowledgeNodeType,
   ConfidenceLevel,
+  KnowledgeIngestionProvenanceKind,
+  KnowledgeIngestionProvenance,
   KnowledgeNode,
   KnowledgeEdgeType,
   KnowledgeEdge,
