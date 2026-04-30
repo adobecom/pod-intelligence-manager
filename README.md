@@ -51,7 +51,7 @@ pim/
 │   ├── sdk/             # @pim/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
 │   ├── cli/             # pim CLI — pods, context, hooks, tunnel, init, leave
-│   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
+├── infra/           # AWS CDK — **deployed:** `PimEc2Stack` (EC2 + SQLite + ALB + CloudFront); **reference:** `pim-stack.ts` (Lambda + DynamoDB — not wired)
 ├── prompts/             # Version-controlled LLM system prompts
 ├── SPEC.md              # Full system specification
 ├── CLAUDE.md            # Guidance for Claude Code
@@ -394,6 +394,8 @@ pnpm --filter @pim/ui typecheck
 
 ## Architecture
 
+**Deployed vs future AWS layout:** See **[docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md)** — the hosted product uses **Fastify + SQLite + optional KG S3 mirror** on **EC2**; SPEC describes the **target** serverless + DynamoDB design.
+
 ### Context Update Flow
 
 ```
@@ -488,4 +490,4 @@ This is a lightweight “production readiness” checklist that used to live in 
 
 - **Expanded unit/integration tests** — Includes ingestion, pressure, classification, merge/conflict/summary agents, and Fastify `inject()` integration tests.
 - **SDK + CLI tests** — vitest coverage for client methods + command registration.
-- **CDK stack** — present in `packages/infra/lib/pim-stack.ts` (see note above about production deployment/ops).
+- **CDK stacks** — **`PimEc2Stack`** (`packages/infra`) is the deployable MVP (see **docs/DEPLOY.md**). **`pim-stack.ts`** (Lambda + DynamoDB) exists as a reference for the target architecture — see **docs/ARCHITECTURE_CURRENT_VS_TARGET.md**.

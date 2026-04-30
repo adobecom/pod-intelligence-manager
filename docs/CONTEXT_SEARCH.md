@@ -208,7 +208,7 @@ await client.pullSessionContext({ externalQuery: "checkout" });
 
 ## Security
 
-Three checkpoints analogous to the ingestion Lambda's three-checkpoint secret model (SPEC §5.4):
+Three checkpoints analogous to the ingestion pipeline's secret-scan model (SPEC §5.4):
 
 1. **Post-fetch redaction** — every hit's `title` and `snippet` passes through `redactSecrets()` in `packages/server/src/services/secret-scan.ts`. AWS keys, JWTs, connection strings, PEM keys, and `password|token|api_key = "…"` patterns are replaced with `[REDACTED:Name]`.
 2. **Synthesis prompt guardrail** — the Haiku system prompt explicitly instructs the model to summarize the presence of a secret without quoting the value.

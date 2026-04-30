@@ -1,12 +1,23 @@
 # PIM System — Living Doc
 
-> **Status:** v1 Spec Complete — Ready for Implementation Planning
-> **Last Updated:** 2026-04-03
+> **Status:** v1 Spec complete — normative product design + **target** AWS architecture
+> **Last Updated:** 2026-04-29
 > **Pod Lifecycle:** 5-day sprints (3-4 days dev, 1-2 days QA/polish)
-> **Infrastructure:** AWS-only
+> **Infrastructure (target):** AWS-only (Lambda + DynamoDB + API Gateway — see below)
+> **Infrastructure (shipped):** EC2 + SQLite + Fastify — see [docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md)
 > **Auth:** Adobe IMS
 > **Design System:** Adobe Spectrum 2
 > **Context:** Adobe internal tool — stack decisions are recommendations that yield to org-level mandates
+
+---
+
+## Implementation status (read before infra diagrams)
+
+**This document** defines correct **behavior** (context updates, living doc rules, committee roles, knowledge-graph semantics) and the **long-term platform shape** (serverless data plane, DynamoDB, S3 artifacts).
+
+**The running product** today follows **Path A** in [docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md): a **single Fastify server** on **EC2**, **SQLite** for structured state, **in-process** committee agents, living doc markdown stored in SQLite and regenerated on demand, and a **filesystem + optional S3 mirror** for the knowledge graph.
+
+Unless a subsection explicitly says **“shipped”** or **“current implementation,”** diagrams and AWS service lists describe the **target** architecture, not the deployed CDK stack (`PimEc2Stack`).
 
 ---
 
@@ -51,7 +62,9 @@ Dev's localhost:3000
   ──► Proxied back to dev's localhost in real time
 ```
 
-**AWS Services Used:**
+**Shipped today:** The tunnel prototype uses the **Fastify** server and **SQLite** (`tunnels` table) for registration — not API Gateway + DynamoDB as in the list below. **Target:** the AWS layout in the next subsection.
+
+**AWS Services Used (target):**
 - **API Gateway (WebSocket API)** — Persistent connection endpoint. Each tunnel is a WebSocket session.
 - **Lambda** — Connection broker that maps incoming HTTP requests to the correct dev tunnel session.
 - **Route 53** — Stable subdomain routing: `{pod}-{dev}.pim.yourdomain.com`
@@ -86,10 +99,10 @@ Starting a tunnel should be one command:
 npx pim tunnel start --pod checkout-redesign --port 3000
 ```
 
-The CLI:
+The CLI (**target flow**):
 1. Authenticates via Adobe IMS (cached token, or prompts browser-based login on first run).
-2. Registers the tunnel in DynamoDB with pod ID, dev identity, branch name.
-3. Opens outbound WebSocket to API Gateway (works behind NAT/firewalls, no port forwarding).
+2. Registers the tunnel (**target:** DynamoDB; **shipped:** SQLite `tunnels` table) with pod ID, dev identity, branch name.
+3. Opens outbound WebSocket (**target:** API Gateway; **shipped:** Fastify server) (works behind NAT/firewalls, no port forwarding).
 4. Prints the live URL.
 5. PIM orchestrator is automatically notified → logs "tunnel active" in the living doc context stream.
 
@@ -187,7 +200,7 @@ context_update:
 
 ### 3.4 Living Doc Structure
 
-The living doc is a **read-only output** assembled from DynamoDB state by the Summary Agent. No one edits it directly — humans and agents alike contribute by talking to PIM (submitting context updates), and the doc reflects the current state.
+The living doc is a **read-only output** assembled from **structured state** by the Summary Agent (**target:** DynamoDB; **shipped:** SQLite). No one edits it directly — humans and agents alike contribute by talking to PIM (submitting context updates), and the doc reflects the current state.
 
 ```
 # Pod: Checkout Redesign — Living Doc
@@ -583,8 +596,9 @@ knowledge_extraction:
 
 Learnings are stored as a **persistent knowledge graph** — a connected structure of nodes (learnings) and edges (semantic relationships). This graph is the org's accumulated intelligence, queryable by agents with token budgets to minimize context window bloat.
 
-- **Storage layer (production target):** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries (GSIs on domain, type, confidence, source pod). The graph is loaded into memory on server start for fast traversal.
-- **Storage layer (local dev):** Filesystem at `.data/knowledge-graph/{org_id}/graph-latest.json` with versioned snapshots. The interface is designed so swapping to S3 requires re-implementing 3 functions.
+- **Storage layer (production target):** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries (GSIs on domain, type, confidence, source pod) so queries do not require loading the entire graph on every instance.
+- **Storage layer (shipped — Path A):** Filesystem JSON under `KG_DATA_DIR` (e.g. `.data/knowledge-graph/{org_id}/` locally, `/data/knowledge-graph/` in Docker). **Disk is authoritative at runtime**; the server loads the graph into memory on startup. If **`KG_S3_BUCKET`** is set, each save is **mirrored** to S3 and **restore from S3** runs when local files are absent — this is **not** the same as DynamoDB-indexed storage; see `packages/server/src/services/graph-storage.ts`.
+- **Storage layer (local dev):** Same filesystem layout as Path A; optional `KG_S3_BUCKET` for parity with hosted durability tests.
 - **Graph structure:**
   - **Nodes** (types: `decision`, `pattern`, `anti_pattern`, `resolved_conflict`, `scope_insight`) — each tagged by domain, confidence level (`extracted` from DB vs `inferred` by LLM), and source pod.
   - **Edges** (types: `relates_to`, `supersedes`, `contradicts`, `builds_on`, `resolved_by`) — computed via keyword overlap + type-specific rules, optionally enriched by LLM.
@@ -627,10 +641,11 @@ The Knowledge Graph UI (`/knowledge` route in the PIM UI) lets humans inspect, a
 
 ### 3.12 Key Design Decisions (Resolved)
 
-- **Storage:** S3 for the living doc files (versioned bucket), DynamoDB for all structured state — conflict records, tunnel registry, pod metadata, context index, org registry. DynamoDB is the right choice because PIM agents need fast, structured reads/writes constantly (conflict lookups, pressure calculations, cross-pod registry scans). S3 is for the rendered `.md` artifact that humans read. The living doc is *assembled* from DynamoDB state, not the other way around.
+- **Storage (target architecture):** S3 for the living doc files (versioned bucket), DynamoDB for all structured state — conflict records, tunnel registry, pod metadata, context index, org registry. DynamoDB fits constant structured reads/writes (conflict lookups, pressure calculations, cross-pod registry scans). S3 holds the rendered `.md` artifact that humans read. The living doc is *assembled* from DynamoDB state, not the other way around.
+- **Storage (shipped implementation):** SQLite holds pods, context updates, conflicts, tunnels, org metadata, and the **`living_docs`** markdown rows; regeneration runs **in-process** on the Fastify server. **Target** adds splitting ingestion/orchestration across Lambdas and persisting the same logical state to DynamoDB + S3 — see [docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md).
 - **Conflict resolution:** Semantic merge handled by the Merge Agent (committee member). Before any merge that touches a previously contested area, the resolution is presented to the human who resolved the conflict for a quick confirmation: "You decided strikethrough. This merge applies that decision to CartSummary.tsx. Confirm?" One-click approval.
 - **Context window:** Full doc for now. Agents fetch the entire living doc when requesting context. As docs grow, we can scope by role/area later — but for 5-day pods the doc won't get unmanageably large.
-- **Retention:** Manual for now. The org dashboard includes a pod management view where admins can archive completed pods. Archived pods move the living doc to S3 (cheaper tier) and tombstone the DynamoDB records. No automatic lifecycle policies yet.
+- **Retention:** Manual for now. The org dashboard includes a pod management view where admins can archive completed pods. **Target:** archived living docs in colder S3 and tombstoned DynamoDB rows. **Shipped:** archival updates SQLite and feeds knowledge extraction; no automatic lifecycle policies yet.
 - **Multi-pod:** Yes — supported via the org-level context registry and Cross-Pod Agent (see 3.9). Read-only cross-pollination, advisory not blocking.
 
 ---
@@ -656,11 +671,14 @@ The Knowledge Graph UI (`/knowledge` route in the PIM UI) lets humans inspect, a
 - **AI agents** contribute via the SDK/API — they post structured context updates after each work unit.
 - **PIM orchestrator** is the single merge authority — it treats human and agent inputs identically.
 
-**The living doc is read-only.** No one — human or agent — edits the `.md` directly. The canonical living doc is an output assembled from DynamoDB state by the Summary Agent. If you want to change something in the doc, you talk to PIM: submit a context update, a spec change request, or a conflict resolution. The Master processes it and the doc reflects the new state.
+**The living doc is read-only.** No one — human or agent — edits the `.md` directly. The canonical living doc is an output assembled from **current structured state** — **target:** DynamoDB via the Summary Agent; **shipped:** SQLite via in-process regeneration from DB state. To change what it says, submit a context update, a spec change request, or a conflict resolution; orchestration updates state and the doc reflects it.
 
 This is the same model as a conversation with an AI — you don't edit the AI's output, you give it new input and it produces updated output. The living doc is PIM's output. The context stream is the input.
 
-### 4.3 Real-Time Architecture — AWS Stack
+### 4.3 Real-Time Architecture — AWS Stack (target)
+
+The diagram below is the **target** serverless layout. **Shipped:** ALB → single EC2 → Fastify; SQLite + optional graph S3; UI via CloudFront + S3 — see [docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md).
+
 ```
                     ┌──────────────────────────────────────┐
   AI Agents ──API──►│  API Gateway (REST + WebSocket)      │◄──WebSocket── Human Users
@@ -1194,17 +1212,17 @@ These are independent workstreams that can be built in parallel on Day 1.
 |---|---|
 | **Pod** | A cross-functional team running a time-boxed sprint (typically 5 days). |
 | **PIM** | The AI orchestration layer for a pod — Master + Committee + living doc. |
-| **PIM orchestrator** | The lightweight Lambda orchestrator that routes context updates to Committee agents. |
+| **PIM orchestrator** | Routes context updates to Committee agents. **Target:** lightweight Lambda. **Shipped:** in-process Fastify orchestration. |
 | **Committee** | Specialized sub-agents (Merge, Conflict, Summary, Cross-Pod, Knowledge Extraction) that handle specific reasoning tasks. |
-| **Living Doc** | The read-only canonical `.md` file assembled from DynamoDB state. PIM's output. |
+| **Living Doc** | The read-only canonical `.md` assembled from structured state — **target:** DynamoDB; **shipped:** SQLite + in-process regeneration. PIM's output. |
 | **Context Update** | A structured report from an agent or human describing work done, decisions made, or blockers encountered. |
 | **Conflict** | A detected contradiction between two or more context updates that PIM cannot confidently resolve. |
 | **Conflict Pressure** | A 0.0–1.0 health score reflecting how many open conflicts exist and how long they've been unresolved. |
 | **Lint Pass** | A periodic proactive scan of the living doc state for staleness, implicit assumptions, coverage gaps, dependency risks, and spec drift. |
 | **Tunnel** | An Expo-style outbound WebSocket connection from a dev's localhost to a stable remote URL. |
-| **Org Registry** | A DynamoDB table tracking all pods, their scopes, and key decisions for cross-pod awareness. |
-| **Org Knowledge Base** | A DynamoDB table of durable learnings extracted from completed pods — patterns, anti-patterns, and scope insights that seed future pods. |
+| **Org Registry** | **Target:** DynamoDB table tracking pods, scopes, cross-pod awareness. **Shipped:** SQLite / API-layer equivalents. |
+| **Org Knowledge Base** | Durable learnings (patterns, anti-patterns, scope insights). **Target:** DynamoDB + S3 graph snapshots. **Shipped:** knowledge graph JSON on disk + optional S3 mirror (`KG_S3_BUCKET`). |
 
 ---
 
-*This is a living document. It will be updated as implementation progresses.*
+*This is a living document. It will be updated as implementation progresses. For **shipped vs target infrastructure**, see [docs/ARCHITECTURE_CURRENT_VS_TARGET.md](docs/ARCHITECTURE_CURRENT_VS_TARGET.md).*

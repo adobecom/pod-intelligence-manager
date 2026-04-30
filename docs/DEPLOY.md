@@ -3,6 +3,8 @@
 One-page guide for deploying PIM to AWS using the `PimEc2Stack` in `packages/infra/`.
 See the architecture rationale in the approved plan (Path A — EC2 + SQLite + ALB + CloudFront).
 
+**How this fits the long-term design:** [ARCHITECTURE_CURRENT_VS_TARGET.md](ARCHITECTURE_CURRENT_VS_TARGET.md) contrasts Path A (what you deploy from this runbook) with the SPEC target (Lambda + DynamoDB).
+
 ## Prerequisites
 
 - AWS CLI v2 (Klam-federated for Adobe accounts).

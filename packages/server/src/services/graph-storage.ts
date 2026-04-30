@@ -1,9 +1,10 @@
 /**
  * Graph Storage Service — versioned JSON persistence for the knowledge graph.
  *
- * Local filesystem is authoritative at runtime (in-memory graph is rebuilt from it on startup).
- * When KG_S3_BUCKET is set, saves are mirrored to S3 as a durability layer, and an
- * initial restore from S3 runs if the local directory is empty.
+ * Authoritative runtime persistence is the **local filesystem** under KG_DATA_DIR; the in-memory
+ * graph is rebuilt from it on startup. When KG_S3_BUCKET is set, saves are mirrored to S3 for
+ * durability, and restore from S3 runs if the local org directory is empty (new disk / fresh data).
+ * This is disk-first + optional cloud mirror — not a DynamoDB-backed index layer (see SPEC target).
  *
  * Config:
  *   KG_DATA_DIR    — base directory (default: <cwd>/.data/knowledge-graph; prod: /data/knowledge-graph)
