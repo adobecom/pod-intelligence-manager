@@ -45,6 +45,7 @@ const appContainer = style({
 
 const contentArea = style({
   flexGrow: 1,
+  minHeight: 0,
   overflow: "auto",
 });
 

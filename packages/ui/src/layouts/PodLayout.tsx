@@ -19,6 +19,7 @@ const navItems = [
 const layoutContainer = style({
   display: "flex",
   height: "full",
+  minHeight: 0,
 });
 
 const sidebar = style({
@@ -29,6 +30,7 @@ const sidebar = style({
 
 const mainContent = style({
   flexGrow: 1,
+  minHeight: 0,
   padding: 24,
   overflow: "auto",
 });

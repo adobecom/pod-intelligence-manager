@@ -1,3 +1,13 @@
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
 :root,
 body {
   font-family: adobe-clean-spectrum-vf, adobe-clean-variable, adobe-clean, ui-sans-serif, system-ui, sans-serif;
