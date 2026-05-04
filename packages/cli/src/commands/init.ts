@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { confirm, input, select } from "@inquirer/prompts";
+import { checkbox, confirm, input, select } from "@inquirer/prompts";
 import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
@@ -14,7 +14,11 @@ import {
   PROTOCOL_MARKER_END,
 } from "../templates/pod-agent-protocol.md.js";
 import { renderSyncCommand } from "../templates/sync-command.md.js";
-import { detectEdsProject, runEdsSetup } from "../eds-setup.js";
+import {
+  buildWizardSkillChoices,
+  checkForUpdates,
+  installSelectedSources,
+} from "../shared-standards.js";
 import {
   defaultScopeIdFromConfig,
   fetchOrgConfig,
@@ -40,6 +44,7 @@ export interface RunInitOptions {
   skipHooks: boolean;
   skipClaude: boolean;
   skipClaudeMd: boolean;
+  selectedSources?: string[];
 }
 
 function isInteractiveSession(): boolean {
@@ -61,6 +66,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     skipHooks,
     skipClaude,
     skipClaudeMd,
+    selectedSources,
   } = opts;
 
   const templateScope = scope ?? defaultScopeId;
@@ -201,6 +207,12 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     }
   }
 
+  // 8. Install shared standards skills
+  if (selectedSources?.length) {
+    console.log(chalk.dim("\n  Installing shared standards..."));
+    await installSelectedSources(root, selectedSources);
+  }
+
   console.log(chalk.bold.green("\n  PIM initialized!\n"));
   console.log(chalk.dim("  Next steps:"));
   console.log(chalk.dim(`    1. Set PIM_AGENT_ID (or pass --agent) for commit attribution`));
@@ -226,7 +238,7 @@ async function runWizard(
   orgConfig: OrgConfig,
   root: string,
   initial: { project?: string; scope?: string; agent?: string },
-): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string; isEds: boolean }> {
+): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string; selectedSources: string[] }> {
   // Pod selection — optional; user can skip to project-only mode
   const pods = await fetchOrgPods(serverUrl);
   let podId: string | undefined;
@@ -301,14 +313,21 @@ async function runWizard(
     agentId = entered.trim() || undefined;
   }
 
-  // EDS/Milo project detection
-  const looksLikeEds = detectEdsProject(root);
-  const isEds = await confirm({
-    message: looksLikeEds
-      ? "EDS/Milo project detected. Set up EDS development tooling (Milo rules, lint hooks, permissions)?"
-      : "Set up EDS/Milo development tooling (Milo rules, lint hooks, permissions)?",
-    default: looksLikeEds,
-  });
+  // Shared Standards — fetch catalogue and let user pick which sources to install
+  let selectedSources: string[] = [];
+  console.log(chalk.dim("  Fetching shared standards catalogue..."));
+  let skillChoices: Array<{ name: string; value: string; checked: boolean }> = [];
+  try {
+    skillChoices = await buildWizardSkillChoices();
+  } catch {
+    console.log(chalk.yellow("  Could not reach skills catalogue — skipping shared standards."));
+  }
+  if (skillChoices.length > 0) {
+    selectedSources = await checkbox({
+      message: "Shared standards to install (.claude/skills/):",
+      choices: skillChoices,
+    });
+  }
 
   const target = podId
     ? `pod ${podId}${projectId ? `, project ${projectId}` : ""}`
@@ -324,7 +343,7 @@ async function runWizard(
     process.exit(0);
   }
 
-  return { podId, projectId, scope, agentId, isEds };
+  return { podId, projectId, scope, agentId, selectedSources };
 }
 
 export function registerInitCommand(program: Command): void {
@@ -351,6 +370,17 @@ export function registerInitCommand(program: Command): void {
       const interactive = isInteractiveSession();
 
       console.log(chalk.bold("\n  PIM Init\n"));
+
+      // Auto-check for stale skills on re-run
+      try {
+        const updateStatus = await checkForUpdates(root);
+        if (!updateStatus.upToDate) {
+          console.log(chalk.yellow(`  Skills may be outdated: ${updateStatus.staleSources.join(", ")}`));
+          console.log(chalk.dim("  Run `pim update-skills` after init to update.\n"));
+        }
+      } catch {
+        // Don't block init for update check failures
+      }
 
       console.log(chalk.dim("  Checking server..."));
       let authMode: "trust" | "ims" | undefined;
@@ -429,8 +459,8 @@ export function registerInitCommand(program: Command): void {
       let projectIdOpt: string | undefined = opts.project;
       let scope: string | undefined = opts.scope;
       let agentId: string | undefined = opts.agent;
+      let selectedSources: string[] = [];
 
-      let isEds = false;
       if (interactive && !opts.pod) {
         const w = await runWizard(serverUrl, orgConfig, root, {
           project: projectIdOpt,
@@ -441,7 +471,7 @@ export function registerInitCommand(program: Command): void {
         projectIdOpt = w.projectId;
         scope = w.scope;
         agentId = w.agentId;
-        isEds = w.isEds;
+        selectedSources = w.selectedSources;
       } else {
         if (!podId?.trim() && !projectIdOpt?.trim()) {
           console.error(chalk.red("\n  Missing --pod or --project (at least one required in non-interactive mode / CI).\n"));
@@ -494,11 +524,7 @@ export function registerInitCommand(program: Command): void {
         skipHooks: !!opts.skipHooks,
         skipClaude: !!opts.skipClaude,
         skipClaudeMd: !!opts.skipClaudeMd,
+        selectedSources,
       });
-
-      if (isEds && !opts.skipClaude) {
-        const settingsPath = path.join(root, ".claude", "settings.json");
-        runEdsSetup(root, settingsPath);
-      }
     });
 }
