@@ -217,6 +217,7 @@ export function registerLoginCommand(program: Command): void {
         email: profile.email,
         ims_user_id: profile.userId,
         client_id: clientId,
+        client_secret: clientSecret,
         ims_env: imsEnv,
       };
       saveCredentials(creds);
