@@ -1,45 +1,45 @@
 import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
-import { SKILL_CATALOGUE, type SkillSource } from "./skill-catalogue.js";
+import { STANDARDS_CATALOGUE, type StandardsSource } from "./standards-catalogue.js";
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_RAW = "https://raw.githubusercontent.com";
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
-export interface SkillsLockSource {
+export interface StandardsLockSource {
   id: string;
   repo: string;
   branch: string;
   path: string;
   installedSha: string;
-  installedSkills: string[];
+  installedItems: string[];
 }
 
-export interface SkillsLock {
+export interface StandardsLock {
   version: number;
   updatedAt: string;
   lastChecked: string;
-  sources: SkillsLockSource[];
+  sources: StandardsLockSource[];
 }
 
-export function readSkillsLock(root: string): SkillsLock | null {
-  const lockPath = path.join(root, ".pim", "skills.lock.json");
+export function readStandardsLock(root: string): StandardsLock | null {
+  const lockPath = path.join(root, ".pim", "standards.lock.json");
   if (!fs.existsSync(lockPath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(lockPath, "utf-8")) as SkillsLock;
+    return JSON.parse(fs.readFileSync(lockPath, "utf-8")) as StandardsLock;
   } catch {
     return null;
   }
 }
 
-export function writeSkillsLock(root: string, lock: SkillsLock): void {
-  const lockPath = path.join(root, ".pim", "skills.lock.json");
+export function writeStandardsLock(root: string, lock: StandardsLock): void {
+  const lockPath = path.join(root, ".pim", "standards.lock.json");
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n", "utf-8");
 }
 
-export async function fetchLatestCommitSha(source: SkillSource): Promise<string> {
+export async function fetchLatestCommitSha(source: StandardsSource): Promise<string> {
   const url = `${GITHUB_API}/repos/${source.repo}/commits?path=${source.path}&sha=${source.branch}&per_page=1`;
   const res = await fetch(url, {
     headers: { Accept: "application/vnd.github.v3+json", "User-Agent": "pim-cli" },
@@ -51,7 +51,7 @@ export async function fetchLatestCommitSha(source: SkillSource): Promise<string>
   return commits[0].sha;
 }
 
-export async function fetchSkillListing(source: SkillSource): Promise<string[]> {
+export async function fetchItemListing(source: StandardsSource): Promise<string[]> {
   const url = `${GITHUB_API}/repos/${source.repo}/contents/${source.path}?ref=${source.branch}`;
   const res = await fetch(url, {
     headers: { Accept: "application/vnd.github.v3+json", "User-Agent": "pim-cli" },
@@ -62,11 +62,11 @@ export async function fetchSkillListing(source: SkillSource): Promise<string[]> 
   return items.filter(i => i.type === "dir").map(i => i.name);
 }
 
-async function downloadSkill(source: SkillSource, skillName: string, skillsDir: string): Promise<void> {
-  const dest = path.join(skillsDir, skillName);
+async function downloadItem(source: StandardsSource, itemName: string, destDir: string): Promise<void> {
+  const dest = path.join(destDir, itemName);
   fs.mkdirSync(dest, { recursive: true });
-  for (const file of source.skillFiles) {
-    const rawUrl = `${GITHUB_RAW}/${source.repo}/${source.branch}/${source.path}/${skillName}/${file}`;
+  for (const file of source.files) {
+    const rawUrl = `${GITHUB_RAW}/${source.repo}/${source.branch}/${source.path}/${itemName}/${file}`;
     const res = await fetch(rawUrl, {
       headers: { "User-Agent": "pim-cli" },
       signal: AbortSignal.timeout(15000),
@@ -81,46 +81,46 @@ async function downloadSkill(source: SkillSource, skillName: string, skillsDir: 
 
 export interface InstallResult {
   sourceId: string;
-  installedSkills: string[];
+  installedItems: string[];
   sha: string;
 }
 
-export async function installSourceSkills(
+export async function installSourceStandards(
   root: string,
-  source: SkillSource,
+  source: StandardsSource,
   onProgress?: (msg: string) => void,
 ): Promise<InstallResult> {
-  const skillsDir = path.join(root, ".claude", "skills");
-  const [skills, sha] = await Promise.all([
-    fetchSkillListing(source),
+  const destDir = path.join(root, ".claude", "skills");
+  const [items, sha] = await Promise.all([
+    fetchItemListing(source),
     fetchLatestCommitSha(source),
   ]);
-  const installedSkills: string[] = [];
-  for (const skill of skills) {
-    await downloadSkill(source, skill, skillsDir);
-    installedSkills.push(skill);
-    onProgress?.(`    ${chalk.green("✓")} ${skill}`);
+  const installedItems: string[] = [];
+  for (const item of items) {
+    await downloadItem(source, item, destDir);
+    installedItems.push(item);
+    onProgress?.(`    ${chalk.green("✓")} ${item}`);
   }
-  return { sourceId: source.id, installedSkills, sha };
+  return { sourceId: source.id, installedItems, sha };
 }
 
 export async function installSelectedSources(root: string, selectedSourceIds: string[]): Promise<void> {
   const now = new Date().toISOString();
-  const lock = readSkillsLock(root) ?? { version: 1, updatedAt: now, lastChecked: now, sources: [] };
+  const lock = readStandardsLock(root) ?? { version: 1, updatedAt: now, lastChecked: now, sources: [] };
 
   for (const sourceId of selectedSourceIds) {
-    const source = SKILL_CATALOGUE.find(s => s.id === sourceId);
+    const source = STANDARDS_CATALOGUE.find(s => s.id === sourceId);
     if (!source) continue;
     console.log(chalk.dim(`  Installing ${source.name}...`));
     try {
-      const result = await installSourceSkills(root, source, msg => console.log(msg));
-      const entry: SkillsLockSource = {
+      const result = await installSourceStandards(root, source, msg => console.log(msg));
+      const entry: StandardsLockSource = {
         id: sourceId,
         repo: source.repo,
         branch: source.branch,
         path: source.path,
         installedSha: result.sha,
-        installedSkills: result.installedSkills,
+        installedItems: result.installedItems,
       };
       const idx = lock.sources.findIndex(s => s.id === sourceId);
       if (idx >= 0) {
@@ -128,7 +128,7 @@ export async function installSelectedSources(root: string, selectedSourceIds: st
       } else {
         lock.sources.push(entry);
       }
-      console.log(chalk.green(`  Installed ${result.installedSkills.length} skills from ${source.name}`));
+      console.log(chalk.green(`  Installed ${result.installedItems.length} items from ${source.name}`));
     } catch (e) {
       console.log(chalk.yellow(`  Could not install ${source.name}: ${e instanceof Error ? e.message : e}`));
     }
@@ -137,22 +137,22 @@ export async function installSelectedSources(root: string, selectedSourceIds: st
   if (lock.sources.length > 0) {
     lock.updatedAt = now;
     lock.lastChecked = now;
-    writeSkillsLock(root, lock);
-    console.log(chalk.green("  Updated .pim/skills.lock.json"));
+    writeStandardsLock(root, lock);
+    console.log(chalk.green("  Updated .pim/standards.lock.json"));
   }
 }
 
 export async function checkForUpdates(
   root: string,
 ): Promise<{ upToDate: boolean; staleSources: string[] }> {
-  const lock = readSkillsLock(root);
+  const lock = readStandardsLock(root);
   if (!lock?.sources.length) return { upToDate: true, staleSources: [] };
   const now = Date.now();
   const lastChecked = new Date(lock.lastChecked).getTime();
   if (now - lastChecked < STALE_THRESHOLD_MS) return { upToDate: true, staleSources: [] };
   const staleSources: string[] = [];
   for (const lockedSource of lock.sources) {
-    const source = SKILL_CATALOGUE.find(s => s.id === lockedSource.id);
+    const source = STANDARDS_CATALOGUE.find(s => s.id === lockedSource.id);
     if (!source) continue;
     try {
       const latestSha = await fetchLatestCommitSha(source);
@@ -162,19 +162,19 @@ export async function checkForUpdates(
     }
   }
   lock.lastChecked = new Date().toISOString();
-  writeSkillsLock(root, lock);
+  writeStandardsLock(root, lock);
   return { upToDate: staleSources.length === 0, staleSources };
 }
 
-export async function buildWizardSkillChoices(): Promise<
+export async function buildWizardStandardsChoices(): Promise<
   Array<{ name: string; value: string; checked: boolean }>
 > {
   return Promise.all(
-    SKILL_CATALOGUE.map(async (source) => {
+    STANDARDS_CATALOGUE.map(async (source) => {
       let detail = source.description;
       try {
-        const skills = await fetchSkillListing(source);
-        detail = skills.join(", ");
+        const items = await fetchItemListing(source);
+        detail = items.join(", ");
       } catch {
         // Use catalogue description as fallback
       }

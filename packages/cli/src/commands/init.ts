@@ -15,7 +15,7 @@ import {
 } from "../templates/pod-agent-protocol.md.js";
 import { renderSyncCommand } from "../templates/sync-command.md.js";
 import {
-  buildWizardSkillChoices,
+  buildWizardStandardsChoices,
   checkForUpdates,
   installSelectedSources,
 } from "../shared-standards.js";
@@ -316,16 +316,16 @@ async function runWizard(
   // Shared Standards — fetch catalogue and let user pick which sources to install
   let selectedSources: string[] = [];
   console.log(chalk.dim("  Fetching shared standards catalogue..."));
-  let skillChoices: Array<{ name: string; value: string; checked: boolean }> = [];
+  let standardsChoices: Array<{ name: string; value: string; checked: boolean }> = [];
   try {
-    skillChoices = await buildWizardSkillChoices();
+    standardsChoices = await buildWizardStandardsChoices();
   } catch {
-    console.log(chalk.yellow("  Could not reach skills catalogue — skipping shared standards."));
+    console.log(chalk.yellow("  Could not reach standards catalogue — skipping shared standards."));
   }
-  if (skillChoices.length > 0) {
+  if (standardsChoices.length > 0) {
     selectedSources = await checkbox({
       message: "Shared standards to install (.claude/skills/):",
-      choices: skillChoices,
+      choices: standardsChoices,
     });
   }
 
@@ -376,7 +376,7 @@ export function registerInitCommand(program: Command): void {
         const updateStatus = await checkForUpdates(root);
         if (!updateStatus.upToDate) {
           console.log(chalk.yellow(`  Skills may be outdated: ${updateStatus.staleSources.join(", ")}`));
-          console.log(chalk.dim("  Run `pim update-skills` after init to update.\n"));
+          console.log(chalk.dim("  Run `pim update-standards` after init to update.\n"));
         }
       } catch {
         // Don't block init for update check failures

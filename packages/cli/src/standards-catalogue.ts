@@ -1,14 +1,14 @@
-export interface SkillSource {
+export interface StandardsSource {
   id: string;
   name: string;
   description: string;
   repo: string;
   branch: string;
   path: string;
-  skillFiles: string[];
+  files: string[];
 }
 
-export const SKILL_CATALOGUE: SkillSource[] = [
+export const STANDARDS_CATALOGUE: StandardsSource[] = [
   {
     id: "milo-skills",
     name: "Milo Skills",
@@ -16,6 +16,6 @@ export const SKILL_CATALOGUE: SkillSource[] = [
     repo: "overmyheadandbody/milo",
     branch: "main",
     path: ".claude/skills",
-    skillFiles: ["SKILL.md", "README.md"],
+    files: ["SKILL.md", "README.md"],
   },
 ];
