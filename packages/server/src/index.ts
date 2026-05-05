@@ -154,7 +154,7 @@ app.get("/api/health", async (_req, reply) => {
 app.get("/api/cli-config", {
   config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
 }, async (req) => {
-  req.log.info({ ip: req.ip, ua: req.headers["user-agent"] }, "cli-config accessed");
+  req.log.info({ ip: req.headers["x-forwarded-for"] ?? req.ip, ua: req.headers["user-agent"] }, "cli-config accessed");
   return {
     auth_mode: authMode,
     ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
