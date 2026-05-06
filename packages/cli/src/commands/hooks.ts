@@ -28,6 +28,19 @@ export function resolveRunnerPath(): string {
   return path.join(pkgRoot, "dist/git-hook/run.cjs");
 }
 
+export function resolveMcpServerCommand(): { command: string; args: string[] } {
+  try {
+    const pkgRoot = getCliPackageRoot();
+    const mcpEntry = path.resolve(pkgRoot, "../mcp-server/dist/index.js");
+    if (fs.existsSync(mcpEntry)) {
+      return { command: "node", args: [mcpEntry] };
+    }
+  } catch {
+    // fall through to npx
+  }
+  return { command: "npx", args: ["-y", "@pim/mcp-server"] };
+}
+
 export function installHooks(): void {
   const root = findGitRoot();
   if (!root) {

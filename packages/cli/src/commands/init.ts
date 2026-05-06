@@ -7,7 +7,7 @@ import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
 import { loadCredentials } from "@pim/shared/auth";
-import { installHooks, resolveRunnerPath } from "./hooks.js";
+import { installHooks, resolveRunnerPath, resolveMcpServerCommand } from "./hooks.js";
 import {
   renderPodAgentProtocol,
   PROTOCOL_MARKER_BEGIN,
@@ -99,10 +99,9 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     console.log(chalk.dim("  Skipped git hooks (--skip-hooks)"));
   }
 
-  // 5. Claude Code integration
-  if (!skipClaude) {
-    const claudeDir = path.join(root, ".claude");
-    fs.mkdirSync(claudeDir, { recursive: true });
+  // 5. Claude Code integration (only if .claude/ already exists in the repo)
+  const claudeDir = path.join(root, ".claude");
+  if (!skipClaude && fs.existsSync(claudeDir)) {
 
     const settingsPath = path.join(claudeDir, "settings.json");
     let settings: Record<string, unknown> = {};
@@ -150,6 +149,22 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     delete hooks.PreToolCall;
 
     settings.hooks = hooks;
+
+    // MCP server entry
+    const mcpCmd = resolveMcpServerCommand();
+    const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
+    if (!mcpServers.pim) {
+      mcpServers.pim = {
+        command: mcpCmd.command,
+        args: mcpCmd.args,
+        env: { PIM_API_URL: serverUrl },
+      };
+      settings.mcpServers = mcpServers;
+      console.log(chalk.green("  Registered pim MCP server in .claude/settings.json"));
+    } else {
+      console.log(chalk.dim("  pim MCP server already in .claude/settings.json (skipped)"));
+    }
+
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
     console.log(chalk.green("  Updated .claude/settings.json (hooks)"));
 
@@ -158,8 +173,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     const syncPath = path.join(commandsDir, "sync.md");
     fs.writeFileSync(syncPath, renderSyncCommand({ podId, projectId: projectIdOpt, scope: templateScope }), "utf-8");
     console.log(chalk.green("  Created .claude/commands/sync.md"));
-  } else {
+  } else if (skipClaude) {
     console.log(chalk.dim("  Skipped Claude Code integration (--skip-claude)"));
+  } else {
+    console.log(chalk.dim("  Skipped Claude Code integration (no .claude/ directory found)"));
   }
 
   // 6. CLAUDE.md addendum
