@@ -109,8 +109,8 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     }
 
     const hookRunnerDir = path.dirname(resolveRunnerPath());
-    const postToolScript = path.resolve(path.join(hookRunnerDir, "../hooks/claude-code-post-tool.js"));
-    const preToolScript = path.resolve(path.join(hookRunnerDir, "../hooks/claude-code-pre-tool.js"));
+    const postToolScript = path.resolve(path.join(hookRunnerDir, "../hooks/claude-code-post-tool.cjs"));
+    const preToolScript = path.resolve(path.join(hookRunnerDir, "../hooks/claude-code-pre-tool.cjs"));
 
     const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
 
@@ -198,6 +198,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     if (!gitignore.includes(".pim/")) {
       fs.appendFileSync(gitignorePath, "\n# PIM local state\n.pim/\n");
       console.log(chalk.green("  Added .pim/ to .gitignore"));
+    }
+    if (!gitignore.includes(".pim.json")) {
+      fs.appendFileSync(gitignorePath, ".pim.json\n");
+      console.log(chalk.green("  Added .pim.json to .gitignore"));
     }
   }
 

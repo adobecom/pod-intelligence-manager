@@ -25,7 +25,7 @@ function isOurHook(content: string): boolean {
 
 export function resolveRunnerPath(): string {
   const pkgRoot = getCliPackageRoot();
-  return path.join(pkgRoot, "dist/git-hook/run.js");
+  return path.join(pkgRoot, "dist/git-hook/run.cjs");
 }
 
 export function installHooks(): void {
