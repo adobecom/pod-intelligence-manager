@@ -1,8 +1,8 @@
-import type { Pod } from "../types/pod";
-import type { Conflict, PendingWork } from "../types/conflict";
-import type { ContextUpdate } from "../types/context-update";
-import type { Tunnel } from "../types/tunnel";
-import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "../types/org";
+import type { Pod } from "../types/pod.js";
+import type { Conflict, PendingWork } from "../types/conflict.js";
+import type { ContextUpdate } from "../types/context-update.js";
+import type { Tunnel } from "../types/tunnel.js";
+import type { OrgPodSummary, CrossPodOverlap, ArchivedPod } from "../types/org.js";
 
 // ── Pods ──────────────────────────────────────────────────────────────
 

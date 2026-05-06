@@ -1,0 +1,21 @@
+# Adobe Artifactory (npm) — supplemental notes
+#
+# Root `.npmrc` in this repo sets `@pim:registry` only (no secrets — commit-safe).
+# Put tokens in your user ~/.npmrc using Artifactory "Set me up", never in this file.
+#
+# Official writable repo (from Artifactory UI):
+#   https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
+#
+# Scoped auth (user ~/.npmrc), per Artifactory — replace SCOPE and use your token:
+# @<SCOPE>:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
+# //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:_authToken=<token>
+# //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:email=you@adobe.com
+# (omit //.../:always-auth — npm 11+ warns it is unsupported in that form; _authToken is enough.)
+#
+# Or use: npm login --registry=... --auth-type=web --scope=@pim
+#
+# Unscoped `ado-pim` uses publishConfig.registry in packages/cli/package.json.
+#
+# Other read mirrors (if your doc uses them for installs only):
+# https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npmjs/
+# https://artifactory.corp.adobe.com/artifactory/api/npm/npmjs/

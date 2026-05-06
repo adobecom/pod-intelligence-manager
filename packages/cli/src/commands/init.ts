@@ -93,7 +93,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
       console.log(chalk.dim("  Installing git hooks..."));
       installHooks();
     } else {
-      console.log(chalk.yellow("  Git hooks skipped (build CLI first: pnpm --filter @pim/cli build)"));
+      console.log(chalk.yellow("  Git hooks skipped (build CLI first: pnpm --filter ado-pim build)"));
     }
   } else {
     console.log(chalk.dim("  Skipped git hooks (--skip-hooks)"));

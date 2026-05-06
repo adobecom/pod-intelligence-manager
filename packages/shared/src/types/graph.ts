@@ -1,4 +1,4 @@
-import type { Scope } from "./pod";
+import type { Scope } from "./pod.js";
 
 // --- Node Types ---
 

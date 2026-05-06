@@ -9,4 +9,4 @@ export {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "./demo-seed";
+} from "./demo-seed.js";

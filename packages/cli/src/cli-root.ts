@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Absolute path to the `@pim/cli` package (directory with package.json). */
+/** Absolute path to the `ado-pim` CLI package (directory with package.json). */
 export function getCliPackageRoot(): string {
   const envRoot = process.env.PIM_CLI_ROOT?.trim();
   if (envRoot && fs.existsSync(path.join(envRoot, "package.json"))) {
@@ -42,7 +42,7 @@ export function getCliPackageRoot(): string {
         if (fs.existsSync(pj)) {
           try {
             const pkg = JSON.parse(fs.readFileSync(pj, "utf-8")) as { name?: string };
-            if (pkg.name === "@pim/cli") return candidate;
+            if (pkg.name === "ado-pim" || pkg.name === "@pim/cli") return candidate;
           } catch {
             /* ignore */
           }
@@ -54,7 +54,7 @@ export function getCliPackageRoot(): string {
   }
 
   throw new Error(
-    "Cannot locate @pim/cli package root. If you use the bundled CLI, run it via `bin/pim.mjs` or set PIM_CLI_ROOT to your clone's packages/cli directory.",
+    "Cannot locate ado-pim package root (npm name: `ado-pim`). If you use the bundled CLI, run it via `bin/pim.mjs` or set PIM_CLI_ROOT to your clone's packages/cli directory.",
   );
 }
 

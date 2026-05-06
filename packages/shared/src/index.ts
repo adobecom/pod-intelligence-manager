@@ -4,7 +4,7 @@ export type {
   PodArea,
   AreaStatus,
   Scope,
-} from "./types/pod";
+} from "./types/pod.js";
 
 export type {
   Project,
@@ -13,16 +13,16 @@ export type {
   ProjectAnatomy,
   ProjectAnatomyInternalSlot,
   ProjectAnatomyExternalTeam,
-} from "./types/project";
+} from "./types/project.js";
 
-export { EMPTY_PROJECT_ANATOMY } from "./types/project";
+export { EMPTY_PROJECT_ANATOMY } from "./types/project.js";
 
 export type {
   OrgConfig,
   OrgScopeDefinition,
-} from "./types/org-settings";
+} from "./types/org-settings.js";
 
-export { DEFAULT_ORG_CONFIG } from "./types/org-settings";
+export { DEFAULT_ORG_CONFIG } from "./types/org-settings.js";
 
 export type {
   ContextUpdate,
@@ -31,7 +31,7 @@ export type {
   WorkStatus,
   Artifact,
   InputRequest,
-} from "./types/context-update";
+} from "./types/context-update.js";
 
 export type {
   Conflict,
@@ -39,9 +39,9 @@ export type {
   ConflictStatus,
   ConflictSeverity,
   PendingWork,
-} from "./types/conflict";
+} from "./types/conflict.js";
 
-export type { Tunnel, TunnelStatus } from "./types/tunnel";
+export type { Tunnel, TunnelStatus } from "./types/tunnel.js";
 
 export type {
   TunnelRequest,
@@ -51,13 +51,13 @@ export type {
   TunnelHeartbeatAck,
   TunnelError,
   TunnelMessage,
-} from "./types/tunnel-protocol";
+} from "./types/tunnel-protocol.js";
 
 export {
   TUNNEL_CHUNK_THRESHOLD,
   TUNNEL_REQUEST_TIMEOUT_MS,
   TUNNEL_WS_HEARTBEAT_MS,
-} from "./types/tunnel-protocol";
+} from "./types/tunnel-protocol.js";
 
 export type {
   KnowledgeNodeType,
@@ -75,14 +75,14 @@ export type {
   CurationAction,
   CurationRequest,
   AdHocLearningInput,
-} from "./types/graph";
+} from "./types/graph.js";
 
 export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
   ArchivedProject,
-} from "./types/org";
+} from "./types/org.js";
 
 export type {
   ContextSource,
@@ -91,22 +91,22 @@ export type {
   ContextSearchMissingSource,
   ContextSearchResult,
   ContextSearchActor,
-} from "./types/context-search";
+} from "./types/context-search.js";
 
-export { CONTEXT_SOURCES } from "./types/context-search";
+export { CONTEXT_SOURCES } from "./types/context-search.js";
 
 export type {
   LivingDocViewerStat,
   LivingDocStats,
-} from "./types/living-doc";
+} from "./types/living-doc.js";
 
 export {
   PRESSURE_THRESHOLDS,
   getPressureLevel,
   getPressureLabel,
-} from "./constants/pressure";
+} from "./constants/pressure.js";
 
-export type { PressureLevel } from "./constants/pressure";
+export type { PressureLevel } from "./constants/pressure.js";
 
 export {
   pods,
@@ -118,4 +118,4 @@ export {
   crossPodOverlaps,
   archivedPods,
   livingDocs,
-} from "./fixtures/index";
+} from "./fixtures/index.js";
