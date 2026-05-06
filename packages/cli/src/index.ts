@@ -21,6 +21,7 @@ import { registerLeaveCommand } from "./commands/leave.js";
 import { registerSearchCommand } from "./commands/search.js";
 import { registerLoginCommand } from "./commands/login.js";
 import { registerProjectCommands } from "./commands/project.js";
+import { registerUpdateStandardsCommand } from "./commands/update-standards.js";
 
 setOrgSlug(resolveOrgSlug());
 
@@ -42,6 +43,7 @@ registerHooksCommand(program);
 registerContextCommand(program);
 registerSearchCommand(program);
 registerInitCommand(program);
+registerUpdateStandardsCommand(program);
 registerLeaveCommand(program);
 registerLoginCommand(program);
 
