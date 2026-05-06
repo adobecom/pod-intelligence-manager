@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Global `pim` entry when `@pim/cli` is linked (`pnpm -C packages/cli link --global`).
+ * Global `pim` entry when `ado-pim` is linked (`pnpm -C packages/cli link --global`).
  * Prefer the bundled CLI so `pim` works from any cwd without tsx / workspace TS resolution.
  */
 import { spawnSync } from "node:child_process";
@@ -34,7 +34,7 @@ try {
   if (!existsSync(tsxCli)) throw new Error("missing tsx cli");
 } catch {
   console.error(
-    "pim: no bundled CLI (dist/pim.bundle.cjs). From the monorepo run:\n  pnpm --filter @pim/cli build\n",
+    "pim: no bundled CLI (dist/pim.bundle.cjs). From the monorepo run:\n  pnpm --filter ado-pim build\n",
   );
   process.exit(1);
 }

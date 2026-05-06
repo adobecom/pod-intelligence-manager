@@ -6,6 +6,11 @@ dist/
 *.tsbuildinfo
 .data/
 
+# Local npm auth experiments — never commit credentials into tracked .npmrc
+.npmrc.bak
+.npmrc.save
+.npmrc~
+
 # CDK build artifacts
 cdk.out/
 cdk.context.json

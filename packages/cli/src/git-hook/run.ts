@@ -5,11 +5,23 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolveConfig, type PimConfig } from "../config.js";
+import { loadCredentials, ensureFreshToken } from "@pim/shared/auth";
 
-function orgHeaders(config: PimConfig): Record<string, string> {
-  const base: Record<string, string> = { "Content-Type": "application/json" };
-  if (config.orgSlug) base["X-Pim-Org"] = config.orgSlug;
-  return base;
+async function getAccessToken(): Promise<string | null> {
+  const creds = loadCredentials();
+  if (!creds) return null;
+  try {
+    return (await ensureFreshToken(creds)).access_token;
+  } catch {
+    return null;
+  }
+}
+
+function buildHeaders(config: PimConfig, token: string | null): Record<string, string> {
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.orgSlug) h["X-Pim-Org"] = config.orgSlug;
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
 }
 
 function git(args: string[]): string {
@@ -68,13 +80,14 @@ async function postCommit(): Promise<void> {
       .filter(Boolean)
       .join("\n\n") || "(no extra details)";
 
+  const token = await getAccessToken();
   const url =
     config.mode === "pod"
       ? `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId!)}/context-updates`
       : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
-    headers: orgHeaders(config),
+    headers: buildHeaders(config, token),
     body: JSON.stringify({
       agent_id: config.agentId,
       scope: config.scope,
@@ -92,7 +105,8 @@ async function postCommit(): Promise<void> {
 
   if (!res.ok) {
     const text = await res.text();
-    fail(`PIM POST failed ${res.status}: ${text}`, strict);
+    const hint = res.status === 401 ? " (run 'pim login' to authenticate)" : "";
+    fail(`PIM POST failed ${res.status}: ${text}${hint}`, strict);
     return;
   }
 
@@ -126,13 +140,14 @@ async function postRewrite(): Promise<void> {
     stdinData ? `Mappings:\n${stdinData.trim()}` : "(no stdin)",
   ].join("\n\n");
 
+  const token = await getAccessToken();
   const url =
     config.mode === "pod"
       ? `${config.serverUrl}/api/pods/${encodeURIComponent(config.podId!)}/context-updates`
       : `${config.serverUrl}/api/projects/${encodeURIComponent(config.projectId!)}/context-updates`;
   const res = await fetch(url, {
     method: "POST",
-    headers: orgHeaders(config),
+    headers: buildHeaders(config, token),
     body: JSON.stringify({
       agent_id: config.agentId,
       scope: config.scope,
@@ -150,7 +165,8 @@ async function postRewrite(): Promise<void> {
 
   if (!res.ok) {
     const text = await res.text();
-    fail(`PIM POST failed ${res.status}: ${text}`, strict);
+    const hint = res.status === 401 ? " (run 'pim login' to authenticate)" : "";
+    fail(`PIM POST failed ${res.status}: ${text}${hint}`, strict);
     return;
   }
 

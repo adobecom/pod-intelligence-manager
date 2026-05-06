@@ -5,6 +5,7 @@ import { ensureCliPackageRootEnv } from "./cli-root.js";
 
 ensureCliPackageRootEnv();
 
+import chalk from "chalk";
 import { resolveOrgSlug } from "./config.js";
 import { setOrgSlug, setAuthToken } from "./util.js";
 import { loadCredentials, ensureFreshToken } from "@pim/shared/auth";
@@ -20,6 +21,7 @@ import { registerLeaveCommand } from "./commands/leave.js";
 import { registerSearchCommand } from "./commands/search.js";
 import { registerLoginCommand } from "./commands/login.js";
 import { registerProjectCommands } from "./commands/project.js";
+import { registerUpdateStandardsCommand } from "./commands/update-standards.js";
 
 setOrgSlug(resolveOrgSlug());
 
@@ -41,6 +43,7 @@ registerHooksCommand(program);
 registerContextCommand(program);
 registerSearchCommand(program);
 registerInitCommand(program);
+registerUpdateStandardsCommand(program);
 registerLeaveCommand(program);
 registerLoginCommand(program);
 
@@ -55,9 +58,11 @@ program.hook("preAction", async (thisCommand) => {
   try {
     const fresh = await ensureFreshToken(creds);
     setAuthToken(fresh.access_token);
-  } catch {
-    // Token expired with no refresh token — let the command hit a 401 so the
-    // error message names the actual failing operation, then tell the user to re-login.
+  } catch (err) {
+    // Surface the real IMS error (e.g. invalid_client, invalid_grant) so the
+    // user knows why refresh failed instead of hitting a silent 401 later.
+    console.warn(chalk.yellow(`\n  Warning: token refresh failed (${err instanceof Error ? err.message : err})`));
+    console.warn(chalk.yellow("  Run 'pim login' to re-authenticate.\n"));
     setAuthToken(creds.access_token);
   }
 });

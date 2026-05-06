@@ -25,7 +25,7 @@ function isOurHook(content: string): boolean {
 
 export function resolveRunnerPath(): string {
   const pkgRoot = getCliPackageRoot();
-  return path.join(pkgRoot, "dist/git-hook/run.js");
+  return path.join(pkgRoot, "dist/git-hook/run.cjs");
 }
 
 export function installHooks(): void {
@@ -39,7 +39,7 @@ export function installHooks(): void {
   if (!fs.existsSync(runnerPath)) {
     console.error(
       chalk.red(
-        `\n  Hook runner not found at ${runnerPath}. Build the CLI first: pnpm --filter @pim/cli build\n`,
+        `\n  Hook runner not found at ${runnerPath}. Build the CLI first: pnpm --filter ado-pim build\n`,
       ),
     );
     process.exit(1);

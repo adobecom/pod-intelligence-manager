@@ -8,15 +8,19 @@
   "files": [
     "bin",
     "dist/pim.bundle.cjs",
-    "dist/git-hook/run.js",
-    "dist/hooks/claude-code-pre-tool.js",
-    "dist/hooks/claude-code-post-tool.js"
+    "dist/git-hook/run.cjs",
+    "dist/hooks/claude-code-pre-tool.cjs",
+    "dist/hooks/claude-code-post-tool.cjs"
   ],
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "rm -rf dist && tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/pim.bundle.cjs && esbuild src/git-hook/run.ts --bundle --platform=node --format=cjs --outfile=dist/git-hook/run.js && esbuild src/hooks/claude-code-pre-tool.ts --bundle --platform=node --format=cjs --outfile=dist/hooks/claude-code-pre-tool.js && esbuild src/hooks/claude-code-post-tool.ts --bundle --platform=node --format=cjs --outfile=dist/hooks/claude-code-post-tool.js",
+    "build": "rm -rf dist && tsc -p tsconfig.json && esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/pim.bundle.cjs && esbuild src/git-hook/run.ts --bundle --platform=node --format=cjs --outfile=dist/git-hook/run.cjs && esbuild src/hooks/claude-code-pre-tool.ts --bundle --platform=node --format=cjs --outfile=dist/hooks/claude-code-pre-tool.cjs && esbuild src/hooks/claude-code-post-tool.ts --bundle --platform=node --format=cjs --outfile=dist/hooks/claude-code-post-tool.cjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run build"
+  },
+  "publishConfig": {
+    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.5.0",

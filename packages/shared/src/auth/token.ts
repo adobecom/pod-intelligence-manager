@@ -14,6 +14,7 @@ export async function ensureFreshToken(creds: Credentials): Promise<Credentials>
   const refreshed = await refreshAccessToken({
     env: creds.ims_env,
     clientId: creds.client_id,
+    clientSecret: creds.client_secret,
     refreshToken: creds.refresh_token,
   });
   const next: Credentials = {

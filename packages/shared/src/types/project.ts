@@ -4,8 +4,8 @@ import type {
   Artifact,
   InputRequest,
   ContextUpdateSource,
-} from "./context-update";
-import type { Scope } from "./pod";
+} from "./context-update.js";
+import type { Scope } from "./pod.js";
 
 /** External data-source endpoints a project pulls from (Jira, GitHub, etc.).
  * Used by context-search to scope fan-out; independent of team composition. */

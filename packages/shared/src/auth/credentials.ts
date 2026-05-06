@@ -9,6 +9,8 @@ export interface Credentials {
   email?: string;
   ims_user_id?: string;
   client_id: string;
+  /** Stored so the refresh grant can authenticate the client. Undefined for public (PKCE-only) clients. */
+  client_secret?: string;
   ims_env: "stg1" | "prod";
 }
 

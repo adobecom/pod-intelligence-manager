@@ -142,10 +142,19 @@ app.get("/api/health", async (_req, reply) => {
 
 // CLI auto-config — advertises IMS client settings so `pim login` works without
 // env vars. Split from /api/health so secret-shaped values don't appear on the
-// endpoint that every compliance scanner crawls. The cli client_secret is a
-// public OAuth value by design (CLIs are distributed to all users), but serving
-// it here keeps it out of the universal healthcheck surface.
-app.get("/api/cli-config", async () => {
+// endpoint that every compliance scanner crawls.
+//
+// Security note: `ims_cli_client_secret` is intentionally public for the
+// authorization-code+PKCE flow (the code_verifier protects against code
+// interception even if the secret is known). However, the refresh grant does
+// NOT use PKCE, so `client_secret + refresh_token` together enable persistent
+// token minting. The refresh_token lives in ~/.pim/credentials.json (chmod 600);
+// treat secret rotation as an incident response action if credentials are
+// compromised. Rate-limited to 10 req/min per IP to slow enumeration.
+app.get("/api/cli-config", {
+  config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+}, async (req) => {
+  req.log.info({ ip: req.headers["x-forwarded-for"] ?? req.ip, ua: req.headers["user-agent"] }, "cli-config accessed");
   return {
     auth_mode: authMode,
     ims_env: (process.env.IMS_ENV === "prod" ? "prod" : "stg1"),
