@@ -25,14 +25,17 @@ export interface TokenResponse {
 export async function refreshAccessToken(params: {
   env: ImsEnv;
   clientId: string;
+  clientSecret?: string;
   refreshToken: string;
 }): Promise<TokenResponse> {
   const { token } = getImsEndpoints(params.env);
-  const body = new URLSearchParams({
+  const bodyParams: Record<string, string> = {
     grant_type: "refresh_token",
     client_id: params.clientId,
     refresh_token: params.refreshToken,
-  });
+  };
+  if (params.clientSecret) bodyParams.client_secret = params.clientSecret;
+  const body = new URLSearchParams(bodyParams);
   const res = await fetch(token, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
