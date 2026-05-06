@@ -44,6 +44,7 @@ export interface RunInitOptions {
   skipHooks: boolean;
   skipClaude: boolean;
   skipClaudeMd: boolean;
+  skipMcp: boolean;
   selectedSources?: string[];
 }
 
@@ -66,6 +67,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     skipHooks,
     skipClaude,
     skipClaudeMd,
+    skipMcp,
     selectedSources,
   } = opts;
 
@@ -108,8 +110,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     if (fs.existsSync(settingsPath)) {
       try {
         settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-      } catch {
-        settings = {};
+      } catch (e) {
+        console.error(chalk.red(`  .claude/settings.json is not valid JSON: ${e instanceof Error ? e.message : e}`));
+        console.error(chalk.dim("  Fix or delete the file and re-run pim init."));
+        process.exit(1);
       }
     }
 
@@ -151,18 +155,32 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     settings.hooks = hooks;
 
     // MCP server entry
-    const mcpCmd = resolveMcpServerCommand();
-    const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
-    if (!mcpServers.pim) {
-      mcpServers.pim = {
-        command: mcpCmd.command,
-        args: mcpCmd.args,
-        env: { PIM_API_URL: serverUrl },
-      };
-      settings.mcpServers = mcpServers;
-      console.log(chalk.green("  Registered pim MCP server in .claude/settings.json"));
+    if (!skipMcp) {
+      try { new URL(serverUrl); } catch {
+        console.error(chalk.red(`  Cannot register MCP server: "${serverUrl}" is not a valid URL.`));
+        process.exit(1);
+      }
+      const mcpCmd = resolveMcpServerCommand();
+      const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
+      if (!mcpServers.pim) {
+        mcpServers.pim = {
+          command: mcpCmd.command,
+          args: mcpCmd.args,
+          env: { PIM_API_URL: serverUrl },
+        };
+        settings.mcpServers = mcpServers;
+        console.log(chalk.green("  Registered pim MCP server in .claude/settings.json"));
+      } else {
+        const existing = mcpServers.pim as { env?: Record<string, string> };
+        if (existing.env?.PIM_API_URL !== serverUrl) {
+          existing.env = { ...existing.env, PIM_API_URL: serverUrl };
+          console.log(chalk.yellow("  Updated PIM_API_URL in existing pim MCP server entry"));
+        } else {
+          console.log(chalk.dim("  pim MCP server already in .claude/settings.json (skipped)"));
+        }
+      }
     } else {
-      console.log(chalk.dim("  pim MCP server already in .claude/settings.json (skipped)"));
+      console.log(chalk.dim("  Skipped pim MCP server registration (--skip-mcp)"));
     }
 
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
@@ -377,8 +395,9 @@ export function registerInitCommand(program: Command): void {
     .option("--scope <scope>", "Agent scope id (must exist in org config; see GET /api/org/config)")
     .option("--agent <id>", "Agent ID (default: git user.name)")
     .option("--skip-hooks", "Skip git hook installation")
-    .option("--skip-claude", "Skip Claude Code integration (.claude/ files)")
+    .option("--skip-claude", "Skip Claude Code integration (.claude/ hooks, MCP server entry, and commands)")
     .option("--skip-claude-md", "Skip CLAUDE.md addendum")
+    .option("--skip-mcp", "Skip MCP server registration in .claude/settings.json (use if you configure pim MCP globally)")
     .action(async (opts) => {
       const serverUrl = getBaseUrl(program);
       const root = findGitRoot();
@@ -545,6 +564,7 @@ export function registerInitCommand(program: Command): void {
         skipHooks: !!opts.skipHooks,
         skipClaude: !!opts.skipClaude,
         skipClaudeMd: !!opts.skipClaudeMd,
+        skipMcp: !!opts.skipMcp || !!opts.skipClaude,
         selectedSources,
       });
     });
