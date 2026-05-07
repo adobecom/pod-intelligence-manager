@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import type { Command } from "commander";
 import chalk from "chalk";
 import { getCliPackageRoot } from "../cli-root.js";
@@ -26,6 +27,31 @@ function isOurHook(content: string): boolean {
 export function resolveRunnerPath(): string {
   const pkgRoot = getCliPackageRoot();
   return path.join(pkgRoot, "dist/git-hook/run.cjs");
+}
+
+export function resolveMcpServerCommand(): { command: string; args: string[] } {
+  try {
+    const pkgRoot = getCliPackageRoot();
+    // Use module resolution so the path is correct for both monorepo and installed consumers.
+    const req = createRequire(path.join(pkgRoot, "package.json"));
+    const mcpPkgJson = req.resolve("@pim/mcp-server/package.json");
+    const mcpEntry = path.join(path.dirname(mcpPkgJson), "dist/index.js");
+    if (fs.existsSync(mcpEntry)) {
+      return { command: "node", args: [mcpEntry] };
+    }
+  } catch {
+    // fall through to npx
+  }
+  // Pin to the matching CLI version to avoid pulling a different version at startup.
+  let version = "latest";
+  try {
+    const pkgRoot = getCliPackageRoot();
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, "package.json"), "utf-8")) as { version?: string };
+    if (pkg.version) version = pkg.version;
+  } catch {
+    // ignore
+  }
+  return { command: "npx", args: ["-y", `@pim/mcp-server@${version}`] };
 }
 
 export function installHooks(): void {

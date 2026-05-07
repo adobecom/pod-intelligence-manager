@@ -8,7 +8,7 @@ import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
 import { loadCredentials } from "@pim/shared/auth";
-import { installHooks, resolveRunnerPath } from "./hooks.js";
+import { installHooks, resolveRunnerPath, resolveMcpServerCommand } from "./hooks.js";
 import {
   renderPodAgentProtocol,
   PROTOCOL_MARKER_BEGIN,
@@ -46,6 +46,7 @@ export interface RunInitOptions {
   skipHooks: boolean;
   skipClaude: boolean;
   skipClaudeMd: boolean;
+  skipMcp: boolean;
   selectedSources?: string[];
 }
 
@@ -68,6 +69,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     skipHooks,
     skipClaude,
     skipClaudeMd,
+    skipMcp,
     selectedSources,
   } = opts;
 
@@ -101,18 +103,19 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     console.log(chalk.dim("  Skipped git hooks (--skip-hooks)"));
   }
 
-  // 5. Claude Code integration
-  if (!skipClaude) {
-    const claudeDir = path.join(root, ".claude");
-    fs.mkdirSync(claudeDir, { recursive: true });
+  // 5. Claude Code integration (only if .claude/ already exists in the repo)
+  const claudeDir = path.join(root, ".claude");
+  if (!skipClaude && fs.existsSync(claudeDir)) {
 
     const settingsPath = path.join(claudeDir, "settings.json");
     let settings: Record<string, unknown> = {};
     if (fs.existsSync(settingsPath)) {
       try {
         settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
-      } catch {
-        settings = {};
+      } catch (e) {
+        console.error(chalk.red(`  .claude/settings.json is not valid JSON: ${e instanceof Error ? e.message : e}`));
+        console.error(chalk.dim("  Fix or delete the file and re-run pim init."));
+        process.exit(1);
       }
     }
 
@@ -152,6 +155,36 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     delete hooks.PreToolCall;
 
     settings.hooks = hooks;
+
+    // MCP server entry
+    if (!skipMcp) {
+      try { new URL(serverUrl); } catch {
+        console.error(chalk.red(`  Cannot register MCP server: "${serverUrl}" is not a valid URL.`));
+        process.exit(1);
+      }
+      const mcpCmd = resolveMcpServerCommand();
+      const mcpServers = (settings.mcpServers ?? {}) as Record<string, unknown>;
+      if (!mcpServers.pim) {
+        mcpServers.pim = {
+          command: mcpCmd.command,
+          args: mcpCmd.args,
+          env: { PIM_API_URL: serverUrl },
+        };
+        settings.mcpServers = mcpServers;
+        console.log(chalk.green("  Registered pim MCP server in .claude/settings.json"));
+      } else {
+        const existing = mcpServers.pim as { env?: Record<string, string> };
+        if (existing.env?.PIM_API_URL !== serverUrl) {
+          existing.env = { ...existing.env, PIM_API_URL: serverUrl };
+          console.log(chalk.yellow("  Updated PIM_API_URL in existing pim MCP server entry"));
+        } else {
+          console.log(chalk.dim("  pim MCP server already in .claude/settings.json (skipped)"));
+        }
+      }
+    } else {
+      console.log(chalk.dim("  Skipped pim MCP server registration (--skip-mcp)"));
+    }
+
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
     console.log(chalk.green("  Updated .claude/settings.json (hooks)"));
 
@@ -160,8 +193,10 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     const syncPath = path.join(commandsDir, "sync.md");
     fs.writeFileSync(syncPath, renderSyncCommand({ podId, projectId: projectIdOpt, scope: templateScope }), "utf-8");
     console.log(chalk.green("  Created .claude/commands/sync.md"));
-  } else {
+  } else if (skipClaude) {
     console.log(chalk.dim("  Skipped Claude Code integration (--skip-claude)"));
+  } else {
+    console.log(chalk.dim("  Skipped Claude Code integration (no .claude/ directory found)"));
   }
 
   // 6. CLAUDE.md addendum
@@ -392,8 +427,9 @@ export function registerInitCommand(program: Command): void {
     .option("--scope <scope>", "Agent scope id (must exist in org config; see GET /api/org/config)")
     .option("--agent <id>", "Agent ID (default: git user.name)")
     .option("--skip-hooks", "Skip git hook installation")
-    .option("--skip-claude", "Skip Claude Code integration (.claude/ files)")
+    .option("--skip-claude", "Skip Claude Code integration (.claude/ hooks, MCP server entry, and commands)")
     .option("--skip-claude-md", "Skip CLAUDE.md addendum")
+    .option("--skip-mcp", "Skip MCP server registration in .claude/settings.json (use if you configure pim MCP globally)")
     .action(async (opts) => {
       const serverUrl = getBaseUrl(program);
       const root = findGitRoot();
@@ -569,6 +605,7 @@ export function registerInitCommand(program: Command): void {
         skipHooks: !!opts.skipHooks,
         skipClaude: !!opts.skipClaude,
         skipClaudeMd: !!opts.skipClaudeMd,
+        skipMcp: !!opts.skipMcp || !!opts.skipClaude,
         selectedSources,
       });
     });
