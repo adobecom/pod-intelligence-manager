@@ -9,6 +9,13 @@ import {
 } from "@pim/shared/auth";
 
 const API_BASE = process.env.PIM_API_URL ?? "http://localhost:4000";
+const FETCH_TIMEOUT_MS = 45_000;
+
+function withTimeout(ms: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
 
 interface HealthSnapshot {
   authMode: "trust" | "ims";
@@ -123,47 +130,75 @@ async function buildHeaders(hasBody: boolean): Promise<Record<string, string>> {
 
 export async function apiFetch<T>(path: string): Promise<T> {
   const headers = await buildHeaders(false);
-  const res = await fetch(`${API_BASE}${path}`, { headers });
-  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const { signal, clear } = withTimeout(FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { headers, signal });
+    if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  } finally {
+    clear();
+  }
 }
 
 export async function apiFetchText(path: string): Promise<string> {
   const headers = await buildHeaders(false);
-  const res = await fetch(`${API_BASE}${path}`, { headers });
-  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
-  return res.text();
+  const { signal, clear } = withTimeout(FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, { headers, signal });
+    if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+    return res.text();
+  } finally {
+    clear();
+  }
 }
 
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const headers = await buildHeaders(body != null);
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const { signal, clear } = withTimeout(FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: body != null ? JSON.stringify(body) : undefined,
+      signal,
+    });
+    if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  } finally {
+    clear();
+  }
 }
 
 export async function apiPut<T>(path: string, body?: unknown): Promise<T> {
   const headers = await buildHeaders(body != null);
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "PUT",
-    headers,
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const { signal, clear } = withTimeout(FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PUT",
+      headers,
+      body: body != null ? JSON.stringify(body) : undefined,
+      signal,
+    });
+    if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  } finally {
+    clear();
+  }
 }
 
 export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
   const headers = await buildHeaders(body != null);
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "PATCH",
-    headers,
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<T>;
+  const { signal, clear } = withTimeout(FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "PATCH",
+      headers,
+      body: body != null ? JSON.stringify(body) : undefined,
+      signal,
+    });
+    if (!res.ok) throw new Error(`PIM API ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<T>;
+  } finally {
+    clear();
+  }
 }
