@@ -4,11 +4,13 @@ import type {
   Project,
   OrgPodSummary,
   OrgConfig,
+  OrgTuning,
   CrossPodOverlap,
   ArchivedPod,
   ArchivedProject,
 } from "@pim/shared";
 import * as api from "../services/api";
+import type { TuningHistoryEntry } from "../services/api";
 
 interface OrgStore {
   pods: OrgPodSummary[];
@@ -17,11 +19,15 @@ interface OrgStore {
   archivedPods: ArchivedPod[];
   archivedProjects: ArchivedProject[];
   orgConfig: OrgConfig | null;
+  orgTuning: OrgTuning | null;
+  tuningHistory: TuningHistoryEntry[];
   loading: boolean;
 
   loadOrg: () => Promise<void>;
   loadOrgConfig: () => Promise<void>;
   saveOrgConfig: (config: OrgConfig) => Promise<OrgConfig>;
+  loadOrgTuning: () => Promise<void>;
+  resetOrgTuning: () => Promise<OrgTuning>;
   createPod: (input: {
     name: string;
     sprint_days?: number;
@@ -52,6 +58,8 @@ export const useOrgStore = create<OrgStore>((set) => ({
   archivedPods: [],
   archivedProjects: [],
   orgConfig: null,
+  orgTuning: null,
+  tuningHistory: [],
   loading: false,
 
   loadOrg: async () => {
@@ -69,6 +77,21 @@ export const useOrgStore = create<OrgStore>((set) => ({
     const orgConfig = await api.patchOrgConfig(config);
     set({ orgConfig });
     return orgConfig;
+  },
+
+  loadOrgTuning: async () => {
+    const [orgTuning, tuningHistory] = await Promise.all([
+      api.getOrgTuning(),
+      api.getOrgTuningHistory(),
+    ]);
+    set({ orgTuning, tuningHistory });
+  },
+
+  resetOrgTuning: async () => {
+    const orgTuning = await api.deleteOrgTuning();
+    const tuningHistory = await api.getOrgTuningHistory();
+    set({ orgTuning, tuningHistory });
+    return orgTuning;
   },
 
   createPod: async (input) => {

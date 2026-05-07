@@ -3,6 +3,9 @@ import db from "../../db/connection.js";
 import { broadcast } from "../../ws/index.js";
 import { callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
 import { computeCurrentDay } from "../../services/pod-day.js";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
+import { getOrgTuning } from "../../services/org-settings.js";
+import type { OrgTuning } from "@pim/shared";
 
 /** Returned with POST /api/pods/:podId/lint so clients can see if the fast (Haiku) supplement ran. */
 export interface LintPassMeta {
@@ -68,10 +71,11 @@ interface ConflictRow {
   sides_json: string;
 }
 
-const STALENESS_HOURS = 8;
-const LIVING_DOC_MAX_CHARS = 10_000;
-const UPDATE_DETAILS_MAX_CHARS = 800;
-const MAX_LLM_FINDINGS = 8;
+// Defaults preserved for backward compatibility; actual values come from OrgTuning at runtime.
+const STALENESS_HOURS = DEFAULT_ORG_TUNING.lint.stalenessHours;
+const LIVING_DOC_MAX_CHARS = DEFAULT_ORG_TUNING.lint.livingDocMaxChars;
+const UPDATE_DETAILS_MAX_CHARS = DEFAULT_ORG_TUNING.lint.updateDetailsMaxChars;
+const MAX_LLM_FINDINGS = DEFAULT_ORG_TUNING.lint.maxLlmFindings;
 
 const LLM_ALLOWED_TYPES = new Set<LintFinding["type"]>(["implicit_assumption", "spec_drift"]);
 
@@ -80,9 +84,10 @@ function truncate(s: string, max: number): string {
   return `${s.slice(0, max)}…`;
 }
 
-function collectDeterministicLintFindings(podId: string, timestamp: string): LintFinding[] {
+function collectDeterministicLintFindings(podId: string, timestamp: string, lintTuning?: OrgTuning["lint"]): LintFinding[] {
   const now = Date.now();
   const findings: LintFinding[] = [];
+  const stalenessHours = lintTuning?.stalenessHours ?? STALENESS_HOURS;
 
   const pod = db.prepare("SELECT pod_id, day_number, sprint_start, total_days FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
   if (!pod) return [];
@@ -111,7 +116,7 @@ function collectDeterministicLintFindings(podId: string, timestamp: string): Lin
     if (latestUpdate) {
       const ageMs = now - new Date(latestUpdate.timestamp).getTime();
       const ageHours = ageMs / (1000 * 60 * 60);
-      if (ageHours > STALENESS_HOURS) {
+      if (ageHours > stalenessHours) {
         findings.push({
           id: `lint-${randomUUID().slice(0, 8)}`,
           pod_id: podId,
@@ -242,13 +247,14 @@ function normalizeLLMFindings(
   podId: string,
   timestamp: string,
   rows: LLMFindingRow[] | undefined,
+  maxFindings: number,
 ): LintFinding[] {
   if (!rows?.length) return [];
   const out: LintFinding[] = [];
   const severities = new Set(["info", "warning", "critical"]);
 
   for (const row of rows) {
-    if (out.length >= MAX_LLM_FINDINGS) break;
+    if (out.length >= maxFindings) break;
     if (!row.summary?.trim() || !row.type) continue;
     if (!LLM_ALLOWED_TYPES.has(row.type as LintFinding["type"])) continue;
     const sev = row.severity as LintFinding["severity"];
@@ -269,7 +275,9 @@ function normalizeLLMFindings(
   return out;
 }
 
-function buildLintLLMContext(podId: string, deterministicSummary: string): string {
+function buildLintLLMContext(podId: string, deterministicSummary: string, lintTuning?: OrgTuning["lint"]): string {
+  const livingDocMaxChars = lintTuning?.livingDocMaxChars ?? LIVING_DOC_MAX_CHARS;
+  const updateDetailsMaxChars = lintTuning?.updateDetailsMaxChars ?? UPDATE_DETAILS_MAX_CHARS;
   const pod = db.prepare("SELECT pod_id, day_number, sprint_start, total_days FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
   if (!pod) return "";
   const currentDay = pod.sprint_start && pod.total_days
@@ -297,7 +305,7 @@ function buildLintLLMContext(podId: string, deterministicSummary: string): strin
   lines.push("");
   lines.push("## Recent context updates (newest first, details may be Markdown)");
   for (const u of updates) {
-    const det = u.details ? truncate(u.details, UPDATE_DETAILS_MAX_CHARS) : "";
+    const det = u.details ? truncate(u.details, updateDetailsMaxChars) : "";
     lines.push(
       `- [${u.timestamp}] ${u.agent_id} | ${u.type} | ${u.scope} | ${u.summary}${det ? `\n  Details:\n  ${det.replace(/\n/g, "\n  ")}` : ""}`,
     );
@@ -306,7 +314,7 @@ function buildLintLLMContext(podId: string, deterministicSummary: string): strin
   lines.push("## Living doc excerpt (Markdown)");
   lines.push(
     livingDocRow?.markdown
-      ? truncate(livingDocRow.markdown, LIVING_DOC_MAX_CHARS)
+      ? truncate(livingDocRow.markdown, livingDocMaxChars)
       : "(no living doc in store)",
   );
   lines.push("");
@@ -320,15 +328,17 @@ async function runLLMIntelligenceLint(
   podId: string,
   deterministicFindings: LintFinding[],
   timestamp: string,
+  lintTuning?: OrgTuning["lint"],
 ): Promise<LintFinding[]> {
   const podExists = db.prepare("SELECT 1 FROM pods WHERE pod_id = ?").get(podId);
   if (!podExists) return [];
 
+  const maxFindings = lintTuning?.maxLlmFindings ?? MAX_LLM_FINDINGS;
   const detSummary = deterministicFindings
     .map((f) => `- [${f.type}] ${f.severity}: ${f.summary}`)
     .join("\n");
 
-  const context = buildLintLLMContext(podId, detSummary);
+  const context = buildLintLLMContext(podId, detSummary, lintTuning);
   if (!context) return [];
 
   const system = `You are the PIM lint assistant. Given pod state (areas, recent Markdown context updates, living doc excerpt) and a list of findings already produced by deterministic rules, add ONLY new advisory findings of types:
@@ -337,7 +347,7 @@ async function runLLMIntelligenceLint(
 
 Rules:
 - Output valid JSON only, no markdown fences, no commentary.
-- At most ${MAX_LLM_FINDINGS} findings. Skip issues already covered by the deterministic list.
+- At most ${maxFindings} findings. Skip issues already covered by the deterministic list.
 - Each finding: type (implicit_assumption | spec_drift only), severity (info | warning | critical), summary (one sentence), area (scope string or empty), suggestion (actionable, or empty).
 - Never include secrets, credentials, or PII. If nothing useful, return {"findings":[]}.`;
 
@@ -350,7 +360,7 @@ Rules:
     maxTokens: 2048,
   });
 
-  return normalizeLLMFindings(podId, timestamp, parsed?.findings);
+  return normalizeLLMFindings(podId, timestamp, parsed?.findings, maxFindings);
 }
 
 function persistLintFindings(podId: string, findings: LintFinding[]): void {
@@ -368,9 +378,11 @@ function persistLintFindings(podId: string, findings: LintFinding[]): void {
 
 export async function runLintPass(
   podId: string,
+  orgId?: string,
 ): Promise<{ findings: LintFinding[]; meta: LintPassMeta }> {
+  const lintTuning = orgId ? getOrgTuning(orgId).lint : undefined;
   const timestamp = new Date().toISOString();
-  const findings = collectDeterministicLintFindings(podId, timestamp);
+  const findings = collectDeterministicLintFindings(podId, timestamp, lintTuning);
 
   const meta: LintPassMeta = {
     bedrock_configured: isLLMAvailable(),
@@ -382,7 +394,7 @@ export async function runLintPass(
 
   if (meta.bedrock_configured) {
     try {
-      const llmExtra = await runLLMIntelligenceLint(podId, findings, timestamp);
+      const llmExtra = await runLLMIntelligenceLint(podId, findings, timestamp, lintTuning);
       meta.llm_ok = true;
       meta.llm_model = MODELS.fast;
       meta.llm_extra_findings = llmExtra.length;

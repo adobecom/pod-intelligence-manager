@@ -175,7 +175,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   });
 
   // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
-  const pimResult = await processUpdate(update);
+  const pimResult = await processUpdate(update, orgId);
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)
   scheduleAsyncQualityScore(podId, update.id);

@@ -6,10 +6,16 @@ export const PRESSURE_THRESHOLDS = {
 
 export type PressureLevel = "normal" | "cautious" | "degraded" | "critical";
 
-export function getPressureLevel(pressure: number): PressureLevel {
-  if (pressure <= PRESSURE_THRESHOLDS.NORMAL_MAX) return "normal";
-  if (pressure <= PRESSURE_THRESHOLDS.CAUTIOUS_MAX) return "cautious";
-  if (pressure <= PRESSURE_THRESHOLDS.DEGRADED_MAX) return "degraded";
+export function getPressureLevel(
+  pressure: number,
+  thresholds?: { cautiousMax?: number; degradedMax?: number },
+): PressureLevel {
+  const normalMax = PRESSURE_THRESHOLDS.NORMAL_MAX;
+  const cautiousMax = thresholds?.cautiousMax ?? PRESSURE_THRESHOLDS.CAUTIOUS_MAX;
+  const degradedMax = thresholds?.degradedMax ?? PRESSURE_THRESHOLDS.DEGRADED_MAX;
+  if (pressure <= normalMax) return "normal";
+  if (pressure <= cautiousMax) return "cautious";
+  if (pressure <= degradedMax) return "degraded";
   return "critical";
 }
 
