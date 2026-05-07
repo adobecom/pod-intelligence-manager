@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Command } from "commander";
 import chalk from "chalk";
 import { checkbox, confirm, input, select, Separator } from "@inquirer/prompts";
+import { ExitPromptError } from "@inquirer/core";
 import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
@@ -321,18 +322,13 @@ async function runWizard(
   // Shared Standards — per-vendor sections with individual item checkboxes
   let selectedSources: string[] = [];
   console.log(chalk.dim("  Fetching shared standards catalogue..."));
-  let wizardSources: WizardSourceData[] = [];
-  try {
-    wizardSources = await fetchStandardsForWizard();
-  } catch {
-    console.log(chalk.yellow("  Could not reach standards catalogue — skipping shared standards."));
-  }
+  const wizardSources = await fetchStandardsForWizard();
   if (wizardSources.length > 0) {
     type CheckboxChoice = { name: string; value: string; checked: boolean; disabled?: string | boolean };
     const choices: Array<CheckboxChoice | Separator> = [];
     const mandatoryValues: string[] = [];
 
-    for (const { source, items, fallback } of wizardSources) {
+    for (const { source, items } of wizardSources) {
       choices.push(new Separator(`  ── ${source.name} ──`));
       const isMandatory = source.mandatory ?? false;
 
@@ -364,6 +360,8 @@ async function runWizard(
       pageSize: 20,
     });
 
+    // @inquirer/checkbox excludes disabled items from its resolved value, so
+    // mandatory items (which are disabled) must be merged back in explicitly.
     selectedSources = [...new Set([...userPicked, ...mandatoryValues])];
   }
 
@@ -508,7 +506,7 @@ export function registerInitCommand(program: Command): void {
             agent: agentId,
           });
         } catch (e) {
-          if (e instanceof Error && e.constructor.name === "ExitPromptError") {
+          if (e instanceof ExitPromptError) {
             console.log(chalk.dim("\n  Aborted.\n"));
             process.exit(0);
           }

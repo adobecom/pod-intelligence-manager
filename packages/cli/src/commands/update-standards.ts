@@ -69,7 +69,8 @@ export function registerUpdateStandardsCommand(program: Command): void {
         }
 
         try {
-          const result = await installSourceStandards(root, source, msg => console.log(msg));
+          const itemFilter = lockedSource.installedItems.length ? lockedSource.installedItems : undefined;
+          const result = await installSourceStandards(root, source, msg => console.log(msg), itemFilter);
           lockedSource.installedSha = result.sha;
           lockedSource.installedItems = result.installedItems;
           console.log(chalk.green(`  ✓ ${source.name} updated (${result.installedItems.length} items)`));

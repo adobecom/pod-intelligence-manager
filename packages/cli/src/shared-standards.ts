@@ -97,6 +97,9 @@ export async function installSourceStandards(
     fetchLatestCommitSha(source),
   ]);
   const toInstall = itemFilter?.length ? items.filter(i => itemFilter.includes(i)) : items;
+  if (itemFilter?.length && toInstall.length === 0) {
+    console.log(chalk.yellow(`  Warning: none of the requested items for ${source.name} were found in the repo. The catalogue may be stale.`));
+  }
   const installedItems: string[] = [];
   for (const item of toInstall) {
     await downloadItem(source, item, destDir);
