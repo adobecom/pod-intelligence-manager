@@ -2,7 +2,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import { PimClient } from "@pim/sdk";
 import type { ContextUpdateType, WorkStatus, Scope } from "@pim/shared";
-import { getBaseUrl, getOrgSlug } from "../util.js";
+import { getBaseUrl, getOrgSlug, getAuthToken } from "../util.js";
 
 export function registerReportCommand(program: Command) {
   program
@@ -32,6 +32,7 @@ export function registerReportCommand(program: Command) {
         agentId: opts.agent,
         scope: opts.scope as Scope,
         orgSlug: getOrgSlug() ?? undefined,
+        authToken: getAuthToken() ?? undefined,
       });
 
       const result = await client.report({
