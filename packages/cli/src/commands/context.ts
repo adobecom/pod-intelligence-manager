@@ -5,7 +5,7 @@ import chalk from "chalk";
 import { PimClient } from "@pim/sdk";
 import type { SessionContext } from "@pim/sdk";
 import type { Scope } from "@pim/shared";
-import { getBaseUrl, getOrgSlug } from "../util.js";
+import { getBaseUrl, getOrgSlug, getAuthToken } from "../util.js";
 import { findGitRoot } from "../config.js";
 import { fetchOrgConfig, formatScopeChoicesForError, scopeIdsFromConfig } from "../org-config.js";
 
@@ -175,6 +175,7 @@ export function registerContextCommand(program: Command): void {
         agentId,
         scope,
         orgSlug: getOrgSlug() ?? undefined,
+        authToken: getAuthToken() ?? undefined,
       });
 
       const ctx = await client.pullSessionContext({

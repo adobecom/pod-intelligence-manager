@@ -3,7 +3,7 @@ import chalk from "chalk";
 import { searchContext } from "@pim/sdk";
 import type { ContextSearchHit, ContextSearchRequest, ContextSource } from "@pim/shared";
 import { CONTEXT_SOURCES } from "@pim/shared";
-import { getBaseUrl, getOrgSlug } from "../util.js";
+import { getBaseUrl, getOrgSlug, getAuthToken } from "../util.js";
 
 function parseSources(raw?: string): ContextSource[] | undefined {
   if (!raw) return undefined;
@@ -79,7 +79,7 @@ export function registerSearchCommand(program: Command): void {
         use_cache: opts.cache !== false,
       };
 
-      const result = await searchContext(base, request, getOrgSlug() ?? undefined);
+      const result = await searchContext(base, request, getOrgSlug() ?? undefined, getAuthToken() ?? undefined);
 
       if (opts.json) {
         console.log(JSON.stringify(result, null, 2));

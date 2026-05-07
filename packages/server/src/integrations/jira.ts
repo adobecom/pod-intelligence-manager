@@ -124,6 +124,8 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
 
   const jql = buildJql(opts);
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
   try {
     const res = await fetch(`${base.replace(/\/$/, "")}/${restPath}`, {
       method: "POST",
@@ -137,6 +139,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
         maxResults: opts.max_hits_per_source,
         fields: ["summary", "description", "status", "updated", "creator", "assignee"],
       }),
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -173,5 +176,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
       hits: [],
       missing: `Jira error: ${describeFetchError(err, base)}`,
     };
+  } finally {
+    clearTimeout(timer);
   }
 }

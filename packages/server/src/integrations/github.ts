@@ -102,11 +102,14 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   const prUrl = `https://api.github.com/search/issues?q=${prQuery}&per_page=${perPage}`;
   const issueUrl = `https://api.github.com/search/issues?q=${issueQuery}&per_page=${perPage}`;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
   const [codeRes, prRes, issueRes] = await Promise.allSettled([
-    fetch(codeUrl, { headers }),
-    fetch(prUrl, { headers }),
-    fetch(issueUrl, { headers }),
+    fetch(codeUrl, { headers, signal: controller.signal }),
+    fetch(prUrl, { headers, signal: controller.signal }),
+    fetch(issueUrl, { headers, signal: controller.signal }),
   ]);
+  clearTimeout(timer);
 
   const hits: ContextSearchHit[] = [];
   const errors: string[] = [];

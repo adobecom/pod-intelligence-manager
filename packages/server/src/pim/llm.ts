@@ -23,6 +23,8 @@ interface ConverseResponse {
   output?: { message?: { content?: Array<{ text?: string }> } };
 }
 
+const LLM_TIMEOUT_MS = 30_000;
+
 export async function callLLM(opts: {
   model: ModelId;
   system: string;
@@ -35,18 +37,32 @@ export async function callLLM(opts: {
   const region = process.env.AWS_REGION || "us-west-2";
   const url = `https://bedrock-runtime.${region}.amazonaws.com/model/${opts.model}/converse`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      system: [{ text: opts.system }],
-      messages: [{ role: "user", content: [{ text: opts.prompt }] }],
-      inferenceConfig: { maxTokens: opts.maxTokens ?? 2048 },
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        system: [{ text: opts.system }],
+        messages: [{ role: "user", content: [{ text: opts.prompt }] }],
+        inferenceConfig: { maxTokens: opts.maxTokens ?? 2048 },
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Bedrock Converse timed out after ${LLM_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
