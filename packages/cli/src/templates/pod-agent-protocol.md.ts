@@ -31,19 +31,6 @@ function renderPodProtocol(params: ProtocolTemplateParams & { podId: string }): 
 This project is connected to PIM pod \`${params.podId}\`.
 PIM server: \`${params.serverUrl}\`
 
-### Getting Current Pod Context
-
-When you need to understand the current state of the pod before making decisions
-or starting work in an unfamiliar area, pull context with:
-
-\`\`\`bash
-pim context --pod ${params.podId} --scope ${params.scope}
-\`\`\`
-
-Use \`--brief\` for a quick summary or \`--diff\` to see only what changed since
-your last pull. If conflict pressure is >= 0.6, check open conflicts before
-proceeding in contested areas.
-
 ### Automatic Reporting
 
 Context updates are automatically reported to PIM when you:
@@ -52,45 +39,17 @@ Context updates are automatically reported to PIM when you:
 
 You do not need to manually report routine progress — it flows automatically.
 
-### Manual Reporting
+### PIM MCP Tools (Preferred)
 
-Report these manually using \`pim report\` or the MCP \`submit_context_update\` tool:
-- **Blockers**: When you are blocked by another area or dependency
-- **Decisions**: When you make a significant architectural or design decision
-- **Spec changes**: When you discover the spec needs to change
-- **Questions**: When you need input from another role
-
-Example:
-\`\`\`bash
-pim report --pod ${params.podId} --type decision --scope ${params.scope} \\
-  --summary "Chose Redis over Memcached for session cache" \\
-  --details "Redis supports pub/sub which we need for real-time invalidation..."
-\`\`\`
-
-### Quality Guidelines
-
-- Summaries should be specific and actionable (avoid "made progress" or "working on it")
-- Include file paths, function names, or API endpoints when relevant
-- Declare blockers and input requests — this triggers PIM's escalation system
-- Artifacts (changed files) are automatically included with commit reports
-
-### Conflict Awareness
-
-- Check pod pressure with \`pim context --pod ${params.podId} --brief\`
-- If pressure is >= 0.8, ingestion is halted — resolve conflicts first
-- When your work overlaps with another area, PIM will detect it automatically
-
-### PIM MCP Tools
-
-If the PIM MCP server is configured in Claude Code, you can use these tools
-directly instead of CLI commands. They cover the same operations plus additional
-querying and management capabilities.
+If the PIM MCP server is configured in Claude Code, **always use these tools
+instead of CLI commands** — they are faster, don't require a shell, and avoid
+the authentication issues that can occur with the CLI.
 
 **Context & Session**
 
 | Tool | When to use |
 |------|-------------|
-| \`get_agent_session_context\` | Pull pod state, living doc, conflicts, and token-budgeted org learnings in one call — the MCP equivalent of \`pim context\` |
+| \`get_agent_session_context\` | Pull pod state, living doc, conflicts, and token-budgeted org learnings in one call |
 | \`context_search\` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
 | \`query_knowledge\` | Search the org knowledge graph for historical precedents and resolved decisions |
 
@@ -114,6 +73,45 @@ querying and management capabilities.
 | \`render_pod_dashboard\` | Get a full interactive React artifact showing pod health, conflicts, feed, and live doc |
 | \`list_pods\` | See all active pods in the org |
 
+### Fallback: CLI Commands
+
+Use these only when the PIM MCP server is not configured.
+
+#### Getting Current Pod Context
+
+\`\`\`bash
+pim context --pod ${params.podId} --scope ${params.scope}
+\`\`\`
+
+Use \`--brief\` for a quick summary or \`--diff\` to see only what changed since
+your last pull. If conflict pressure is >= 0.6, check open conflicts before
+proceeding in contested areas.
+
+#### Manual Reporting
+
+Report blockers, decisions, spec changes, and questions manually:
+
+\`\`\`bash
+pim report --pod ${params.podId} --type decision --scope ${params.scope} \\
+  --summary "Chose Redis over Memcached for session cache" \\
+  --details "Redis supports pub/sub which we need for real-time invalidation..."
+\`\`\`
+
+Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`
+
+### Quality Guidelines
+
+- Summaries should be specific and actionable (avoid "made progress" or "working on it")
+- Include file paths, function names, or API endpoints when relevant
+- Declare blockers and input requests — this triggers PIM's escalation system
+- Artifacts (changed files) are automatically included with commit reports
+
+### Conflict Awareness
+
+- Check pod pressure with \`pim context --pod ${params.podId} --brief\`
+- If pressure is >= 0.8, ingestion is halted — resolve conflicts first
+- When your work overlaps with another area, PIM will detect it automatically
+
 ${PROTOCOL_MARKER_END}`;
 }
 
@@ -133,33 +131,17 @@ Context updates are automatically sent to PIM when you:
 
 You do not need to manually report routine progress — it flows automatically.
 
-### Manual Reporting
+### PIM MCP Tools (Preferred)
 
-Report decisions, blockers, and spec changes manually:
-\`\`\`bash
-pim report --project ${params.projectId} --type decision --scope ${params.scope} \\
-  --summary "Chose Redis over Memcached for session cache" \\
-  --details "Redis supports pub/sub which we need for real-time invalidation..."
-\`\`\`
-
-Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`
-
-### Quality Guidelines
-
-- Summaries should be specific and actionable (avoid "made progress" or "working on it")
-- Include file paths, function names, or API endpoints when relevant
-- Decisions and spec changes flow into the org knowledge graph automatically
-
-### PIM MCP Tools
-
-If the PIM MCP server is configured in Claude Code, you can use these tools
-directly instead of CLI commands.
+If the PIM MCP server is configured in Claude Code, **always use these tools
+instead of CLI commands** — they are faster, don't require a shell, and avoid
+the authentication issues that can occur with the CLI.
 
 **Context & Search**
 
 | Tool | When to use |
 |------|-------------|
-| \`get_project_session_context\` | Pull project state, recent updates, and token-budgeted org learnings — the MCP equivalent of \`pim context --project\` |
+| \`get_project_session_context\` | Pull project state, recent updates, and token-budgeted org learnings |
 | \`context_search\` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
 | \`query_knowledge\` | Search the org knowledge graph for historical precedents and resolved decisions |
 
@@ -175,6 +157,24 @@ directly instead of CLI commands.
 |------|-------------|
 | \`get_project\` | Fetch project details including anatomy and resource configuration |
 | \`list_projects\` | See all long-lived projects in the org |
+
+### Fallback: CLI Commands
+
+Use these only when the PIM MCP server is not configured.
+
+\`\`\`bash
+pim report --project ${params.projectId} --type decision --scope ${params.scope} \\
+  --summary "Chose Redis over Memcached for session cache" \\
+  --details "Redis supports pub/sub which we need for real-time invalidation..."
+\`\`\`
+
+Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`
+
+### Quality Guidelines
+
+- Summaries should be specific and actionable (avoid "made progress" or "working on it")
+- Include file paths, function names, or API endpoints when relevant
+- Decisions and spec changes flow into the org knowledge graph automatically
 
 ${PROTOCOL_MARKER_END}`;
 }

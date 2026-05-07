@@ -77,6 +77,8 @@ interface PimClientConfigBase {
   scope: Scope;
   /** Org slug sent as X-Pim-Org on every request. Required once the server enforces org scoping. */
   orgSlug?: string;
+  /** IMS Bearer token forwarded as Authorization header. Required when the server runs in IMS auth mode. */
+  authToken?: string;
 }
 
 export type PimClientConfig =
@@ -136,7 +138,13 @@ export class PimClient {
   }
 
   private withHeaders(init?: RequestInit): RequestInit | undefined {
-    return withOrgHeader(init, this.config.orgSlug);
+    let result = withOrgHeader(init, this.config.orgSlug);
+    if (this.config.authToken) {
+      const headers = new Headers(result?.headers);
+      headers.set("Authorization", `Bearer ${this.config.authToken}`);
+      result = { ...result, headers };
+    }
+    return result;
   }
 
   // Submit a context update to PIM
