@@ -39,3 +39,96 @@ Agents query via `getRelevantLearnings(tokenBudget)` — never dump the full gra
 - **Pod agent protocol:** [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md)
 - **Deployment:** [docs/DEPLOY.md](docs/DEPLOY.md), [docs/DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md)
 - **Context search:** [docs/CONTEXT_SEARCH.md](docs/CONTEXT_SEARCH.md)
+
+
+<!-- pim-pod-agent-begin -->
+
+## PIM — Pod Agent Protocol
+
+This project is connected to PIM pod `pod-pim-live-demo-prep-848a3e`.
+PIM server: `https://d1ygncl0yqo6sv.cloudfront.net`
+
+### Getting Current Pod Context
+
+When you need to understand the current state of the pod before making decisions
+or starting work in an unfamiliar area, pull context with:
+
+```bash
+pim context --pod pod-pim-live-demo-prep-848a3e --scope frontend
+```
+
+Use `--brief` for a quick summary or `--diff` to see only what changed since
+your last pull. If conflict pressure is >= 0.6, check open conflicts before
+proceeding in contested areas.
+
+### Automatic Reporting
+
+Context updates are automatically reported to PIM when you:
+- **Make a git commit** — via post-commit hook (captures subject, body, changed files)
+- **Create a pull request** — via Claude Code hook (captures PR URL and title)
+
+You do not need to manually report routine progress — it flows automatically.
+
+### Manual Reporting
+
+Report these manually using `pim report` or the MCP `submit_context_update` tool:
+- **Blockers**: When you are blocked by another area or dependency
+- **Decisions**: When you make a significant architectural or design decision
+- **Spec changes**: When you discover the spec needs to change
+- **Questions**: When you need input from another role
+
+Example:
+```bash
+pim report --pod pod-pim-live-demo-prep-848a3e --type decision --scope frontend \
+  --summary "Chose Redis over Memcached for session cache" \
+  --details "Redis supports pub/sub which we need for real-time invalidation..."
+```
+
+### Quality Guidelines
+
+- Summaries should be specific and actionable (avoid "made progress" or "working on it")
+- Include file paths, function names, or API endpoints when relevant
+- Declare blockers and input requests — this triggers PIM's escalation system
+- Artifacts (changed files) are automatically included with commit reports
+
+### Conflict Awareness
+
+- Check pod pressure with `pim context --pod pod-pim-live-demo-prep-848a3e --brief`
+- If pressure is >= 0.8, ingestion is halted — resolve conflicts first
+- When your work overlaps with another area, PIM will detect it automatically
+
+### PIM MCP Tools
+
+If the PIM MCP server is configured in Claude Code, you can use these tools
+directly instead of CLI commands. They cover the same operations plus additional
+querying and management capabilities.
+
+**Context & Session**
+
+| Tool | When to use |
+|------|-------------|
+| `get_agent_session_context` | Pull pod state, living doc, conflicts, and token-budgeted org learnings in one call — the MCP equivalent of `pim context` |
+| `context_search` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
+| `query_knowledge` | Search the org knowledge graph for historical precedents and resolved decisions |
+
+**Reporting**
+
+| Tool | When to use |
+|------|-------------|
+| `submit_context_update` | Report progress, blockers, decisions, spec changes, or questions |
+
+**Conflicts**
+
+| Tool | When to use |
+|------|-------------|
+| `get_conflict_details` | Inspect a specific open conflict and its suggested resolutions |
+| `resolve_conflict` | Mark a conflict as resolved with a chosen approach |
+
+**Observability**
+
+| Tool | When to use |
+|------|-------------|
+| `render_pod_dashboard` | Get a full interactive React artifact showing pod health, conflicts, feed, and live doc |
+| `list_pods` | See all active pods in the org |
+
+<!-- pim-pod-agent-end -->

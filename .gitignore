@@ -16,3 +16,7 @@ cdk.out/
 cdk.context.json
 packages/infra/outputs.json
 
+
+# PIM local state
+.pim/
+.pim.json

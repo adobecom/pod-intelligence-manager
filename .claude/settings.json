@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/cod87753/Code/ai-council/packages/cli/dist/hooks/claude-code-post-tool.cjs\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"/Users/cod87753/Code/ai-council/packages/cli/dist/hooks/claude-code-pre-tool.cjs\""
+          }
+        ]
+      }
+    ]
+  }
+}
