@@ -19,10 +19,12 @@ const column = style({
 
 interface ConflictPressureGaugeProps {
   pressure: number;
+  thresholds?: { cautiousMax?: number; degradedMax?: number };
 }
 
 export function ConflictPressureGauge({
   pressure,
+  thresholds,
 }: ConflictPressureGaugeProps) {
   return (
     <div className={well}>
@@ -30,7 +32,7 @@ export function ConflictPressureGauge({
         <Heading level={4} styles={style({ marginY: 0 })}>
           Conflict Pressure
         </Heading>
-        <PressureMeter value={pressure} />
+        <PressureMeter value={pressure} thresholds={thresholds} />
       </div>
     </div>
   );

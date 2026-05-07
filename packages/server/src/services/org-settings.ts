@@ -183,9 +183,7 @@ function deepMergeTuning(defaults: OrgTuning, overrides: Partial<OrgTuning>): Or
     pressureWeights: { ...defaults.pressureWeights, ...(overrides.pressureWeights ?? {}) },
     conflictScout:   { ...defaults.conflictScout,   ...(overrides.conflictScout   ?? {}) },
     graphScoring:    { ...defaults.graphScoring,     ...(overrides.graphScoring    ?? {}) },
-    contextSearch:   { ...defaults.contextSearch,    ...(overrides.contextSearch   ?? {}) },
     lint:            { ...defaults.lint,             ...(overrides.lint            ?? {}) },
     classifier:      { ...defaults.classifier,       ...(overrides.classifier      ?? {}) },
-    rateLimit:       { ...defaults.rateLimit,        ...(overrides.rateLimit       ?? {}) },
   };
 }

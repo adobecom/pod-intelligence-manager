@@ -7,6 +7,7 @@ import { useOrgStore } from "../stores/orgStore";
 
 const loadPod = usePodStore.getState().loadPod;
 const loadOrgConfig = useOrgStore.getState().loadOrgConfig;
+const loadOrgTuning = useOrgStore.getState().loadOrgTuning;
 
 const navItems = [
   { path: "", label: "Dashboard", end: true },
@@ -58,6 +59,7 @@ export function PodLayout() {
 
   useEffect(() => {
     void loadOrgConfig();
+    void loadOrgTuning();
   }, []);
 
   useEffect(() => {
