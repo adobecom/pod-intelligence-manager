@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Command } from "commander";
 import chalk from "chalk";
-import { checkbox, confirm, input, select } from "@inquirer/prompts";
+import { checkbox, confirm, input, select, Separator } from "@inquirer/prompts";
+import { ExitPromptError } from "@inquirer/core";
 import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
@@ -15,7 +16,8 @@ import {
 } from "../templates/pod-agent-protocol.md.js";
 import { renderSyncCommand } from "../templates/sync-command.md.js";
 import {
-  buildWizardStandardsChoices,
+  type WizardSourceData,
+  fetchStandardsForWizard,
   checkForUpdates,
   installSelectedSources,
 } from "../shared-standards.js";
@@ -317,20 +319,50 @@ async function runWizard(
     agentId = entered.trim() || undefined;
   }
 
-  // Shared Standards — fetch catalogue and let user pick which sources to install
+  // Shared Standards — per-vendor sections with individual item checkboxes
   let selectedSources: string[] = [];
   console.log(chalk.dim("  Fetching shared standards catalogue..."));
-  let standardsChoices: Array<{ name: string; value: string; checked: boolean }> = [];
-  try {
-    standardsChoices = await buildWizardStandardsChoices();
-  } catch {
-    console.log(chalk.yellow("  Could not reach standards catalogue — skipping shared standards."));
-  }
-  if (standardsChoices.length > 0) {
-    selectedSources = await checkbox({
-      message: "Shared standards to install (.claude/skills/):",
-      choices: standardsChoices,
+  const wizardSources = await fetchStandardsForWizard();
+  if (wizardSources.length > 0) {
+    type CheckboxChoice = { name: string; value: string; checked: boolean; disabled?: string | boolean };
+    const choices: Array<CheckboxChoice | Separator> = [];
+    const mandatoryValues: string[] = [];
+
+    for (const { source, items } of wizardSources) {
+      choices.push(new Separator(`  ── ${source.name} ──`));
+      const isMandatory = source.mandatory ?? false;
+
+      if (items.length > 0) {
+        for (const item of items) {
+          const value = `${source.id}:${item}`;
+          choices.push({ name: item, value, checked: isMandatory, disabled: isMandatory ? "Adobe required" : false });
+          if (isMandatory) mandatoryValues.push(value);
+        }
+      } else {
+        // Truly offline with no static items — single source-level entry installs everything
+        const value = source.id;
+        choices.push({
+          name: `${source.name} — ${source.description}`,
+          value,
+          checked: isMandatory,
+          disabled: isMandatory ? "Adobe required" : false,
+        });
+        if (isMandatory) mandatoryValues.push(value);
+      }
+    }
+
+    console.log(chalk.bold("\n  ── Shared Standards ──────────────────────────────────────"));
+    console.log(chalk.dim("  Installed to .claude/skills/ · Space to toggle · Enter to confirm\n"));
+
+    const userPicked = await checkbox({
+      message: "Select standards to install:",
+      choices,
+      pageSize: 20,
     });
+
+    // @inquirer/checkbox excludes disabled items from its resolved value, so
+    // mandatory items (which are disabled) must be merged back in explicitly.
+    selectedSources = [...new Set([...userPicked, ...mandatoryValues])];
   }
 
   const target = podId
@@ -466,11 +498,20 @@ export function registerInitCommand(program: Command): void {
       let selectedSources: string[] = [];
 
       if (interactive && !opts.pod) {
-        const w = await runWizard(serverUrl, orgConfig, root, {
-          project: projectIdOpt,
-          scope,
-          agent: agentId,
-        });
+        let w: Awaited<ReturnType<typeof runWizard>>;
+        try {
+          w = await runWizard(serverUrl, orgConfig, root, {
+            project: projectIdOpt,
+            scope,
+            agent: agentId,
+          });
+        } catch (e) {
+          if (e instanceof ExitPromptError) {
+            console.log(chalk.dim("\n  Aborted.\n"));
+            process.exit(0);
+          }
+          throw e;
+        }
         podId = w.podId;
         projectIdOpt = w.projectId;
         scope = w.scope;
