@@ -89,14 +89,16 @@ export async function installSourceStandards(
   root: string,
   source: StandardsSource,
   onProgress?: (msg: string) => void,
+  itemFilter?: string[],
 ): Promise<InstallResult> {
   const destDir = path.join(root, ".claude", "skills");
   const [items, sha] = await Promise.all([
     fetchItemListing(source),
     fetchLatestCommitSha(source),
   ]);
+  const toInstall = itemFilter?.length ? items.filter(i => itemFilter.includes(i)) : items;
   const installedItems: string[] = [];
-  for (const item of items) {
+  for (const item of toInstall) {
     await downloadItem(source, item, destDir);
     installedItems.push(item);
     onProgress?.(`    ${chalk.green("✓")} ${item}`);
@@ -104,16 +106,39 @@ export async function installSourceStandards(
   return { sourceId: source.id, installedItems, sha };
 }
 
-export async function installSelectedSources(root: string, selectedSourceIds: string[]): Promise<void> {
+/**
+ * Decodes encoded wizard checkbox values into per-source install instructions.
+ * Value format: "sourceId:itemName" (per-item) or "sourceId" (install all, offline fallback).
+ */
+export function parseStandardsSelections(
+  values: string[],
+): { sourceId: string; items: string[] }[] {
+  const map = new Map<string, string[]>();
+  for (const v of values) {
+    const colon = v.indexOf(":");
+    if (colon === -1) {
+      if (!map.has(v)) map.set(v, []);
+    } else {
+      const sourceId = v.slice(0, colon);
+      const item = v.slice(colon + 1);
+      if (!map.has(sourceId)) map.set(sourceId, []);
+      map.get(sourceId)!.push(item);
+    }
+  }
+  return Array.from(map.entries()).map(([sourceId, items]) => ({ sourceId, items }));
+}
+
+export async function installSelectedSources(root: string, encodedValues: string[]): Promise<void> {
   const now = new Date().toISOString();
   const lock = readStandardsLock(root) ?? { version: 1, updatedAt: now, lastChecked: now, sources: [] };
+  const selections = parseStandardsSelections(encodedValues);
 
-  for (const sourceId of selectedSourceIds) {
+  for (const { sourceId, items } of selections) {
     const source = STANDARDS_CATALOGUE.find(s => s.id === sourceId);
     if (!source) continue;
     console.log(chalk.dim(`  Installing ${source.name}...`));
     try {
-      const result = await installSourceStandards(root, source, msg => console.log(msg));
+      const result = await installSourceStandards(root, source, msg => console.log(msg), items.length ? items : undefined);
       const entry: StandardsLockSource = {
         id: sourceId,
         repo: source.repo,
@@ -166,19 +191,28 @@ export async function checkForUpdates(
   return { upToDate: staleSources.length === 0, staleSources };
 }
 
-export async function buildWizardStandardsChoices(): Promise<
-  Array<{ name: string; value: string; checked: boolean }>
-> {
+/** Data fetched per catalogue source for the init wizard. */
+export interface WizardSourceData {
+  source: StandardsSource;
+  /** Directory names from GitHub. Empty if the listing fetch failed. */
+  items: string[];
+  /** True if the GitHub listing call failed; wizard shows a single source-level entry. */
+  fallback: boolean;
+}
+
+/**
+ * Fetches item listings for all catalogue sources in parallel.
+ * Never throws — failed sources are returned with fallback: true.
+ */
+export async function fetchStandardsForWizard(): Promise<WizardSourceData[]> {
   return Promise.all(
     STANDARDS_CATALOGUE.map(async (source) => {
-      let detail = source.description;
       try {
         const items = await fetchItemListing(source);
-        detail = items.join(", ");
+        return { source, items, fallback: false };
       } catch {
-        // Use catalogue description as fallback
+        return { source, items: source.staticItems ?? [], fallback: true };
       }
-      return { name: `${source.name} — ${detail}`, value: source.id, checked: true };
     }),
   );
 }

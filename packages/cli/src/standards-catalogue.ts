@@ -6,14 +6,19 @@ export interface StandardsSource {
   branch: string;
   path: string;
   files: string[];
+  /** Known item names, used as fallback when the GitHub listing is unavailable. */
+  staticItems?: string[];
+  /** Adobe-enforced: pre-selected in the wizard and cannot be deselected. */
+  mandatory?: boolean;
 }
 
 export const STANDARDS_CATALOGUE: StandardsSource[] = [
   {
     id: "milo-skills",
     name: "Milo Skills",
-    description: "build-block-from-figma, build-content-from-figma, build-scroll-animation",
-    repo: "overmyheadandbody/milo",
+    description: "Figma-to-Milo component builder skills",
+    staticItems: ["build-block-from-figma", "build-content-from-figma", "build-scroll-animation"],
+    repo: "adobecom/milo",
     branch: "main",
     path: ".claude/skills",
     files: ["SKILL.md", "README.md"],
