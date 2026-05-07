@@ -51,7 +51,7 @@ pim/
 │   ├── sdk/             # @pim/sdk -- TypeScript client for agent integration
 │   ├── mcp-server/      # MCP server for Claude.ai artifact integration
 │   ├── cli/             # pim CLI — pods, context, hooks, tunnel, init, leave
-├── infra/           # AWS CDK — **deployed:** `PimEc2Stack` (EC2 + SQLite + ALB + CloudFront); **reference:** `pim-stack.ts` (Lambda + DynamoDB — not wired)
+│   └── infra/           # AWS CDK — **deployed:** `PimEc2Stack` (EC2 + SQLite + ALB + CloudFront); **reference:** `pim-stack.ts` (Lambda + DynamoDB — not wired)
 ├── prompts/             # Version-controlled LLM system prompts
 ├── SPEC.md              # Full system specification
 ├── CLAUDE.md            # Guidance for Claude Code

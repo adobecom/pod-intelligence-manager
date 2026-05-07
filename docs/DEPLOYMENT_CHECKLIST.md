@@ -7,6 +7,7 @@ no code changes required.
 Deployment context: **[ARCHITECTURE_CURRENT_VS_TARGET.md](ARCHITECTURE_CURRENT_VS_TARGET.md)** (Path A — EC2 + SQLite).
 
 Architecture context: the server runs as a single Node process on EC2 behind
+ALB + CloudFront. `packages/server/scripts/fetch-secrets.sh` fetches every
 parameter under `/pim/*` in SSM at container start and exports each as an env
 var (parameter `/pim/SLACK_BOT_TOKEN` → env `SLACK_BOT_TOKEN`). Adding new
 functionality typically means: put a value in SSM, restart the instance.
