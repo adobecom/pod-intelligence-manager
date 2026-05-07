@@ -23,6 +23,7 @@ import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
+import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
 import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
@@ -170,6 +171,7 @@ const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "3
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
 const GRAPH_PRUNE_INTERVAL_MS = parseInt(process.env.GRAPH_PRUNE_INTERVAL_MS ?? "86400000", 10); // 24 hours
+const GRAPH_SYNTHESIS_INTERVAL_MS = parseInt(process.env.GRAPH_SYNTHESIS_INTERVAL_MS ?? "604800000", 10); // 7 days
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -222,10 +224,39 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }
   }, GRAPH_PRUNE_INTERVAL_MS);
 
+  // Scheduled graph synthesis (composite learnings from graph + lint; gated on LLM + embeddings).
+  setInterval(() => {
+    void runScheduledGraphSynthesis()
+      .then((r) => {
+        if (!r.ok) {
+          app.log.error({
+            msg: "Knowledge graph synthesis failed",
+            error: r.error ?? "unknown",
+            run_id: r.run_id,
+          });
+          return;
+        }
+        if (r.skipped) {
+          app.log.debug({ msg: "Knowledge graph synthesis skipped", reason: r.skipped, run_id: r.run_id });
+        } else {
+          app.log.info({
+            msg: "Knowledge graph synthesis completed",
+            run_id: r.run_id,
+            nodes_added: r.nodes_added ?? 0,
+            edges_added: r.edges_added ?? 0,
+          });
+        }
+      })
+      .catch((e) => {
+        app.log.error(e, "Knowledge graph synthesis failed");
+      });
+  }, GRAPH_SYNTHESIS_INTERVAL_MS);
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph prune interval: ${GRAPH_PRUNE_INTERVAL_MS}ms`);
+  app.log.info(`Knowledge graph synthesis interval: ${GRAPH_SYNTHESIS_INTERVAL_MS}ms`);
 });
 
 // Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.

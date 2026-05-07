@@ -159,6 +159,7 @@ export async function addLearningsToGraph(
       confidence_score: learning.confidence_score,
       created_at: now,
       curated: false,
+      ...(learning.ingestion_provenance ? { ingestion_provenance: learning.ingestion_provenance } : {}),
     };
 
     node.embedding = (await generateEmbedding(embedText(node))) ?? undefined;
