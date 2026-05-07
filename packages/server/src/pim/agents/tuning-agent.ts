@@ -35,7 +35,6 @@ const GUARD_RAILS: Record<string, GuardRailEntry> = {
   "conflictScout.overlapForceMinConf": [0.40, 0.92],
   "pressure.normalMax":                [0.10, 0.45],
   "pressure.cautiousMax":              [0.30, 0.75],
-  "pressure.degradedMax":              [0.55, 0.92],
   "lint.stalenessHours":               [4,    72  ],
 };
 
@@ -119,6 +118,7 @@ function computeNudges(signals: TuningSignals, current: OrgTuning): Nudge[] {
       nudges.push({ parameter: "conflictScout.overlapForceMinConf", delta: +0.05, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
     } else if (signals.conflictFPRate < 0.05) {
       nudges.push({ parameter: "conflictScout.additiveMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
+      nudges.push({ parameter: "conflictScout.overlapForceMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
     }
   }
 
@@ -147,13 +147,13 @@ function applyNudges(current: OrgTuning, nudges: Nudge[]): OrgTuning {
     updated = setNestedValue(updated, nudge.parameter, newValue);
   }
 
-  // Enforce pressure ordering invariant: normalMax < cautiousMax < degradedMax
-  const p = updated.pressure;
-  if (p.normalMax >= p.cautiousMax) {
-    updated = setNestedValue(updated, "pressure.normalMax", p.cautiousMax - 0.05);
+  // Enforce pressure ordering invariant: normalMax < cautiousMax < degradedMax.
+  // Re-read updated.pressure after each set so subsequent checks see the corrected values.
+  if (updated.pressure.normalMax >= updated.pressure.cautiousMax) {
+    updated = setNestedValue(updated, "pressure.normalMax", updated.pressure.cautiousMax - 0.05);
   }
-  if (p.cautiousMax >= p.degradedMax) {
-    updated = setNestedValue(updated, "pressure.cautiousMax", p.degradedMax - 0.05);
+  if (updated.pressure.cautiousMax >= updated.pressure.degradedMax) {
+    updated = setNestedValue(updated, "pressure.cautiousMax", updated.pressure.degradedMax - 0.05);
   }
 
   return updated;
