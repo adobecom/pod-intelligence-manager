@@ -57,18 +57,22 @@ export async function searchContext(
   baseUrl: string,
   request: ContextSearchRequest,
   orgSlug?: string,
+  authToken?: string,
 ): Promise<ContextSearchResult> {
-  return fetchJSON<ContextSearchResult>(
-    `${baseUrl}/api/context-search`,
-    withOrgHeader(
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      },
-      orgSlug,
-    ),
+  let init = withOrgHeader(
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    },
+    orgSlug,
   );
+  if (authToken) {
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${authToken}`);
+    init = { ...init, headers };
+  }
+  return fetchJSON<ContextSearchResult>(`${baseUrl}/api/context-search`, init);
 }
 
 interface PimClientConfigBase {

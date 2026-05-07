@@ -59,8 +59,7 @@ You do not need to manually report routine progress — it flows automatically.
 ### PIM MCP Tools (Preferred)
 
 If the PIM MCP server is configured in Claude Code, **always use these tools
-instead of CLI commands** — they are faster, don't require a shell, and avoid
-the authentication issues that can occur with the CLI.
+instead of CLI commands** — they are faster and don't require a shell.
 
 **Context & Session**
 

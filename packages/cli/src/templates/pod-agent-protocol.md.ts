@@ -42,8 +42,7 @@ You do not need to manually report routine progress — it flows automatically.
 ### PIM MCP Tools (Preferred)
 
 If the PIM MCP server is configured in Claude Code, **always use these tools
-instead of CLI commands** — they are faster, don't require a shell, and avoid
-the authentication issues that can occur with the CLI.
+instead of CLI commands** — they are faster and don't require a shell.
 
 **Context & Session**
 
@@ -134,8 +133,7 @@ You do not need to manually report routine progress — it flows automatically.
 ### PIM MCP Tools (Preferred)
 
 If the PIM MCP server is configured in Claude Code, **always use these tools
-instead of CLI commands** — they are faster, don't require a shell, and avoid
-the authentication issues that can occur with the CLI.
+instead of CLI commands** — they are faster and don't require a shell.
 
 **Context & Search**
 
@@ -158,9 +156,17 @@ the authentication issues that can occur with the CLI.
 | \`get_project\` | Fetch project details including anatomy and resource configuration |
 | \`list_projects\` | See all long-lived projects in the org |
 
+### Quality Guidelines
+
+- Summaries should be specific and actionable (avoid "made progress" or "working on it")
+- Include file paths, function names, or API endpoints when relevant
+- Decisions and spec changes flow into the org knowledge graph automatically
+
 ### Fallback: CLI Commands
 
 Use these only when the PIM MCP server is not configured.
+
+#### Manual Reporting
 
 \`\`\`bash
 pim report --project ${params.projectId} --type decision --scope ${params.scope} \\
@@ -169,12 +175,6 @@ pim report --project ${params.projectId} --type decision --scope ${params.scope}
 \`\`\`
 
 Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`
-
-### Quality Guidelines
-
-- Summaries should be specific and actionable (avoid "made progress" or "working on it")
-- Include file paths, function names, or API endpoints when relevant
-- Decisions and spec changes flow into the org knowledge graph automatically
 
 ${PROTOCOL_MARKER_END}`;
 }
