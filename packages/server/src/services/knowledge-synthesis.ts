@@ -246,7 +246,7 @@ export function rawProposalsToLearnings(
       details,
       domains,
       confidence: "inferred",
-      confidence_score: Math.min(SYNTHESIS_CONFIDENCE_SCORE, 0.45),
+      confidence_score: SYNTHESIS_CONFIDENCE_SCORE,
       ingestion_provenance: provenance,
     });
   }
