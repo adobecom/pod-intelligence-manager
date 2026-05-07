@@ -3,7 +3,6 @@ import path from "node:path";
 import type { Command } from "commander";
 import chalk from "chalk";
 import { checkbox, confirm, input, select, Separator } from "@inquirer/prompts";
-import { ExitPromptError } from "@inquirer/core";
 import type { OrgConfig } from "@pim/shared";
 import { getBaseUrl, apiFetch, setOrgSlug } from "../util.js";
 import { findGitRoot, getGitUserName } from "../config.js";
@@ -542,7 +541,9 @@ export function registerInitCommand(program: Command): void {
             agent: agentId,
           });
         } catch (e) {
-          if (e instanceof ExitPromptError) {
+          // instanceof fails across bundle-deduplication boundaries (v10 vs v11 of @inquirer/core),
+          // so check by name — reliable in this unminified bundle.
+          if (e instanceof Error && e.constructor.name === "ExitPromptError") {
             console.log(chalk.dim("\n  Aborted.\n"));
             process.exit(0);
           }
