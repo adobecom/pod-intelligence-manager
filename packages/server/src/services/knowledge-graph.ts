@@ -166,6 +166,9 @@ export async function addLearningsToGraph(
     // P0 + P2: Skip if a near-identical node already exists in the graph.
     // Same-pod threshold (0.85) catches incremental-signal nodes re-extracted at archival.
     // Cross-pod threshold (0.95) catches near-verbatim patterns from different pods.
+    if (!node.embedding) {
+      console.warn(`[knowledge-graph] Node accepted without dedup (embedding unavailable): "${node.summary.slice(0, 80)}"`);
+    }
     if (node.embedding) {
       const samePodThreshold = 0.85;
       const crossPodThreshold = 0.95;

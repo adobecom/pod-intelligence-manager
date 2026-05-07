@@ -41,7 +41,14 @@ async function getHealth(): Promise<HealthSnapshot> {
   if (healthCache) return healthCache;
   if (healthPromise) return healthPromise;
   const attempt = (async () => {
-    const res = await fetch(`${API_BASE}/api/health`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/health`, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) throw new Error(`health ${res.status}`);
     const body = (await res.json()) as { auth_mode?: "trust" | "ims" };
     const snapshot: HealthSnapshot = { authMode: body.auth_mode === "ims" ? "ims" : "trust" };
