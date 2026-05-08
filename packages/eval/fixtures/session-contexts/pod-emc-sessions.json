@@ -1,0 +1,182 @@
+{
+  "podId": "pod-emc-sessions",
+  "pulledAt": "2026-05-08T02:07:39.164Z",
+  "payload": {
+    "pod": {
+      "pod_id": "pod-emc-sessions",
+      "name": "Session Management",
+      "milestone": {
+        "name": "v0.1 — Session CRUD + Timezone Handling"
+      },
+      "conflict_pressure": 0.38,
+      "areas": [
+        {
+          "scope": "frontend",
+          "owner": "fe-agent-sessions",
+          "status": "in_progress",
+          "last_activity": "2026-04-16T16:20:00Z"
+        },
+        {
+          "scope": "backend",
+          "owner": "be-agent-sessions",
+          "status": "in_progress",
+          "last_activity": "2026-04-16T15:10:00Z"
+        },
+        {
+          "scope": "design",
+          "owner": "design-sessions",
+          "status": "done",
+          "last_activity": "2026-04-15T11:30:00Z"
+        },
+        {
+          "scope": "qa",
+          "owner": "qa-agent-sessions",
+          "status": "in_progress",
+          "last_activity": "2026-04-16T17:00:00Z"
+        }
+      ]
+    },
+    "livingDocMarkdown": "# Pod: Session Management — Living Doc\n\n## Pod Health\n**Conflict Pressure:** 0.38 (Cautious) | **Day 3 of 5** | Sprint: Apr 14–18\n\n## Active Milestone\n**v0.1 — Session CRUD + Timezone Handling** (Target: Apr 17) — 55% complete\n\n## Current Status\n\n| Area | Owner | Status | Last Update |\n|------|-------|--------|-------------|\n| Session Form + List | fe-agent-sessions | In Progress | Apr 16 |\n| Session CRUD API | be-agent-sessions | In Progress | Apr 16 |\n| Session Form Mockup | design-sessions | Done | Apr 15 |\n| Session Tests | qa-agent-sessions | In Progress | Apr 16 |\n\n## Open Conflicts\n\n- **C-201:** Timezone handling — naive strings vs. UTC everywhere — **BLOCKING**\n- **C-202:** Auto-registration default for new sessions — non-blocking\n\n## Decisions Log\n\n- **[Apr 14]** UTC millis for storage, naive ISO + IANA timezone for transport (be-agent-sessions)\n\n## Context Stream (Recent)\n\n- **[Apr 16 16:20]** fe-agent-sessions: Session form built — blocked on API timezone contract\n- **[Apr 16 15:15]** be-agent-sessions: Recommends auto-registration default OFF\n- **[Apr 16 15:00]** pm-configs: Proposes auto-registration default ON\n- **[Apr 16 14:00]** fe-agent-sessions: Session list view with timezone-aware display\n- **[Apr 16 10:30]** be-agent-sessions: Session CRUD API complete with UTC millis\n- **[Apr 15 11:30]** design-sessions: Session form mockup with naive datetime inputs\n\n## Active Tunnels\n\n- 🟢 maria: feat/session-crud → sessions-maria.emc.adobe.dev\n- 🟡 chen: feat/session-timezone → sessions-chen.emc.adobe.dev (idle)\n",
+    "conflicts": [
+      {
+        "id": "C-201",
+        "summary": "Timezone handling: naive ISO strings with IANA timezone vs. UTC-everywhere with client conversion",
+        "severity": "blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "be-agent-sessions",
+            "position": "Store UTC millis everywhere. naiveDateTimeToUTCMillis() at write time, millisToNaiveDateTimeString() at read time. Single source of truth. Already implemented the conversion utilities and all API endpoints use UTC millis internally. The IANA timezone string is stored alongside for display but never used in comparisons."
+          },
+          {
+            "contributor": "design-sessions",
+            "position": "UI must display and accept naive datetime strings (what the user sees on the clock at the venue). The session creation form should work with local times — converting to UTC at the form boundary creates confusion when the organizer is in a different timezone than the venue. The mockup shows time inputs as naive strings with an explicit timezone selector."
+          }
+        ],
+        "master_analysis": "Both positions are partially correct and actually compatible. The backend stores UTC millis (be-agent-sessions has this built), while the frontend works with naive strings + IANA timezone at the form level (design-sessions' mockup). The disagreement is about who does the conversion: backend says the API accepts/returns UTC millis and frontend converts; design says the API should accept naive strings + timezone and convert server-side. This must be resolved because fe-agent-sessions needs to know the API contract to build the session form.",
+        "impact": [
+          "Blocks session creation form implementation",
+          "Affects auto-registration time window logic",
+          "Speaker assignment modal depends on session time display"
+        ]
+      },
+      {
+        "id": "C-202",
+        "summary": "Auto-registration default for new sessions: enabled by default vs. disabled by default",
+        "severity": "non_blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "pm-configs",
+            "position": "Default auto-registration ON for new sessions. Most Adobe events want attendees auto-registered. Turning it off is the exception. This reduces a step for the 80% use case."
+          },
+          {
+            "contributor": "be-agent-sessions",
+            "position": "Default OFF. Auto-registration triggers downstream webhook calls to the registration service. If an organizer creates a session accidentally or as a draft, auto-registration would fire webhooks and create registration records that need cleanup. Safer to require explicit opt-in."
+          }
+        ],
+        "master_analysis": "Non-blocking — the session CRUD works either way, this is a default value question. PM's argument is about UX convenience, backend's is about data integrity. A compromise: default ON only when the session has a linked event with auto-registration enabled at the event level, otherwise OFF. Recommend defaulting OFF for v0.1 and revisiting based on usage data.",
+        "impact": [
+          "Minor UX difference in session creation flow",
+          "Downstream registration webhook behavior"
+        ]
+      }
+    ],
+    "relevantLearnings": {
+      "nodes": [
+        {
+          "type": "anti_pattern",
+          "summary": "Client-side date validation without timezone awareness caused events to appear with wrong dates for cross-timezone organizers",
+          "details": "JavaScript Date() uses the browser's local timezone. An organizer in PST creating a Tokyo event entered '2026-06-15' but the API received '2026-06-14T07:00:00Z' due to offset. Fix: pair every date input with an explicit timezone selector and validate against the event's timezone, not the browser's.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Event CRUD v1"
+        },
+        {
+          "type": "pattern",
+          "summary": "Optimistic concurrency via modificationTime prevents lost updates on concurrent edits",
+          "details": "Every PUT requires a modificationTime field matching the server's last-known value. If they differ, the update returns 409 with the current server state. The frontend shows a diff dialog allowing merge or overwrite.",
+          "domains": [
+            "backend",
+            "frontend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Event CRUD v1"
+        },
+        {
+          "type": "decision",
+          "summary": "Event status lifecycle: draft → published → active → completed → archived with explicit transitions",
+          "details": "Each transition has validation rules (e.g., draft→published requires at least one session). Status transitions exposed as POST /:id/transition. Invalid transitions return 422.",
+          "domains": [
+            "backend",
+            "pm"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Event CRUD v1"
+        }
+      ],
+      "total_matching": 3,
+      "truncated": false
+    },
+    "recentUpdates": [
+      {
+        "agent_id": "be-agent-sessions",
+        "timestamp": "2026-04-14T11:00:00Z",
+        "type": "decision",
+        "summary": "Session time storage: UTC millis for persistence, naive ISO strings for API transport with IANA timezone",
+        "details": "Decision: all session start/end times stored as UTC millis in the database. API responses include naive ISO datetime strings (e.g., '2026-06-15T09:00:00') plus an IANA timezone string (e.g., 'America/Los_Angeles'). Two utility functions: naiveDateTimeToUTCMillis(naive, tz) and millisToNaiveDateTimeString(millis, tz). This separates display concerns from storage concerns.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "design-sessions",
+        "timestamp": "2026-04-15T11:30:00Z",
+        "type": "spec_change",
+        "summary": "Session form mockup: naive datetime inputs with explicit venue timezone selector",
+        "details": "Figma mockup for session creation form. Start/end time inputs show the time as it appears at the venue (naive). A timezone dropdown defaults to the venue's IANA timezone (derived from locationId). Users can override the timezone if the session is virtual. Auto-registration toggle below the time inputs. Speaker assignment section with search and change detection.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-sessions",
+        "timestamp": "2026-04-16T10:30:00Z",
+        "type": "progress",
+        "summary": "Session CRUD API complete — all endpoints use UTC millis, timezone conversion utilities tested",
+        "details": "Implemented POST/GET/PUT/DELETE /sessions endpoints. Create and update accept UTC millis for start/end with IANA timezone string. Response includes both UTC millis and naive datetime strings for frontend convenience. Speaker assignment handled via speakerIds array with originalSpeakerIds for change detection. Optimistic concurrency via creationTime/modificationTime comparison. locationId references venue locations table.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-sessions",
+        "timestamp": "2026-04-16T14:00:00Z",
+        "type": "progress",
+        "summary": "Session list view with timezone-aware display and venue location badges",
+        "details": "SessionListView renders sessions with venue-local times using millisToNaiveDateTimeString(). Each session row shows: title, naive start/end times, venue name badge, speaker count, auto-registration status icon. Sortable by start time (sorts on UTC millis). Pagination via cursor-based API.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-sessions",
+        "timestamp": "2026-04-16T16:20:00Z",
+        "type": "progress",
+        "summary": "Session creation form with naive datetime inputs — blocked on API contract for timezone conversion responsibility",
+        "details": "Session form has naive datetime inputs and venue timezone selector per design mockup. Speaker assignment with search and change detection (tracks originalSpeakerIds). Auto-registration toggle. Currently converting to UTC millis client-side before API call, but unsure if this is the agreed contract — backend API accepts UTC millis but design mockup implies the API should accept naive strings.",
+        "status": "in_progress"
+      },
+      {
+        "agent_id": "pm-configs",
+        "timestamp": "2026-04-16T15:00:00Z",
+        "type": "question",
+        "summary": "Proposal: auto-registration should default ON for new sessions",
+        "details": "Based on data from the current EMC: 78% of sessions at Adobe events have auto-registration enabled. Defaulting it ON saves organizers a click and matches the majority use case. Organizers creating invite-only or capacity-limited sessions can turn it off.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-sessions",
+        "timestamp": "2026-04-16T15:15:00Z",
+        "type": "progress",
+        "summary": "Recommends auto-registration default OFF — downstream webhook implications",
+        "details": "Responding to pm-configs. Auto-registration ON triggers a webhook to the registration service immediately on session create. If a session is created as a draft or accidentally, this creates registration records that require manual cleanup. The registration service has no 'undo' endpoint. Safer to default OFF and let organizers explicitly enable it when the session is finalized.",
+        "status": "completed"
+      }
+    ]
+  }
+}

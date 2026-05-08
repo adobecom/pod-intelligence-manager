@@ -1,0 +1,65 @@
+import type { Task } from "../types.js";
+
+export const sessionCreateTimezone: Task = {
+  id: "session-create-timezone",
+  type: "code",
+  podId: "pod-emc-sessions",
+  tags: ["sessions", "smoke"],
+  prompt: [
+    "Implement `createSessionPayload(input: { title: string; startNaive: string; endNaive: string; ianaTz: string }): { title: string; startUtcMillis: number; endUtcMillis: number; ianaTz: string }`.",
+    "",
+    "Inputs:",
+    "- `startNaive` and `endNaive` are naive datetime strings shaped like `'2026-06-15T14:30:00'` (no timezone suffix).",
+    "- `ianaTz` is an IANA timezone like `'America/Los_Angeles'` or `'Asia/Tokyo'`.",
+    "",
+    "Behavior:",
+    "- Convert each naive datetime, *interpreted in `ianaTz`*, to UTC milliseconds since epoch.",
+    "- Return the payload with `startUtcMillis` and `endUtcMillis` as numbers, plus the original `title` and `ianaTz`.",
+    "- This is the API write-boundary conversion: storage is UTC millis, the IANA tz travels alongside for display.",
+    "",
+    "You may use the built-in `Intl.DateTimeFormat` or any other standard library, but no external packages.",
+    "",
+    "Export the function as a named export `createSessionPayload`.",
+  ].join("\n"),
+  expectedSignals: ["UTC", "millis", "IANA"],
+  tests: [
+    {
+      name: "returns numeric UTC millis with the original title and tz",
+      body: [
+        "const out = mod.createSessionPayload({",
+        "  title: 'Adobe Summit Keynote',",
+        "  startNaive: '2026-06-15T09:00:00',",
+        "  endNaive: '2026-06-15T10:00:00',",
+        "  ianaTz: 'America/Los_Angeles',",
+        "});",
+        "assert.equal(out.title, 'Adobe Summit Keynote');",
+        "assert.equal(out.ianaTz, 'America/Los_Angeles');",
+        "assert.equal(typeof out.startUtcMillis, 'number');",
+        "assert.equal(typeof out.endUtcMillis, 'number');",
+        "assert.ok(out.endUtcMillis > out.startUtcMillis);",
+      ].join("\n"),
+    },
+    {
+      name: "interprets naive time in the given IANA tz, not the runtime's local tz",
+      body: [
+        "// 2026-06-15 09:00 in PDT (UTC-7) is 2026-06-15 16:00:00Z = 1781020800000",
+        "const out = mod.createSessionPayload({",
+        "  title: 'X',",
+        "  startNaive: '2026-06-15T09:00:00',",
+        "  endNaive: '2026-06-15T09:00:00',",
+        "  ianaTz: 'America/Los_Angeles',",
+        "});",
+        "const expected = Date.UTC(2026, 5, 15, 16, 0, 0);",
+        "assert.equal(out.startUtcMillis, expected, `expected ${expected} got ${out.startUtcMillis}`);",
+      ].join("\n"),
+    },
+    {
+      name: "different IANA tz produces a different UTC millis for the same naive time",
+      body: [
+        "const pdt = mod.createSessionPayload({ title: 'X', startNaive: '2026-06-15T09:00:00', endNaive: '2026-06-15T09:00:00', ianaTz: 'America/Los_Angeles' });",
+        "const tokyo = mod.createSessionPayload({ title: 'X', startNaive: '2026-06-15T09:00:00', endNaive: '2026-06-15T09:00:00', ianaTz: 'Asia/Tokyo' });",
+        "assert.notEqual(pdt.startUtcMillis, tokyo.startUtcMillis, 'naive time interpreted in two different IANA tzs must produce different UTC millis');",
+      ].join("\n"),
+    },
+  ],
+};
