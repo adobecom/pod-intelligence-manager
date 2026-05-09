@@ -1,3 +1,4 @@
+import https from "node:https";
 import type {
   TunnelRequest,
   TunnelResponse,
@@ -20,6 +21,7 @@ export class TunnelClient {
     private tunnelId: string,
     private localPort: number,
     private authToken?: string,
+    private localProtocol: "http" | "https" = "http",
   ) {}
 
   async connect(): Promise<void> {
@@ -122,8 +124,42 @@ export class TunnelClient {
     }
   }
 
+  private fetchLocal(url: string, init: RequestInit): Promise<Response> {
+    if (this.localProtocol !== "https") return fetch(url, init);
+    return new Promise((resolve, reject) => {
+      const u = new URL(url);
+      const req = https.request(
+        {
+          hostname: u.hostname,
+          port: u.port || 443,
+          path: u.pathname + u.search,
+          method: init.method as string,
+          headers: init.headers as Record<string, string>,
+          rejectUnauthorized: false,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (c: Buffer) => chunks.push(c));
+          res.on("end", () => {
+            const body = Buffer.concat(chunks);
+            const headers = new Headers();
+            for (const [k, v] of Object.entries(res.headers)) {
+              if (v !== undefined)
+                headers.set(k, Array.isArray(v) ? v.join(", ") : v);
+            }
+            resolve(new Response(body, { status: res.statusCode ?? 200, headers }));
+          });
+          res.on("error", reject);
+        },
+      );
+      req.on("error", reject);
+      if (init.body) req.write(init.body as Buffer);
+      req.end();
+    });
+  }
+
   private async forwardRequest(req: TunnelRequest): Promise<void> {
-    const localUrl = `http://localhost:${this.localPort}${req.path}`;
+    const localUrl = `${this.localProtocol}://localhost:${this.localPort}${req.path}`;
 
     try {
       // Build request options
@@ -136,7 +172,7 @@ export class TunnelClient {
         init.body = Buffer.from(req.body, "base64");
       }
 
-      const res = await fetch(localUrl, init);
+      const res = await this.fetchLocal(localUrl, init);
 
       // Read response body as ArrayBuffer
       const bodyBuf = Buffer.from(await res.arrayBuffer());

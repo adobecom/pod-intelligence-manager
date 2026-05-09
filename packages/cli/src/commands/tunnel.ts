@@ -14,6 +14,7 @@ export function registerTunnelCommands(program: Command) {
     .requiredOption("--port <port>", "Local server port")
     .requiredOption("-d, --dev <name>", "Developer name")
     .option("-b, --branch <branch>", "Branch name", "main")
+    .option("--https", "Forward to local HTTPS server (accepts self-signed certs)", false)
     .action(async (opts) => {
       const base = getBaseUrl(program);
       const port = parseInt(opts.port, 10);
@@ -30,13 +31,20 @@ export function registerTunnelCommands(program: Command) {
 
       console.log(chalk.green("\n  Tunnel active!\n"));
       console.log(`  ${chalk.bold(opts.dev)}'s dev server → ${chalk.cyan(tunnel.url)}`);
-      console.log(`  Pod:    ${opts.pod}`);
-      console.log(`  Branch: ${opts.branch}`);
-      console.log(`  ID:     ${tunnel.tunnel_id}`);
+      console.log(`  Pod:      ${opts.pod}`);
+      console.log(`  Branch:   ${opts.branch}`);
+      console.log(`  ID:       ${tunnel.tunnel_id}`);
+      console.log(`  Protocol: ${opts.https ? "https" : "http"}`);
 
       // Connect the WebSocket tunnel client for request proxying
       const wsBase = base.replace(/^http/, "ws");
-      const client = new TunnelClient(`${wsBase}/ws/tunnel`, tunnel.tunnel_id, port, getAuthToken() ?? undefined);
+      const client = new TunnelClient(
+        `${wsBase}/ws/tunnel`,
+        tunnel.tunnel_id,
+        port,
+        getAuthToken() ?? undefined,
+        opts.https ? "https" : "http",
+      );
 
       try {
         await client.connect();
