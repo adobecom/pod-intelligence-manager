@@ -127,11 +127,19 @@ export class TunnelClient {
   private fetchLocal(url: string, init: RequestInit): Promise<Response> {
     if (this.localProtocol !== "https") return fetch(url, init);
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (err: unknown, val?: Response) => {
+        if (settled) return;
+        settled = true;
+        if (err) reject(err);
+        else resolve(val!);
+      };
+
       const u = new URL(url);
       const req = https.request(
         {
           hostname: u.hostname,
-          port: u.port || 443,
+          port: parseInt(u.port, 10) || 443,
           path: u.pathname + u.search,
           method: init.method as string,
           headers: init.headers as Record<string, string>,
@@ -147,18 +155,28 @@ export class TunnelClient {
               if (v !== undefined)
                 headers.set(k, Array.isArray(v) ? v.join(", ") : v);
             }
-            resolve(new Response(body, { status: res.statusCode ?? 200, headers }));
+            settle(null, new Response(body, { status: res.statusCode ?? 200, headers }));
           });
-          res.on("error", reject);
+          res.on("error", (err) => settle(err));
         },
       );
-      req.on("error", reject);
-      if (init.body) req.write(init.body as Buffer);
+      req.on("error", (err) => settle(err));
+      if (init.body instanceof Buffer) req.write(init.body);
       req.end();
     });
   }
 
   private async forwardRequest(req: TunnelRequest): Promise<void> {
+    // Reject paths that could inject extra headers into the local HTTP request line
+    if (!req.path.startsWith("/") || /[\r\n]/.test(req.path)) {
+      this.send({
+        type: "tunnel_error",
+        requestId: req.requestId,
+        error: "Invalid request path",
+      });
+      return;
+    }
+
     const localUrl = `${this.localProtocol}://localhost:${this.localPort}${req.path}`;
 
     try {
