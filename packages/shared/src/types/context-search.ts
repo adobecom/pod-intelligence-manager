@@ -70,6 +70,14 @@ export interface ContextSearchResult {
   /** Actor the search was scoped to, if one was resolved (explicit or
    * auto-detected from the query text). */
   actor?: ContextSearchActor;
+  /** Set when scope was filled in by a fallback rather than by an
+   * explicit/pod/text-detected source. Today the only fallback is
+   * "authenticated_user" — the IMS-authenticated caller was used as the
+   * actor and (when available) the union of Jira project keys for their
+   * orgs' projects was used as the project scope. Surfaced so callers
+   * can explain the narrowing ("searched as you across your orgs'
+   * projects"). */
+  fallback?: "authenticated_user";
   summary_md?: string;
   hits: ContextSearchHit[];
   sources_used: ContextSource[];

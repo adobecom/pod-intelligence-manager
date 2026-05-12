@@ -40,7 +40,11 @@ export default async function contextSearchRoutes(app: FastifyInstance) {
     "/api/context-search",
     { preHandler: validateBody(ContextSearchRequestSchema) },
     async (req) => {
-      return searchContext(req.body);
+      // Forward the authenticated caller's email so the orchestrator can
+      // fall back to scoping Jira to the user (and their orgs' projects)
+      // when the request carries no explicit project/pod/actor scope.
+      // req.user is populated by the global auth hook in middleware/auth.ts.
+      return searchContext(req.body, { authenticatedUserEmail: req.user?.email });
     },
   );
 }
