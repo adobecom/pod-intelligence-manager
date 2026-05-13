@@ -23,6 +23,29 @@ import {
 } from "../knowledge-graph.js";
 import type { EnhancedPodLearning, KnowledgeNode } from "@pim/shared";
 
+// Push a node directly into the graph (bypasses embedding/dedup so tests stay fast).
+// The index is NOT updated here — caller must use addLearningsToGraph for index-aware
+// insertion, or manually trigger by re-initializing. Direct push is intentional for
+// prune tests that need full control over node metadata.
+function rawPushNode(
+  orgId: string,
+  overrides: Partial<KnowledgeNode> & Pick<KnowledgeNode, "id" | "summary" | "domains">,
+): KnowledgeNode {
+  const node: KnowledgeNode = {
+    type: "pattern",
+    details: overrides.summary,
+    source_pod_id: "pod-test",
+    source_pod_name: "Test Pod",
+    confidence: "extracted",
+    confidence_score: 0.8,
+    created_at: new Date().toISOString(),
+    curated: false,
+    ...overrides,
+  };
+  getGraph(orgId).nodes.push(node);
+  return node;
+}
+
 let orgSeq = 0;
 
 function nextOrgId(prefix: string): string {
@@ -109,6 +132,36 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       include_embeddings: true,
     });
     expect(withEmb.nodes[0]?.embedding).toEqual([1, 2, 3]);
+  });
+
+  it("text_search composed entirely of stop words is treated as no filter (returns all candidates)", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Use Redis for session caching",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Prefer CDN for static assets",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    // "the a an is" are all stop words — extractKeywords returns empty set.
+    // The text_search filter must be skipped entirely, not collapse results to zero.
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], text_search: "the a an is" },
+      max_tokens: 500,
+    });
+
+    expect(q.nodes.length).toBe(2);
   });
 
   it("merges filters.keywords with text_search tokens for scoring", async () => {
@@ -232,5 +285,170 @@ describe("pruneStaleNodes", () => {
     const orgId = nextOrgId("kg-prune-empty");
     initializeKnowledgeGraph(orgId);
     expect(pruneStaleNodes(orgId).removed).toBe(0);
+  });
+
+  it("pruned node is absent from domain-index queries, not just from graph.nodes", async () => {
+    // Gap 3: verify the index is rebuilt after pruning so queries reflect the removal.
+    const orgId = nextOrgId("kg-prune-index");
+    initializeKnowledgeGraph(orgId);
+
+    // Seed a kept node so the domain index has at least one entry.
+    await addLearningsToGraph(
+      orgId,
+      [
+        {
+          type: "pattern",
+          summary: "Kept survivor node for backend",
+          details: "",
+          domains: ["backend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+      ],
+      "pod-prune-idx",
+      "Prune Index Pod",
+    );
+
+    // Directly push the stale node into graph.nodes (index will be built by pruneStaleNodes rebuild).
+    rawPushNode(orgId, {
+      id: "kn-prune-idx-stale",
+      summary: "Stale backend pattern to prune",
+      domains: ["backend"],
+      confidence_score: 0.3,
+      curated: false,
+      created_at: new Date("2024-01-01T00:00:00Z").toISOString(),
+    });
+
+    // Confirm both nodes exist before pruning.
+    expect(getGraph(orgId).nodes.length).toBe(2);
+
+    pruneStaleNodes(orgId);
+
+    // After pruning the stale node should be gone from graph.nodes...
+    const remainingIds = getGraph(orgId).nodes.map((n) => n.id);
+    expect(remainingIds).not.toContain("kn-prune-idx-stale");
+
+    // ...and a domain query must not surface it either (index consistency).
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+    const queriedIds = q.nodes.map((n) => n.id);
+    expect(queriedIds).not.toContain("kn-prune-idx-stale");
+    expect(queriedIds.some((id) => id !== "kn-prune-idx-stale")).toBe(true);
+  });
+});
+
+describe("text_search index behavior", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForTests();
+  });
+
+  it("text_search returns matching nodes and excludes non-matching ones", async () => {
+    // Gap 4: exercise filters.text_search through the keyword index path specifically.
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Redis caching strategy for session management",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.85,
+      },
+      {
+        type: "pattern",
+        summary: "Webpack bundle splitting for faster load",
+        details: "",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.85,
+      },
+    ]);
+
+    // Search on a term that appears only in the first node.
+    const q = queryKnowledge(orgId, {
+      filters: { text_search: "redis" },
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.length).toBe(1);
+    expect(q.nodes[0].summary.toLowerCase()).toContain("redis");
+    expect(q.nodes.some((n) => n.summary.toLowerCase().includes("webpack"))).toBe(false);
+  });
+
+  it("text_search with no matching term returns an empty result set", async () => {
+    // Gap 4 (exclusion path): non-matching text_search must yield empty results,
+    // not fall through to a full-scan default.
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "GraphQL schema stitching pattern",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.85,
+      },
+    ]);
+
+    const q = queryKnowledge(orgId, {
+      filters: { text_search: "kubernetes" },
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+});
+
+describe("empty filter set intersection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForTests();
+  });
+
+  it("filters.domains pointing to an unknown domain returns empty, not a full-scan fallback", async () => {
+    // Gap 5: when every domain in filters.domains has zero indexed nodes the result
+    // must be empty — it must not silently degrade to returning all nodes.
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Backend only node that must not appear",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["domain-that-does-not-exist"] },
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
+  it("filters.types pointing to an unknown type returns empty", async () => {
+    // Gap 5 (type dimension): same empty-intersection guarantee for the type index.
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Pattern node that must not appear",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const q = queryKnowledge(orgId, {
+      filters: { types: ["resolved_conflict"] },
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
   });
 });

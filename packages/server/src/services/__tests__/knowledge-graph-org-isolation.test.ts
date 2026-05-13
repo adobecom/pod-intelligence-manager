@@ -150,3 +150,99 @@ describe("knowledge graph org isolation", () => {
     expect(q.total_matching).toBe(0);
   });
 });
+
+describe("curateNode index consistency", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForTests();
+  });
+
+  it("edit action: old domain no longer returns the node, new domain does", async () => {
+    // Gap 1: _removeNodeFromIndexes + _indexNode must be called around the edit so
+    // the domain index stays coherent.
+    const orgId = "org-curate-edit";
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [learning("Domain-swap node", "pre-edit details")],
+      "pod-edit",
+      "Edit Pod",
+    );
+
+    const nodeId = getGraph(orgId).nodes[0].id;
+
+    // Confirm the node is reachable via its original domain before editing.
+    const beforeEdit = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+    expect(beforeEdit.nodes.map((n) => n.id)).toContain(nodeId);
+
+    // Edit: move node from "backend" to "frontend".
+    const edited = curateNode(orgId, nodeId, "edit", { domains: ["frontend"] });
+    expect(edited).toBe(true);
+
+    // Old domain must no longer return the node.
+    const afterOldDomain = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+    expect(afterOldDomain.nodes.map((n) => n.id)).not.toContain(nodeId);
+
+    // New domain must return the node.
+    const afterNewDomain = queryKnowledge(orgId, {
+      filters: { domains: ["frontend"] },
+      max_tokens: 2000,
+    });
+    expect(afterNewDomain.nodes.map((n) => n.id)).toContain(nodeId);
+  });
+
+  it("reject action: node is absent from domain, type, and keyword index queries", async () => {
+    // Gap 2: _removeNodeFromIndexes is called on reject; verify all index dimensions
+    // are cleaned up, not just graph.nodes.
+    const orgId = "org-curate-reject";
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [learning("Webhook retry logic for async jobs", "details about retries")],
+      "pod-reject",
+      "Reject Pod",
+    );
+
+    const nodeId = getGraph(orgId).nodes[0].id;
+
+    // Sanity: node is reachable before rejection.
+    const beforeReject = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+    expect(beforeReject.nodes.map((n) => n.id)).toContain(nodeId);
+
+    const rejected = curateNode(orgId, nodeId, "reject");
+    expect(rejected).toBe(true);
+
+    // Must be absent from graph.nodes.
+    expect(getGraph(orgId).nodes.map((n) => n.id)).not.toContain(nodeId);
+
+    // Must be absent from domain index query.
+    const domainQ = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+    expect(domainQ.nodes.map((n) => n.id)).not.toContain(nodeId);
+
+    // Must be absent from type index query.
+    const typeQ = queryKnowledge(orgId, {
+      filters: { types: ["decision"] },
+      max_tokens: 2000,
+    });
+    expect(typeQ.nodes.map((n) => n.id)).not.toContain(nodeId);
+
+    // Must be absent from keyword index query (term that was in the summary).
+    const kwQ = queryKnowledge(orgId, {
+      filters: { text_search: "webhook" },
+      max_tokens: 2000,
+    });
+    expect(kwQ.nodes.map((n) => n.id)).not.toContain(nodeId);
+  });
+});

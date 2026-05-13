@@ -99,9 +99,11 @@ export function buildEdges(
       const domOverlap = domainOverlap(newNode.domains, existing.domains);
       const keyword = keywordOverlap(newNode.summary, existing.summary);
 
-      // Fast-path: skip expensive cosine similarity when keyword and domain signals
-      // are both absent — these pairs are almost certainly unrelated.
-      if (keyword < 0.2 && domOverlap === 0) continue;
+      // Fast-path: skip cosine similarity when keyword and domain signals are both
+      // absent AND neither node has an embedding — those pairs are almost certainly
+      // unrelated. When embeddings ARE present, always compute cosine: two nodes can
+      // be semantically near-identical with disjoint summaries and domains.
+      if (keyword < 0.2 && domOverlap === 0 && !(newNode.embedding && existing.embedding)) continue;
 
       const cosine =
         newNode.embedding && existing.embedding
@@ -146,9 +148,16 @@ function capNodeDegree(
     degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
     degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
   }
-  let anyExceed = false;
+  // Fast-path: skip sorting if no node would exceed the cap.
+  // Must account for degree accumulated within newEdges themselves, not just existing edges.
+  const newDegree = new Map<string, number>();
   for (const e of newEdges) {
-    if ((degree.get(e.source) ?? 0) >= maxDegree || (degree.get(e.target) ?? 0) >= maxDegree) {
+    newDegree.set(e.source, (newDegree.get(e.source) ?? 0) + 1);
+    newDegree.set(e.target, (newDegree.get(e.target) ?? 0) + 1);
+  }
+  let anyExceed = false;
+  for (const [id, nd] of newDegree) {
+    if ((degree.get(id) ?? 0) + nd > maxDegree) {
       anyExceed = true;
       break;
     }

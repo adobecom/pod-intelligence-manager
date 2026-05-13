@@ -412,13 +412,18 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
 
   // text_search: inverted keyword index — O(|query_words|) instead of O(all_nodes).
   // Behavior change: word-level match instead of substring (better recall in practice).
+  // If extractKeywords returns an empty set (e.g. all stop words), the filter is a
+  // no-op — treating it as "zero results" would silently break callers that pass short
+  // or punctuation-heavy queries (e.g. getPrecedents with a 100-char conflict summary).
   if (filters.text_search) {
     const queryKws = extractKeywords(filters.text_search);
-    const textMatches = new Set<string>();
-    for (const qk of queryKws) {
-      for (const id of state.keywordIndex.get(qk) ?? []) textMatches.add(id);
+    if (queryKws.size > 0) {
+      const textMatches = new Set<string>();
+      for (const qk of queryKws) {
+        for (const id of state.keywordIndex.get(qk) ?? []) textMatches.add(id);
+      }
+      candidateIds = intersectIds(candidateIds, textMatches);
     }
-    candidateIds = intersectIds(candidateIds, textMatches);
   }
 
   const baseNodes: KnowledgeNode[] = candidateIds === null
