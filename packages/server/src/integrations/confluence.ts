@@ -62,9 +62,12 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
     `&limit=${opts.max_hits_per_source}` +
     `&expand=body.view,history.lastUpdated,history.createdBy`;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
   try {
     const res = await fetch(url, {
       headers: { Authorization: authHeader, Accept: "application/json" },
+      signal: controller.signal,
     });
 
     if (!res.ok) {
@@ -90,5 +93,7 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
       hits: [],
       missing: `Confluence error: ${describeFetchError(err, base)}`,
     };
+  } finally {
+    clearTimeout(timer);
   }
 }

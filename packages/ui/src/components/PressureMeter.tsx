@@ -35,14 +35,16 @@ interface PressureMeterProps {
   value: number;
   size?: "S" | "L";
   showLabel?: boolean;
+  thresholds?: { cautiousMax?: number; degradedMax?: number };
 }
 
 export function PressureMeter({
   value,
   size = "L",
   showLabel = true,
+  thresholds,
 }: PressureMeterProps) {
-  const level = getPressureLevel(value);
+  const level = getPressureLevel(value, thresholds);
   const label = getPressureLabel(level);
   const displayValue = Math.round(value * 100);
 

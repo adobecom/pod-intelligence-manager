@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import db from "./connection.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";
+export const ORG_TUNING_ROW_KEY = "org_tuning";
 
 export function createTables() {
   db.exec(`
@@ -411,5 +412,24 @@ export function createTables() {
   } catch { /* already exists */ }
   try {
     db.exec("CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status ON ingestion_queue(pod_id, status)");
+  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS org_tuning_history (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        org_id      TEXT NOT NULL REFERENCES orgs(org_id),
+        adjusted_at TEXT NOT NULL,
+        signal_name TEXT NOT NULL,
+        signal_value REAL NOT NULL,
+        parameter   TEXT NOT NULL,
+        old_value   REAL NOT NULL,
+        new_value   REAL NOT NULL,
+        pods_analyzed INTEGER NOT NULL
+      )
+    `);
+  } catch { /* already exists */ }
+  try {
+    db.exec("CREATE INDEX IF NOT EXISTS idx_org_tuning_history_org ON org_tuning_history(org_id, adjusted_at DESC)");
   } catch { /* already exists */ }
 }

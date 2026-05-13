@@ -18,7 +18,8 @@ import {
   ProgressBar,
 } from "@react-spectrum/s2";
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
-import type { OrgScopeDefinition } from "@pim/shared";
+import type { OrgScopeDefinition, OrgTuning } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { useOrgStore } from "../../stores/orgStore";
 import { PressureMeter } from "../../components/PressureMeter";
 
@@ -75,6 +76,39 @@ type ArchiveFlow =
   | { kind: "project"; phase: "success"; projectId: string; projectName: string }
   | { kind: "project"; phase: "error"; projectId: string; projectName: string; message: string };
 
+function formatParamLabel(parameter: string): string {
+  const labels: Record<string, string> = {
+    "conflictScout.additiveMinConf":     "Conflict detection sensitivity",
+    "conflictScout.overlapForceMinConf": "Overlap force conflict threshold",
+    "pressure.normalMax":                "Normal pressure ceiling",
+    "pressure.cautiousMax":              "Caution pressure ceiling",
+    "pressure.degradedMax":              "Degraded pressure ceiling",
+    "lint.stalenessHours":               "Staleness alert threshold (h)",
+  };
+  return labels[parameter] ?? parameter;
+}
+
+function formatSignalLabel(signal: string): string {
+  const labels: Record<string, string> = {
+    conflict_false_positive_rate: "Conflict FP rate",
+    avg_final_pressure:           "Avg final pressure",
+    staleness_aggression_rate:    "Staleness aggression rate",
+  };
+  return labels[signal] ?? signal;
+}
+
+function DriftBadge({ current, defaultVal }: { current: number; defaultVal: number }) {
+  if (Math.abs(current - defaultVal) < 0.001) {
+    return <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>(default)</Text>;
+  }
+  const up = current > defaultVal;
+  return (
+    <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
+      {up ? "↑" : "↓"} from {typeof defaultVal === "number" && defaultVal % 1 !== 0 ? defaultVal.toFixed(2) : defaultVal}
+    </Text>
+  );
+}
+
 export function OrgDashboard() {
   const {
     pods,
@@ -83,8 +117,12 @@ export function OrgDashboard() {
     archivedPods,
     archivedProjects,
     orgConfig,
+    orgTuning,
+    tuningHistory,
     loading,
     loadOrg,
+    loadOrgTuning,
+    resetOrgTuning,
     saveOrgConfig,
     createPod,
     createProject,
@@ -92,6 +130,8 @@ export function OrgDashboard() {
     archiveProject,
   } = useOrgStore();
   const navigate = useNavigate();
+  const [showTuning, setShowTuning] = useState(false);
+  const [resettingTuning, setResettingTuning] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [podName, setPodName] = useState("");
   const [sprintDays, setSprintDays] = useState(5);
@@ -114,13 +154,23 @@ export function OrgDashboard() {
 
   useEffect(() => {
     loadOrg();
-  }, [loadOrg]);
+    loadOrgTuning();
+  }, [loadOrg, loadOrgTuning]);
 
   useEffect(() => {
     if (orgConfig) {
       setScopeDraft(orgConfig.scopes.map(s => ({ ...s })));
     }
   }, [orgConfig]);
+
+  async function handleResetTuning() {
+    setResettingTuning(true);
+    try {
+      await resetOrgTuning();
+    } finally {
+      setResettingTuning(false);
+    }
+  }
 
   useEffect(() => {
     if (!archiveFlow || archiveFlow.phase !== "running") return;
@@ -568,6 +618,81 @@ export function OrgDashboard() {
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* System Tuning — read-only, autonomously adjusted after pod archival */}
+        <Divider />
+        <div className={createFormCard}>
+          <div className={style({ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 })}>
+            <div>
+              <Heading level={3} styles={style({ marginY: 0 })}>System tuning</Heading>
+              <Text styles={style({ font: "body-sm", color: "neutral-subdued" })}>
+                Thresholds auto-adjust based on your pod outcomes.
+                {tuningHistory.length > 0 && (
+                  <> {tuningHistory.length} adjustment{tuningHistory.length !== 1 ? "s" : ""} made
+                  {tuningHistory[0] && ` (last: ${new Date(tuningHistory[0].adjusted_at).toLocaleDateString()})`}.</>
+                )}
+                {tuningHistory.length === 0 && " No adjustments yet — requires 3+ archived pods."}
+              </Text>
+            </div>
+            <Button variant="secondary" onPress={() => setShowTuning(!showTuning)}>
+              {showTuning ? "Hide" : "Show"}
+            </Button>
+          </div>
+
+          {showTuning && orgTuning && (
+            <div className={style({ display: "flex", flexDirection: "column", gap: 16 })}>
+              <div>
+                <Text styles={style({ fontWeight: "bold", font: "body-sm", marginBottom: 8 })}>Current effective values</Text>
+                <div className={style({ display: "flex", flexDirection: "column", gap: 4 })}>
+                  {([
+                    ["Conflict detection sensitivity", orgTuning.conflictScout.additiveMinConf, DEFAULT_ORG_TUNING.conflictScout.additiveMinConf],
+                    ["Normal pressure ceiling", orgTuning.pressure.normalMax, DEFAULT_ORG_TUNING.pressure.normalMax],
+                    ["Caution pressure ceiling", orgTuning.pressure.cautiousMax, DEFAULT_ORG_TUNING.pressure.cautiousMax],
+                    ["Degraded pressure ceiling", orgTuning.pressure.degradedMax, DEFAULT_ORG_TUNING.pressure.degradedMax],
+                    ["Staleness alert (h)", orgTuning.lint.stalenessHours, DEFAULT_ORG_TUNING.lint.stalenessHours],
+                  ] as [string, number, number][]).map(([label, current, def]) => (
+                    <div key={label} className={style({ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 8, backgroundColor: "layer-2", borderRadius: "default" })}>
+                      <Text styles={style({ font: "body-sm" })}>{label}</Text>
+                      <div className={style({ display: "flex", gap: 8, alignItems: "center" })}>
+                        <Text styles={style({ font: "body-sm", fontWeight: "bold" })}>
+                          {typeof current === "number" && current % 1 !== 0 ? current.toFixed(2) : current}
+                        </Text>
+                        <DriftBadge current={current} defaultVal={def} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {tuningHistory.length > 0 && (
+                <div>
+                  <Text styles={style({ fontWeight: "bold", font: "body-sm", marginBottom: 8 })}>Recent adjustments</Text>
+                  <div className={style({ display: "flex", flexDirection: "column", gap: 8 })}>
+                    {tuningHistory.slice(0, 10).map((entry) => (
+                      <div key={entry.id} className={style({ display: "flex", flexDirection: "column", gap: 4 })}>
+                        <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
+                          {new Date(entry.adjusted_at).toLocaleDateString()} — {formatParamLabel(entry.parameter)}{" "}
+                          {entry.new_value > entry.old_value ? "↑" : "↓"}: {formatSignalLabel(entry.signal_name)} was{" "}
+                          {(entry.signal_value * 100).toFixed(0)}% over {entry.pods_analyzed} pods
+                        </Text>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className={style({ display: "flex", justifyContent: "end" })}>
+                <Button
+                  variant="secondary"
+                  onPress={handleResetTuning}
+                  isPending={resettingTuning}
+                >
+                  Reset to defaults
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         {archiveFlow !== null && (

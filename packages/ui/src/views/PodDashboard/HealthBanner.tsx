@@ -4,10 +4,11 @@ import { getPressureLevel } from "@pim/shared";
 interface HealthBannerProps {
   pressure: number;
   openConflicts: number;
+  thresholds?: { cautiousMax?: number; degradedMax?: number };
 }
 
-export function HealthBanner({ pressure, openConflicts }: HealthBannerProps) {
-  const level = getPressureLevel(pressure);
+export function HealthBanner({ pressure, openConflicts, thresholds }: HealthBannerProps) {
+  const level = getPressureLevel(pressure, thresholds);
 
   if (level === "normal" || level === "cautious") return null;
 

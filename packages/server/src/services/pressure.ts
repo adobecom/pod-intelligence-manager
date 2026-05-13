@@ -1,4 +1,6 @@
 import db from "../db/connection.js";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
+import { getOrgTuning } from "./org-settings.js";
 
 interface ConflictRow {
   id: string;
@@ -19,7 +21,7 @@ export function setPodPressure(podId: string, pressure: number): void {
 
 // Recalculate conflict pressure for a pod based on open conflicts
 // Formula: base score per conflict + age bonus + severity weight
-export function recalculatePressure(podId: string): number {
+export function recalculatePressure(podId: string, orgId?: string): number {
   const openConflicts = db.prepare(
     "SELECT id, severity, created_at FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
   ).all(podId) as unknown as ConflictRow[];
@@ -29,23 +31,18 @@ export function recalculatePressure(podId: string): number {
     return 0;
   }
 
+  const pw = orgId ? getOrgTuning(orgId).pressureWeights : DEFAULT_ORG_TUNING.pressureWeights;
   const now = Date.now();
   let pressure = 0;
 
   for (const conflict of openConflicts) {
-    // Base: 0.15 per blocking conflict, 0.08 per non-blocking
-    const base = conflict.severity === "blocking" ? 0.15 : 0.08;
-
-    // Age factor: conflicts older than 24h add extra pressure
+    const base = conflict.severity === "blocking" ? pw.blockingBase : pw.nonBlockingBase;
     const ageHours = (now - new Date(conflict.created_at).getTime()) / (1000 * 60 * 60);
-    const ageFactor = Math.min(ageHours / 48, 0.1); // caps at 0.1 extra
-
+    const ageFactor = Math.min(ageHours / pw.ageWindowHours, pw.ageFactorCap);
     pressure += base + ageFactor;
   }
 
-  // Clamp to [0, 1]
   pressure = Math.min(Math.max(pressure, 0), 1);
-
   setPodPressure(podId, pressure);
   return pressure;
 }

@@ -1,5 +1,6 @@
 import db from "../../db/connection.js";
-import type { ContextUpdate } from "@pim/shared";
+import type { ContextUpdate, OrgTuning } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import type { Classification } from "../classifier.js";
 import { callLLMJSON, isLLMAvailable, MODELS } from "../llm.js";
 import fs from "node:fs";
@@ -9,18 +10,18 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Last K context rows in this scope (any agent), for peer-presence and prompt context. */
-export const SCOUT_PEER_WINDOW = 15;
+export const SCOUT_PEER_WINDOW = DEFAULT_ORG_TUNING.conflictScout.peerWindow;
 
 /** Min scout confidence to auto-open a conflict when heuristics said `additive`. */
-export const ADDITIVE_SCOUT_CONFLICT_MIN_CONF = 0.65;
+export const ADDITIVE_SCOUT_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.additiveMinConf;
 
 /** Min scout confidence to force conflict on `overlapping` without waiting for merge LLM. */
-export const OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF = 0.65;
+export const OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.overlapForceMinConf;
 
 /** If merge LLM escalates but scout says `none` with at least this confidence, skip creating a conflict. */
-export const SUPPRESS_MERGE_ESCALATE_MIN_CONF = 0.65;
+export const SUPPRESS_MERGE_ESCALATE_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.suppressMergeMinConf;
 
-const DETAILS_CAP = 900;
+const DETAILS_CAP = DEFAULT_ORG_TUNING.conflictScout.detailsCap;
 
 export type ScoutRecommendation = "none" | "coordination" | "open_conflict";
 
@@ -56,13 +57,13 @@ function getSystemPrompt(): string {
   return _systemPrompt;
 }
 
-function truncateDetails(s: string): string {
-  if (s.length <= DETAILS_CAP) return s;
-  return `${s.slice(0, DETAILS_CAP)}…`;
+function truncateDetails(s: string, cap: number): string {
+  if (s.length <= cap) return s;
+  return `${s.slice(0, cap)}…`;
 }
 
 /** True if any row in the last K scope updates is from another agent (cross-agent activity). */
-export function hasCrossAgentPeerInScoutWindow(update: ContextUpdate): boolean {
+export function hasCrossAgentPeerInScoutWindow(update: ContextUpdate, peerWindow = SCOUT_PEER_WINDOW): boolean {
   const rows = db
     .prepare(
       `SELECT agent_id FROM context_updates
@@ -70,7 +71,7 @@ export function hasCrossAgentPeerInScoutWindow(update: ContextUpdate): boolean {
        ORDER BY timestamp DESC
        LIMIT ?`,
     )
-    .all(update.pod_id, update.scope, SCOUT_PEER_WINDOW) as { agent_id: string }[];
+    .all(update.pod_id, update.scope, peerWindow) as { agent_id: string }[];
 
   return rows.some((r) => r.agent_id !== update.agent_id);
 }
@@ -78,15 +79,16 @@ export function hasCrossAgentPeerInScoutWindow(update: ContextUpdate): boolean {
 export function shouldRunConflictScout(
   classification: Classification,
   update: ContextUpdate,
+  tuning?: OrgTuning["conflictScout"],
 ): boolean {
   if (!isLLMAvailable()) return false;
   if (classification === "contradictory") return false;
   if (classification === "overlapping") return true;
   // additive
-  return hasCrossAgentPeerInScoutWindow(update);
+  return hasCrossAgentPeerInScoutWindow(update, tuning?.peerWindow ?? SCOUT_PEER_WINDOW);
 }
 
-function loadPeerBundle(update: ContextUpdate): PeerRow[] {
+function loadPeerBundle(update: ContextUpdate, peerWindow: number): PeerRow[] {
   return db
     .prepare(
       `SELECT id, agent_id, type, summary, details, timestamp
@@ -100,7 +102,7 @@ function loadPeerBundle(update: ContextUpdate): PeerRow[] {
       update.scope,
       update.agent_id,
       update.id,
-      SCOUT_PEER_WINDOW,
+      peerWindow,
     ) as unknown as PeerRow[];
 }
 
@@ -123,10 +125,13 @@ function normalizeScoutResponse(raw: LLMScoutResponse | null): ConflictScoutResu
 export async function runConflictScout(
   update: ContextUpdate,
   heuristicClassification: Classification,
+  tuning?: OrgTuning["conflictScout"],
 ): Promise<ConflictScoutResult | null> {
   if (!isLLMAvailable()) return null;
 
-  const peers = loadPeerBundle(update);
+  const peerWindow = tuning?.peerWindow ?? SCOUT_PEER_WINDOW;
+  const detailsCap = tuning?.detailsCap ?? DETAILS_CAP;
+  const peers = loadPeerBundle(update, peerWindow);
   if (peers.length === 0 && heuristicClassification === "additive") {
     return null;
   }
@@ -141,7 +146,7 @@ export async function runConflictScout(
       : peers
           .map(
             (p) =>
-              `- [${p.timestamp}] ${p.agent_id} (${p.type}): ${p.summary}\n  Details: ${truncateDetails(p.details)}`,
+              `- [${p.timestamp}] ${p.agent_id} (${p.type}): ${p.summary}\n  Details: ${truncateDetails(p.details, detailsCap)}`,
           )
           .join("\n");
 
@@ -158,7 +163,7 @@ ${heuristicClassification}
 - Scope: ${update.scope}
 - Status: ${update.status}
 - Summary: ${update.summary}
-- Details: ${truncateDetails(update.details)}
+- Details: ${truncateDetails(update.details, detailsCap)}
 
 ## Peer updates (other agents, same scope)
 ${peerBlock}
@@ -187,7 +192,7 @@ export function scoutSaysOpenConflict(
   return scout.recommendation === "open_conflict" && scout.confidence >= minConfidence;
 }
 
-export function scoutSuppressesMergeEscalate(scout: ConflictScoutResult | null): boolean {
+export function scoutSuppressesMergeEscalate(scout: ConflictScoutResult | null, minConf = SUPPRESS_MERGE_ESCALATE_MIN_CONF): boolean {
   if (!scout) return false;
-  return scout.recommendation === "none" && scout.confidence >= SUPPRESS_MERGE_ESCALATE_MIN_CONF;
+  return scout.recommendation === "none" && scout.confidence >= minConf;
 }

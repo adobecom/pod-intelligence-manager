@@ -1,4 +1,5 @@
 import type { ContextUpdate } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { classifyUpdate, type Classification } from "./classifier.js";
 import { deterministicMerge, llmMerge } from "./agents/merge.js";
 import { createConflict } from "./agents/conflict.js";
@@ -10,10 +11,9 @@ import {
   runConflictScout,
   scoutSaysOpenConflict,
   scoutSuppressesMergeEscalate,
-  ADDITIVE_SCOUT_CONFLICT_MIN_CONF,
-  OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF,
   type ScoutRecommendation,
 } from "./agents/conflict-scout.js";
+import { getOrgTuning } from "../services/org-settings.js";
 
 export interface PimResult {
   classification: Classification;
@@ -25,16 +25,18 @@ export interface PimResult {
   scout_recommendation?: ScoutRecommendation | null;
 }
 
-export async function processUpdate(update: ContextUpdate): Promise<PimResult> {
-  const classification = classifyUpdate(update);
+export async function processUpdate(update: ContextUpdate, orgId?: string): Promise<PimResult> {
+  const tuning = orgId ? getOrgTuning(orgId) : DEFAULT_ORG_TUNING;
+  const scoutTuning = tuning.conflictScout;
+  const classification = classifyUpdate(update, tuning.classifier);
 
   let scout_used = false;
   let scout_recommendation: ScoutRecommendation | null = null;
   let scoutResult = null as Awaited<ReturnType<typeof runConflictScout>>;
 
-  if (shouldRunConflictScout(classification, update)) {
+  if (shouldRunConflictScout(classification, update, scoutTuning)) {
     scout_used = true;
-    scoutResult = await runConflictScout(update, classification);
+    scoutResult = await runConflictScout(update, classification, scoutTuning);
     if (scoutResult) {
       scout_recommendation = scoutResult.recommendation;
     }
@@ -48,7 +50,7 @@ export async function processUpdate(update: ContextUpdate): Promise<PimResult> {
   // Scout-forced conflict on overlapping: skip merge LLM when scout is decisive
   if (
     classification === "overlapping" &&
-    scoutSaysOpenConflict(scoutResult, OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF)
+    scoutSaysOpenConflict(scoutResult, scoutTuning.overlapForceMinConf)
   ) {
     const conflict = await createConflict(update);
     if (conflict) {
@@ -63,7 +65,7 @@ export async function processUpdate(update: ContextUpdate): Promise<PimResult> {
         const result = deterministicMerge(update, classification);
         merged = result.merged;
         note = result.note;
-        if (scoutSaysOpenConflict(scoutResult, ADDITIVE_SCOUT_CONFLICT_MIN_CONF)) {
+        if (scoutSaysOpenConflict(scoutResult, scoutTuning.additiveMinConf)) {
           const conflict = await createConflict(update);
           if (conflict) {
             conflictCreated = true;
@@ -78,7 +80,7 @@ export async function processUpdate(update: ContextUpdate): Promise<PimResult> {
           const result = await llmMerge(update);
           merged = result.merged;
           note = result.note;
-          if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult)) {
+          if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult, scoutTuning.suppressMergeMinConf)) {
             const conflict = await createConflict(update);
             if (conflict) {
               conflictCreated = true;

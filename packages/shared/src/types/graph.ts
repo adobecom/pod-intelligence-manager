@@ -11,6 +11,18 @@ export type KnowledgeNodeType =
 
 export type ConfidenceLevel = "extracted" | "inferred";
 
+/** Provenance for nodes not produced by pod archival or a single ad-hoc human submission. */
+export type KnowledgeIngestionProvenanceKind = "scheduled_synthesis";
+
+export interface KnowledgeIngestionProvenance {
+  kind: KnowledgeIngestionProvenanceKind;
+  run_id: string;
+  model: string;
+  /** Existing graph nodes cited as evidence (must be valid ids at ingest time). */
+  evidence_node_ids: string[];
+  lint_finding_ids?: string[];
+}
+
 export interface KnowledgeNode {
   id: string;
   type: KnowledgeNodeType;
@@ -31,6 +43,8 @@ export interface KnowledgeNode {
   superseded_by?: string;
   /** Titan Text Embeddings v2 vector; absent on nodes created before embedding backfill. */
   embedding?: number[];
+  /** Optional audit trail for scheduled synthesis or future system ingestors. */
+  ingestion_provenance?: KnowledgeIngestionProvenance;
 }
 
 // --- Edge Types ---
@@ -146,6 +160,8 @@ export interface EnhancedPodLearning {
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number;
+  /** When set, persisted on the created `KnowledgeNode` (e.g. scheduled graph synthesis). */
+  ingestion_provenance?: KnowledgeIngestionProvenance;
 }
 
 // --- Curation ---

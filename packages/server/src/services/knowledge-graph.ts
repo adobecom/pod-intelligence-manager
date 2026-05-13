@@ -21,6 +21,8 @@ import type {
   EnhancedPodLearning,
   CurationAction,
 } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
+import { getOrgTuning } from "./org-settings.js";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
@@ -200,16 +202,24 @@ export async function addLearningsToGraph(
       confidence_score: learning.confidence_score,
       created_at: now,
       curated: false,
+      ...(learning.ingestion_provenance ? { ingestion_provenance: learning.ingestion_provenance } : {}),
     };
 
     node.embedding = (await generateEmbedding(embedText(node))) ?? undefined;
 
     // P0 + P2: Skip if a near-identical node already exists in the graph.
-    // Same-pod threshold (0.85) catches incremental-signal nodes re-extracted at archival.
-    // Cross-pod threshold (0.95) catches near-verbatim patterns from different pods.
+    // Same-pod threshold catches incremental-signal nodes re-extracted at archival.
+    // Cross-pod threshold catches near-verbatim patterns from different pods.
+    // Thresholds are org-tunable via getOrgTuning (defaults: 0.85 same-pod, 0.95 cross-pod).
+    if (!node.embedding) {
+      console.warn(`[knowledge-graph] Node accepted without dedup (embedding unavailable): "${node.summary.slice(0, 80)}"`);
+    }
     if (node.embedding) {
-      const samePodThreshold = 0.85;
-      const crossPodThreshold = 0.95;
+      const graphTuning = graph.org_id
+        ? getOrgTuning(graph.org_id).graphScoring
+        : DEFAULT_ORG_TUNING.graphScoring;
+      const samePodThreshold = graphTuning.samePodDedupThreshold;
+      const crossPodThreshold = graphTuning.crossPodDedupThreshold;
       const isDuplicate = graph.nodes.some((existing) => {
         if (!existing.embedding) return false;
         const sim = cosineSimilarity(node.embedding!, existing.embedding);
@@ -337,6 +347,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters);
+  const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
 
   const scored = candidates.map((node) => {
     const querySimilarity =
@@ -345,7 +356,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
         : undefined;
     return {
       node,
-      score: scoreRelevance(node, { scopes, keywords, querySimilarity }, hubIds),
+      score: scoreRelevance(node, { scopes, keywords, querySimilarity }, hubIds, graphTuning),
     };
   });
   scored.sort((a, b) => b.score - a.score);

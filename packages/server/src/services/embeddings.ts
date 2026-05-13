@@ -19,6 +19,8 @@ export function embedText(node: Pick<KnowledgeNode, "summary" | "details">): str
   return details ? `${node.summary}. ${details}` : node.summary;
 }
 
+const BEDROCK_TIMEOUT_MS = 8_000;
+
 /**
  * Calls Amazon Titan Text Embeddings v2 via the Bedrock `/invoke` endpoint.
  * Returns null (silently) when the embedding service is unavailable or errors.
@@ -32,6 +34,9 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
 
   const url = `https://bedrock-runtime.${region}.amazonaws.com/model/amazon.titan-embed-text-v2:0/invoke`;
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BEDROCK_TIMEOUT_MS);
+
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -40,6 +45,7 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ inputText: text, dimensions, normalize: true }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -50,8 +56,14 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
     const data = (await response.json()) as { embedding?: number[] };
     return data.embedding ?? null;
   } catch (err) {
-    console.warn("[embeddings] Embedding generation failed:", err);
+    if (err instanceof Error && err.name === "AbortError") {
+      console.warn(`[embeddings] Bedrock timed out after ${BEDROCK_TIMEOUT_MS}ms — falling back to keyword scoring`);
+    } else {
+      console.warn("[embeddings] Embedding generation failed:", err);
+    }
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

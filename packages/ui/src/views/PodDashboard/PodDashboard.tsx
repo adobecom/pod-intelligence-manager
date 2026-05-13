@@ -1,5 +1,6 @@
 import { style } from "@react-spectrum/s2/style" with { type: "macro" };
 import { usePodStore } from "../../stores/podStore";
+import { useOrgStore } from "../../stores/orgStore";
 import { PodHeader } from "./PodHeader";
 import { PodProjectAssociation } from "./PodProjectAssociation";
 import { HealthBanner } from "./HealthBanner";
@@ -34,6 +35,10 @@ export function PodDashboard() {
   const openConflictCount = usePodStore(
     (s) => s.conflicts.filter((c) => c.status !== "resolved").length,
   );
+  const orgTuning = useOrgStore((s) => s.orgTuning);
+  const pressureThresholds = orgTuning
+    ? { cautiousMax: orgTuning.pressure.cautiousMax, degradedMax: orgTuning.pressure.degradedMax }
+    : undefined;
 
   if (!pod) return null;
 
@@ -42,6 +47,7 @@ export function PodDashboard() {
       <HealthBanner
         pressure={pod.conflict_pressure}
         openConflicts={openConflictCount}
+        thresholds={pressureThresholds}
       />
       <PodHeader pod={pod} />
 
@@ -49,7 +55,7 @@ export function PodDashboard() {
 
       <div className={row}>
         <div className={halfPanel}>
-          <ConflictPressureGauge pressure={pod.conflict_pressure} />
+          <ConflictPressureGauge pressure={pod.conflict_pressure} thresholds={pressureThresholds} />
         </div>
         <div className={halfPanel}>
           <MilestoneProgress milestone={pod.milestone} />

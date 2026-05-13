@@ -5,6 +5,13 @@ vi.mock("../graph-storage.js", () => ({
   saveGraph: vi.fn(),
 }));
 
+vi.mock("../org-settings.js", async () => {
+  const { DEFAULT_ORG_TUNING } = await import("@pim/shared");
+  return {
+    getOrgTuning: vi.fn(() => DEFAULT_ORG_TUNING),
+  };
+});
+
 import {
   initializeKnowledgeGraph,
   addLearningsToGraph,

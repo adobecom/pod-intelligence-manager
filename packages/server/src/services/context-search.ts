@@ -14,7 +14,7 @@ import { callLLM, isLLMAvailable, MODELS } from "../pim/llm.js";
 import { redactSecrets } from "./secret-scan.js";
 import { searchSlack } from "../integrations/slack.js";
 import { searchFluffyjaws } from "../integrations/fluffyjaws.js";
-import { searchJira } from "../integrations/jira.js";
+import { searchJira, extractFixVersions } from "../integrations/jira.js";
 import { searchConfluence } from "../integrations/confluence.js";
 import { searchGithub } from "../integrations/github.js";
 import { searchGit } from "../integrations/git.js";
@@ -47,7 +47,7 @@ const INTEGRATIONS: Record<ContextSource, Integration> = {
   git: searchGit,
 };
 
-interface ResolvedScope {
+export interface ResolvedScope {
   project_id?: string;
   project_name?: string;
   project_resources?: ProjectResources;
@@ -63,9 +63,24 @@ interface ResolvedScope {
    * per-integration text-match queries to avoid spurious hits on words
    * like "recent" or "activity". */
   is_activity_query?: boolean;
+  /** Set when scope was filled in by a fallback rather than by an
+   * explicit/pod/text-detected source. See ContextSearchResult.fallback. */
+  fallback?: "authenticated_user";
 }
 
-function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string): string {
+export interface SearchContextOptions {
+  /** Email of the IMS-authenticated caller, taken from req.user.email by
+   * the route handler. When present and no other project/actor scope
+   * resolves, the orchestrator falls back to scoping Jira to this user
+   * (assignee/reporter/creator) and to the union of Jira project keys
+   * across projects in orgs they belong to. Trust-mode dev users still
+   * pass an email (DEV_USER_EMAIL) but their fallback typically yields
+   * no project keys and no real Jira hits — which is the desired
+   * fail-closed behavior for non-IMS callers. */
+  authenticatedUserEmail?: string;
+}
+
+export function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string): string {
   const normalized = {
     org_id: orgId,
     query: req.query.trim().toLowerCase(),
@@ -77,6 +92,15 @@ function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string
     project_id: scope.project_id ?? null,
     project_resources: scope.project_resources ?? null,
     actor: scope.actor ?? null,
+    // Include the fallback marker. A query with the IMS fallback and a
+    // query with an explicit actor can resolve to the same scope.actor
+    // (the caller themselves), but dispatch differently — the fallback
+    // path keeps non-Jira sources broad; the explicit path scopes every
+    // actor-aware source to that person. Without this field, the two
+    // would collide on a single cache entry and poison each other for
+    // the TTL. Synthesis output also differs (fallback strips actor from
+    // the LLM prompt), so the cached summary_md must differ too.
+    fallback: scope.fallback ?? null,
   };
   return crypto.createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
@@ -217,7 +241,44 @@ function stripTerms(query: string, terms: string[]): string {
     .trim();
 }
 
-async function resolveScope(req: ContextSearchRequest): Promise<ResolvedScope> {
+// Walk users → memberships → orgs → projects.resources_json and union every
+// project's Jira project_keys. Used as a last-resort scope when an IMS-
+// authenticated caller issues an ad-hoc query that doesn't carry a
+// project_id or pod and doesn't text-match any onboarded project. Returns
+// [] when the user has no orgs, when their orgs have no projects, or when
+// none of those projects have configured Jira keys.
+export function loadJiraKeysForUserOrgs(email: string): string[] {
+  let rows: { resources_json: string }[];
+  try {
+    // Case-insensitive email match: IMS can return the same address in
+    // different cases across sessions, and findUserByEmail (services/users.ts)
+    // already follows this pattern. Matching exactly would silently drop
+    // the user's project keys when their stored email casing differs.
+    rows = db
+      .prepare(
+        `SELECT p.resources_json
+           FROM projects p
+           JOIN memberships m ON m.org_id = p.org_id
+           JOIN users u       ON u.user_id = m.user_id
+          WHERE lower(u.email) = lower(?)
+            AND p.resources_json IS NOT NULL`,
+      )
+      .all(email) as { resources_json: string }[];
+  } catch {
+    return [];
+  }
+  const keys = new Set<string>();
+  for (const r of rows) {
+    const parsed = parseResources(r.resources_json);
+    for (const k of parsed?.jira?.project_keys ?? []) keys.add(k);
+  }
+  return [...keys];
+}
+
+export async function resolveScope(
+  req: ContextSearchRequest,
+  authenticatedUserEmail?: string,
+): Promise<ResolvedScope> {
   const scope: ResolvedScope = {};
 
   // 1. Project: explicit > inferred from pod > detected from query text
@@ -265,6 +326,43 @@ async function resolveScope(req: ContextSearchRequest): Promise<ResolvedScope> {
   // actor, integrations should rely on authorship filters rather than
   // matching the natural-language phrasing as text.
   scope.is_activity_query = tokens.is_activity_query;
+
+  // 3. Last-resort IMS fallback. Only activates when no project AND no
+  // actor resolved AND the query carries no fixVersion token AND the
+  // caller is an authenticated user. Scopes Jira (and any other
+  // integration that respects actor/project_resources) to the caller's
+  // identity and to the Jira project keys of every project in the orgs
+  // they belong to. The fixVersion gate is important: a query like
+  // "what's in T3-26.16" already satisfies the Jira scope guard via the
+  // release token, and narrowing it to the caller as actor would silently
+  // drop teammates' contributions to the same release.
+  const queryFixVersions = extractFixVersions(req.query).versions;
+  if (
+    !scope.project_id &&
+    !scope.actor &&
+    queryFixVersions.length === 0 &&
+    authenticatedUserEmail
+  ) {
+    const actor = await resolveActor({
+      email: authenticatedUserEmail,
+      cleaned_query: req.query,
+      is_activity_query: false,
+    });
+    if (actor) {
+      scope.actor = actor;
+      scope.fallback = "authenticated_user";
+      const orgProjectKeys = loadJiraKeysForUserOrgs(authenticatedUserEmail);
+      if (orgProjectKeys.length > 0) {
+        scope.project_resources = {
+          ...scope.project_resources,
+          jira: {
+            ...scope.project_resources?.jira,
+            project_keys: orgProjectKeys,
+          },
+        };
+      }
+    }
+  }
 
   return scope;
 }
@@ -368,12 +466,23 @@ async function synthesize(
   hits: ContextSearchHit[],
   scope: ResolvedScope,
 ): Promise<string | undefined> {
-  // When a scope is set and zero hits came back, emit a deterministic
-  // "no activity found in scope" summary rather than asking the LLM to
-  // hallucinate corroboration.
+  // The IMS-authenticated-user fallback supplies an actor solely so the
+  // Jira fail-closed scope guard has a narrowing dimension; it never
+  // narrows the other sources (see searchContext dispatch). The synthesis
+  // prompt's contract is "actor = all hits are filtered to this person",
+  // so passing scope.actor through here would make the LLM write "your
+  // work on X" around broad Slack/GitHub/KG hits — and, worst case, around
+  // a sources list that excluded Jira entirely (no source was actor-
+  // scoped at all). Treat the fallback as Jira-internal: present the
+  // synthesis with a view of the scope that has no actor when the
+  // fallback fired. The response still echoes scope.actor and
+  // scope.fallback for the caller to render however they like.
+  const effectiveActor =
+    scope.fallback === "authenticated_user" ? undefined : scope.actor;
+
   if (hits.length === 0) {
-    if (scope.project_name || scope.actor?.display_name) {
-      const who = scope.actor?.display_name ?? scope.actor?.email;
+    if (scope.project_name || effectiveActor?.display_name) {
+      const who = effectiveActor?.display_name ?? effectiveActor?.email;
       const where = scope.project_name ? `in ${scope.project_name}` : "";
       return `No matching activity found ${[who ? `by ${who}` : "", where].filter(Boolean).join(" ")} for this query.`.trim();
     }
@@ -393,7 +502,7 @@ async function synthesize(
               resources: scope.project_resources,
             }
           : undefined,
-        actor: scope.actor,
+        actor: effectiveActor,
       },
       null,
       2,
@@ -406,11 +515,15 @@ async function synthesize(
   }
 }
 
-export async function searchContext(req: ContextSearchRequest, orgId: string): Promise<ContextSearchResult> {
+export async function searchContext(
+  req: ContextSearchRequest,
+  orgId: string,
+  opts: SearchContextOptions = {},
+): Promise<ContextSearchResult> {
   const ttlSec = parseInt(process.env.CONTEXT_SEARCH_CACHE_TTL_SEC ?? String(DEFAULT_CACHE_TTL_SEC), 10);
   const useCache = req.use_cache !== false;
 
-  const scope = await resolveScope(req);
+  const scope = await resolveScope(req, opts.authenticatedUserEmail);
 
   const key = cacheKey(req, scope, orgId);
   if (useCache) {
@@ -440,13 +553,29 @@ export async function searchContext(req: ContextSearchRequest, orgId: string): P
     project_resources: scope.project_resources,
     actor: scope.actor,
   };
+  // When the actor came from the IMS-authenticated-user fallback, only
+  // Jira needs it to satisfy its fail-closed scope guard. Carrying it to
+  // the other integrations would silently narrow Slack/GitHub/Git to the
+  // caller's own messages, commits, and PRs for an ad-hoc query like
+  // "milo block init" — which is not what the caller asked for. Strip
+  // the actor from every non-Jira source in that case; the explicit /
+  // query-detected actor paths still flow through untouched.
+  const fromIMSFallback = scope.fallback === "authenticated_user";
+  const nonJiraOpts: IntegrationSearchOpts = fromIMSFallback
+    ? { ...integrationOpts, actor: undefined }
+    : integrationOpts;
   // The KG always sees the original query — semantic search benefits from
-  // the intent phrasing other integrations have to drop.
-  const kgOpts: IntegrationSearchOpts = { ...integrationOpts, query: req.query };
+  // the intent phrasing other integrations have to drop. It also follows
+  // the Jira-only-actor rule when the fallback fired.
+  const kgOpts: IntegrationSearchOpts = { ...nonJiraOpts, query: req.query };
 
   const selected = (req.sources ?? CONTEXT_SOURCES).filter((s) => s in INTEGRATIONS);
   const settled = await Promise.allSettled(
-    selected.map((s) => INTEGRATIONS[s](s === "kg" ? kgOpts : integrationOpts)),
+    selected.map((s) => {
+      if (s === "kg") return INTEGRATIONS[s](kgOpts);
+      if (s === "jira") return INTEGRATIONS[s](integrationOpts);
+      return INTEGRATIONS[s](nonJiraOpts);
+    }),
   );
 
   const missing_sources: ContextSearchResult["missing_sources"] = [];
@@ -480,6 +609,7 @@ export async function searchContext(req: ContextSearchRequest, orgId: string): P
     project_id: scope.project_id,
     project_name: scope.project_name,
     actor: scope.actor,
+    fallback: scope.fallback,
     summary_md,
     hits: ranked,
     sources_used,
