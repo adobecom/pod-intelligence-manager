@@ -15,7 +15,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { KnowledgeGraph } from "@pim/shared";
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  CopyObjectCommand,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 
 const DATA_ROOT = process.env.KG_DATA_DIR
   ? path.resolve(process.env.KG_DATA_DIR)
@@ -146,6 +153,135 @@ async function writeThroughToS3(orgId: string, version: number, body: string): P
       }),
     ),
   ]);
+}
+
+/**
+ * One-shot migration: move the pre-multi-tenant `default/` graph slot into a
+ * specific org's slot. Runs idempotently — exits if the target org's slot
+ * already exists, so it is safe to leave the env var set across redeploys
+ * until the legacy directory has been verified gone.
+ *
+ * Migrates both local filesystem and (when KG_S3_BUCKET is set) S3, including
+ * versioned snapshots. The in-JSON `org_id` field of the latest graph is
+ * rewritten to match the target org so query metadata stays consistent.
+ *
+ * Triggered by env var `PIM_LEGACY_DEFAULT_GRAPH_ORG_ID=<org_id>` — set this on
+ * the first deploy that ships the multi-tenant refactor; remove it afterwards.
+ */
+const LEGACY_ORG_ID = "default";
+export async function migrateLegacyDefaultGraph(targetOrgId: string): Promise<void> {
+  if (!targetOrgId || targetOrgId === LEGACY_ORG_ID) return;
+
+  const legacyDir = orgDir(LEGACY_ORG_ID);
+  const targetDir = orgDir(targetOrgId);
+  const legacyExists = fs.existsSync(legacyDir);
+  const targetExists = fs.existsSync(targetDir);
+
+  if (!legacyExists && !S3_BUCKET) {
+    return; // nothing to migrate, nowhere to look
+  }
+  if (targetExists && (!S3_BUCKET || (await s3HasOrgPrefix(targetOrgId)))) {
+    // Already migrated — leave things alone.
+    return;
+  }
+
+  console.log(
+    `[graph-storage] Migrating legacy "default" graph → org "${targetOrgId}" (local=${legacyExists}, s3=${Boolean(S3_BUCKET)})`,
+  );
+
+  if (legacyExists && !targetExists) {
+    ensureDir(path.dirname(targetDir));
+    fs.renameSync(legacyDir, targetDir);
+    // Rewrite the latest graph's in-JSON org_id so reads see the new owner.
+    const latest = latestPath(targetOrgId);
+    if (fs.existsSync(latest)) {
+      try {
+        const raw = fs.readFileSync(latest, "utf-8");
+        const obj = JSON.parse(raw) as KnowledgeGraph;
+        if (obj.org_id !== targetOrgId) {
+          obj.org_id = targetOrgId;
+          fs.writeFileSync(latest, JSON.stringify(obj, null, 2), "utf-8");
+        }
+      } catch (err) {
+        console.warn(`[graph-storage] Failed to rewrite org_id on migrated graph:`, err);
+      }
+    }
+  }
+
+  if (S3_BUCKET) {
+    await migrateS3Prefix(LEGACY_ORG_ID, targetOrgId);
+  }
+}
+
+async function s3HasOrgPrefix(orgId: string): Promise<boolean> {
+  if (!S3_BUCKET) return true;
+  const client = getS3();
+  const res = await client.send(
+    new ListObjectsV2Command({
+      Bucket: S3_BUCKET,
+      Prefix: `${S3_PREFIX}/${orgId}/`,
+      MaxKeys: 1,
+    }),
+  );
+  return Boolean(res.Contents && res.Contents.length > 0);
+}
+
+async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void> {
+  if (!S3_BUCKET) return;
+  const client = getS3();
+  const fromPrefix = `${S3_PREFIX}/${fromOrgId}/`;
+  const toPrefix = `${S3_PREFIX}/${toOrgId}/`;
+
+  const listRes = await client.send(
+    new ListObjectsV2Command({ Bucket: S3_BUCKET, Prefix: fromPrefix }),
+  );
+  const objects = listRes.Contents ?? [];
+  if (objects.length === 0) return;
+
+  for (const obj of objects) {
+    if (!obj.Key) continue;
+    const newKey = toPrefix + obj.Key.slice(fromPrefix.length);
+    const isLatest = obj.Key.endsWith("graph-latest.json");
+
+    let body: string | undefined;
+    if (isLatest) {
+      // Rewrite org_id in the latest snapshot's body so query metadata reflects the new owner.
+      const get = await client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: obj.Key }));
+      const raw = await get.Body?.transformToString();
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as KnowledgeGraph;
+          parsed.org_id = toOrgId;
+          body = JSON.stringify(parsed, null, 2);
+        } catch {
+          body = raw;
+        }
+      }
+    }
+
+    if (body !== undefined) {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: newKey,
+          Body: body,
+          ContentType: "application/json",
+        }),
+      );
+    } else {
+      await client.send(
+        new CopyObjectCommand({
+          Bucket: S3_BUCKET,
+          CopySource: encodeURIComponent(`${S3_BUCKET}/${obj.Key}`),
+          Key: newKey,
+        }),
+      );
+    }
+
+    await client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: obj.Key }));
+  }
+
+  console.log(`[graph-storage] Migrated ${objects.length} S3 object(s) from "${fromOrgId}/" to "${toOrgId}/"`);
 }
 
 /**

@@ -128,7 +128,7 @@ describe("extractKnowledge — deterministic extraction quality", () => {
       ],
       [],
     );
-    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    const enhanced = await extractKnowledgeEnhanced("pod-x", "org-test");
     expect(enhanced).toHaveLength(1);
     // Domain comes from scope, not from keyword inference (which would have included "general"
     // or other matches because "migrate" / "consumer" don't appear in the backend keyword list).
@@ -148,7 +148,7 @@ describe("extractKnowledge — deterministic extraction quality", () => {
         },
       ],
     );
-    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    const enhanced = await extractKnowledgeEnhanced("pod-x", "org-test");
     expect(enhanced).toHaveLength(1);
     expect(enhanced[0].domains).toEqual(["unknown"]);
   });
@@ -166,7 +166,7 @@ describe("extractKnowledge — deterministic extraction quality", () => {
       ],
       [],
     );
-    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    const enhanced = await extractKnowledgeEnhanced("pod-x", "org-test");
     expect(enhanced).toHaveLength(1);
     expect(enhanced[0].confidence).toBe("extracted");
     expect(enhanced[0].confidence_score).toBe(0.7);
@@ -185,7 +185,7 @@ describe("extractKnowledge — deterministic extraction quality", () => {
         },
       ],
     );
-    const enhanced = await extractKnowledgeEnhanced("pod-x");
+    const enhanced = await extractKnowledgeEnhanced("pod-x", "org-test");
     expect(enhanced).toHaveLength(1);
     expect(enhanced[0].type).toBe("resolved_conflict");
     expect(enhanced[0].confidence_score).toBe(0.9);

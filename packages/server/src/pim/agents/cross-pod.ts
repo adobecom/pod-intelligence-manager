@@ -127,8 +127,8 @@ export async function detectOverlaps(): Promise<void> {
       let advisory = `${podA.name} and ${podB.name} appear to be tackling related concepts. Coordinate to avoid conflicting approaches.`;
       try {
         const seedDomains = [...new Set([...ctxA.topTerms, ...ctxB.topTerms])].slice(0, 3);
-        if (seedDomains.length > 0) {
-          const historicalLearnings = await getRelevantLearnings(seedDomains, [], 500);
+        if (seedDomains.length > 0 && podA.org_id) {
+          const historicalLearnings = await getRelevantLearnings(podA.org_id, seedDomains, [], 500);
           if (historicalLearnings.nodes.length > 0) {
             const relevantNote = historicalLearnings.nodes[0];
             advisory += ` Historical note: "${relevantNote.summary}" (from ${relevantNote.source_pod_name}).`;

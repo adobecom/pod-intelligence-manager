@@ -40,7 +40,7 @@ export default async function contextSearchRoutes(app: FastifyInstance) {
     "/api/context-search",
     { preHandler: validateBody(ContextSearchRequestSchema) },
     async (req) => {
-      return searchContext(req.body);
+      return searchContext(req.body, req.org!.org_id);
     },
   );
 }

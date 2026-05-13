@@ -65,8 +65,9 @@ interface ResolvedScope {
   is_activity_query?: boolean;
 }
 
-function cacheKey(req: ContextSearchRequest, scope: ResolvedScope): string {
+function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string): string {
   const normalized = {
+    org_id: orgId,
     query: req.query.trim().toLowerCase(),
     sources: [...(req.sources ?? CONTEXT_SOURCES)].sort(),
     time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
@@ -405,13 +406,13 @@ async function synthesize(
   }
 }
 
-export async function searchContext(req: ContextSearchRequest): Promise<ContextSearchResult> {
+export async function searchContext(req: ContextSearchRequest, orgId: string): Promise<ContextSearchResult> {
   const ttlSec = parseInt(process.env.CONTEXT_SEARCH_CACHE_TTL_SEC ?? String(DEFAULT_CACHE_TTL_SEC), 10);
   const useCache = req.use_cache !== false;
 
   const scope = await resolveScope(req);
 
-  const key = cacheKey(req, scope);
+  const key = cacheKey(req, scope, orgId);
   if (useCache) {
     const cached = readCache(key, ttlSec);
     if (cached) return { ...cached, from_cache: true };
@@ -432,6 +433,7 @@ export async function searchContext(req: ContextSearchRequest): Promise<ContextS
     query: perSourceQuery,
     time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
     max_hits_per_source: req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE,
+    org_id: orgId,
     pod_id: req.pod_id,
     project_id: scope.project_id,
     project_name: scope.project_name,

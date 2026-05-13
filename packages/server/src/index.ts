@@ -23,7 +23,7 @@ import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
-import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
+import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import db from "./db/connection.js";
@@ -44,10 +44,39 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
 createTables();
 seedDatabase();
 
-// Initialize knowledge graph (restore from S3 if local is empty, then load from disk into memory)
-await restoreGraphFromS3IfEmpty("default");
-initializeKnowledgeGraph("default");
-await seedKnowledgeGraph();
+// Knowledge graph init.
+//
+// One-shot legacy migration: before multi-tenant partitioning, every org's graph was
+// stored under the literal slot "default". The first deploy that ships partitioning
+// sets PIM_LEGACY_DEFAULT_GRAPH_ORG_ID to the org that should inherit that data
+// (production: T3 Events under Adobecom). Migration is idempotent — once the target
+// slot exists, the helper is a no-op.
+const LEGACY_DEFAULT_TARGET = process.env.PIM_LEGACY_DEFAULT_GRAPH_ORG_ID?.trim();
+if (LEGACY_DEFAULT_TARGET) {
+  try {
+    await migrateLegacyDefaultGraph(LEGACY_DEFAULT_TARGET);
+  } catch (err) {
+    app.log.error(err, "Legacy default-graph migration failed");
+  }
+}
+
+// Eager-load every known org's graph at boot so periodic jobs see them without
+// waiting for a first request. New orgs created at runtime are loaded lazily on
+// first access.
+const orgIds = (db.prepare("SELECT org_id FROM orgs").all() as { org_id: string }[]).map(
+  (r) => r.org_id,
+);
+for (const orgId of orgIds) {
+  await restoreGraphFromS3IfEmpty(orgId);
+  initializeKnowledgeGraph(orgId);
+}
+
+// Seed the demo org's graph for fresh local installs. Skipped silently if the
+// graph already has nodes or if no demo org exists in this environment.
+const DEMO_ORG_ID = "org_demo";
+if (orgIds.includes(DEMO_ORG_ID)) {
+  await seedKnowledgeGraph(DEMO_ORG_ID);
+}
 
 // Run a startup prune so a redeploy doesn't have to wait for the first interval tick.
 try {

@@ -9,6 +9,11 @@ export interface IntegrationSearchOpts {
   query: string;
   time_window_days: number;
   max_hits_per_source: number;
+  /**
+   * Required for any integration that reads org-partitioned state (notably the KG).
+   * Threaded from req.org.org_id through searchContext(); never inferred from pod/project.
+   */
+  org_id: string;
   pod_id?: string;
   project_id?: string;
   project_name?: string;

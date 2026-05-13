@@ -127,7 +127,7 @@ export default async function orgRoutes(app: FastifyInstance) {
     // Extract knowledge and add to the persistent graph
     let learningsExtracted = 0;
     try {
-      const learnings = await extractKnowledgeEnhanced(podId);
+      const learnings = await extractKnowledgeEnhanced(podId, req.org!.org_id);
       if (learnings.length > 0) {
         let projectMeta: { project_id: string; project_name: string } | undefined;
         if (pod.project_id) {
@@ -136,7 +136,7 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = await addLearningsToGraph(learnings, podId, pod.name, projectMeta);
+        const result = await addLearningsToGraph(req.org!.org_id, learnings, podId, pod.name, projectMeta);
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

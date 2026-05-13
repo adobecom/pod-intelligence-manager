@@ -12,24 +12,31 @@ import {
   addLearningsToGraph,
   getGraph,
   pruneStaleNodes,
+  _resetForTests,
 } from "../knowledge-graph.js";
 import type { EnhancedPodLearning, KnowledgeNode } from "@pim/shared";
 
 let orgSeq = 0;
 
-async function seedGraph(learnings: EnhancedPodLearning[]) {
-  const orgId = `kg-test-${orgSeq++}`;
+function nextOrgId(prefix: string): string {
+  return `${prefix}-${orgSeq++}`;
+}
+
+async function seedGraph(learnings: EnhancedPodLearning[]): Promise<string> {
+  const orgId = nextOrgId("kg-test");
   initializeKnowledgeGraph(orgId);
-  await addLearningsToGraph(learnings, "pod-seed", "Seed Pod");
+  await addLearningsToGraph(orgId, learnings, "pod-seed", "Seed Pod");
+  return orgId;
 }
 
 describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetForTests();
   });
 
   it("ranks nodes matching conflict-derived keywords ahead of same-domain peers", async () => {
-    await seedGraph([
+    const orgId = await seedGraph([
       {
         type: "scope_insight",
         summary: "Use webhook authentication for payment callbacks",
@@ -49,11 +56,12 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     ]);
 
     const withConflict = await getRelevantLearnings(
+      orgId,
       ["backend"],
       ["webhook payment authentication issue"],
       500,
     );
-    const withoutConflict = await getRelevantLearnings(["backend"], [], 500);
+    const withoutConflict = await getRelevantLearnings(orgId, ["backend"], [], 500);
 
     expect(withConflict.nodes[0]?.summary).toContain("webhook");
     expect(withoutConflict.nodes[0]?.summary).toBeDefined();
@@ -66,7 +74,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
   });
 
   it("queryKnowledge omits node embeddings by default; include_embeddings restores them", async () => {
-    await seedGraph([
+    const orgId = await seedGraph([
       {
         type: "pattern",
         summary: "Embedding strip test node",
@@ -77,18 +85,18 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       },
     ]);
 
-    const g = getGraph();
+    const g = getGraph(orgId);
     const n = g.nodes.find((x) => x.summary === "Embedding strip test node");
     expect(n).toBeDefined();
     n!.embedding = [1, 2, 3];
 
-    const without = queryKnowledge({
+    const without = queryKnowledge(orgId, {
       filters: { domains: ["backend"] },
       max_tokens: 500,
     });
     expect(without.nodes[0]?.embedding).toBeUndefined();
 
-    const withEmb = queryKnowledge({
+    const withEmb = queryKnowledge(orgId, {
       filters: { domains: ["backend"] },
       max_tokens: 500,
       include_embeddings: true,
@@ -97,7 +105,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
   });
 
   it("merges filters.keywords with text_search tokens for scoring", async () => {
-    await seedGraph([
+    const orgId = await seedGraph([
       {
         type: "pattern",
         summary: "Zebra migration checklist for infra",
@@ -116,7 +124,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       },
     ]);
 
-    const q = queryKnowledge({
+    const q = queryKnowledge(orgId, {
       filters: {
         domains: ["infra"],
         text_search: "migration",
@@ -129,7 +137,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
   });
 
   it("getRelevantLearnings with projectId filters out nodes tagged to other projects", async () => {
-    const orgId = `kg-test-${orgSeq++}`;
+    const orgId = nextOrgId("kg-test");
     initializeKnowledgeGraph(orgId);
     const base: EnhancedPodLearning = {
       type: "decision",
@@ -139,21 +147,23 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       confidence_score: 0.9,
       summary: "",
     };
-    await addLearningsToGraph([{ ...base, summary: "Shared org learning" }], "pod-a", "Pod A");
+    await addLearningsToGraph(orgId, [{ ...base, summary: "Shared org learning" }], "pod-a", "Pod A");
     await addLearningsToGraph(
+      orgId,
       [{ ...base, summary: "Project Alpha decision" }],
       "pod-b",
       "Pod B",
       { project_id: "proj-alpha", project_name: "Alpha" },
     );
     await addLearningsToGraph(
+      orgId,
       [{ ...base, summary: "Project Beta decision" }],
       "pod-c",
       "Pod C",
       { project_id: "proj-beta", project_name: "Beta" },
     );
 
-    const forAlpha = await getRelevantLearnings(["backend"], [], 2000, "proj-alpha");
+    const forAlpha = await getRelevantLearnings(orgId, ["backend"], [], 2000, "proj-alpha");
     const summaries = forAlpha.nodes.map(n => n.summary);
     expect(summaries.some(s => s.includes("Shared org"))).toBe(true);
     expect(summaries.some(s => s.includes("Project Alpha"))).toBe(true);
@@ -165,10 +175,11 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 describe("pruneStaleNodes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetForTests();
   });
 
   it("removes only stale, low-confidence, uncurated, non-superseded nodes", async () => {
-    const orgId = `kg-prune-${orgSeq++}`;
+    const orgId = nextOrgId("kg-prune");
     initializeKnowledgeGraph(orgId);
 
     const old = new Date("2024-01-01T00:00:00Z").toISOString();
@@ -181,7 +192,7 @@ describe("pruneStaleNodes", () => {
       { id: "kn-old-superseded", created_at: old, confidence_score: 0.3, curated: false, superseded: true }, // protected (superseded)
     ];
 
-    const graph = getGraph();
+    const graph = getGraph(orgId);
     for (const a of ages) {
       const node: KnowledgeNode = {
         id: a.id,
@@ -200,9 +211,9 @@ describe("pruneStaleNodes", () => {
       graph.nodes.push(node);
     }
 
-    const result = pruneStaleNodes();
+    const result = pruneStaleNodes(orgId);
     expect(result.removed).toBe(1);
-    const ids = getGraph().nodes.map((n) => n.id);
+    const ids = getGraph(orgId).nodes.map((n) => n.id);
     expect(ids).not.toContain("kn-stale-junk");
     expect(ids).toContain("kn-curated-old");
     expect(ids).toContain("kn-recent-junk");
@@ -211,8 +222,8 @@ describe("pruneStaleNodes", () => {
   });
 
   it("returns 0 removed on an empty graph", () => {
-    const orgId = `kg-prune-empty-${orgSeq++}`;
+    const orgId = nextOrgId("kg-prune-empty");
     initializeKnowledgeGraph(orgId);
-    expect(pruneStaleNodes().removed).toBe(0);
+    expect(pruneStaleNodes(orgId).removed).toBe(0);
   });
 });
