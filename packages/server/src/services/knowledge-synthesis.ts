@@ -259,9 +259,10 @@ interface LLMSynthesisResponse {
 }
 
 /**
- * Runs one synthesis pass for the in-memory graph's org. Safe to call on a timer; no-ops when gated.
+ * Runs one synthesis pass for the given org's graph. Safe to call on a timer; no-ops when gated.
+ * The periodic scheduler in index.ts invokes this once per loaded org per tick.
  */
-export async function runScheduledGraphSynthesis(): Promise<GraphSynthesisRunResult> {
+export async function runScheduledGraphSynthesis(orgId: string): Promise<GraphSynthesisRunResult> {
   const run_id = crypto.randomUUID();
 
   if (!isLLMAvailable()) {
@@ -273,7 +274,7 @@ export async function runScheduledGraphSynthesis(): Promise<GraphSynthesisRunRes
 
   let graph: KnowledgeGraph;
   try {
-    graph = getGraph();
+    graph = getGraph(orgId);
   } catch {
     return { ok: false, error: "graph_not_initialized", run_id };
   }
@@ -317,11 +318,11 @@ export async function runScheduledGraphSynthesis(): Promise<GraphSynthesisRunRes
   }
 
   try {
-    const result = await addLearningsToGraph(learnings, SYNTHESIS_SOURCE_POD_ID, SYNTHESIS_SOURCE_POD_NAME, undefined, {
+    const result = await addLearningsToGraph(orgId, learnings, SYNTHESIS_SOURCE_POD_ID, SYNTHESIS_SOURCE_POD_NAME, undefined, {
       skipAnalysis: true,
     });
     console.log(
-      `[knowledge-synthesis] run ${run_id}: added ${result.nodesAdded} node(s), ${result.edgesAdded} edge(s)`,
+      `[knowledge-synthesis] run ${run_id} (org ${orgId}): added ${result.nodesAdded} node(s), ${result.edgesAdded} edge(s)`,
     );
     return {
       ok: true,

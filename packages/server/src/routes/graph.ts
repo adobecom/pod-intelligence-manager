@@ -4,6 +4,9 @@
  * Query endpoints designed for minimal context window consumption.
  * Agents use POST /api/knowledge/query with token budgets.
  * UI uses GET /api/knowledge/graph for full visualization.
+ *
+ * Every handler partitions by req.org.org_id (resolved by the org-context
+ * middleware) so org A can never read or write org B's graph.
  */
 
 import type { FastifyInstance } from "fastify";
@@ -72,13 +75,13 @@ const AD_HOC_DEFAULT_CONFIDENCE = 0.7;
 
 export default async function graphRoutes(app: FastifyInstance) {
   // Full graph (for UI visualization)
-  app.get("/api/knowledge/graph", async () => {
-    return getGraph();
+  app.get("/api/knowledge/graph", async (req) => {
+    return getGraph(req.org!.org_id);
   });
 
   // Stats summary
-  app.get("/api/knowledge/stats", async () => {
-    return getStats();
+  app.get("/api/knowledge/stats", async (req) => {
+    return getStats(req.org!.org_id);
   });
 
   // Token-budgeted query (main agent-facing interface).
@@ -87,7 +90,7 @@ export default async function graphRoutes(app: FastifyInstance) {
   app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req) => {
     const { query_text, query_embedding, ...rest } = req.body;
     const embedding = query_embedding ?? (query_text ? await generateEmbedding(query_text) : null);
-    return queryKnowledge({ ...rest, query_embedding: embedding });
+    return queryKnowledge(req.org!.org_id, { ...rest, query_embedding: embedding });
   });
 
   // Convenience: relevant learnings for given scopes.
@@ -101,7 +104,7 @@ export default async function graphRoutes(app: FastifyInstance) {
       const projectId = req.query.projectId?.trim() || null;
       const queryText = req.query.query?.trim();
       const conflictSummaries = queryText ? [queryText] : [];
-      return getRelevantLearnings(scopes, conflictSummaries, maxTokens, projectId);
+      return getRelevantLearnings(req.org!.org_id, scopes, conflictSummaries, maxTokens, projectId);
     },
   );
 
@@ -111,7 +114,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     async (req) => {
       const conflict = req.query.conflict ?? "";
       const maxTokens = parseInt(req.query.maxTokens ?? "1000", 10);
-      return getPrecedents(conflict, maxTokens);
+      return getPrecedents(req.org!.org_id, conflict, maxTokens);
     },
   );
 
@@ -133,6 +136,7 @@ export default async function graphRoutes(app: FastifyInstance) {
         confidence_score: body.confidence_score ?? AD_HOC_DEFAULT_CONFIDENCE,
       };
       const result = await addLearningsToGraph(
+        req.org!.org_id,
         [learning],
         AD_HOC_POD_ID,
         body.source_label ?? AD_HOC_DEFAULT_LABEL,
@@ -158,7 +162,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const { nodeId } = req.params;
       const { action, edits } = req.body;
-      const success = curateNode(nodeId, action, edits);
+      const success = curateNode(req.org!.org_id, nodeId, action, edits);
       if (!success) {
         reply.code(404);
         return { error: "Node not found" };

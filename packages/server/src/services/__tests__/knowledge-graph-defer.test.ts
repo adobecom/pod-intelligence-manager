@@ -5,12 +5,20 @@ vi.mock("../graph-storage.js", () => ({
   saveGraph: vi.fn(),
 }));
 
+vi.mock("../org-settings.js", async () => {
+  const { DEFAULT_ORG_TUNING } = await import("@pim/shared");
+  return {
+    getOrgTuning: vi.fn(() => DEFAULT_ORG_TUNING),
+  };
+});
+
 import {
   initializeKnowledgeGraph,
   addLearningsToGraph,
   refreshAnalysisIfStale,
   isAnalysisStale,
   getGraph,
+  _resetForTests,
 } from "../knowledge-graph.js";
 import type { EnhancedPodLearning } from "@pim/shared";
 
@@ -29,11 +37,16 @@ const sample: EnhancedPodLearning = {
 };
 
 describe("addLearningsToGraph skipAnalysis option", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForTests();
+  });
 
   it("skipAnalysis=true marks the graph stale and does not recompute communities", async () => {
-    initializeKnowledgeGraph(freshOrg());
+    const orgId = freshOrg();
+    initializeKnowledgeGraph(orgId);
     const result = await addLearningsToGraph(
+      orgId,
       [sample],
       "pod-1",
       "Pod One",
@@ -41,35 +54,39 @@ describe("addLearningsToGraph skipAnalysis option", () => {
       { skipAnalysis: true },
     );
     expect(result.nodesAdded).toBe(1);
-    expect(isAnalysisStale()).toBe(true);
-    expect(getGraph().communities).toEqual([]);
+    expect(isAnalysisStale(orgId)).toBe(true);
+    expect(getGraph(orgId).communities).toEqual([]);
   });
 
   it("default (no options) recomputes communities and clears the stale flag", async () => {
-    initializeKnowledgeGraph(freshOrg());
-    await addLearningsToGraph([sample], "pod-1", "Pod One");
-    expect(isAnalysisStale()).toBe(false);
+    const orgId = freshOrg();
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(orgId, [sample], "pod-1", "Pod One");
+    expect(isAnalysisStale(orgId)).toBe(false);
     // Single node → at least one community gets assigned
-    expect(getGraph().communities.length).toBeGreaterThan(0);
+    expect(getGraph(orgId).communities.length).toBeGreaterThan(0);
   });
 
   it("refreshAnalysisIfStale is a no-op when not stale", async () => {
-    initializeKnowledgeGraph(freshOrg());
-    await addLearningsToGraph([sample], "pod-1", "Pod One"); // not skipped → not stale
-    expect(refreshAnalysisIfStale()).toBe(false);
+    const orgId = freshOrg();
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(orgId, [sample], "pod-1", "Pod One"); // not skipped → not stale
+    expect(refreshAnalysisIfStale(orgId)).toBe(false);
   });
 
   it("refreshAnalysisIfStale runs when stale and clears the flag", async () => {
-    initializeKnowledgeGraph(freshOrg());
+    const orgId = freshOrg();
+    initializeKnowledgeGraph(orgId);
     await addLearningsToGraph(
+      orgId,
       [sample],
       "pod-1",
       "Pod One",
       undefined,
       { skipAnalysis: true },
     );
-    expect(isAnalysisStale()).toBe(true);
-    expect(refreshAnalysisIfStale()).toBe(true);
-    expect(isAnalysisStale()).toBe(false);
+    expect(isAnalysisStale(orgId)).toBe(true);
+    expect(refreshAnalysisIfStale(orgId)).toBe(true);
+    expect(isAnalysisStale(orgId)).toBe(false);
   });
 });

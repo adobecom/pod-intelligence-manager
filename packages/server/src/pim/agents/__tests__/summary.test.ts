@@ -33,6 +33,7 @@ const MOCK_POD = {
   total_days: 5,
   conflict_pressure: 0.2,
   milestone_json: JSON.stringify({ name: "MVP Launch", target_date: "2026-04-14T00:00:00.000Z", percent_complete: 60 }),
+  org_id: "org-test",
 };
 
 const MOCK_AREAS = [

@@ -44,7 +44,7 @@ export default async function contextSearchRoutes(app: FastifyInstance) {
       // fall back to scoping Jira to the user (and their orgs' projects)
       // when the request carries no explicit project/pod/actor scope.
       // req.user is populated by the global auth hook in middleware/auth.ts.
-      return searchContext(req.body, { authenticatedUserEmail: req.user?.email });
+      return searchContext(req.body, req.org!.org_id, { authenticatedUserEmail: req.user?.email });
     },
   );
 }

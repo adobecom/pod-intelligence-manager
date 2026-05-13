@@ -255,6 +255,7 @@ function normalizeLLMDomains(raw: LLMLearning["domain"]): string[] | null {
 
 export async function extractKnowledgeEnhanced(
   podId: string,
+  orgId: string,
 ): Promise<EnhancedPodLearning[]> {
   // Step 1: Deterministic base extraction. Use the authoritative `scope` from the source row
   // when present; default to "unknown" rather than keyword-bag inference (which mis-tags).
@@ -339,7 +340,7 @@ export async function extractKnowledgeEnhanced(
       // Pre-fetch existing graph nodes once so we can dedup against history, not just this batch.
       let existingNodes: { summary: string; embedding?: number[] }[] = [];
       try {
-        existingNodes = getGraph().nodes.map((n) => ({ summary: n.summary, embedding: n.embedding }));
+        existingNodes = getGraph(orgId).nodes.map((n) => ({ summary: n.summary, embedding: n.embedding }));
       } catch {
         // Graph not initialized yet (e.g. test setups) — skip historical dedup.
       }

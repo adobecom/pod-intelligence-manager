@@ -132,10 +132,13 @@ beforeEach(() => {
   testDb.exec("DELETE FROM identity_cache");
 });
 
+const TEST_ORG_ID = "org-test";
+
 describe("searchContext per-integration opts", () => {
   it("when IMS fallback fires, only Jira receives the actor; other sources stay broad", async () => {
     await searchContext(
       { query: "milo block init", synthesize: false, use_cache: false },
+      TEST_ORG_ID,
       { authenticatedUserEmail: userEmail },
     );
 
@@ -170,6 +173,7 @@ describe("searchContext per-integration opts", () => {
         synthesize: false,
         use_cache: false,
       },
+      TEST_ORG_ID,
       { authenticatedUserEmail: userEmail },
     );
 
@@ -193,6 +197,7 @@ describe("searchContext per-integration opts", () => {
   it("when no auth user is passed, every source sees actor: undefined", async () => {
     await searchContext(
       { query: "milo block init", synthesize: false, use_cache: false },
+      TEST_ORG_ID,
     );
 
     for (const mock of [searchJira, searchSlack, searchGithub, searchGit, searchConfluence, searchFluffyjaws, searchKG]) {
@@ -222,6 +227,7 @@ describe("searchContext synthesis prompt", () => {
   it("omits actor from the synthesis prompt when IMS fallback fired", async () => {
     await searchContext(
       { query: "milo block init", use_cache: false },
+      TEST_ORG_ID,
       { authenticatedUserEmail: userEmail },
     );
 
@@ -238,6 +244,7 @@ describe("searchContext synthesis prompt", () => {
         actor: { email: "someone-else@adobe.com", display_name: "Someone Else" },
         use_cache: false,
       },
+      TEST_ORG_ID,
       { authenticatedUserEmail: userEmail },
     );
 
@@ -254,6 +261,7 @@ describe("searchContext synthesis prompt", () => {
 
     const result = await searchContext(
       { query: "milo block init", use_cache: false },
+      TEST_ORG_ID,
       { authenticatedUserEmail: userEmail },
     );
 
@@ -267,14 +275,20 @@ describe("cacheKey", () => {
   it("differs for IMS fallback vs explicit actor when actor.email is the same", () => {
     const req = { query: "milo block init" } as const;
     const actor = { email: userEmail };
-    const fallbackKey = cacheKey(req, { actor, fallback: "authenticated_user" });
-    const explicitKey = cacheKey(req, { actor });
+    const fallbackKey = cacheKey(req, { actor, fallback: "authenticated_user" }, TEST_ORG_ID);
+    const explicitKey = cacheKey(req, { actor }, TEST_ORG_ID);
     expect(fallbackKey).not.toBe(explicitKey);
   });
 
   it("is stable for the same scope shape", () => {
     const req = { query: "milo block init" } as const;
     const scope = { actor: { email: userEmail }, fallback: "authenticated_user" as const };
-    expect(cacheKey(req, scope)).toBe(cacheKey(req, scope));
+    expect(cacheKey(req, scope, TEST_ORG_ID)).toBe(cacheKey(req, scope, TEST_ORG_ID));
+  });
+
+  it("differs across org_ids for the same query+scope (cache cannot leak across orgs)", () => {
+    const req = { query: "milo block init" } as const;
+    const scope = { actor: { email: userEmail } };
+    expect(cacheKey(req, scope, "org-a")).not.toBe(cacheKey(req, scope, "org-b"));
   });
 });

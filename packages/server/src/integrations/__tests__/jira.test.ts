@@ -8,6 +8,7 @@ function baseOpts(overrides: Partial<IntegrationSearchOpts> = {}): IntegrationSe
     query: "milo block init",
     time_window_days: 90,
     max_hits_per_source: 10,
+    org_id: "org-test",
     ...overrides,
   };
 }
