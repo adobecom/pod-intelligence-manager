@@ -5,6 +5,13 @@ vi.mock("../graph-storage.js", () => ({
   saveGraph: vi.fn(),
 }));
 
+vi.mock("../org-settings.js", async () => {
+  const { DEFAULT_ORG_TUNING } = await import("@pim/shared");
+  return {
+    getOrgTuning: vi.fn(() => DEFAULT_ORG_TUNING),
+  };
+});
+
 vi.mock("../embeddings.js", async (importOriginal) => {
   const act = await importOriginal<typeof import("../embeddings.js")>();
   let seq = 0;
