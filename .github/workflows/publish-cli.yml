@@ -1,0 +1,32 @@
+name: Publish CLI
+
+on:
+  push:
+    tags:
+      - 'cli/v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Configure Artifactory auth
+        run: |
+          echo "//artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
+
+      - name: Build and publish
+        run: pnpm --filter ado-pim publish --no-git-checks
+        env:
+          NPM_TOKEN: ${{ secrets.ARTIFACTORY_NPM_TOKEN }}
