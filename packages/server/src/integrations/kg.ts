@@ -56,7 +56,7 @@ export async function searchKG(opts: IntegrationSearchOpts): Promise<Integration
       ? await generateEmbedding(queryText)
       : null;
 
-    const result = queryKnowledge({
+    const result = queryKnowledge(opts.org_id, {
       filters: {
         ...(opts.project_id ? { include_project_id: opts.project_id } : {}),
       },

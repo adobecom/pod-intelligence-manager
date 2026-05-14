@@ -5,6 +5,13 @@ vi.mock("../graph-storage.js", () => ({
   saveGraph: vi.fn(),
 }));
 
+vi.mock("../org-settings.js", async () => {
+  const { DEFAULT_ORG_TUNING } = await import("@pim/shared");
+  return {
+    getOrgTuning: vi.fn(() => DEFAULT_ORG_TUNING),
+  };
+});
+
 vi.mock("../embeddings.js", async (importOriginal) => {
   const act = await importOriginal<typeof import("../embeddings.js")>();
   let seq = 0;
@@ -145,7 +152,8 @@ describe("addLearningsToGraph preserves ingestion_provenance", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("stores provenance on the created node", async () => {
-    initializeKnowledgeGraph(freshOrg());
+    const orgId = freshOrg();
+    initializeKnowledgeGraph(orgId);
     const learning: EnhancedPodLearning = {
       type: "pattern",
       summary: "Synthetic provenance check summary",
@@ -161,8 +169,8 @@ describe("addLearningsToGraph preserves ingestion_provenance", () => {
         lint_finding_ids: ["lf-1"],
       },
     };
-    await addLearningsToGraph([learning], "synthesis", "Scheduled synthesis", undefined, { skipAnalysis: true });
-    const nodes = getGraph().nodes;
+    await addLearningsToGraph(orgId, [learning], "synthesis", "Scheduled synthesis", undefined, { skipAnalysis: true });
+    const nodes = getGraph(orgId).nodes;
     const created = nodes.find((n) => n.summary === learning.summary);
     expect(created).toBeDefined();
     expect(created!.ingestion_provenance).toEqual(learning.ingestion_provenance);

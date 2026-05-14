@@ -22,9 +22,9 @@ import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
 import { checkEscalations } from "./services/escalation.js";
 import { runLintPass } from "./pim/agents/lint.js";
-import { initializeKnowledgeGraph, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
+import { initializeKnowledgeGraph, loadedOrgIds, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
+import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
-import { restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import db from "./db/connection.js";
@@ -45,10 +45,39 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
 createTables();
 seedDatabase();
 
-// Initialize knowledge graph (restore from S3 if local is empty, then load from disk into memory)
-await restoreGraphFromS3IfEmpty("default");
-initializeKnowledgeGraph("default");
-await seedKnowledgeGraph();
+// Knowledge graph init.
+//
+// One-shot legacy migration: before multi-tenant partitioning, every org's graph was
+// stored under the literal slot "default". The first deploy that ships partitioning
+// sets PIM_LEGACY_DEFAULT_GRAPH_ORG_ID to the org that should inherit that data
+// (production: T3 Events under Adobecom). Migration is idempotent — once the target
+// slot exists, the helper is a no-op.
+const LEGACY_DEFAULT_TARGET = process.env.PIM_LEGACY_DEFAULT_GRAPH_ORG_ID?.trim();
+if (LEGACY_DEFAULT_TARGET) {
+  try {
+    await migrateLegacyDefaultGraph(LEGACY_DEFAULT_TARGET);
+  } catch (err) {
+    app.log.error(err, "Legacy default-graph migration failed");
+  }
+}
+
+// Eager-load every known org's graph at boot so periodic jobs see them without
+// waiting for a first request. New orgs created at runtime are loaded lazily on
+// first access.
+const orgIds = (db.prepare("SELECT org_id FROM orgs").all() as { org_id: string }[]).map(
+  (r) => r.org_id,
+);
+for (const orgId of orgIds) {
+  await restoreGraphFromS3IfEmpty(orgId);
+  initializeKnowledgeGraph(orgId);
+}
+
+// Seed the demo org's graph for fresh local installs. Skipped silently if the
+// graph already has nodes or if no demo org exists in this environment.
+const DEMO_ORG_ID = "org_demo";
+if (orgIds.includes(DEMO_ORG_ID)) {
+  await seedKnowledgeGraph(DEMO_ORG_ID);
+}
 
 // Run a startup prune so a redeploy doesn't have to wait for the first interval tick.
 try {
@@ -224,32 +253,39 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }
   }, GRAPH_PRUNE_INTERVAL_MS);
 
-  // Scheduled graph synthesis (composite learnings from graph + lint; gated on LLM + embeddings).
+  // Scheduled graph synthesis — one pass per loaded org per interval tick.
+  // Each pass is independently gated on LLM + embeddings + sufficient embedded nodes,
+  // so most ticks for empty orgs are cheap no-ops.
   setInterval(() => {
-    void runScheduledGraphSynthesis()
-      .then((r) => {
-        if (!r.ok) {
-          app.log.error({
-            msg: "Knowledge graph synthesis failed",
-            error: r.error ?? "unknown",
-            run_id: r.run_id,
-          });
-          return;
+    void (async () => {
+      for (const orgId of loadedOrgIds()) {
+        try {
+          const r = await runScheduledGraphSynthesis(orgId);
+          if (!r.ok) {
+            app.log.error({
+              msg: "Knowledge graph synthesis failed",
+              org_id: orgId,
+              error: r.error ?? "unknown",
+              run_id: r.run_id,
+            });
+            continue;
+          }
+          if (r.skipped) {
+            app.log.debug({ msg: "Knowledge graph synthesis skipped", org_id: orgId, reason: r.skipped, run_id: r.run_id });
+          } else {
+            app.log.info({
+              msg: "Knowledge graph synthesis completed",
+              org_id: orgId,
+              run_id: r.run_id,
+              nodes_added: r.nodes_added ?? 0,
+              edges_added: r.edges_added ?? 0,
+            });
+          }
+        } catch (e) {
+          app.log.error(e, `Knowledge graph synthesis failed for org ${orgId}`);
         }
-        if (r.skipped) {
-          app.log.debug({ msg: "Knowledge graph synthesis skipped", reason: r.skipped, run_id: r.run_id });
-        } else {
-          app.log.info({
-            msg: "Knowledge graph synthesis completed",
-            run_id: r.run_id,
-            nodes_added: r.nodes_added ?? 0,
-            edges_added: r.edges_added ?? 0,
-          });
-        }
-      })
-      .catch((e) => {
-        app.log.error(e, "Knowledge graph synthesis failed");
-      });
+      }
+    })();
   }, GRAPH_SYNTHESIS_INTERVAL_MS);
 
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);

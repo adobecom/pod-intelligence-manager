@@ -14,6 +14,7 @@ interface PodRow {
   conflict_pressure: number;
   milestone_json: string;
   project_id?: string | null;
+  org_id: string | null;
 }
 
 interface AreaRow {
@@ -129,9 +130,14 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
 
   // Add knowledge context from org memory (token-budgeted)
   try {
+    if (!pod.org_id) {
+      // Pre-org-model row — skip KG enrichment rather than risk cross-org bleed.
+      throw new Error("pod missing org_id");
+    }
     const activeScopes = areas.map(a => a.scope);
     const conflictSummaries = openConflicts.map(c => c.summary);
     const knowledgeResult = await getRelevantLearnings(
+      pod.org_id,
       activeScopes,
       conflictSummaries,
       1500,

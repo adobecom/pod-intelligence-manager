@@ -5,6 +5,7 @@ import type { ContextUpdate, Conflict } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";
+import { getOrgIdForPod } from "../../services/orgs.js";
 import { notifyConflictCreated, notifyPressureThreshold } from "../../services/slack.js";
 import { computeCurrentDay } from "../../services/pod-day.js";
 import fs from "fs";
@@ -56,14 +57,17 @@ export async function createConflict(
 
   // Look up historical precedents for this conflict
   let precedentsContext = "";
+  const podOrgId = getOrgIdForPod(podId);
   try {
-    const conflictDesc = `${update.summary} vs ${conflicting.summary} in ${update.scope}`;
-    const precedents = await getPrecedents(conflictDesc, 500);
-    if (precedents.nodes.length > 0) {
-      precedentsContext = "\n\n## Historical Precedents\n";
-      for (const p of precedents.nodes.slice(0, 3)) {
-        precedentsContext += `- ${p.summary} (from ${p.source_pod_name}, confidence: ${p.confidence_score.toFixed(1)})\n`;
-        if (p.details) precedentsContext += `  Details: ${p.details}\n`;
+    if (podOrgId) {
+      const conflictDesc = `${update.summary} vs ${conflicting.summary} in ${update.scope}`;
+      const precedents = await getPrecedents(podOrgId, conflictDesc, 500);
+      if (precedents.nodes.length > 0) {
+        precedentsContext = "\n\n## Historical Precedents\n";
+        for (const p of precedents.nodes.slice(0, 3)) {
+          precedentsContext += `- ${p.summary} (from ${p.source_pod_name}, confidence: ${p.confidence_score.toFixed(1)})\n`;
+          if (p.details) precedentsContext += `  Details: ${p.details}\n`;
+        }
       }
     }
   } catch {

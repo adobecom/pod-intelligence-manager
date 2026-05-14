@@ -1,0 +1,197 @@
+{
+  "podId": "pod-emc-configs",
+  "pulledAt": "2026-05-08T02:07:39.164Z",
+  "payload": {
+    "pod": {
+      "pod_id": "pod-emc-configs",
+      "name": "Scope Level Configs Service",
+      "milestone": {
+        "name": "v0.1 — Config CRUD + Inheritance Model"
+      },
+      "conflict_pressure": 0.52,
+      "areas": [
+        {
+          "scope": "frontend",
+          "owner": "fe-agent-configs",
+          "status": "in_progress",
+          "last_activity": "2026-04-16T14:45:00Z"
+        },
+        {
+          "scope": "backend",
+          "owner": "be-agent-configs",
+          "status": "blocked",
+          "last_activity": "2026-04-17T08:00:00Z"
+        },
+        {
+          "scope": "design",
+          "owner": "design-configs",
+          "status": "done",
+          "last_activity": "2026-04-15T16:00:00Z"
+        },
+        {
+          "scope": "qa",
+          "owner": "qa-agent-configs",
+          "status": "waiting",
+          "last_activity": null
+        },
+        {
+          "scope": "pm",
+          "owner": "pm-configs",
+          "status": "in_progress",
+          "last_activity": "2026-04-16T11:00:00Z"
+        }
+      ]
+    },
+    "livingDocMarkdown": "# Pod: Scope Level Configs Service — Living Doc\n\n## Pod Health\n**Conflict Pressure:** 0.52 (Cautious) | **Day 3 of 5** | Sprint: Apr 14–18\n\n## Active Milestone\n**v0.1 — Config CRUD + Inheritance Model** (Target: Apr 17) — 48% complete\n\n## Current Status\n\n| Area | Owner | Status | Last Update |\n|------|-------|--------|-------------|\n| Config Editor UI | fe-agent-configs | In Progress | Apr 16 |\n| Config Service + API | be-agent-configs | Blocked | Apr 17 |\n| Config Type Mockups | design-configs | Done | Apr 15 |\n| Config Tests | qa-agent-configs | Waiting | — |\n| Config Requirements | pm-configs | In Progress | Apr 16 |\n\n## Open Conflicts\n\n- **C-301:** Config inheritance — full-replace vs. deep-merge — **BLOCKING**\n- **C-302:** Config cache TTL vs. real-time invalidation — non-blocking\n\n## Decisions Log\n\n- **[Apr 14]** Three config types: RSVP form fields, Locales, Custom Attributes (be-agent-configs)\n- **[Apr 14]** ConfigService singleton: 5-min cache TTL, 2 retries, request dedup (be-agent-configs)\n\n## Context Stream (Recent)\n\n- **[Apr 17 08:15]** fe-agent-configs: Config writes should reflect immediately in editor UI\n- **[Apr 17 08:00]** be-agent-configs: Blocked on inheritance model decision (C-301)\n- **[Apr 17 08:00]** be-agent-configs: 5-min cache TTL analysis — sufficient for read patterns\n- **[Apr 16 09:45]** pm-configs: Requests deep-merge inheritance for easier overrides\n- **[Apr 16 09:30]** be-agent-configs: Config CRUD endpoints complete with full-replace inheritance\n- **[Apr 15 16:00]** fe-agent-configs: RSVP config editor with localization overlays\n\n## Active Tunnels\n\n- 🟢 alex: feat/config-service → configs-alex.emc.adobe.dev\n\n## Cross-Pod Dependencies\n\n- Config endpoints gated by RBAC permissions (config:read/write/delete)\n- Sessions pod needs Locales config for multi-language support\n",
+    "conflicts": [
+      {
+        "id": "C-301",
+        "summary": "Config inheritance model: full-replace (child completely overrides parent) vs. deep-merge (child overrides individual fields)",
+        "severity": "blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "be-agent-configs",
+            "position": "Full-replace inheritance. The ConfigService is already built with full-replace semantics — when a team-level scope has RSVP config, it completely replaces the org-level RSVP config. This is simpler to reason about, easier to debug, and avoids merge ambiguity for ordered lists like custom attribute values. The 5-minute cache TTL and request deduplication are built around this model."
+          },
+          {
+            "contributor": "pm-configs",
+            "position": "Deep-merge inheritance. Event organizers want to add a few custom fields at the team level without re-specifying all 15 base RSVP fields from the org level. Full-replace means every team must duplicate the org config and add their changes — this is error-prone and creates config drift when the org updates base fields."
+          }
+        ],
+        "master_analysis": "Fundamental architectural decision. be-agent-configs has a working implementation with full-replace. pm-configs raises a valid UX concern about config duplication and drift. Deep-merge would require: (1) rewriting ConfigService resolution logic, (2) defining merge rules for each config type, (3) handling ordered-list merges for custom attribute values. This is blocking because the frontend config editor UI depends on knowing whether users are editing a full config or a delta overlay.",
+        "impact": [
+          "Blocks config editor UI implementation",
+          "Affects RSVP form customization workflow",
+          "Custom attribute ordering depends on inheritance model",
+          "ConfigService rewrite if deep-merge wins"
+        ]
+      },
+      {
+        "id": "C-302",
+        "summary": "ConfigService cache: 5-minute TTL with deduplication vs. real-time invalidation via webhooks",
+        "severity": "non_blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "be-agent-configs",
+            "position": "5-minute TTL cache with request deduplication and 2 retries on miss. Simple, predictable, already implemented. Config changes are infrequent (~3 times per day per scope) so a 5-minute delay is acceptable. Real-time invalidation adds infrastructure complexity (webhook registration, event bus, cache-key targeting)."
+          },
+          {
+            "contributor": "fe-agent-configs",
+            "position": "Config changes should be visible immediately in the UI. An admin editing RSVP fields expects to see the changes reflected in the preview immediately, not up to 5 minutes later. At minimum, the editing user's session should invalidate its cache on write. Other users can tolerate the TTL."
+          }
+        ],
+        "master_analysis": "Non-blocking because the config CRUD endpoints work regardless of cache behavior. fe-agent-configs has a valid point about the editing UX. A pragmatic middle ground: keep the 5-minute TTL for cross-session reads, but add a write-through cache bust for the current user's session. This avoids the infrastructure overhead of webhooks while solving the immediate UX issue.",
+        "impact": [
+          "Config editor UX for admins making changes",
+          "No impact on end-user-facing config reads"
+        ]
+      }
+    ],
+    "relevantLearnings": {
+      "nodes": [
+        {
+          "type": "decision",
+          "summary": "RSVP form fields defined as a JSON schema stored at scope level, rendered by a generic FormRenderer component",
+          "details": "Form schema (field types, labels, placeholders, validation, ordering) is stored at the scope level in the Configs service. A generic FormRenderer interprets the schema and renders the form. Decouples form layout from code so organizers can customize without developer involvement.",
+          "domains": [
+            "backend",
+            "frontend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Registration Forms v1"
+        },
+        {
+          "type": "pattern",
+          "summary": "Localization overlays on RSVP forms: base field definitions + per-locale label/placeholder overrides",
+          "details": "Form schema has a base layer (field types, ordering, validation) and per-locale overlays that override only label and placeholder strings. FormRenderer selects the overlay matching the user's locale, falling back to the base layer.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Registration Forms v1"
+        },
+        {
+          "type": "decision",
+          "summary": "Registration data stored separately from RSVP form schema — registrations are immutable once submitted",
+          "details": "Submitted registration records reference the form schema version they were submitted against. If the form schema changes after submission, existing registrations retain their original field values and validation.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Registration Forms v1"
+        }
+      ],
+      "total_matching": 3,
+      "truncated": false
+    },
+    "recentUpdates": [
+      {
+        "agent_id": "be-agent-configs",
+        "timestamp": "2026-04-14T09:00:00Z",
+        "type": "decision",
+        "summary": "Three config types at scope level: RSVP form fields, Locales, Custom Attributes",
+        "details": "Decision: the config service manages three config types, all scoped to org or team level. (1) RSVP form fields: defines which fields appear on registration forms, with localization overlays for label/placeholder per locale. (2) Locales: list of supported locales for the scope with URL codes. (3) Custom Attributes: single-select, multi-select, or text input fields with ordered value lists. Each config type is independently versioned and cached.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-configs",
+        "timestamp": "2026-04-14T14:00:00Z",
+        "type": "decision",
+        "summary": "ConfigService singleton with 5-minute cache TTL, 2 retries, and request deduplication",
+        "details": "ConfigService is a singleton (one instance per server process). Caches resolved configs for 5 minutes. On cache miss, retries up to 2 times with 500ms backoff. Request deduplication: if multiple callers request the same config simultaneously, only one API call is made and the result is shared. Cache key: scope_type:scope_id:config_type.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-configs",
+        "timestamp": "2026-04-16T09:30:00Z",
+        "type": "progress",
+        "summary": "Config CRUD endpoints complete with full-replace inheritance — child scope completely replaces parent",
+        "details": "Implemented GET/POST/PUT/DELETE /configs/:scopeType/:scopeId/:configType. Inheritance: when resolving a config, the service checks team-level first; if not found, falls back to org-level. This is full-replace — a team config completely replaces the org config, no field-level merging. Permissions: config:read for GET, config:write for POST/PUT, config:delete for DELETE. All endpoints integrated with ConfigService cache.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "pm-configs",
+        "timestamp": "2026-04-16T09:45:00Z",
+        "type": "spec_change",
+        "summary": "PM requests deep-merge inheritance: team configs should only specify overrides, not duplicate all org fields",
+        "details": "Feedback from event organizer interviews: teams want to add 2-3 custom RSVP fields without re-specifying all 15 base fields from the org config. With full-replace, every team must copy the full org config and append their additions. When the org updates a base field (e.g., changes 'Company' label to 'Organization'), teams don't see the change unless they manually update their copy. Deep-merge would solve this.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-configs",
+        "timestamp": "2026-04-15T16:00:00Z",
+        "type": "progress",
+        "summary": "RSVP config editor with localization overlay UI",
+        "details": "Built the RSVP config editor. Users can add/remove/reorder form fields. Each field has a base label/placeholder and locale-specific overrides displayed in a tabbed overlay panel. Locale tabs are driven by the Locales config for the current scope. Custom Attributes editor shows single-select, multi-select, and text input types with drag-to-reorder value lists.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-configs",
+        "timestamp": "2026-04-17T08:00:00Z",
+        "type": "blocker",
+        "summary": "Blocked on inheritance model decision — cannot proceed with config resolution refactor until C-301 is resolved",
+        "details": "If deep-merge wins, the ConfigService resolution logic needs a complete rewrite: (1) fetch both org and team configs, (2) deep-merge with team taking precedence, (3) handle ordered list merging for custom attribute values (append? replace? interleave?), (4) update cache invalidation to bust both scope levels when either changes. Estimated 2-3 days of work. Cannot start until the decision is made.",
+        "status": "blocked"
+      },
+      {
+        "agent_id": "be-agent-configs",
+        "timestamp": "2026-04-17T08:00:00Z",
+        "type": "progress",
+        "summary": "ConfigService cache: 5-minute TTL is sufficient for config read patterns",
+        "details": "Analyzed config read patterns from the existing EMC deployment. Configs are read ~500 times per minute across all scopes. Config writes happen ~3 times per day per scope. The 5-minute TTL means a worst-case 5-minute delay for config changes to propagate, which is acceptable given the write frequency. Real-time invalidation would require an event bus (SNS/SQS or WebSocket) which adds operational complexity.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-configs",
+        "timestamp": "2026-04-17T08:15:00Z",
+        "type": "question",
+        "summary": "Request: config writes should immediately reflect in the editing user's UI",
+        "details": "When an admin saves RSVP config changes, the preview panel should show the updated config immediately — not after up to 5 minutes. Proposal: the POST/PUT response should return the saved config, and the frontend should update its local cache/state from the response. This doesn't require server-side cache invalidation — just a write-through pattern on the client.",
+        "status": "in_progress"
+      }
+    ]
+  }
+}

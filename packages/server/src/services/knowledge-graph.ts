@@ -2,8 +2,10 @@
  * Core Knowledge Graph Service — the central hub for building, querying,
  * and maintaining the persistent organizational knowledge graph.
  *
- * In-memory cache loaded on server start, persisted to disk on mutations.
- * All query endpoints use token budgets to minimize agent context window usage.
+ * In-memory state is keyed by org_id. Each org's graph is loaded lazily from
+ * disk on first access and held in a Map for the lifetime of the process.
+ * Every exported function takes orgId as its first arg; callers are expected
+ * to thread req.org.org_id (resolved by the org-context middleware) through.
  */
 
 import crypto from "node:crypto";
@@ -25,6 +27,7 @@ import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
   detectCommunities,
+  extractKeywords,
   identifyHubs,
   keywordsFromTexts,
   scoreRelevance,
@@ -37,14 +40,74 @@ import {
   isEmbeddingAvailable,
 } from "./embeddings.js";
 
-// --- In-Memory Cache ---
+// --- In-Memory Cache (per-org) ---
 
-let graph: KnowledgeGraph | null = null;
-let hubIds: Set<string> = new Set();
-// Set when a mutation skipped community/hub recompute; cleared by refreshAnalysis.
-// Lets ad-hoc POSTs return fast without leaving the graph permanently stale —
-// the periodic interval (or the next archival batch) picks up the work.
-let analysisStale = false;
+// Supplementary indexes derived from graph.nodes — never serialised, rebuilt on load,
+// updated incrementally on every mutation to keep query cost O(result) not O(all_nodes).
+interface NodeIndexes {
+  nodeById: Map<string, KnowledgeNode>;
+  domainIndex: Map<string, Set<string>>;
+  typeIndex: Map<string, Set<string>>;
+  podIndex: Map<string, Set<string>>;
+  nodeKeywords: Map<string, Set<string>>;
+  keywordIndex: Map<string, Set<string>>;
+}
+
+interface OrgGraphState extends NodeIndexes {
+  graph: KnowledgeGraph;
+  hubIds: Set<string>;
+  // Set when a mutation skipped community/hub recompute; cleared by refreshAnalysis.
+  // Lets ad-hoc POSTs return fast without leaving the graph permanently stale —
+  // the periodic interval (or the next archival batch) picks up the work.
+  analysisStale: boolean;
+}
+
+const orgStates = new Map<string, OrgGraphState>();
+
+// --- Index helpers ---
+
+function buildIndexes(nodes: KnowledgeNode[]): NodeIndexes {
+  const idx: NodeIndexes = {
+    nodeById: new Map(),
+    domainIndex: new Map(),
+    typeIndex: new Map(),
+    podIndex: new Map(),
+    nodeKeywords: new Map(),
+    keywordIndex: new Map(),
+  };
+  for (const node of nodes) _indexNode(node, idx);
+  return idx;
+}
+
+function _indexNode(node: KnowledgeNode, idx: NodeIndexes): void {
+  idx.nodeById.set(node.id, node);
+  for (const d of node.domains) {
+    if (!idx.domainIndex.has(d)) idx.domainIndex.set(d, new Set());
+    idx.domainIndex.get(d)!.add(node.id);
+  }
+  if (!idx.typeIndex.has(node.type)) idx.typeIndex.set(node.type, new Set());
+  idx.typeIndex.get(node.type)!.add(node.id);
+  if (!idx.podIndex.has(node.source_pod_id)) idx.podIndex.set(node.source_pod_id, new Set());
+  idx.podIndex.get(node.source_pod_id)!.add(node.id);
+  const kws = extractKeywords(`${node.summary} ${node.details}`);
+  idx.nodeKeywords.set(node.id, kws);
+  for (const kw of kws) {
+    if (!idx.keywordIndex.has(kw)) idx.keywordIndex.set(kw, new Set());
+    idx.keywordIndex.get(kw)!.add(node.id);
+  }
+}
+
+function _removeNodeFromIndexes(node: KnowledgeNode, idx: NodeIndexes): void {
+  idx.nodeById.delete(node.id);
+  for (const d of node.domains) idx.domainIndex.get(d)?.delete(node.id);
+  idx.typeIndex.get(node.type)?.delete(node.id);
+  idx.podIndex.get(node.source_pod_id)?.delete(node.id);
+  const kws = idx.nodeKeywords.get(node.id);
+  if (kws) {
+    for (const kw of kws) idx.keywordIndex.get(kw)?.delete(node.id);
+  }
+  idx.nodeKeywords.delete(node.id);
+}
 
 function emptyGraph(orgId: string): KnowledgeGraph {
   return {
@@ -57,28 +120,62 @@ function emptyGraph(orgId: string): KnowledgeGraph {
   };
 }
 
+function buildState(graph: KnowledgeGraph): OrgGraphState {
+  return {
+    graph,
+    hubIds: new Set(identifyHubs(graph)),
+    analysisStale: false,
+    ...buildIndexes(graph.nodes),
+  };
+}
+
 // --- Initialization ---
 
 export function initializeKnowledgeGraph(orgId: string): void {
-  graph = loadGraph(orgId) ?? emptyGraph(orgId);
-  hubIds = new Set(identifyHubs(graph));
+  const graph = loadGraph(orgId) ?? emptyGraph(orgId);
+  const state = buildState(graph);
+  orgStates.set(orgId, state);
   console.log(
     `[knowledge-graph] Loaded graph for org "${orgId}": ${graph.nodes.length} nodes, ${graph.edges.length} edges`,
   );
 
   const unembeddedCount = graph.nodes.filter((n) => !n.embedding).length;
   if (unembeddedCount > 0 && isEmbeddingAvailable()) {
-    console.log(`[knowledge-graph] Scheduling background embedding backfill for ${unembeddedCount} nodes`);
+    console.log(`[knowledge-graph] Scheduling background embedding backfill for ${unembeddedCount} nodes (org "${orgId}")`);
     // Fire-and-forget: does not block server startup
     batchEmbedWithRateLimit(graph.nodes, () => {
-      if (graph) saveGraph(graph.org_id, graph);
-    }).catch((err) => console.error("[knowledge-graph] Backfill failed:", err));
+      saveGraph(orgId, state.graph);
+    }).catch((err) => console.error(`[knowledge-graph] Backfill failed for org "${orgId}":`, err));
   }
 }
 
-export function getGraph(): KnowledgeGraph {
-  if (!graph) throw new Error("Knowledge graph not initialized. Call initializeKnowledgeGraph first.");
-  return graph;
+/**
+ * Returns an active in-memory state for the org, loading it lazily on first access.
+ * Every read/write path enters through here so a request for a previously-unseen org
+ * boots its graph from disk without requiring an eager startup pass.
+ */
+function getOrgState(orgId: string): OrgGraphState {
+  let state = orgStates.get(orgId);
+  if (!state) {
+    const graph = loadGraph(orgId) ?? emptyGraph(orgId);
+    state = buildState(graph);
+    orgStates.set(orgId, state);
+  }
+  return state;
+}
+
+export function getGraph(orgId: string): KnowledgeGraph {
+  return getOrgState(orgId).graph;
+}
+
+/** Test/debug helper: list orgs with a loaded in-memory graph. */
+export function loadedOrgIds(): string[] {
+  return [...orgStates.keys()];
+}
+
+/** Test helper: clear the in-memory cache. Production code should never call this. */
+export function _resetForTests(): void {
+  orgStates.clear();
 }
 
 // --- Token Estimation ---
@@ -133,13 +230,15 @@ export interface AddLearningsOptions {
 }
 
 export async function addLearningsToGraph(
+  orgId: string,
   learnings: EnhancedPodLearning[],
   podId: string,
   podName: string,
   project?: { project_id: string; project_name: string },
   options: AddLearningsOptions = {},
 ): Promise<{ nodesAdded: number; edgesAdded: number; nodeIds: string[] }> {
-  if (!graph) throw new Error("Knowledge graph not initialized");
+  const state = getOrgState(orgId);
+  const { graph } = state;
 
   const now = new Date().toISOString();
   const newNodes: KnowledgeNode[] = [];
@@ -179,9 +278,16 @@ export async function addLearningsToGraph(
         : DEFAULT_ORG_TUNING.graphScoring;
       const samePodThreshold = graphTuning.samePodDedupThreshold;
       const crossPodThreshold = graphTuning.crossPodDedupThreshold;
-      const isDuplicate = graph.nodes.some((existing) => {
-        if (!existing.embedding) return false;
-        const sim = cosineSimilarity(node.embedding!, existing.embedding);
+      // Narrow candidates to same-domain nodes — O(N/D) instead of O(N).
+      // Cross-domain near-duplicates at ≥0.95 cosine are exceedingly rare in practice;
+      // nodes without any domain fall back to a full scan (uncommon path).
+      const dedupCandidates = node.domains.length > 0
+        ? [...new Set(node.domains.flatMap((d) => [...(state.domainIndex.get(d) ?? [])]))]
+            .map((id) => state.nodeById.get(id))
+            .filter((n): n is KnowledgeNode => !!n && !!n.embedding)
+        : graph.nodes.filter((n) => !!n.embedding);
+      const isDuplicate = dedupCandidates.some((existing) => {
+        const sim = cosineSimilarity(node.embedding!, existing.embedding!);
         return existing.source_pod_id === podId ? sim >= samePodThreshold : sim >= crossPodThreshold;
       });
       if (isDuplicate) {
@@ -194,7 +300,7 @@ export async function addLearningsToGraph(
   }
 
   if (skipped > 0) {
-    console.log(`[knowledge-graph] Skipped ${skipped} near-duplicate node(s) during ingestion for pod "${podId}"`);
+    console.log(`[knowledge-graph] Skipped ${skipped} near-duplicate node(s) during ingestion for pod "${podId}" (org "${orgId}")`);
   }
 
   if (newNodes.length === 0) {
@@ -206,6 +312,7 @@ export async function addLearningsToGraph(
   const intraEdges = buildEdges(newNodes, newNodes, [...graph.edges, ...newEdges]);
 
   graph.nodes.push(...newNodes);
+  for (const node of newNodes) _indexNode(node, state);
   graph.edges.push(...newEdges, ...intraEdges);
 
   // P1: Mark older nodes that are superseded by newly added ones.
@@ -215,14 +322,14 @@ export async function addLearningsToGraph(
   graph.updated_at = now;
 
   if (options.skipAnalysis) {
-    analysisStale = true;
+    state.analysisStale = true;
   } else {
     graph.communities = detectCommunities(graph);
-    hubIds = new Set(identifyHubs(graph));
-    analysisStale = false;
+    state.hubIds = new Set(identifyHubs(graph));
+    state.analysisStale = false;
   }
 
-  saveGraph(graph.org_id, graph);
+  saveGraph(orgId, graph);
 
   return {
     nodesAdded: newNodes.length,
@@ -252,8 +359,15 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string
   return out;
 }
 
-export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryResult {
-  if (!graph) throw new Error("Knowledge graph not initialized");
+// `null` means "no filter applied yet — all nodes qualify".
+function intersectIds(a: Set<string> | null, b: Set<string>): Set<string> {
+  if (a === null) return new Set(b);
+  return new Set([...b].filter((id) => a.has(id)));
+}
+
+export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): KnowledgeQueryResult {
+  const state = getOrgState(orgId);
+  const { graph, hubIds } = state;
 
   const {
     filters,
@@ -265,39 +379,68 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
     query_embedding,
   } = options;
 
-  // Step 1: Filter nodes
-  let candidates = graph.nodes.filter((node) => {
-    if (filters.domains?.length) {
-      const hasDomain = filters.domains.some((d) => node.domains.includes(d));
-      if (!hasDomain) return false;
+  // Step 1: Filter candidates using index-based set intersections.
+  // Indexed dimensions (domain, type, pod, keyword) resolve to candidate sets in O(result)
+  // time instead of scanning all nodes. Scalar filters (confidence, curated, superseded,
+  // project) are applied inline over the already-narrowed list.
+
+  let candidateIds: Set<string> | null = null;
+
+  if (filters.domains?.length) {
+    const union = new Set<string>();
+    for (const d of filters.domains) {
+      for (const id of state.domainIndex.get(d) ?? []) union.add(id);
     }
-    if (filters.types?.length) {
-      if (!filters.types.includes(node.type)) return false;
+    candidateIds = intersectIds(candidateIds, union);
+  }
+
+  if (filters.types?.length) {
+    const union = new Set<string>();
+    for (const t of filters.types) {
+      for (const id of state.typeIndex.get(t) ?? []) union.add(id);
     }
-    if (filters.source_pod_ids?.length) {
-      if (!filters.source_pod_ids.includes(node.source_pod_id)) return false;
+    candidateIds = intersectIds(candidateIds, union);
+  }
+
+  if (filters.source_pod_ids?.length) {
+    const union = new Set<string>();
+    for (const p of filters.source_pod_ids) {
+      for (const id of state.podIndex.get(p) ?? []) union.add(id);
     }
+    candidateIds = intersectIds(candidateIds, union);
+  }
+
+  // text_search: inverted keyword index — O(|query_words|) instead of O(all_nodes).
+  // Behavior change: word-level match instead of substring (better recall in practice).
+  // If extractKeywords returns an empty set (e.g. all stop words), the filter is a
+  // no-op — treating it as "zero results" would silently break callers that pass short
+  // or punctuation-heavy queries (e.g. getPrecedents with a 100-char conflict summary).
+  if (filters.text_search) {
+    const queryKws = extractKeywords(filters.text_search);
+    if (queryKws.size > 0) {
+      const textMatches = new Set<string>();
+      for (const qk of queryKws) {
+        for (const id of state.keywordIndex.get(qk) ?? []) textMatches.add(id);
+      }
+      candidateIds = intersectIds(candidateIds, textMatches);
+    }
+  }
+
+  const baseNodes: KnowledgeNode[] = candidateIds === null
+    ? graph.nodes
+    : [...candidateIds].map((id) => state.nodeById.get(id)).filter((n): n is KnowledgeNode => !!n);
+
+  // P1: Exclude superseded nodes by default so agents don't receive stale decisions.
+  const candidates: KnowledgeNode[] = baseNodes.filter((node) => {
     if (filters.source_project_ids?.length) {
-      const pid = node.source_project_id;
-      if (!pid || !filters.source_project_ids.includes(pid)) return false;
+      if (!node.source_project_id || !filters.source_project_ids.includes(node.source_project_id)) return false;
     }
     if (filters.include_project_id) {
-      const want = filters.include_project_id;
-      if (node.source_project_id && node.source_project_id !== want) return false;
+      if (node.source_project_id && node.source_project_id !== filters.include_project_id) return false;
     }
-    if (filters.confidence_min !== undefined) {
-      if (node.confidence_score < filters.confidence_min) return false;
-    }
-    if (filters.curated_only) {
-      if (!node.curated) return false;
-    }
-    // P1: Exclude superseded nodes by default so agents don't receive stale decisions.
+    if (filters.confidence_min !== undefined && node.confidence_score < filters.confidence_min) return false;
+    if (filters.curated_only && !node.curated) return false;
     if (!filters.include_superseded && node.superseded_by) return false;
-    if (filters.text_search) {
-      const search = filters.text_search.toLowerCase();
-      const text = `${node.summary} ${node.details}`.toLowerCase();
-      if (!text.includes(search)) return false;
-    }
     return true;
   });
 
@@ -315,7 +458,12 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
         : undefined;
     return {
       node,
-      score: scoreRelevance(node, { scopes, keywords, querySimilarity }, hubIds, graphTuning),
+      score: scoreRelevance(
+        node,
+        { scopes, keywords, querySimilarity, precomputedKeywords: state.nodeKeywords.get(node.id) },
+        hubIds,
+        graphTuning,
+      ),
     };
   });
   scored.sort((a, b) => b.score - a.score);
@@ -359,6 +507,7 @@ export function queryKnowledge(options: KnowledgeQueryOptions): KnowledgeQueryRe
 // --- Convenience: Get Relevant Learnings ---
 
 export async function getRelevantLearnings(
+  orgId: string,
   scopes: string[],
   activeConflictSummaries: string[],
   maxTokens: number,
@@ -372,7 +521,7 @@ export async function getRelevantLearnings(
     ? await generateEmbedding(queryText)
     : null;
 
-  return queryKnowledge({
+  return queryKnowledge(orgId, {
     filters: {
       domains: scopes,
       ...(keywords.length > 0 ? { keywords } : {}),
@@ -387,6 +536,7 @@ export async function getRelevantLearnings(
 // --- Convenience: Get Precedents ---
 
 export async function getPrecedents(
+  orgId: string,
   conflictSummary: string,
   maxTokens: number,
 ): Promise<KnowledgeQueryResult> {
@@ -394,7 +544,7 @@ export async function getPrecedents(
     ? await generateEmbedding(conflictSummary)
     : null;
 
-  return queryKnowledge({
+  return queryKnowledge(orgId, {
     filters: {
       types: ["resolved_conflict"],
       text_search: conflictSummary.slice(0, 100),
@@ -408,16 +558,19 @@ export async function getPrecedents(
 // --- Curation ---
 
 export function curateNode(
+  orgId: string,
   nodeId: string,
   action: CurationAction,
   edits?: Partial<Pick<KnowledgeNode, "summary" | "details" | "domains">>,
 ): boolean {
-  if (!graph) throw new Error("Knowledge graph not initialized");
+  const state = getOrgState(orgId);
+  const { graph } = state;
 
   const nodeIndex = graph.nodes.findIndex((n) => n.id === nodeId);
   if (nodeIndex === -1) return false;
 
   if (action === "reject") {
+    _removeNodeFromIndexes(graph.nodes[nodeIndex], state);
     // Clear superseded_by on any nodes this node was superseding, so they
     // become visible again rather than pointing at a deleted node.
     for (const n of graph.nodes) {
@@ -431,10 +584,12 @@ export function curateNode(
     graph.nodes[nodeIndex].curated = true;
   } else if (action === "edit" && edits) {
     const node = graph.nodes[nodeIndex];
+    _removeNodeFromIndexes(node, state);
     if (edits.summary !== undefined) node.summary = edits.summary;
     if (edits.details !== undefined) node.details = edits.details;
     if (edits.domains !== undefined) node.domains = edits.domains;
     node.curated = true;
+    _indexNode(node, state);
   }
 
   graph.version++;
@@ -443,16 +598,18 @@ export function curateNode(
   // Re-run analysis after structural changes
   if (action === "reject") {
     graph.communities = detectCommunities(graph);
-    hubIds = new Set(identifyHubs(graph));
+    state.hubIds = new Set(identifyHubs(graph));
   }
 
-  saveGraph(graph.org_id, graph);
+  saveGraph(orgId, graph);
   return true;
 }
 
 // --- Stats ---
 
-export function getStats(): KnowledgeStats {
+export function getStats(orgId: string): KnowledgeStats {
+  const state = orgStates.get(orgId);
+  const graph = state?.graph ?? loadGraph(orgId);
   if (!graph) {
     return {
       total_nodes: 0,
@@ -499,30 +656,45 @@ export function getStats(): KnowledgeStats {
 
 // --- Re-run Community Detection (called periodically) ---
 
-export function refreshAnalysis(): void {
-  if (!graph || graph.nodes.length === 0) {
-    analysisStale = false;
+export function refreshAnalysis(orgId: string): void {
+  const state = orgStates.get(orgId);
+  if (!state || state.graph.nodes.length === 0) {
+    if (state) state.analysisStale = false;
     return;
   }
+  const { graph } = state;
   graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
-  analysisStale = false;
-  saveGraph(graph.org_id, graph);
+  state.hubIds = new Set(identifyHubs(graph));
+  state.analysisStale = false;
+  saveGraph(orgId, graph);
 }
 
 /**
  * Cheap variant of refreshAnalysis: returns immediately when nothing has marked the graph
  * stale. Safe to call from hot paths (interval ticks, post-query lazy refresh).
+ *
+ * With no orgId, iterates over every loaded org's state — the periodic interval uses this
+ * form so newly active orgs get picked up without a separate scheduler.
  */
-export function refreshAnalysisIfStale(): boolean {
-  if (!analysisStale) return false;
-  refreshAnalysis();
-  return true;
+export function refreshAnalysisIfStale(orgId?: string): boolean {
+  if (orgId) {
+    const state = orgStates.get(orgId);
+    if (!state?.analysisStale) return false;
+    refreshAnalysis(orgId);
+    return true;
+  }
+  let didWork = false;
+  for (const [id, state] of orgStates) {
+    if (!state.analysisStale) continue;
+    refreshAnalysis(id);
+    didWork = true;
+  }
+  return didWork;
 }
 
 /** Test/debug helper. */
-export function isAnalysisStale(): boolean {
-  return analysisStale;
+export function isAnalysisStale(orgId: string): boolean {
+  return orgStates.get(orgId)?.analysisStale ?? false;
 }
 
 // --- Pruning ---
@@ -531,11 +703,23 @@ export function isAnalysisStale(): boolean {
  * Drop low-confidence, uncurated, stale nodes that no human has approved or edited.
  * Curated and superseded nodes are protected; superseded nodes are filtered at query
  * time and may still be useful for history. Runs once and rebuilds analysis at the end.
+ *
+ * With no orgId, prunes every loaded org's graph — matches the periodic-interval shape.
  */
 const PRUNE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
-export function pruneStaleNodes(now: Date = new Date()): { removed: number } {
-  if (!graph || graph.nodes.length === 0) return { removed: 0 };
+export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { removed: number } {
+  if (!orgId) {
+    let total = 0;
+    for (const id of orgStates.keys()) {
+      total += pruneStaleNodes(id, now).removed;
+    }
+    return { removed: total };
+  }
+
+  const state = orgStates.get(orgId);
+  if (!state || state.graph.nodes.length === 0) return { removed: 0 };
+  const { graph } = state;
 
   const cutoff = now.getTime() - PRUNE_AGE_MS;
   const toRemove = new Set<string>();
@@ -564,9 +748,16 @@ export function pruneStaleNodes(now: Date = new Date()): { removed: number } {
   graph.version++;
   graph.updated_at = now.toISOString();
   graph.communities = detectCommunities(graph);
-  hubIds = new Set(identifyHubs(graph));
-  saveGraph(graph.org_id, graph);
+  state.hubIds = new Set(identifyHubs(graph));
+  const freshIndexes = buildIndexes(graph.nodes);
+  state.nodeById = freshIndexes.nodeById;
+  state.domainIndex = freshIndexes.domainIndex;
+  state.typeIndex = freshIndexes.typeIndex;
+  state.podIndex = freshIndexes.podIndex;
+  state.nodeKeywords = freshIndexes.nodeKeywords;
+  state.keywordIndex = freshIndexes.keywordIndex;
+  saveGraph(orgId, graph);
 
-  console.log(`[knowledge-graph] Pruned ${toRemove.size} stale node(s)`);
+  console.log(`[knowledge-graph] Pruned ${toRemove.size} stale node(s) for org "${orgId}"`);
   return { removed: toRemove.size };
 }

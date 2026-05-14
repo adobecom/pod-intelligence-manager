@@ -64,7 +64,7 @@ async function main() {
 
   await restoreGraphFromS3IfEmpty(orgId);
   initializeKnowledgeGraph(orgId);
-  const graph = getGraph();
+  const graph = getGraph(orgId);
 
   const candidates = graph.nodes.filter(isLegacyCandidate);
   console.log(

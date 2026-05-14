@@ -1,0 +1,190 @@
+{
+  "podId": "pod-emc-rbac",
+  "pulledAt": "2026-05-08T02:07:39.161Z",
+  "payload": {
+    "pod": {
+      "pod_id": "pod-emc-rbac",
+      "name": "RBAC Permission System",
+      "milestone": {
+        "name": "v0.1 — Permission Gating + Group Context"
+      },
+      "conflict_pressure": 0.65,
+      "areas": [
+        {
+          "scope": "frontend",
+          "owner": "fe-agent-rbac",
+          "status": "in_progress",
+          "last_activity": "2026-04-17T10:45:00Z"
+        },
+        {
+          "scope": "backend",
+          "owner": "be-agent-rbac",
+          "status": "in_progress",
+          "last_activity": "2026-04-17T09:30:00Z"
+        },
+        {
+          "scope": "design",
+          "owner": "design-lead",
+          "status": "done",
+          "last_activity": "2026-04-16T14:00:00Z"
+        },
+        {
+          "scope": "qa",
+          "owner": "qa-agent-rbac",
+          "status": "waiting",
+          "last_activity": null
+        }
+      ]
+    },
+    "livingDocMarkdown": "# Pod: RBAC Permission System — Living Doc\n\n## Pod Health\n**Conflict Pressure:** 0.65 (Degraded) | **Day 4 of 5** | Sprint: Apr 14–18\n\n## Active Milestone\n**v0.1 — Permission Gating + Group Context** (Target: Apr 17) — 72% complete\n\n## Current Status\n\n| Area | Owner | Status | Last Update |\n|------|-------|--------|-------------|\n| Permission Gating UI | fe-agent-rbac | In Progress | Apr 17 |\n| ESP API + GroupContext | be-agent-rbac | In Progress | Apr 17 |\n| Admin Overview Mockup | design-lead | Done | Apr 16 |\n| Integration Tests | qa-agent-rbac | Waiting | — |\n\n## Open Conflicts\n\n- **C-101:** Static users.json vs. ESP API-driven GroupContext — **BLOCKING**\n- **C-102:** 403 fallback permissiveness — non-blocking\n\n## Decisions Log\n\n- **[Apr 14]** Permission format: resource:action with wildcard support (be-agent-rbac)\n- **[Apr 16]** Admin UI mockup with permission-aware gated stat cards (design-lead)\n\n## Context Stream (Recent)\n\n- **[Apr 17 09:00]** be-agent-rbac: Recommends deny-all fallback with auto-retry\n- **[Apr 17 08:45]** fe-agent-rbac: Question — 403 fallback scope for read permissions\n- **[Apr 16 14:00]** fe-agent-rbac: 8% of staging first-logins hit 403 fallback path\n- **[Apr 16 13:30]** be-agent-rbac: Proposed full deprecation of static users.json\n- **[Apr 15 14:00]** fe-agent-rbac: Permission gating on TopNav tabs and Home cards\n- **[Apr 15 09:30]** be-agent-rbac: ESP API GroupContext integration complete\n\n## Active Tunnels\n\n- 🟢 priya: feat/rbac-permission-gating → rbac-priya.emc.adobe.dev\n- 🟢 raj: feat/esp-group-context → rbac-raj.emc.adobe.dev\n\n## Cross-Pod Dependencies\n\n- Config endpoints depend on RBAC permission resolution (config:read/write/delete)\n- Session endpoints need session:read/session:write from RBAC\n",
+    "conflicts": [
+      {
+        "id": "C-101",
+        "summary": "Static users.json RBAC vs. ESP API-driven GroupContext: deprecate or keep as fallback",
+        "severity": "blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "be-agent-rbac",
+            "position": "Fully deprecate static users.json. The ESP API groups endpoint is production-ready and GroupContext provides real-time role resolution via x-adobe-esp-group-id header. Maintaining two permission systems creates inconsistency — the static file already has role definitions that conflict with API-returned scopes for 3 users."
+          },
+          {
+            "contributor": "fe-agent-rbac",
+            "position": "Keep users.json as a fallback for the 403 path. When role:read returns 403, the frontend currently falls back to domain-only permissions derived from the static file. Removing it breaks permission gating on TopNav tabs and Home cards for users whose groups haven't synced. We've seen this happen in staging for ~8% of first-time logins."
+          }
+        ],
+        "master_analysis": "The two RBAC systems are partially redundant. be-agent-rbac's position eliminates maintenance burden and data drift, but fe-agent-rbac has documented evidence that 8% of first logins hit the 403 fallback path in staging. Fully removing the static file without a replacement fallback would break TopNav permission gating for those users. A middle path: deprecate users.json for primary auth but generate a cached fallback from the last successful API response stored in sessionStorage.",
+        "impact": [
+          "Blocks QA sign-off on permission gating",
+          "TopNav tabs, Home cards, and Overview stats all depend on resolved permissions",
+          "Admin UI cannot be tested until permission source is finalized"
+        ]
+      },
+      {
+        "id": "C-102",
+        "summary": "403 fallback scope: grant domain-only read permissions vs. deny all until role:read succeeds",
+        "severity": "non_blocking",
+        "status": "open",
+        "sides": [
+          {
+            "contributor": "fe-agent-rbac",
+            "position": "Grant domain-only read permissions (event:read, session:read, config:read) on 403 fallback. Users can at least browse content. Write operations still blocked. This matches the current behavior and prevents a blank screen on first login."
+          },
+          {
+            "contributor": "be-agent-rbac",
+            "position": "Deny all permissions and show a retry prompt. Granting any permissions without API confirmation is a security concern — we could be granting access to users who have been removed from a group. The retry should auto-fire after 3 seconds."
+          }
+        ],
+        "master_analysis": "Low urgency — this only affects the 403 edge case. fe-agent-rbac's approach provides a better UX and matches existing behavior. be-agent-rbac raises a valid security concern about stale permissions. A compromise: grant read-only fallback for 30 seconds while retrying the API, then deny all if retries exhaust. Non-blocking because the primary permission path works.",
+        "impact": [
+          "Affects UX for ~8% of first logins in staging",
+          "Security posture of fallback path"
+        ]
+      }
+    ],
+    "relevantLearnings": {
+      "nodes": [
+        {
+          "type": "decision",
+          "summary": "Use Adobe IMS org_id as the tenant isolation boundary for all event data",
+          "details": "All event data is partitioned by IMS org_id. Every query includes org_id in the WHERE clause. Row-level security ensures one org cannot access another org's events even with a valid event ID. The org_id is extracted from the IMS token on every request.",
+          "domains": [
+            "backend",
+            "infra"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Event CRUD v1"
+        },
+        {
+          "type": "decision",
+          "summary": "Use REST endpoints for event CRUD instead of GraphQL — aligns with ESP platform conventions",
+          "details": "Decision: REST chosen over GraphQL because the team has stronger REST experience and the ESP platform's other services are REST-based. Standard REST endpoints with query params for filtering/pagination.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Event CRUD v1"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Validating registration form submissions only on the frontend allowed invalid data through",
+          "details": "Direct API calls (third-party integrations, curl) bypassed FE-only validation. Fix: server-side validation against the JSON schema on every POST. Frontend validation is for UX only.",
+          "domains": [
+            "backend",
+            "frontend"
+          ],
+          "confidence_score": 0.9,
+          "source_pod_name": "Registration Forms v1"
+        }
+      ],
+      "total_matching": 3,
+      "truncated": false
+    },
+    "recentUpdates": [
+      {
+        "agent_id": "be-agent-rbac",
+        "timestamp": "2026-04-14T10:00:00Z",
+        "type": "decision",
+        "summary": "Permission format: resource:action with wildcard support",
+        "details": "Decision: all permissions follow resource:action format. Wildcards supported (*:* for super-admin, event:* for full event access). Resources: event, series, session, cloud, config, integration, scope, group, role, user. Actions: read, write, delete, manage. Stored in role definitions and evaluated by a central hasPermission() utility.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-rbac",
+        "timestamp": "2026-04-15T09:30:00Z",
+        "type": "progress",
+        "summary": "ESP API GroupContext integration — groups, scopes, and roles fetched via x-adobe-esp-group-id header",
+        "details": "Implemented GroupContext provider that reads the selected group from sessionStorage, sends x-adobe-esp-group-id header on all API calls, and resolves the user's roles and scopes from the ESP API response. Scope hierarchy: platform > org > team. Group selection UI wired to sessionStorage for persistence.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-rbac",
+        "timestamp": "2026-04-15T14:00:00Z",
+        "type": "progress",
+        "summary": "Permission gating implemented on TopNav tabs and Home cards",
+        "details": "TopNav tabs (Events, Sessions, Config, Admin) now conditionally render based on resolved permissions. Home dashboard cards check for resource:read before rendering stats. Uses usePermissions() hook backed by GroupContext. Falls back to domain-only permissions from users.json when role:read returns 403.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "be-agent-rbac",
+        "timestamp": "2026-04-16T13:30:00Z",
+        "type": "progress",
+        "summary": "Proposed full deprecation of static users.json — ESP API covers all role resolution",
+        "details": "Analyzed users.json vs. ESP API role mappings. Found 3 users with conflicting role definitions between the two systems. Static file has stale admin role for a user removed from the org 2 weeks ago. Recommending full migration to API-only role resolution to eliminate data drift.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-rbac",
+        "timestamp": "2026-04-16T14:00:00Z",
+        "type": "progress",
+        "summary": "403 fallback path documented — 8% of staging first-logins hit role:read 403",
+        "details": "Instrumented the 403 fallback path in staging. 8% of first-time logins trigger role:read 403 because the ESP group sync hasn't completed yet. Current fallback reads users.json to resolve domain-only permissions (event:read, session:read). Without this, those users see a blank TopNav and empty Home page until group sync completes (typically 5-15 seconds, but up to 60 seconds for new org members).",
+        "status": "completed"
+      },
+      {
+        "agent_id": "design-lead",
+        "timestamp": "2026-04-16T14:00:00Z",
+        "type": "spec_change",
+        "summary": "Updated Admin UI mockup: permission-aware Overview dashboard with gated stat cards",
+        "details": "Updated Figma mockup for the Overview dashboard. Stat cards (total events, active sessions, pending registrations) only render if user has the corresponding resource:read permission. Users without admin scope see a reduced dashboard with only their assigned events. Added loading skeleton for permission-resolution-in-progress state.",
+        "status": "completed"
+      },
+      {
+        "agent_id": "fe-agent-rbac",
+        "timestamp": "2026-04-17T08:45:00Z",
+        "type": "question",
+        "summary": "Question: should 403 fallback grant domain-only read permissions or deny all?",
+        "details": "Need a decision on the fallback behavior. Current implementation grants event:read, session:read, config:read so users can browse while group sync completes. Alternative: deny all and show a loading/retry screen. The deny-all approach is more secure but produces a worse first-login experience. Asking backend team for security perspective.",
+        "status": "in_progress"
+      },
+      {
+        "agent_id": "be-agent-rbac",
+        "timestamp": "2026-04-17T09:00:00Z",
+        "type": "progress",
+        "summary": "Recommends deny-all fallback with auto-retry — granting permissions without API confirmation is a security risk",
+        "details": "Responding to fe-agent-rbac's question. Granting any permissions on 403 means users who have been removed from a group could still access content if the API is slow or down. Recommend: show a loading state with 'Resolving permissions...' message, auto-retry role:read after 3 seconds (up to 3 attempts), then show an error with manual retry button. This keeps the security boundary clean.",
+        "status": "completed"
+      }
+    ]
+  }
+}

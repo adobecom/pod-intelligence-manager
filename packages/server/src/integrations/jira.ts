@@ -36,7 +36,14 @@ function escapeJql(s: string): string {
 // index doesn't tokenize hyphen/dot well, so `text ~ "T3-26.16"` returns
 // nothing — but `fixVersion = "T3-26.16"` does. Extract these tokens,
 // emit a fixVersion clause, and strip them from the text query.
-function extractFixVersions(query: string): { versions: string[]; cleaned: string } {
+//
+// Exported because the context-search orchestrator also uses this to
+// decide whether the IMS-authenticated-user fallback should activate:
+// a fixVersion token is already a sufficient narrowing dimension for
+// Jira, so a release query like "what's in T3-26.16" must not be
+// silently narrowed to the caller as actor (that would drop teammates'
+// results from the same release).
+export function extractFixVersions(query: string): { versions: string[]; cleaned: string } {
   const re = /\b[A-Za-z][A-Za-z0-9]*-\d+(?:\.\d+)+\b/g;
   const versions = Array.from(new Set(Array.from(query.matchAll(re)).map((m) => m[0])));
   if (versions.length === 0) return { versions: [], cleaned: query };
@@ -112,6 +119,33 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
   const email = process.env.JIRA_EMAIL;
   if (!base || !token) {
     return { source: "jira", hits: [], missing: "JIRA_BASE_URL or JIRA_TOKEN not set" };
+  }
+
+  // Fail-closed scope guard. Unscoped full-text JQL against the shared
+  // Adobe Jira instance (~35K users) is one of the most expensive queries
+  // the API will run; refuse it. Allow Jira only when at least one
+  // narrowing dimension is present: project keys, a Jira "Team" custom-
+  // field value, an actor filter, or a release-version token in the
+  // query. Each of these makes buildJql() emit a narrowing clause; the
+  // guard mirrors that exact set so no valid onboarded configuration is
+  // refused.
+  const projectKeys = opts.project_resources?.jira?.project_keys ?? [];
+  const team = opts.project_resources?.jira?.team;
+  const hasActor = !!opts.actor?.email;
+  const { versions } = extractFixVersions(opts.query);
+  const hasNarrowingScope =
+    projectKeys.length > 0 || !!team || hasActor || versions.length > 0;
+  if (!hasNarrowingScope) {
+    return {
+      source: "jira",
+      hits: [],
+      missing:
+        "Jira search refused: no project scope, team, actor, or release version. " +
+        "Configure project_resources.jira.project_keys or project_resources.jira.team " +
+        "via configure_project_resources, pass an explicit project_id, sign in (IMS) " +
+        "so the server can scope to your identity, or include a fixVersion token " +
+        "(e.g. T3-26.16) in the query.",
+    };
   }
 
   // Cloud tenants use `/rest/api/3` and Basic auth with email+token.
