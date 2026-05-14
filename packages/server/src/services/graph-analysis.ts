@@ -32,7 +32,7 @@ const STOP_WORDS = new Set([
   "we", "us", "our", "you", "your", "he", "him", "his", "she", "her",
 ]);
 
-function extractKeywords(text: string): Set<string> {
+export function extractKeywords(text: string): Set<string> {
   return new Set(
     text
       .toLowerCase()
@@ -97,16 +97,18 @@ export function buildEdges(
       if (seenPairs.has(pairKey) || seenPairs.has(reverseKey)) continue;
 
       const domOverlap = domainOverlap(newNode.domains, existing.domains);
+      const keyword = keywordOverlap(newNode.summary, existing.summary);
 
-      // Hard floor: domain overlap alone never qualifies. We require some textual or
-      // semantic signal (cosine ≥ 0.2 OR keyword overlap ≥ 0.2). Two ["backend"] nodes
-      // with zero textual similarity must not get an edge — that inflates topology and
-      // skews community detection.
+      // Fast-path: skip cosine similarity when keyword and domain signals are both
+      // absent AND neither node has an embedding — those pairs are almost certainly
+      // unrelated. When embeddings ARE present, always compute cosine: two nodes can
+      // be semantically near-identical with disjoint summaries and domains.
+      if (keyword < 0.2 && domOverlap === 0 && !(newNode.embedding && existing.embedding)) continue;
+
       const cosine =
         newNode.embedding && existing.embedding
           ? cosineSimilarity(newNode.embedding, existing.embedding)
           : 0;
-      const keyword = keywordOverlap(newNode.summary, existing.summary);
       if (cosine < 0.2 && keyword < 0.2) continue;
 
       // Domain becomes a tiebreaker (15% weight) rather than a primary signal.
@@ -132,7 +134,49 @@ export function buildEdges(
     }
   }
 
-  return edges;
+  return capNodeDegree(edges, existingEdges);
+}
+
+function capNodeDegree(
+  newEdges: KnowledgeEdge[],
+  existingEdges: KnowledgeEdge[] = [],
+  maxDegree = 20,
+): KnowledgeEdge[] {
+  // Count degrees already committed by existing edges so we don't push any node over cap.
+  const degree = new Map<string, number>();
+  for (const e of existingEdges) {
+    degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+    degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+  }
+  // Fast-path: skip sorting if no node would exceed the cap.
+  // Must account for degree accumulated within newEdges themselves, not just existing edges.
+  const newDegree = new Map<string, number>();
+  for (const e of newEdges) {
+    newDegree.set(e.source, (newDegree.get(e.source) ?? 0) + 1);
+    newDegree.set(e.target, (newDegree.get(e.target) ?? 0) + 1);
+  }
+  let anyExceed = false;
+  for (const [id, nd] of newDegree) {
+    if ((degree.get(id) ?? 0) + nd > maxDegree) {
+      anyExceed = true;
+      break;
+    }
+  }
+  if (!anyExceed) return newEdges;
+
+  // Sort highest-weight first so we keep the strongest connections.
+  const sorted = [...newEdges].sort((a, b) => b.weight - a.weight);
+  const added = new Map<string, number>();
+  const kept: KnowledgeEdge[] = [];
+  for (const edge of sorted) {
+    const sd = (degree.get(edge.source) ?? 0) + (added.get(edge.source) ?? 0);
+    const td = (degree.get(edge.target) ?? 0) + (added.get(edge.target) ?? 0);
+    if (sd >= maxDegree || td >= maxDegree) continue;
+    kept.push(edge);
+    added.set(edge.source, (added.get(edge.source) ?? 0) + 1);
+    added.set(edge.target, (added.get(edge.target) ?? 0) + 1);
+  }
+  return kept;
 }
 
 function inferEdgeType(
@@ -338,7 +382,7 @@ export function identifyHubs(graph: KnowledgeGraph): string[] {
 
 export function scoreRelevance(
   node: KnowledgeNode,
-  context: { scopes: string[]; keywords: string[]; querySimilarity?: number },
+  context: { scopes: string[]; keywords: string[]; querySimilarity?: number; precomputedKeywords?: Set<string> },
   hubIds: Set<string>,
   graphTuning?: OrgTuning["graphScoring"],
 ): number {
@@ -352,7 +396,7 @@ export function scoreRelevance(
   const domainScore = node.domains.length > 0 ? domainMatch / node.domains.length : 0;
 
   // Keyword match
-  const nodeKw = extractKeywords(`${node.summary} ${node.details}`);
+  const nodeKw = context.precomputedKeywords ?? extractKeywords(`${node.summary} ${node.details}`);
   let kwMatch = 0;
   for (const kw of context.keywords) {
     if (nodeKw.has(kw.toLowerCase())) kwMatch++;
