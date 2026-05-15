@@ -194,6 +194,21 @@ function omitEmbeddingForResponse(node: KnowledgeNode): KnowledgeNode {
   return rest as KnowledgeNode;
 }
 
+/**
+ * Returns a shallow-cloned graph with every node's `embedding` field omitted. The in-memory
+ * state is untouched. Used to shape the UI-facing /api/knowledge/graph response so a 512-dim
+ * vector (~2 KB/node) is not shipped for every node when only the structure is needed.
+ *
+ * Callers that genuinely need embeddings (MCP resource clients doing client-side similarity)
+ * opt in via the include_embeddings query param at the route layer.
+ */
+export function stripEmbeddingsFromGraph(graph: KnowledgeGraph): KnowledgeGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map(omitEmbeddingForResponse),
+  };
+}
+
 function shapeNodeForQueryResponse(
   node: KnowledgeNode,
   includeDetails: boolean,
