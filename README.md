@@ -35,8 +35,19 @@ Optional:
 
 | Goal | Easiest command |
 |------|----------------|
+| **Just the CLI** (no clone needed) | Install from Artifactory: `npm install -g ado-pim --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/` — then `pim --help`. You’ll need Artifactory credentials (see below). |
 | **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and **`ado-pim`** (CLI package), links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
 | **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
+
+### Artifactory credentials (for the "Just the CLI" path)
+
+The `npm-adobe-pim-release` registry requires authentication. Log in once:
+
+```bash
+npm login --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/
+```
+
+Use your Adobe LDAP username and your Artifactory API key or Access Token as the password (find it under your profile on `artifactory-uw2.adobeitc.com`). This writes the auth token to `~/.npmrc` and persists across installs.
 
 For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
 
@@ -251,14 +262,16 @@ To use MCP in IMS mode:
 
 Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands. The published npm name is **`ado-pim`**; the workspace path is `packages/cli`.
 
-**Easiest install from this clone:** run **`pnpm bootstrap`** at the monorepo root (see **Setup** above). It builds the bundled CLI (`packages/cli/dist/pim.bundle.cjs`) and runs **`pnpm -C packages/cli link --global`**, so **`pim` works from any directory** (for example `pim init` in another repo) once your shell **`PATH`** includes pnpm’s global executables directory. **`pnpm install-cli`** is the same script.
+**Install options:**
 
-| Alternative | When to use |
-|-------------|-------------|
-| `pnpm pim <args>` | No global install; run only from the monorepo root (e.g. `pnpm pim pod list`). |
-| `npx tsx packages/cli/src/index.ts` | Debug / run from TypeScript without building the bundle first. |
+| Method | Command | When to use |
+|--------|---------|-------------|
+| **Artifactory** (recommended) | `npm install -g ado-pim --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/` | No clone needed; gets the published release. Requires Artifactory auth (see **Setup** above). |
+| **From clone** | `pnpm bootstrap` at monorepo root | Contributors; builds from source and links `pim` globally via pnpm. |
+| **No global install** | `pnpm pim <args>` from monorepo root | Run only from this repo (e.g. `pnpm pim pod list`). |
+| **TypeScript (dev)** | `npx tsx packages/cli/src/index.ts` | Debug without building the bundle first. |
 
-Before deleting a clone you linked globally, run **`pnpm unlink --global`** from `packages/cli` if you want to remove the global `pim` shim.
+Before deleting a clone you linked globally via pnpm, run **`pnpm unlink --global`** from `packages/cli` to remove the shim.
 
 **If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
 

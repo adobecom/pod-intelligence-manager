@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "pim": "./bin/pim.mjs"
+    "pim": "bin/pim.js"
   },
   "files": [
     "bin",
@@ -20,7 +20,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "publishConfig": {
-    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/"
+    "registry": "https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.5.0",
