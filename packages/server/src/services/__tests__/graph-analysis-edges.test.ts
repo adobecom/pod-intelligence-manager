@@ -62,3 +62,49 @@ describe("buildEdges — embedding-driven scoring", () => {
     expect(edges).toHaveLength(0);
   });
 });
+
+describe("buildEdges — incremental maintenance (no quadratic rebuild)", () => {
+  // Why this test exists: archival ingestion calls buildEdges(newNodes, existingNodes).
+  // If a future refactor passes the full graph for both args, the cost regresses from
+  // newNodes × existingNodes to existingNodes² — at 5k nodes that is 25M comparisons
+  // per archival on the main event loop. Lock the contract in.
+  it("only compares newNodes against existingNodes (not existingNodes against itself)", () => {
+    const matchingEmb = [1, 0, 0];
+    const existing = [
+      node({ id: "old-1", summary: "Old pattern one", embedding: matchingEmb }),
+      node({ id: "old-2", summary: "Old pattern two", embedding: matchingEmb }),
+      node({ id: "old-3", summary: "Old pattern three", embedding: matchingEmb }),
+    ];
+    const incoming = [node({ id: "new-1", summary: "New pattern arrival", embedding: matchingEmb })];
+
+    const edges = buildEdges(incoming, existing);
+
+    // 1 new × 3 existing = up to 3 edges. A quadratic rebuild would also emit
+    // edges between old-1↔old-2, old-1↔old-3, old-2↔old-3 (3 more), so a max of 3
+    // proves the function did not re-pair the existing set.
+    expect(edges.length).toBeLessThanOrEqual(3);
+    for (const edge of edges) {
+      expect(edge.source).toBe("new-1");
+      const targetIsExisting = ["old-1", "old-2", "old-3"].includes(edge.target);
+      expect(targetIsExisting).toBe(true);
+    }
+  });
+
+  it("respects existingEdges to avoid duplicating edges across batches", () => {
+    const emb = [1, 0, 0];
+    const a = node({ id: "a", summary: "Shared pattern", embedding: emb });
+    const b = node({ id: "b", summary: "Shared pattern", embedding: emb });
+
+    const firstBatch = buildEdges([a], [b]);
+    expect(firstBatch).toHaveLength(1);
+
+    // Second call with the same pair plus the prior edge: must not re-emit.
+    const secondBatch = buildEdges([a], [b], firstBatch);
+    expect(secondBatch).toHaveLength(0);
+
+    // Reverse-direction guard: edge (b → a) already covers (a → b).
+    const reverseEdge = [{ source: "b", target: "a", type: "relates_to" as const, weight: 0.9 }];
+    const reverseBatch = buildEdges([a], [b], reverseEdge);
+    expect(reverseBatch).toHaveLength(0);
+  });
+});

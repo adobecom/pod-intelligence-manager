@@ -151,7 +151,10 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
-        const result = await addLearningsToGraph(req.org!.org_id, learnings, podId, pod.name, projectMeta);
+        // Defer community/hub recompute to the periodic refreshAnalysisIfStale tick
+        // (matches the ad-hoc POST /api/knowledge/nodes path). Keeps the archive
+        // request off the main-thread CPU spike for graphs of any size.
+        const result = await addLearningsToGraph(req.org!.org_id, learnings, podId, pod.name, projectMeta, { skipAnalysis: true });
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }
