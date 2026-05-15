@@ -39,6 +39,7 @@ import {
   cosineSimilarity,
   isEmbeddingAvailable,
 } from "./embeddings.js";
+import { getGraphAnalysisPool, isGraphWorkerEnabled } from "./graph-analysis-pool.js";
 
 // --- In-Memory Cache (per-org) ---
 
@@ -685,13 +686,72 @@ export function refreshAnalysis(orgId: string): void {
 }
 
 /**
+ * Worker-backed variant of refreshAnalysis. Dispatches detectCommunities + identifyHubs
+ * onto a separate OS thread, freeing the main event loop while the work runs.
+ *
+ * Version-stamp pattern: the worker is sent the graph snapshot's version. When the result
+ * arrives we re-check the live graph's version. If a mutation happened in the interim, the
+ * worker's result is stale — we discard it and leave analysisStale=true so the next tick
+ * re-runs against the newer graph. Correctness wins over throughput here.
+ */
+export async function refreshAnalysisWithWorker(orgId: string): Promise<boolean> {
+  const state = orgStates.get(orgId);
+  if (!state || state.graph.nodes.length === 0) {
+    if (state) state.analysisStale = false;
+    return false;
+  }
+
+  const fromVersion = state.graph.version;
+  // Strip embeddings before serialization — they are not needed for community detection
+  // and dominate the message size at ~2KB/node × N nodes. A 5k-node graph drops from
+  // ~25MB to ~1.5MB across the worker boundary.
+  const graphSnapshot: typeof state.graph = {
+    ...state.graph,
+    nodes: state.graph.nodes.map((n) => ({ ...n, embedding: undefined })),
+  };
+
+  let response;
+  try {
+    response = await getGraphAnalysisPool().analyze(graphSnapshot, fromVersion);
+  } catch (err) {
+    console.error(`[knowledge-graph] Worker analysis failed for org "${orgId}":`, err);
+    // Leave analysisStale=true so the next interval retries. The graph is not corrupted.
+    return false;
+  }
+
+  // Live state may have shifted while the worker was running.
+  const liveState = orgStates.get(orgId);
+  if (!liveState || liveState.graph.version !== fromVersion) {
+    // Discard stale result; next tick will re-run with the newer graph.
+    return false;
+  }
+
+  liveState.graph.communities = response.communities;
+  liveState.hubIds = new Set(response.hubIds);
+  for (const node of liveState.graph.nodes) {
+    const cid = response.nodeCommunityMap[node.id];
+    if (cid) node.community_id = cid;
+  }
+  liveState.analysisStale = false;
+  saveGraph(orgId, liveState.graph);
+  return true;
+}
+
+/**
  * Cheap variant of refreshAnalysis: returns immediately when nothing has marked the graph
  * stale. Safe to call from hot paths (interval ticks, post-query lazy refresh).
  *
  * With no orgId, iterates over every loaded org's state — the periodic interval uses this
  * form so newly active orgs get picked up without a separate scheduler.
+ *
+ * When PIM_GRAPH_WORKER=true, dispatches to a worker thread. Returns a Promise<boolean> in
+ * that mode. Callers that don't await it (e.g., setInterval) get fire-and-forget behavior,
+ * which is the desired shape for periodic refresh.
  */
-export function refreshAnalysisIfStale(orgId?: string): boolean {
+export function refreshAnalysisIfStale(orgId?: string): boolean | Promise<boolean> {
+  if (isGraphWorkerEnabled()) {
+    return refreshAnalysisIfStaleAsync(orgId);
+  }
   if (orgId) {
     const state = orgStates.get(orgId);
     if (!state?.analysisStale) return false;
@@ -703,6 +763,24 @@ export function refreshAnalysisIfStale(orgId?: string): boolean {
     if (!state.analysisStale) continue;
     refreshAnalysis(id);
     didWork = true;
+  }
+  return didWork;
+}
+
+async function refreshAnalysisIfStaleAsync(orgId?: string): Promise<boolean> {
+  if (orgId) {
+    const state = orgStates.get(orgId);
+    if (!state?.analysisStale) return false;
+    return refreshAnalysisWithWorker(orgId);
+  }
+  let didWork = false;
+  // Snapshot org ids — refreshAnalysisWithWorker can mutate the map (e.g., another org
+  // loaded mid-iteration) so we don't want to iterate a live view.
+  for (const id of [...orgStates.keys()]) {
+    const state = orgStates.get(id);
+    if (!state?.analysisStale) continue;
+    const ran = await refreshAnalysisWithWorker(id);
+    if (ran) didWork = true;
   }
   return didWork;
 }
