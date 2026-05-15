@@ -17,7 +17,8 @@ export interface WSEvent {
     | "context_update_enriched"
     | "project_context_update_enriched"
     | "queue_drained"
-    | "update_retracted";
+    | "update_retracted"
+    | "pim_processed";
   podId: string;
   payload: unknown;
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Mock } from "vitest";
 
 vi.mock("../../db/connection.js", () => ({
@@ -190,5 +190,54 @@ describe("ingestContextUpdate", () => {
     const args = runMock.mock.calls[0];
     expect(args[0]).toMatch(/^ctx-/); // id
     expect(args[1]).toBe("agent-fe"); // agent_id
+  });
+});
+
+describe("ingestContextUpdate — PIM_ASYNC_ORCHESTRATION mode", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    setupDefaultMocks();
+    process.env.PIM_ASYNC_ORCHESTRATION = "true";
+  });
+
+  afterEach(() => {
+    delete process.env.PIM_ASYNC_ORCHESTRATION;
+  });
+
+  it("returns pim_queued=true and does not await processUpdate", async () => {
+    // Hold processUpdate open: if the handler awaits it, the test will hang.
+    let resolveProcess: () => void = () => {};
+    vi.mocked(processUpdate).mockImplementation(
+      () => new Promise((resolve) => {
+        resolveProcess = () => resolve({
+          classification: "additive",
+          merged: true,
+          conflictCreated: false,
+        });
+      }),
+    );
+
+    const result = await ingestContextUpdate("pod-1", validInput());
+    expect(result.success).toBe(true);
+    expect(result.pim_queued).toBe(true);
+    expect(result.pim).toBeUndefined();
+    resolveProcess();
+  });
+
+  it("broadcasts pim_processed once the async job completes", async () => {
+    vi.mocked(processUpdate).mockResolvedValue({
+      classification: "overlapping",
+      merged: true,
+      conflictCreated: false,
+    });
+
+    await ingestContextUpdate("pod-1", validInput());
+    // Allow the setImmediate callback to run.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "pim_processed", podId: "pod-1" }),
+    );
   });
 });

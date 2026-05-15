@@ -49,6 +49,15 @@ export interface IngestionResult {
   error?: string;
   secretFindings?: string[];
   deduplicated?: boolean;
+  pim_queued?: boolean;
+}
+
+// Gate the off-request-path PIM orchestration behind an env flag so it can be
+// enabled per-environment (default off) without a code change. When enabled, the
+// API returns 201 immediately and broadcasts `pim_processed` via WS once the
+// LLM-backed orchestration finishes.
+function isAsyncPimEnabled(): boolean {
+  return process.env.PIM_ASYNC_ORCHESTRATION === "true";
 }
 
 export type PreValidateResult =
@@ -175,7 +184,29 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   });
 
   // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
-  const pimResult = await processUpdate(update, orgId);
+  //    LLM calls inside processUpdate (ConflictScout + llmMerge) can stack up to
+  //    60s of latency, which holds the request open. When async mode is enabled,
+  //    fire it off and broadcast the result over WS instead of awaiting.
+  let pimResult: PimResult | undefined;
+  let pimQueued = false;
+  if (isAsyncPimEnabled()) {
+    pimQueued = true;
+    setImmediate(() => {
+      processUpdate(update, orgId)
+        .then((result) => {
+          broadcast({
+            type: "pim_processed",
+            podId,
+            payload: { updateId: update.id, pim: result },
+          });
+        })
+        .catch((err) => {
+          console.error(`[ingestion] Async PIM processing failed for update ${update.id}:`, err);
+        });
+    });
+  } else {
+    pimResult = await processUpdate(update, orgId);
+  }
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)
   scheduleAsyncQualityScore(podId, update.id);
@@ -185,5 +216,5 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     scheduleGitHookEnrichment(podId, update.id);
   }
 
-  return { success: true, update, pim: pimResult };
+  return { success: true, update, pim: pimResult, pim_queued: pimQueued };
 }
