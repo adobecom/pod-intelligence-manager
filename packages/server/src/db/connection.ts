@@ -18,6 +18,9 @@ const db = new DatabaseSync(dbPath);
 
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
+// Without this, write collisions throw SQLITE_BUSY immediately (default 0ms).
+// 5s retry window absorbs normal write contention under concurrent load.
+db.exec("PRAGMA busy_timeout = 5000");
 
 export function withTransaction<T>(fn: () => T): T {
   db.exec("BEGIN");

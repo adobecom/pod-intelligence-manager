@@ -26,6 +26,7 @@ import {
   getRelevantLearnings,
   getStats,
   queryKnowledge,
+  stripEmbeddingsFromGraph,
 } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { generateEmbedding } from "../services/embeddings.js";
@@ -74,10 +75,21 @@ const AD_HOC_DEFAULT_LABEL = "Ad-Hoc Submission";
 const AD_HOC_DEFAULT_CONFIDENCE = 0.7;
 
 export default async function graphRoutes(app: FastifyInstance) {
-  // Full graph (for UI visualization)
-  app.get("/api/knowledge/graph", async (req) => {
-    return getGraph(req.org!.org_id);
-  });
+  // Full graph (for UI visualization).
+  //
+  // Embeddings (~2 KB per node) are omitted by default. The UI never reads them
+  // and the payload would otherwise dominate the response at scale (a 10k-node
+  // graph drops from ~22 MB to ~4 MB on the wire). Callers that need raw vectors
+  // (MCP clients doing client-side similarity, debugging tools) opt in with
+  // ?include_embeddings=true.
+  app.get<{ Querystring: { include_embeddings?: string } }>(
+    "/api/knowledge/graph",
+    async (req) => {
+      const graph = getGraph(req.org!.org_id);
+      if (req.query.include_embeddings === "true") return graph;
+      return stripEmbeddingsFromGraph(graph);
+    },
+  );
 
   // Stats summary
   app.get("/api/knowledge/stats", async (req) => {

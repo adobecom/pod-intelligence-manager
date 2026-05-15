@@ -236,9 +236,14 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   // Periodic knowledge graph community detection refresh.
   // Only recomputes when a prior mutation marked the graph stale (e.g. ad-hoc POSTs that
   // skip per-request analysis). No-op otherwise — cheap to call frequently.
+  // When PIM_GRAPH_WORKER=true the function returns a Promise; either way the interval
+  // fires fire-and-forget so refresh never blocks the next tick.
   setInterval(() => {
     try {
-      refreshAnalysisIfStale();
+      const result = refreshAnalysisIfStale();
+      if (result instanceof Promise) {
+        result.catch((e) => app.log.error(e, "Knowledge graph refresh (worker) failed"));
+      }
     } catch (e) {
       app.log.error(e, "Knowledge graph refresh failed");
     }

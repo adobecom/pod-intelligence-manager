@@ -200,6 +200,10 @@ export function registerResources(server: McpServer) {
     "knowledge-graph",
     "pim://knowledge/graph",
     { description: "Full knowledge graph (nodes, edges, communities) — may be large" },
-    async (uri) => jsonContents(uri, await apiFetch("/api/knowledge/graph")),
+    // include_embeddings=true preserves the legacy shape MCP clients see (~2 KB per
+    // node). The UI's /api/knowledge/graph call omits the flag and gets a stripped
+    // response. If you do not need raw vectors for client-side similarity, drop
+    // the query param to cut payload size by ~80%.
+    async (uri) => jsonContents(uri, await apiFetch("/api/knowledge/graph?include_embeddings=true")),
   );
 }

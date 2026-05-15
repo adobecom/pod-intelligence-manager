@@ -126,7 +126,12 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
       return { deduplicated: true, message: "Commit already reported by another source" };
     }
     reply.code(201);
-    return { id: result.update!.id, update: result.update, pim: result.pim };
+    return {
+      id: result.update!.id,
+      update: result.update,
+      pim: result.pim,
+      ...(result.pim_queued ? { pim_queued: true } : {}),
+    };
   });
 
   app.delete<{ Params: { podId: string; updateId: string } }>("/api/pods/:podId/context-updates/:updateId", async (req, reply) => {
