@@ -1,6 +1,6 @@
 {
   "podId": "pod-emc-sessions",
-  "pulledAt": "2026-05-08T02:07:39.164Z",
+  "pulledAt": "2026-05-13T02:43:22.785Z",
   "payload": {
     "pod": {
       "pod_id": "pod-emc-sessions",
@@ -86,39 +86,438 @@
       "nodes": [
         {
           "type": "anti_pattern",
-          "summary": "Client-side date validation without timezone awareness caused events to appear with wrong dates for cross-timezone organizers",
-          "details": "JavaScript Date() uses the browser's local timezone. An organizer in PST creating a Tokyo event entered '2026-06-15' but the API received '2026-06-14T07:00:00Z' due to offset. Fix: pair every date input with an explicit timezone selector and validate against the event's timezone, not the browser's.",
+          "summary": "Do not omit server modification time (mtime) when updating session-time API without page refresh; failure to persist and send mtime in consecutive calls triggers OptimisticLockExceptionError.",
+          "details": "The session-time API endpoint requires the server's modification timestamp (mtime) to be stored after each response and included in subsequent PUT/PATCH requests. When session-time params are updated in-memory without a page refresh, the mtime must be extracted from the server response and cached in component state (e.g., Sessions.tsx) so it is available for the next API call. Omitting mtime causes the server to reject the update as a stale write. Additionally, ensure POST is only called once during session creation; subsequent updates must use PUT/PATCH with the cached mtime to avoid duplicate session-time records.",
           "domains": [
-            "frontend"
+            "frontend",
+            "backend"
           ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Event CRUD v1"
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/EMC/pull/124"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "Session location-time conflict validation must occur on both FE (inline UX + cost reduction) and BE (atomicity guard), with FE checking interval overlap via UTC millisecond conversion and BE as final arbiter.",
+          "details": "SessionForm.tsx implements FE-side conflict detection by accepting allSessions prop, deriving hasLocationConflict via useMemo that converts form date/time to UTC milliseconds (reusing naiveDateTimeToUTCMillis + dateAndTimeToISO utilities) and scans for overlapping intervals on same locationId (currentStart < sEnd && currentEnd > sStart), excluding self in edit mode. This marks Location ComboBox isInvalid and blocks Save button. BE (events-service-platform PR #922) performs final DynamoDB scan validation. FE guard reduces unnecessary requests and narrows race-condition window; BE guard ensures atomicity. SessionsList threads allSessions through component hierarchy (SessionsListProps → SessionItemProps → SessionForm) for both add and edit forms; Sessions.tsx sources from existing state, no new fetches.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/pull/143"
         },
         {
           "type": "pattern",
-          "summary": "Optimistic concurrency via modificationTime prevents lost updates on concurrent edits",
-          "details": "Every PUT requires a modificationTime field matching the server's last-known value. If they differ, the update returns 409 with the current server state. The frontend shows a diff dialog allowing merge or overwrite.",
+          "summary": "Session-times entities must have exactly one location; location is a required, singular property of the session-times schema, not a separate join table.",
+          "details": "Per the PR note, location support was added directly to the session-times schema (src/managers/sessionTimesMgr.js, src/api/openapi.json) as a one-to-one relationship: 'a session-times entity should have one and only one location associated.' This means session-times CRUD operations (create, read, update, delete in src/routes/session-times/) must always include location data; location is not optional and should not be managed as a separate entity reference. Strict API validation (unevaluated fields rejected) enforces this contract at the API boundary.",
           "domains": [
             "backend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/863"
+        },
+        {
+          "type": "pattern",
+          "summary": "Session-time helpers must return SessionTimeInfo so React state can update without a page refresh",
+          "details": "createSessionTimeForSession and upsertSessionTimeForSession previously returned Promise<void>, which dropped the API's sessionTimeId, creationTime, and modificationTime on the floor. Calling components could not update local state with the new optimistic-concurrency values, so users saw stale data and had to refresh the page after every session-time edit. Fix is to return the API response from both helpers and have handleAddSession / handleUpdateSession capture and propagate sessionTimeId + creationTime + modificationTime into local React session state. This is the EMC-wide convention for any API helper that yields server-issued timestamps.",
+          "domains": [
             "frontend"
           ],
           "confidence_score": 0.9,
-          "source_pod_name": "Event CRUD v1"
+          "source_pod_name": "sandbox-seed-session-time-helpers-return-info"
+        },
+        {
+          "type": "pattern",
+          "summary": "ESP resources use modificationTime for optimistic concurrency on PUT; clients must round-trip it",
+          "details": "Every ESP PUT on an updatable resource (event, series, session, speaker) requires the modificationTime field to match the server's last-known value. If they differ, PUT returns 409 with the current server state. Clients must therefore: (a) capture modificationTime on every GET, (b) send it back unchanged on the next PUT, (c) re-fetch on 409 and merge. Dropping or recomputing modificationTime client-side is the most common cause of silent edit failures on EMC.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.95,
+          "source_pod_name": "sandbox-seed-optimistic-concurrency-modtime"
+        },
+        {
+          "type": "pattern",
+          "summary": "Date-time formatting in event-libs uses template tokens ({LLL}, {timeRange}, etc.) with metadata field `custom-date-time-format`, falling back to smart auto-formatting (same-day vs. multi-day) when custom template is absent or invalid.",
+          "details": "The system defines a fixed set of template tokens: {YYYY}, {YY}, {LLLL}, {LLL}, {dddd}, {ddd}, {dd}, {timeRange}, {timeZone}. Content authors add `custom-date-time-format` metadata to override default formatting; the placeholder `[[user-event-date-time-range]]` renders the result. Required metadata fields are `local-start-time-millis` and `local-end-time-millis` (UTC milliseconds). Localization is automatic per locale (en-US, de-DE, fr-FR, es-ES). If custom template fails or is missing, the system falls back to smart auto-formatting: same-day events show single date/time, multi-day events show date range. This is the canonical contract for date rendering across the events-on-Milo platform.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:docs/date-time-formatting-guide.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Timing Framework uses two-phase schedule positioning: Phase 1 finds initial position by toggleTime traversal, Phase 2 validates against plugin conditions (Mobile Rider, metadata) before finalizing content display.",
+          "details": "The framework determines schedule position via getStartScheduleItemByToggleTime() which traverses a double-linked list to find the last item whose toggleTime has passed, then validates this position against active Mobile Rider sessions and metadata conditions. This two-phase approach ensures quick initial positioning while handling edge cases like MR session overrun. Plugins communicate state changes via BroadcastChannel, and the worker polls at random intervals (500-1500ms) to prevent thundering herd. The Chronobox block returns a Promise from init() that resolves when the first schedule item is received (with 3-second timeout), enabling CLS prevention while maintaining async framework behavior.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:event-libs/v1/features/timing-framework/README.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Agenda timezone conversion uses event date (not creation date) for DST context, matching [[user-event-date-time-range]] behavior; requires three inputs: startTime, timezone metadata, and local-start-time-millis.",
+          "details": "Agenda times are interpreted in the event's timezone on the event date using DST rules from local-start-time-millis, then converted to user's local timezone via convertEventTimeToLocalTime(time, eventTimezone, eventDateMillis, locale). This ensures consistency: an author entering '17:30:00' means '5:30 PM in event timezone on event date' regardless of when the event was created. The algorithm uses iterative refinement to find the correct UTC timestamp, leveraging the browser's timezone database. Without timezone metadata, the system falls back to convertToLocaleTimeFormat() for backward compatibility.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:docs/agenda-timezone-support.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Sessions Hub text search is scoped to title, speaker names, and tag labels; descriptions excluded by default unless `search-include-description` block class is set.",
+          "details": "The filterSessions function in event-libs/v1/blocks/sessions-hub/sessions-hub.js implements a three-field search pattern: title, speaker (first/last/full-name substring), and tag labels are matched case-insensitively against trimmed queries ≥2 characters. Session descriptions are intentionally excluded from the default search scope to reduce noise; marketers can opt into description matching by adding the `search-include-description` block class. A query of 1 character or whitespace-only does not filter by text, leaving all sessions visible subject to tab/tag filters. When a qualifying search returns zero results, the no-results UI (role=\"status\", aria-live=\"polite\") is shown and the session grid is hidden.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/135"
+        },
+        {
+          "type": "pattern",
+          "summary": "Sessions-hub auto-registration integrates RSVP form submission through events-form block; chrono-box conditionally suppresses first schedule item when no conditions match.",
+          "details": "The sessions-hub block now triggers auto-registration by delegating form submission to the events-form block rather than handling RSVP directly. This pattern centralizes form field validation and payload preparation in events-form. Additionally, chrono-box (timing-framework) implements conditional rendering: the first schedule item is skipped if no time-condition rules match, preventing empty or placeholder schedule displays. Both patterns live in event-libs/v1/blocks/ and should be followed when extending RSVP or schedule rendering flows.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/107"
+        },
+        {
+          "type": "pattern",
+          "summary": "Detect session description truncation via DOM layout (scrollHeight vs clientHeight) rather than character limits; re-sync on filter, expand/collapse, font load, and resize events.",
+          "details": "In sessions-hub.js, replace fixed-character truncation logic with dynamic overflow detection: compare element.scrollHeight > element.clientHeight to determine if text is truncated. Export syncSessionDescriptionsOverflow() and call it after filter changes, expand/collapse toggles, fonts ready (via document.fonts.ready), and ResizeObserver triggers. This ensures descriptions adapt to actual layout constraints (viewport, font metrics, container width) rather than hardcoded thresholds. Apply the same sync pattern to the conflict modal: defer modal close until registration completes, show pending state on confirm button and option elements, and restore UI on failure.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/108"
+        },
+        {
+          "type": "pattern",
+          "summary": "Authoritative time sourcing via Akamai API with multi-layer caching, rate-limiting, and progressive backoff to prevent client-side clock manipulation while scaling to thousands of concurrent users.",
+          "details": "The timing framework uses `getAuthoritativeTime()` as the canonical time source, implementing: (1) cache-first lookup with 10-minute TTL, (2) 5-minute minimum API call interval with jitter (0-30%), (3) exponential backoff (multiplier 2, max 30 min) on consecutive failures (max 3 before max backoff), (4) BroadcastChannel for cross-tab cache sharing, (5) fallback to local time if API fails. This pattern reduces API load by ~90% (e.g., 10k users: 33→3 calls/min) while preventing time-based cheating. All time operations must call `await worker.getAuthoritativeTime()` instead of `new Date().getTime()`. Validation and failure logging are required on API responses.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:event-libs/v1/features/timing-framework/API_TIME_IMPLEMENTATION.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Sessions tab in Event Report uses lazy-loaded expandable rows to display per-session attendee lists, cross-referencing session-time attendees with event attendees for display names.",
+          "details": "The Sessions registration tab (SessionsTab.tsx) implements a table with expandable rows that lazy-load attendee data via getSessionTimeAttendees(timeId) from GET /v1/session-times/{timeId}/attendees. Attendee display names are resolved by cross-referencing the session-time attendee list against the parent event's attendee roster. SessionTimeInfo type extends with attendeeCount, waitlistAttendeeCount, isFull fields. Expanded state resets when switching events to avoid stale data.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/EMC/pull/127"
+        },
+        {
+          "type": "pattern",
+          "summary": "Session form dirty-state tracking and unsaved-changes dialog: parent components receive `sessionHasOpenForm` prop to gate navigation; SessionForm detects dirty state and triggers callbacks; FormWizard integrates confirmation dialog before allowing navigation away.",
+          "details": "The session management enhancement establishes a pattern for handling unsaved changes across the EventForm hierarchy. SessionManagementComponent tracks form state via `sessionHasOpenForm` prop and notifies parents of changes. SessionForm is responsible for detecting dirty state (form modifications) and invoking callbacks to signal this state upward. FormWizard consumes this signal and blocks navigation by rendering a confirmation dialog before allowing users to leave the form. This pattern ensures data loss prevention across nested form components without losing the ability to navigate intentionally. Apply this pattern to other multi-step forms in EMC that risk data loss on navigation.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "github.com/adobecom/EMC/pull/130"
+        },
+        {
+          "type": "pattern",
+          "summary": "Session registration UI follows a three-state model (Registered/Waitlisted, Able to Register, Blocked) with explicit predicates for each state; SessionTimeFull responses must be read from body, not just HTTP status.",
+          "details": "In `event-libs/v1/blocks/sessions-hub/sessions-hub.js`, the per-card CTA must implement exactly three states: (1) Registered/Waitlisted badge (blue, shows checkmark + text from `waitlist-cta-text` dictionary key, hover swaps to unregister action), (2) Able-to-register button (direct `registerForSessionTime` API call, no modal), (3) Blocked button (disabled `.sh-btn-blocked`, labeled from `Registration unavailable` dictionary key). Use the pure predicate `isSessionRegistrationBlocked({ isEventWaitlisted, isEventClosed, inviteOnlyBlocked })` to determine blocked state. For session-time registration responses, read `resp.body.data.registrationStatus === 'waitlisted'` to distinguish waitlist from full registration (2xx with waitlist status must set `session.isWaitlisted`, not `isRegistered`). Use `isSessionTimeFullError(resp)` helper to detect SessionTimeFull errors by checking `error.code | errorCode | error | type | message` fields defensively. Event-level waitlist state (`rsvpData.registrationStatus === 'waitlisted'`) blocks all per-card registration; event-closed state (computed from `isFull && !allowWaitlisting`, accepting both boolean and string `'true'`) also blocks. Banner visibility: keep visible for waitlisted users (only hide when `isEventRegistered === true`), render `sh-banner-waitlist-msg` paragraph with `getEventWaitlistBannerMessage(manager, { eventTitle })` helper from `dictionary-manager.js`.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/128"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope configs (rsvp, locales, customAttributes) are the authoritative source for event metadata; publishing profiles are deprecated but retained for backward compatibility during migration.",
+          "details": "Events created under Creative Events (25f26faa-f8e2-4e99-b341-81a3995ef9af) and Enterprise Events (d758a3bc-ff31-4bfe-a2f5-343f074aec6c) scopes must define four config types: rsvp (pool of form fields), locales (localeNames, localeUrlCodes), and customAttributes (with primaryProductName and promotionalItems attributes). The Kinesis processor (events-kinesis-processor/ServiceProcessor.applyRelatedData) must call GET /v1/events/{eventId}/configs to hydrate event.locales, event.customAttributesConfig, and event.rsvpConfig at stream-processing time; event DDB records store only user selections (rsvpFormFields, customAttributes[] with valueId), not full definitions. Publishing profiles remain in the payload for backward compat but are no longer the source of truth. hoolihan-webhooks must read primary product from event.customAttributes[] where attribute='primaryProductName', promotional items from customAttributes[] where attribute='promotionalItems', RSVP pool from event.rsvpConfig.rsvpFormFields[], and locales from event.locales.localeNames/localeUrlCodes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-wcms-aio-migration-plan.md"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not fall back to rendering the first schedule item when no conditions are satisfied; instead return null and let the timer continue polling for a future match.",
+          "details": "In timing-framework workers (worker.js, worker-traditional.js), `getStartScheduleItemByToggleTime` must return `null` rather than falling back to schedule root when no item's toggle conditions are met. `initializeSchedule` should set `currentScheduleItem` to `null` (no render) while keeping `nextScheduleItem` at the first item so polling continues. `runTimer` must not call `getFirstScheduleItem()` as a fallback—if nothing qualifies, nothing is sent. This prevents chrono-box from rendering stale or incorrect content when all toggleTimes are in the future or unmet. `validateSchedulePosition` in worker.js handles cases where authoritative server time disagrees with wall-clock fast-path.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.8,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/105"
+        },
+        {
+          "type": "pattern",
+          "summary": "Dev token mode is explicitly opt-in via URL parameter and host allowlist; never interferes with real IMS in Experience Cloud Shell.",
+          "details": "Dev token UI and localStorage token usage are only active when URL contains `?devtokenmode=true` AND host is in allowlist (checked via `isDevTokenModeEnabled()` in env.ts). Two separate bootstrap paths exist: `bootstrapInExcShell()` always uses real IMS token and completely bypasses dev token system; `bootstrapStandalone()` uses dev token from localStorage only when dev token mode is enabled. This dual-path design ensures dev tokens never interfere with production shell deployments.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_GUIDE.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "ESP owns session/event/series/cloud entities and their integrations; Rainfocus scheduler is a separate ingest layer that transforms RF data into ESP schema via ESL API.",
+          "details": "The architecture establishes clear ownership: ESP (via ESL API) owns the DynamoDB Events Table (sessions, events, series, clouds, integrations); the events-scheduler Lambda is a separate ingest component that pulls from Rainfocus, transforms via RainfocusDataProcessor, and writes via POST/PUT /api/v1/sessions/{id}. The integration layer (events-integration-processor) consumes DynamoDB Kinesis streams and executes integrations scoped to session/event/series/cloud. This means: (1) ESP does not own Rainfocus polling logic, (2) integrations are defined per entity scope and triggered by DynamoDB change events, (3) the scheduler is stateless except for optional S3 config (lastRunTimestamp).",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:docs/architecture-rf-scheduler-and-integration.md"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not pass JS Date.now() (seconds) directly to eventsMgr date filters; convert to milliseconds to match gsi_sk storage format.",
+          "details": "The events-service-platform stores event dates in gsi_sk as 13-character millisecond timestamps. Callers passing Date.now() (10-character seconds) will silently fail to filter correctly. In src/managers/eventsMgr.js, ensure all date inputs to filtering operations are converted to milliseconds before comparison. This is a silent contract violation—no error is raised, making it a high-risk bug vector.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/890"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Events Service Platform implements a three-tier hierarchical RBAC system (Platform → Org → Team) with type-scoped permissions, where all non-exempt endpoints require x-adobe-esp-group-id header and role resolution via middleware.",
+          "details": "The authorization model enforces a strict scope hierarchy: Platform owns Orgs, Orgs own Teams. Each scope maintains its own Groups, and users belong to Groups (not directly to scopes). All endpoints except public read/list series/events/sessions require the x-adobe-esp-group-id header. Express middleware resolves the user's role by looking up groupId in the scopes manager (pk: group#groupId, sk: role), then attaches the role object to UserInfo. Scope endpoints support type-scoped permissions (e.g., scope-team:write, scope-org:read) in addition to broad permissions (scope:*). The permission structure is {resource}:{access} where resources include scope, group, user, role, config, integration, series, event, session, and * for all; access includes read, write, delete, and *. Wildcard permissions like *:* grant full access (platform super admin), and scope-team:* grants full access only to team-type scopes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/Platform-Org-Team-Support.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope configs unify RSVP forms, locales, and custom attributes under a single typed config system with scope-inherited hierarchy (org → team) and full-replace merge semantics.",
+          "details": "All configuration for the events console — RSVP form fields, locale definitions, and custom attribute definitions — is managed through a single `/v1/scopes/{scopeId}/configs` API with `type` field (e.g., 'rsvp', 'locales', 'custom-attributes'). Configs inherit down the scope hierarchy with full-replace merge per type. Frontend reads merged configs via `GET /v1/events/{eventId}/configs` or `GET /v1/series/{seriesId}/configs` with optional `?type=` filter. Custom attributes are a config type, not a separate entity. Admin management uses POST/PUT/DELETE on `/v1/scopes/{scopeId}/configs/{configId}` and requires `config:read`, `config:write`, or `config:delete` permissions.",
+          "domains": [
+            "backend",
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-fe-integration-guide.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Consent suite visibility and country-region capture follow a locale-aware, metadata-driven pattern: force-consent-collection metadata controls suite visibility; country picker data-country-code maps to payload.countryRegion; consent index URL uses locale-prefixed fallback pattern matching promotional-content.",
+          "details": "In events-form.js, the consent suite (country picker + terms) is conditionally rendered based on user type (guest) OR force-consent-collection metadata being true. Country pre-selection logic runs whenever the suite is present. The consent query index JSON is fetched via getConsentQueryIndexUrl() using getLocale() + FALLBACK_LOCALES pattern (same as promotional-content), not a static URL. On form submit, the selected country option's data-country-code attribute is extracted and sent as payload.countryRegion in the baseAttendee object; BASE_ATTENDEE_DATA_FILTER already whitelists this field. This establishes the contract: force-consent-collection is a boolean metadata flag that overrides guest-only consent visibility, and country selection always populates countryRegion when the suite is shown.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/74"
         },
         {
           "type": "decision",
-          "summary": "Event status lifecycle: draft → published → active → completed → archived with explicit transitions",
-          "details": "Each transition has validation rules (e.g., draft→published requires at least one session). Status transitions exposed as POST /:id/transition. Invalid transitions return 422.",
+          "summary": "ESP event-speaker PUT body contract is { speakerId, speakerType, ordinal, creationTime, modificationTime } and nothing else",
+          "details": "Per ESP OpenAPI, /v1/events/:eventId/speakers/:speakerId PUT accepts only those five fields. Echoing the full GET response (spreading dependentData) fails server-side validation and has been the root cause of repeated 400s on edit. When using callWithDependency's body-builder, fall back to dependentData per-field: body.X ?? dependentData.X. creationTime and modificationTime are server-issued; do not let callers override them. The same pattern applies to all ESP PUTs on speaker resources.",
           "domains": [
-            "backend",
-            "pm"
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.95,
+          "source_pod_name": "sandbox-seed-event-speaker-put-contract"
+        },
+        {
+          "type": "pattern",
+          "summary": "Per-resource PUT payload sanitizers live in utils/dataFilters.ts and follow prepareEsp{Resource}PutPayload naming",
+          "details": "Convention adopted across the EMC frontend: every ESP PUT endpoint has a corresponding prepareEsp{Resource}PutPayload function in web-src/src/utils/dataFilters.ts that calls filterSeriesData (or the resource-specific equivalent) in 'update' mode. This centralizes read-only-field stripping and ensures unpublish, archive, and external-update flows all go through the same validation layer. Do not invent ad-hoc filtering at the call site.",
+          "domains": [
+            "frontend"
           ],
           "confidence_score": 0.9,
-          "source_pod_name": "Event CRUD v1"
+          "source_pod_name": "sandbox-seed-datafilter-naming-convention"
+        },
+        {
+          "type": "pattern",
+          "summary": "Localization workflow delegates project initialization to Glaas API; events-service-layer updates DB with returned task metadata after async Glaas call.",
+          "details": "When a localization task is created via POST /events/localization-task, the service calls Glaas API to start the project (GlaasProvider.startProject()), then persists the returned task info (task ID, status, timestamps) to the events DB via LocalizationService. This establishes the contract: Glaas owns project lifecycle and returns task metadata; events-service-layer owns the DB record and webhook ingestion (glaas-esl/event-update.js) for async status updates. The pattern appears in src/routes/events/localization-task/create.js and src/services/events/localization/LocalizationService.js.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/255"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "PhoneNumber and AttendeeTextField validation rules were relaxed to accept legacy user-typed formats in the database; request and response validation kept symmetric pending future RSVP form redesign and data normalization.",
+          "details": "In openapi.json, PhoneNumber pattern changed from `^\\+?[0-9]+$` to `^\\+?[0-9 ().-]+$` (maxLength 20→30) to accept spaces, parens, and dashes; AttendeeTextField maxLength raised from 100 to 200 across 10 fields (companyName, organizationName, dietaryRestrictions, invitedBy, etc.). This was a production blocker: 13% of ~1,650 attendee records violated the stricter MWPW-188918 rules, causing GET /v1/events/{eventId}/attendees to fail express-openapi-validator with HTTP 418. Request and response validation were kept symmetric intentionally—future phone canonicalization or RSVP form validation tightening can re-constrain the spec independently. Data normalization (216 malformed phones) is out of scope and tracked separately.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/934"
+        },
+        {
+          "type": "pattern",
+          "summary": "Page-schedule-indexer operates as a non-prod-only background service; loads conditionally on chrono-box presence and environment, indexes via ESP API without UI.",
+          "details": "The page-schedule-indexer (event-libs/v1/features/indexer-widget/) is a background indexing service that auto-discovers and indexes unindexed schedules in non-prod environments only. Load is gated by two conditions in libs.js: (1) presence of DOM elements with data-schedule-id attribute, and (2) environment check via getEventConfig().miloConfig.env.name !== 'prod'. The indexer calls ESP API endpoints to index schedules and returns early if all schedules are already indexed or unindexable. Meta-pixel loading is also conditional on metadata presence. This pattern establishes that indexing is a non-user-facing, environment-aware background task, not a visible widget.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/63"
+        },
+        {
+          "type": "pattern",
+          "summary": "Chrono-box block exposes parsed schedule JSON on DOM via `data-tf-schedule-json` attribute for extension and third-party consumer access.",
+          "details": "After the chrono-box block (event-libs/v1/blocks/chrono-box/chrono-box.js) resolves the schedule, store the parsed schedule object as `JSON.stringify(thisSchedule)` in the `data-tf-schedule-json` attribute on the block root element. This must occur after schedule resolution but before inner HTML is cleared, ensuring the attribute persists for the element's lifetime. Extensions and other DOM consumers can retrieve and parse this via `document.querySelector('.chrono-box')?.getAttribute('data-tf-schedule-json')` followed by `JSON.parse()`. This pattern enables decoupled access to schedule data without requiring direct block API exposure.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/51"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Localization Kinesis records omit non-localization fields like rsvpFormFields; always fetch the full event record before scope filtering when hydrating from a localization change.",
+          "details": "In ServiceProcessor.js, when a localization record change triggers `callHydratedEvent` with `forceSpWrite=true`, the hydrated payload lacks `rsvpFormFields` because Kinesis localization records only carry localization-scoped fields. The full event record (sk: event) must be fetched via `eventService.getEventData()` before scope config filtering runs, otherwise `rsvpConfig.rsvpFormFields` will be empty. Check for `forceSpWrite && !rsvpFormFields` to gate this parallel fetch and avoid redundant calls on non-localization event modifications.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/921"
+        },
+        {
+          "type": "pattern",
+          "summary": "Attendees resource has dual CRUD surfaces: standalone /v1/attendees/* for lifecycle management, and nested /v1/events/:eventId/attendees/* for event-specific membership operations only.",
+          "details": "The attendees CRUD operations split across two route hierarchies: /v1/attendees/{create,read,update,delete}.js handle attendee entity lifecycle (create new attendee, read attendee details, update attendee profile, delete attendee). The nested /v1/events/:eventId/attendees/* routes (in src/routes/events/attendees/) handle only event membership: POST adds an *existing* attendee to an event (does not create attendees), GET lists attendees for an event, DELETE removes attendee from event, PUT updates attendee's event-specific state. This separation prevents attendee creation from being coupled to event enrollment. Enforce via attendeesMgr.js and eventsMgr.js: standalone routes call attendeesMgr directly; nested routes validate attendee exists before calling eventsMgr membership methods.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/190"
+        },
+        {
+          "type": "pattern",
+          "summary": "Timing framework exposes serverTime and avoidStreamEndFlag parameters to control event stream lifecycle and server-clock synchronization in chrono-box.",
+          "details": "The timing-framework (worker.js, worker-traditional.js) now accepts serverTime and avoidStreamEndFlag parameters that propagate to chrono-box.js. serverTime synchronizes client-side event scheduling with server clock; avoidStreamEndFlag prevents premature stream termination. These parameters are documented in timing-framework/README.md and tested in testing.js. Future integrations with event-libs timing should pass these through the worker initialization to maintain clock alignment and stream stability.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/37"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC dev token system uses two-path bootstrap architecture: ExC Shell path (real IMS) vs. standalone path (dev token), with dev token activation gated by both hostname allowlist AND ?devtokenmode=true URL parameter.",
+          "details": "The dev token system is never active in Experience Cloud Shell (bootstrapInExcShell() path); it only activates in standalone mode (bootstrapStandalone()) when both hostname is in DEV_TOKEN_ALLOWED_HOSTNAMES (localhost, 127.0.0.1, or specific adobeio-static.net subdomains) AND URL contains ?devtokenmode=true. The isDevTokenModeEnabled() function in web-src/src/config/env.ts enforces this dual gate. Dev token button visibility, token storage use in ApiService.getAuthToken(), and useDevToken hook all depend on this check. This ensures dev tokens never leak into production/staging deployments and cannot interfere with real IMS sessions in the shell.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_SECURITY.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "RBAC permission gating uses wildcard-matching permission strings (resource:access format) with fallback to domain-only permissions when role fetch returns 403, and gates UI elements via useHasPermission hooks and filterEvents/filterSeries helpers.",
+          "details": "Permissions are stored as Set<RBACPermission> in GroupContext and checked via useHasPermission(resource, access) or useRBACFilter helpers. Wildcard matching order: *:* → exact → resource:* → *:access. When GET /v1/roles/{roleId} returns 403, frontend falls back to event:*, series:*, session:*, cloud:*, config:*, integration:* (all domain actions visible, admin UI hidden). GroupContext increments groupVersion on group switch to trigger dashboard re-fetches; role is resolved before groupVersion bump to prevent race conditions. UI elements (TopNav tabs, Home cards, OverviewDashboard stat cards) are conditionally rendered using canReadEvents/canReadSeries/canReadClouds derived from useHasPermission. API service injects x-adobe-esp-group-id header for ESP requests when activeGroupId is set.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "HTML/script injection in attendee string fields must be blocked at the API schema layer using reusable NoTagsString validators, not in application code.",
+          "details": "Define injection-safe OpenAPI schemas (`NoTagsString`, `AttendeeName`, `AttendeeTextField`, `SpecialRequirements`, `PhoneNumber`) in `src/api/openapi.json` and apply them to all attendee string fields via `express-openapi-validator`. This centralizes validation at the API boundary and prevents downstream code from receiving malicious payloads. `BaseAttendee` fields (`firstName`, `lastName`, `companyName`, `countryRegion`, `zipPostalCode`, `organizationName`, `title`, `primarySocialMediaAccount`, `dietaryRestrictions`, `executiveAssistantName`, `mobilePhone`, `businessPhone`, `specialRequirements`) and `EventAttendee` fields (`firstName`, `lastName`, `invitedBy`, `campaignId`) must all use these schemas. Do not rely on application-layer sanitization or assume client-side filtering is sufficient.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/438"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "Response validation must be permissive for legacy attendee data; request-side validation is decoupled and handled separately by RSVP forms.",
+          "details": "PhoneNumber and AttendeeTextField schemas in GET /v1/events/{eventId}/attendees responses were over-constrained (pattern: ^\\+?[0-9]+$, maxLength: 20 for phone; pattern rejecting all HTML for text fields with maxLength: 100), causing 12.8% of production attendee records to fail HTTP 418 validation. The fix relaxes response schemas (PhoneNumber: drop pattern, maxLength 30; AttendeeTextField: newline-tolerant pattern ^(?![\\s\\S]*<[^>]*>)[\\s\\S]*$, maxLength 200) while explicitly documenting that form-side input validation remains the responsibility of RSVP-form frontends. This resolves the architectural tension: the service layer must accept and return legacy data as-is; sanitization and strict validation belong upstream.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/935"
+        },
+        {
+          "type": "pattern",
+          "summary": "Dev token system is gated by both URL query parameter (?devtokenmode=true) and host allowlist (localhost or approved dev instances); without the parameter, the UI button is hidden and stored tokens are not used for API calls.",
+          "details": "The dev token feature in EMC requires two conditions to be active: (1) the URL must include ?devtokenmode=true and (2) the host must be localhost or an approved dev instance (e.g., 14257-emc-dev.adobeio-static.net). When both conditions are met, the Dev Token button appears in the top-right UI and API calls use the stored token via tokenStorage.getValidToken(). When running in Adobe Experience Cloud Shell, the real IMS token is automatically used instead and the dev token button never appears. API calls should use constructRequestHeaders(token) and safeFetch() helpers to inject the token into request headers.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_QUICKSTART.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "ESP owns scope hierarchy enforcement (platform→org→team) and role-based permission checks via middleware; does not own row-level ACLs, ABAC, or OAuth scope validation.",
+          "details": "ESP's authorization system separates scope (where a user can act) from role/permissions (what they can do). Scopes form a 3-level hierarchy; groups are assigned to a scope, inherit a role, and can access that scope plus all descendants via resolveAccessibleScopes(). Type-scoped permissions (e.g., 'scope-team:read') gate operations on specific scope types. Row-level security within a scope, fine-grained audit logging, and ABAC are explicitly out of scope. IMS token validation is handled upstream by Content Gateway; ESP trusts CGW headers.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:docs/design-scopes-rbac.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC is a frontend-only ExC Shell SPA with no backend repo; all mutations and queries call external Adobe APIs (ESP, ESL) directly through a centralized ApiService with caching, validation, and dry-run support.",
+          "details": "EMC (web-src/src/) is a React 18 + TypeScript + React Spectrum S2 SPA deployed via Adobe App Builder. There is no backend in this repo. All API calls route through services/api.ts (ApiService) and cachedApi wrapper: GET requests use 10s caching with request dedup and pattern-based invalidation; all mutations require input validation via validateString()/validateObject() before dispatch; all fetch calls pass through safeFetch() with ALLOWED_HOSTS validation. Two external backends: Adobe ESP (events/series/speakers endpoints) and ESL (lifecycle/venues/attendees). Auth uses Bearer token (IMS in prod, dev token locally) + x-gw-ims-org-id header. Dry-run mode available via apiService.enableDryRun(). Form state (EventForm, SeriesForm) persists to sessionStorage with debounced auto-save; multi-step FormWizard uses useEventFormComponent hook lifecycle (onGatherPayload, onAfterSave, onLoadResponse, validate) for step registration.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:CLAUDE.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Country field defaulting follows a strict priority order: consentStringId > IMS profile countryCode > cookie > navigator.language (only when locale has region).",
+          "details": "In event-libs/v1/blocks/events-form/events-form.js, the country select prefill must respect this hierarchy: (1) never overwrite an existing attendee's consentStringId; (2) use IMS profile countryCode as primary default when signed in; (3) fall back to international_cookie; (4) use navigator.language only if the locale includes a region code (e.g. 'en-US', not 'en'). Use the synchronous findOptionByCountryCode helper to locate matching options. This prevents leaving the field empty and ensures attendee consent data is never lost during form personalization.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/75"
         }
       ],
-      "total_matching": 3,
-      "truncated": false
+      "total_matching": 190,
+      "truncated": true
     },
     "recentUpdates": [
       {

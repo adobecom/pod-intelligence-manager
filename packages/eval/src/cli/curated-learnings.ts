@@ -57,36 +57,58 @@ const RBAC_LEARNINGS: LearningNode[] = [
   },
 ];
 
+const EMC_ESP = "EMC ESP Integration v1";
+
 const SESSIONS_LEARNINGS: LearningNode[] = [
   {
-    type: "anti_pattern",
+    type: "decision",
     summary:
-      "Client-side date validation without timezone awareness caused events to appear with wrong dates for cross-timezone organizers",
+      "ESP event-speaker PUT body contract is { speakerId, speakerType, ordinal, creationTime, modificationTime } and nothing else",
     details:
-      "JavaScript Date() uses the browser's local timezone. An organizer in PST creating a Tokyo event entered '2026-06-15' but the API received '2026-06-14T07:00:00Z' due to offset. Fix: pair every date input with an explicit timezone selector and validate against the event's timezone, not the browser's.",
-    domains: ["frontend"],
-    confidence_score: 0.9,
-    source_pod_name: EVENT_CRUD,
+      "Per ESP OpenAPI, /v1/events/:eventId/speakers/:speakerId PUT accepts only those five fields. Echoing the full GET response (spreading dependentData) fails server-side validation and has been the root cause of repeated 400s on edit. When using callWithDependency's body-builder, fall back to dependentData per-field: body.X ?? dependentData.X. creationTime and modificationTime are server-issued; do not let callers override them. The same pattern applies to all ESP PUTs on speaker resources.",
+    domains: ["frontend", "backend"],
+    confidence_score: 0.95,
+    source_pod_name: EMC_ESP,
   },
   {
     type: "pattern",
     summary:
-      "Optimistic concurrency via modificationTime prevents lost updates on concurrent edits",
+      "Session-time helpers must return SessionTimeInfo so React state can update without a page refresh",
     details:
-      "Every PUT requires a modificationTime field matching the server's last-known value. If they differ, the update returns 409 with the current server state. The frontend shows a diff dialog allowing merge or overwrite.",
-    domains: ["backend", "frontend"],
+      "createSessionTimeForSession and upsertSessionTimeForSession previously returned Promise<void>, which dropped the API's sessionTimeId, creationTime, and modificationTime on the floor. Calling components could not update local state with the new optimistic-concurrency values, so users saw stale data and had to refresh the page after every session-time edit. Fix is to return the API response from both helpers and have handleAddSession / handleUpdateSession capture and propagate sessionTimeId + creationTime + modificationTime into local React session state. This is the EMC-wide convention for any API helper that yields server-issued timestamps.",
+    domains: ["frontend"],
     confidence_score: 0.9,
-    source_pod_name: EVENT_CRUD,
+    source_pod_name: EMC_ESP,
+  },
+  {
+    type: "anti_pattern",
+    summary:
+      "Spreading a GET response back into an ESP PUT body trips readOnly.openapi.validation",
+    details:
+      "ESP marks several fields as read-only on PUT (e.g. targetCms on /v1/series/:id). Series unpublish / archive / external-update flows previously echoed the full GET response into the PUT body, which fails ESP's OpenAPI validator with readOnly.openapi.validation. Fix: always filter the payload through the resource-specific prepareEsp*PutPayload helper before PUT. For series use prepareEspSeriesPutPayload (wraps filterSeriesData in 'update' mode). For events use prepareEslEventPutPayload. New ESP PUT endpoints should add a sibling helper in utils/dataFilters.ts before the call site is added.",
+    domains: ["frontend"],
+    confidence_score: 0.95,
+    source_pod_name: EMC_ESP,
   },
   {
     type: "decision",
     summary:
-      "Event status lifecycle: draft → published → active → completed → archived with explicit transitions",
+      "Per-resource PUT payload sanitizers live in utils/dataFilters.ts and follow prepareEsp{Resource}PutPayload naming",
     details:
-      "Each transition has validation rules (e.g., draft→published requires at least one session). Status transitions exposed as POST /:id/transition. Invalid transitions return 422.",
-    domains: ["backend", "pm"],
+      "Convention adopted across the EMC frontend: every ESP PUT endpoint has a corresponding prepareEsp{Resource}PutPayload function in web-src/src/utils/dataFilters.ts that calls filterSeriesData (or the resource-specific equivalent) in 'update' mode. This centralizes read-only-field stripping and ensures unpublish, archive, and external-update flows all go through the same validation layer. Do not invent ad-hoc filtering at the call site.",
+    domains: ["frontend"],
     confidence_score: 0.9,
-    source_pod_name: EVENT_CRUD,
+    source_pod_name: EMC_ESP,
+  },
+  {
+    type: "pattern",
+    summary:
+      "ESP resources use modificationTime for optimistic concurrency on PUT; clients must round-trip it",
+    details:
+      "Every ESP PUT on an updatable resource (event, series, session, speaker) requires the modificationTime field to match the server's last-known value. If they differ, PUT returns 409 with the current server state. Clients must therefore: (a) capture modificationTime on every GET, (b) send it back unchanged on the next PUT, (c) re-fetch on 409 and merge. Dropping or recomputing modificationTime client-side is the most common cause of silent edit failures on EMC.",
+    domains: ["frontend", "backend"],
+    confidence_score: 0.95,
+    source_pod_name: EMC_ESP,
   },
 ];
 

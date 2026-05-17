@@ -14,6 +14,21 @@ import { sessionBlockerSummary } from "./content-gen/session-blocker-summary.js"
 import { configDecisionWriteup } from "./content-gen/config-decision-writeup.js";
 import { progressUpdatePermissions } from "./content-gen/progress-update-permissions.js";
 
+import { eventSpeakerPutContract } from "./real-emc/event-speaker-put-contract.js";
+import { eventSpeakerPutContractVague } from "./real-emc/event-speaker-put-contract-vague.js";
+import { sessionTimeNoRefresh } from "./real-emc/session-time-no-refresh.js";
+import { seriesPutReadonlyTargetCms } from "./real-emc/series-put-readonly-targetcms.js";
+import { eventTitleMaxLength } from "./real-emc/event-title-max-length.js";
+import { ppnExplicitSelect } from "./real-emc/ppn-explicit-select.js";
+import { declinedRsvpStatus } from "./real-emc/declined-rsvp-status.js";
+import { detailPagePathPut } from "./real-emc/detail-page-path-put.js";
+import { includePartnersToggle } from "./real-emc/include-partners-toggle.js";
+import { prodPublishConfirmation } from "./real-emc/prod-publish-confirmation.js";
+import { sessionLocationTimeOverlap } from "./real-emc/session-location-time-overlap.js";
+import { rteQuillSemanticHtml } from "./real-emc/rte-quill-semantic-html.js";
+import { s2TabsCrashSegmentedControl } from "./real-emc/s2-tabs-crash-segmented-control.js";
+import { sxswTicketFieldConfigService } from "./real-emc/sxsw-ticket-field-config-service.js";
+
 export const ALL_TASKS: Task[] = [
   rbacPermissionResolution,
   rbac403Fallback,
@@ -27,6 +42,20 @@ export const ALL_TASKS: Task[] = [
   sessionBlockerSummary,
   configDecisionWriteup,
   progressUpdatePermissions,
+  eventSpeakerPutContract,
+  eventSpeakerPutContractVague,
+  sessionTimeNoRefresh,
+  seriesPutReadonlyTargetCms,
+  eventTitleMaxLength,
+  ppnExplicitSelect,
+  declinedRsvpStatus,
+  detailPagePathPut,
+  includePartnersToggle,
+  prodPublishConfirmation,
+  sessionLocationTimeOverlap,
+  rteQuillSemanticHtml,
+  s2TabsCrashSegmentedControl,
+  sxswTicketFieldConfigService,
 ];
 
 export function pickTasks(filter?: { ids?: string[]; tags?: string[] }): Task[] {

@@ -84,13 +84,13 @@ export const useOrgStore = create<OrgStore>((set) => ({
       api.getOrgTuning(),
       api.getOrgTuningHistory(),
     ]);
-    set({ orgTuning, tuningHistory });
+    set({ orgTuning, tuningHistory: tuningHistory ?? [] });
   },
 
   resetOrgTuning: async () => {
     const orgTuning = await api.deleteOrgTuning();
     const tuningHistory = await api.getOrgTuningHistory();
-    set({ orgTuning, tuningHistory });
+    set({ orgTuning, tuningHistory: tuningHistory ?? [] });
     return orgTuning;
   },
 
