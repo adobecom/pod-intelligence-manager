@@ -1,6 +1,6 @@
 {
   "podId": "pod-emc-rbac",
-  "pulledAt": "2026-05-08T02:07:39.161Z",
+  "pulledAt": "2026-05-13T02:43:22.276Z",
   "payload": {
     "pod": {
       "pod_id": "pod-emc-rbac",
@@ -85,40 +85,434 @@
     "relevantLearnings": {
       "nodes": [
         {
-          "type": "decision",
-          "summary": "Use Adobe IMS org_id as the tenant isolation boundary for all event data",
-          "details": "All event data is partitioned by IMS org_id. Every query includes org_id in the WHERE clause. Row-level security ensures one org cannot access another org's events even with a valid event ID. The org_id is extracted from the IMS token on every request.",
+          "type": "pattern",
+          "summary": "RBAC permission gating uses wildcard-matching permission strings (resource:access format) with fallback to domain-only permissions when role fetch returns 403, and gates UI elements via useHasPermission hooks and filterEvents/filterSeries helpers.",
+          "details": "Permissions are stored as Set<RBACPermission> in GroupContext and checked via useHasPermission(resource, access) or useRBACFilter helpers. Wildcard matching order: *:* → exact → resource:* → *:access. When GET /v1/roles/{roleId} returns 403, frontend falls back to event:*, series:*, session:*, cloud:*, config:*, integration:* (all domain actions visible, admin UI hidden). GroupContext increments groupVersion on group switch to trigger dashboard re-fetches; role is resolved before groupVersion bump to prevent race conditions. UI elements (TopNav tabs, Home cards, OverviewDashboard stat cards) are conditionally rendered using canReadEvents/canReadSeries/canReadClouds derived from useHasPermission. API service injects x-adobe-esp-group-id header for ESP requests when activeGroupId is set.",
           "domains": [
-            "backend",
-            "infra"
-          ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Event CRUD v1"
-        },
-        {
-          "type": "decision",
-          "summary": "Use REST endpoints for event CRUD instead of GraphQL — aligns with ESP platform conventions",
-          "details": "Decision: REST chosen over GraphQL because the team has stronger REST experience and the ESP platform's other services are REST-based. Standard REST endpoints with query params for filtering/pagination.",
-          "domains": [
+            "frontend",
             "backend"
           ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Event CRUD v1"
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Events Service Platform implements a three-tier hierarchical RBAC system (Platform → Org → Team) with type-scoped permissions, where all non-exempt endpoints require x-adobe-esp-group-id header and role resolution via middleware.",
+          "details": "The authorization model enforces a strict scope hierarchy: Platform owns Orgs, Orgs own Teams. Each scope maintains its own Groups, and users belong to Groups (not directly to scopes). All endpoints except public read/list series/events/sessions require the x-adobe-esp-group-id header. Express middleware resolves the user's role by looking up groupId in the scopes manager (pk: group#groupId, sk: role), then attaches the role object to UserInfo. Scope endpoints support type-scoped permissions (e.g., scope-team:write, scope-org:read) in addition to broad permissions (scope:*). The permission structure is {resource}:{access} where resources include scope, group, user, role, config, integration, series, event, session, and * for all; access includes read, write, delete, and *. Wildcard permissions like *:* grant full access (platform super admin), and scope-team:* grants full access only to team-type scopes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/Platform-Org-Team-Support.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "ESP owns scope hierarchy enforcement (platform→org→team) and role-based permission checks via middleware; does not own row-level ACLs, ABAC, or OAuth scope validation.",
+          "details": "ESP's authorization system separates scope (where a user can act) from role/permissions (what they can do). Scopes form a 3-level hierarchy; groups are assigned to a scope, inherit a role, and can access that scope plus all descendants via resolveAccessibleScopes(). Type-scoped permissions (e.g., 'scope-team:read') gate operations on specific scope types. Row-level security within a scope, fine-grained audit logging, and ABAC are explicitly out of scope. IMS token validation is handled upstream by Content Gateway; ESP trusts CGW headers.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:docs/design-scopes-rbac.md"
         },
         {
           "type": "anti_pattern",
-          "summary": "Validating registration form submissions only on the frontend allowed invalid data through",
-          "details": "Direct API calls (third-party integrations, curl) bypassed FE-only validation. Fix: server-side validation against the JSON schema on every POST. Frontend validation is for UX only.",
+          "summary": "Do not mark x-adobe-esp-group-id as required in OpenAPI specs for endpoints that service callers (e.g., Lambdas) invoke without group context; use resolveAccessibleScopes middleware to handle the absent header as a no-op instead.",
+          "details": "The GET /events/{eventId}/configs endpoint had x-adobe-esp-group-id marked required via $ref to EspGroupId parameter, causing OpenAPI validation to reject kinesis-processor Lambda calls with 400 before the route handler ran. The fix removes the parameter from the spec entirely, matching GET /events/{eventId}. The resolveAccessibleScopes middleware already handles absent headers gracefully for service callers. When the header is present (user-facing calls), middleware still processes it. This pattern applies to any ESP endpoint that must support both authenticated user requests (with group context) and service-to-service calls (without group context).",
           "domains": [
             "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/918"
+        },
+        {
+          "type": "pattern",
+          "summary": "Dev token mode is explicitly opt-in via URL parameter and host allowlist; never interferes with real IMS in Experience Cloud Shell.",
+          "details": "Dev token UI and localStorage token usage are only active when URL contains `?devtokenmode=true` AND host is in allowlist (checked via `isDevTokenModeEnabled()` in env.ts). Two separate bootstrap paths exist: `bootstrapInExcShell()` always uses real IMS token and completely bypasses dev token system; `bootstrapStandalone()` uses dev token from localStorage only when dev token mode is enabled. This dual-path design ensures dev tokens never interfere with production shell deployments.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_GUIDE.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC dev token system uses two-path bootstrap architecture: ExC Shell path (real IMS) vs. standalone path (dev token), with dev token activation gated by both hostname allowlist AND ?devtokenmode=true URL parameter.",
+          "details": "The dev token system is never active in Experience Cloud Shell (bootstrapInExcShell() path); it only activates in standalone mode (bootstrapStandalone()) when both hostname is in DEV_TOKEN_ALLOWED_HOSTNAMES (localhost, 127.0.0.1, or specific adobeio-static.net subdomains) AND URL contains ?devtokenmode=true. The isDevTokenModeEnabled() function in web-src/src/config/env.ts enforces this dual gate. Dev token button visibility, token storage use in ApiService.getAuthToken(), and useDevToken hook all depend on this check. This ensures dev tokens never leak into production/staging deployments and cannot interfere with real IMS sessions in the shell.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_SECURITY.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Meta Pixel tracking in event-libs uses a dual-mode metadata gate (martech vs. pixel-id) with safe fbq wrapper and BlockMediator subscription guard to prevent false positives on hydration.",
+          "details": "The meta-pixel script (event-libs/scripts/meta-pixel.js) supports two modes via the `meta-pixel` metadata tag: (1) martech mode — Adobe Launch manages the pixel, only RSVP triggers attach; (2) pixel-id mode — in-page bootstrap with the given ID. All fbq calls wrap in safeFbq (try/catch + existence check) to prevent page breakage. CompleteRegistration event guards against false positives on initial hydration by subscribing to BlockMediator's rsvpData and checking registration state, not firing on page-load hydration. The script loads via eventsDelayedActions() dynamic import to avoid LCP impact. ViewContent fires once per page via IntersectionObserver on RSVP button scroll; Lead fires on every click via document-level delegation.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/56"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not gate campaign-count updates on a single status condition; branch on the effective registrationStatus of both old and new attendee records to pick the correct count field (attendeeCount vs. waitlistAttendeeCount) and apply capacity/underflow guards independently.",
+          "details": "In `src/managers/attendeesMgr.js` `updateEventAttendee`, when an attendee's registrationStatus and campaignId both change in a single PUT, the `campaignChanging` branch must: (1) select the count field for the new campaign from `eventAttendee.registrationStatus` (waitlistAttendeeCount if waitlisted, else attendeeCount); (2) select the count field for the old campaign from `currentAttendee.registrationStatus` using the same logic; (3) apply capacity checks only to attendeeCount increments on the new campaign; (4) apply `> 0` guards to all decrements to prevent underflow. The anti-pattern is gating the entire branch on a single condition like `!movingOffWaitlist` or `!decliningRegistration`—this causes drift across the four transition modes (registered→waitlisted, waitlisted→registered, waitlisted→waitlisted, declined). The `movingOnto/OffWaitlist` sub-blocks must retain their `!campaignChanging` guard to avoid double-updates.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/932"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope configs (rsvp, locales, customAttributes) are the authoritative source for event metadata; publishing profiles are deprecated but retained for backward compatibility during migration.",
+          "details": "Events created under Creative Events (25f26faa-f8e2-4e99-b341-81a3995ef9af) and Enterprise Events (d758a3bc-ff31-4bfe-a2f5-343f074aec6c) scopes must define four config types: rsvp (pool of form fields), locales (localeNames, localeUrlCodes), and customAttributes (with primaryProductName and promotionalItems attributes). The Kinesis processor (events-kinesis-processor/ServiceProcessor.applyRelatedData) must call GET /v1/events/{eventId}/configs to hydrate event.locales, event.customAttributesConfig, and event.rsvpConfig at stream-processing time; event DDB records store only user selections (rsvpFormFields, customAttributes[] with valueId), not full definitions. Publishing profiles remain in the payload for backward compat but are no longer the source of truth. hoolihan-webhooks must read primary product from event.customAttributes[] where attribute='primaryProductName', promotional items from customAttributes[] where attribute='promotionalItems', RSVP pool from event.rsvpConfig.rsvpFormFields[], and locales from event.locales.localeNames/localeUrlCodes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-wcms-aio-migration-plan.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Unified search across resource metadata and nested relations (group + members) requires debounced query coordination, parallel prefetch, and match-type badges to disambiguate result sources.",
+          "details": "When implementing search that spans a parent resource (group) and its nested relations (members), use `onDebouncedQueryChange` and `searchLoading` props on the dashboard layout to coordinate async prefetch of related data (e.g., `getGroupUsers` calls) in parallel with the main query. Render match-type badges (e.g., 'Group match' vs 'Member match') to clarify which field matched. Auto-expand rows with member matches and scope the expanded panel's member list by the active query to avoid showing unrelated members. This pattern lives in `ResourceDashboardLayout` (coordination layer) and `ScopeGroupManagement` (search filter + prefetch logic).",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "github.com/adobecom/EMC/pull/140"
+        },
+        {
+          "type": "pattern",
+          "summary": "Speakers and sponsors are grouped by role/tier with per-group drag-and-drop reordering; role/tier changes move items to the end of the new group and trigger per-group ordinal recomputation.",
+          "details": "In SpeakersComponent.tsx and SponsorsComponent.tsx, items are grouped by speakerType and tier respectively. Drag-and-drop is restricted to within-group moves only (cross-group drops are blocked). When a speaker's role or sponsor's tier is changed via inline picker, the item is moved to the end of the new group. On save, onAfterSave computes per-group ordinals for both components. SponsorData now includes an optional ordinal field, and updateSponsorInEvent in api.ts explicitly preserves ordinal in the merge logic. Both components display a disclaimer note that group display order on the DA page is governed by template configuration, not EMC form ordering.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/142"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope configs unify RSVP forms, locales, and custom attributes under a single typed config system with scope-inherited hierarchy (org → team) and full-replace merge semantics.",
+          "details": "All configuration for the events console — RSVP form fields, locale definitions, and custom attribute definitions — is managed through a single `/v1/scopes/{scopeId}/configs` API with `type` field (e.g., 'rsvp', 'locales', 'custom-attributes'). Configs inherit down the scope hierarchy with full-replace merge per type. Frontend reads merged configs via `GET /v1/events/{eventId}/configs` or `GET /v1/series/{seriesId}/configs` with optional `?type=` filter. Custom attributes are a config type, not a separate entity. Admin management uses POST/PUT/DELETE on `/v1/scopes/{scopeId}/configs/{configId}` and requires `config:read`, `config:write`, or `config:delete` permissions.",
+          "domains": [
+            "backend",
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-fe-integration-guide.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Consent suite visibility and country-region capture follow a locale-aware, metadata-driven pattern: force-consent-collection metadata controls suite visibility; country picker data-country-code maps to payload.countryRegion; consent index URL uses locale-prefixed fallback pattern matching promotional-content.",
+          "details": "In events-form.js, the consent suite (country picker + terms) is conditionally rendered based on user type (guest) OR force-consent-collection metadata being true. Country pre-selection logic runs whenever the suite is present. The consent query index JSON is fetched via getConsentQueryIndexUrl() using getLocale() + FALLBACK_LOCALES pattern (same as promotional-content), not a static URL. On form submit, the selected country option's data-country-code attribute is extracted and sent as payload.countryRegion in the baseAttendee object; BASE_ATTENDEE_DATA_FILTER already whitelists this field. This establishes the contract: force-consent-collection is a boolean metadata flag that overrides guest-only consent visibility, and country selection always populates countryRegion when the suite is shown.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/74"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "ESL must mirror ESP's AttendeeTextField relaxations (maxLength 100→200, newline-tolerant regex) to avoid being a stricter validation gate than upstream, preventing legacy attendee data from passing re-validation.",
+          "details": "When ESL re-validates attendee payloads against its own OpenAPI spec, fields like `invitedBy` and `campaignId` (both typed as `AttendeeTextField`) must accept the same input that ESP accepts. The original pattern `^(?!.*<[^>]*>).*$` rejected newlines; the relaxed pattern `^(?![\\s\\S]*<[^>]*>)[\\s\\S]*$` accepts them. maxLength was raised from 100 to 200 characters. This is not a feature expansion—it is a compatibility fix to unblock legacy data that ESP already accepts. Do not selectively port only some field relaxations from ESP; ESL's `BaseAttendee` / `EventAttendee` schemas define which fields exist, and only those should be relaxed (e.g., `PhoneNumber` is unreferenced in ESL and should not be changed).",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/445"
+        },
+        {
+          "type": "pattern",
+          "summary": "IMS user context must be threaded as a prop through component tree (App → UserPanel, SideBar); UserPanel displays profile data with graceful fallback when IMS profile unavailable.",
+          "details": "The UserPanel component receives an `ims` prop containing `{ profile?: IMSProfile, org?: string, token?: string }` where IMSProfile has `userId`, `name`, `email`. Components extract user context via optional chaining (e.g., `ims.profile?.name || 'Guest'`). When `ims.profile` is absent, UserPanel renders 'Not Connected' state. This pattern establishes the contract for how IMS data flows through the EMC frontend: App.tsx passes `ims` to both UserPanel and SideBar, and any component needing user context receives the same IMS object structure. Token is never rendered; user ID is truncated in UI for privacy.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/USER_PANEL_IMPLEMENTATION.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Per-resource PUT payload sanitizers live in utils/dataFilters.ts and follow prepareEsp{Resource}PutPayload naming",
+          "details": "Convention adopted across the EMC frontend: every ESP PUT endpoint has a corresponding prepareEsp{Resource}PutPayload function in web-src/src/utils/dataFilters.ts that calls filterSeriesData (or the resource-specific equivalent) in 'update' mode. This centralizes read-only-field stripping and ensures unpublish, archive, and external-update flows all go through the same validation layer. Do not invent ad-hoc filtering at the call site.",
+          "domains": [
             "frontend"
           ],
           "confidence_score": 0.9,
-          "source_pod_name": "Registration Forms v1"
+          "source_pod_name": "sandbox-seed-datafilter-naming-convention"
+        },
+        {
+          "type": "pattern",
+          "summary": "Timing Framework uses two-phase schedule positioning: Phase 1 finds initial position by toggleTime traversal, Phase 2 validates against plugin conditions (Mobile Rider, metadata) before finalizing content display.",
+          "details": "The framework determines schedule position via getStartScheduleItemByToggleTime() which traverses a double-linked list to find the last item whose toggleTime has passed, then validates this position against active Mobile Rider sessions and metadata conditions. This two-phase approach ensures quick initial positioning while handling edge cases like MR session overrun. Plugins communicate state changes via BroadcastChannel, and the worker polls at random intervals (500-1500ms) to prevent thundering herd. The Chronobox block returns a Promise from init() that resolves when the first schedule item is received (with 3-second timeout), enabling CLS prevention while maintaining async framework behavior.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:event-libs/v1/features/timing-framework/README.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Event-attendee payload fields must be explicitly listed in EVENT_ATTENDEE_DATA_FILTER to be sent to ESL's addAttendeeToEvent endpoint.",
+          "details": "The EVENT_ATTENDEE_DATA_FILTER in event-libs/v1/utils/data-utils.js acts as an allowlist for which form fields are included in the event-attendee payload sent to ESL. New checkbox or form fields (e.g., requiresSxswTicket, shareInfoWithPartners) must be added to this filter in getEventAttendeePayload() to be transmitted. Additionally, when gating form fields via rsvp-form-fields metadata in events-form.js, new sheet fields must be listed in the visible array to render; unlisted fields are silently dropped.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/140"
+        },
+        {
+          "type": "pattern",
+          "summary": "Country field defaulting follows a strict priority order: consentStringId > IMS profile countryCode > cookie > navigator.language (only when locale has region).",
+          "details": "In event-libs/v1/blocks/events-form/events-form.js, the country select prefill must respect this hierarchy: (1) never overwrite an existing attendee's consentStringId; (2) use IMS profile countryCode as primary default when signed in; (3) fall back to international_cookie; (4) use navigator.language only if the locale includes a region code (e.g. 'en-US', not 'en'). Use the synchronous findOptionByCountryCode helper to locate matching options. This prevents leaving the field empty and ensures attendee consent data is never lost during form personalization.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/75"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not pass JS Date.now() (seconds) directly to eventsMgr date filters; convert to milliseconds to match gsi_sk storage format.",
+          "details": "The events-service-platform stores event dates in gsi_sk as 13-character millisecond timestamps. Callers passing Date.now() (10-character seconds) will silently fail to filter correctly. In src/managers/eventsMgr.js, ensure all date inputs to filtering operations are converted to milliseconds before comparison. This is a silent contract violation—no error is raised, making it a high-risk bug vector.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/890"
+        },
+        {
+          "type": "pattern",
+          "summary": "Parallel API queries for attendee status types are merged into a single result set; new status types require only type union updates and StatusBadge entries, not table/filter/export logic changes.",
+          "details": "In EMC's Registrations page, attendee statuses (registered, waitlisted, declined) are fetched via parallel `?type=X` queries in `getAllEventAttendees()` (web-src/src/services/api.ts) and merged into a single `AttendeeStats` result. The `RegistrationStatus` type union (web-src/src/types/attendee.ts) controls which statuses exist. Adding a new status requires: (1) extending the `RegistrationStatus` union, (2) adding a `StatusBadge` variant entry (web-src/src/components/shared/StatusBadge.tsx), and (3) updating `AttendeeStats` interface. Table rendering, filtering, and CSV export are data-driven and automatically support new statuses without code changes.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/128"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "RBAC scope attachment point: anchor at Series level, not Event, to enable transitive authorization through seriesId → scopeId resolution and efficient scope-based queries.",
+          "details": "Series is the natural top-level container in the ownership hierarchy (Series → Events → Sessions); every resource transitively knows its scope through seriesId. Store scopeId two ways: (1) embedded in series itemData for efficient reads, (2) as a DynamoDB relationship item (pk: scope#<scopeId>, sk: series#<seriesId>) to enable KeyConditionExpression queries like getGroupsForScope. Child scope inheritance uses recursive getDescendantScopeIds(scopeId) enumerated at query time (hierarchy is shallow: platform → org → team). Authorization middleware: resolveAccessibleScopes resolves group → descendant scope IDs → req.userInfo.accessibleScopeIds; requireResourceScopeAccess(getResourceScopeIdFn) gates single-resource access by checking resource's resolved scopeId. Backwards compatibility: treat scopeId: null as pre-RBAC (open access); new resources get scopeId on creation; existing series migrated via PUT /v1/series/:seriesId/scope using TransactWriteCommand.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/RBAC for event resources.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Dev token system is gated by both URL query parameter (?devtokenmode=true) and host allowlist (localhost or approved dev instances); without the parameter, the UI button is hidden and stored tokens are not used for API calls.",
+          "details": "The dev token feature in EMC requires two conditions to be active: (1) the URL must include ?devtokenmode=true and (2) the host must be localhost or an approved dev instance (e.g., 14257-emc-dev.adobeio-static.net). When both conditions are met, the Dev Token button appears in the top-right UI and API calls use the stored token via tokenStorage.getValidToken(). When running in Adobe Experience Cloud Shell, the real IMS token is automatically used instead and the dev token button never appears. API calls should use constructRequestHeaders(token) and safeFetch() helpers to inject the token into request headers.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_QUICKSTART.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Date-time formatting in event-libs uses template tokens ({LLL}, {timeRange}, etc.) with metadata field `custom-date-time-format`, falling back to smart auto-formatting (same-day vs. multi-day) when custom template is absent or invalid.",
+          "details": "The system defines a fixed set of template tokens: {YYYY}, {YY}, {LLLL}, {LLL}, {dddd}, {ddd}, {dd}, {timeRange}, {timeZone}. Content authors add `custom-date-time-format` metadata to override default formatting; the placeholder `[[user-event-date-time-range]]` renders the result. Required metadata fields are `local-start-time-millis` and `local-end-time-millis` (UTC milliseconds). Localization is automatic per locale (en-US, de-DE, fr-FR, es-ES). If custom template fails or is missing, the system falls back to smart auto-formatting: same-day events show single date/time, multi-day events show date range. This is the canonical contract for date rendering across the events-on-Milo platform.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:docs/date-time-formatting-guide.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Placeholder syntax for array iteration ([[@array(path.attr)separator]]) and conditional rendering ([[condition?(true):(false)]]) with BlockMediator store integration (@BM.storeName.property) enables dynamic content decoration in event templates.",
+          "details": "The events-milo frontend supports two core decoration patterns: (1) Array iteration via [[@array(metadata-path.attribute)separator]] syntax in events/scripts/utils.js, which extracts attributes from object arrays and joins with custom separators (default: space); (2) Conditional rendering via [[condition?(true-content):(false-content)]] supporting equality/inequality checks, AND (&) and OR (||) operators, and reactive BlockMediator store references (@BM.storeName.property). Store references automatically subscribe to changes and re-render content. These patterns are processed by parseMetadataPath, parseConditionalContent, and content-update.js. Use these for dynamic event state display (registration status, capacity, user type) without modifying template HTML.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:docs/advanced-decoration-feature.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Attendee status endpoint exposes only registration state, not full attendee record or event details.",
+          "details": "The GET /v1/events/{eventId}/attendees/{attendeeId or me}/status endpoint returns a minimal payload with only the `registered` boolean field. This establishes that status queries are scoped to registration state alone, not full attendee metadata or event context. The endpoint supports both explicit attendeeId and 'me' (current user) path parameters. Future status-related queries should follow this minimal-payload pattern rather than returning full attendee objects.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/135"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "Logged-in users must register with their authenticated email only; client-provided email in attendee creation payloads is rejected to prevent multi-registration abuse in third-party systems (SplashThat).",
+          "details": "The attendee creation endpoint (src/routes/events/attendee/create.js) extracts the user's email from the IMS token (src/utils/IMSToken.js) or UserInfo (src/utils/UserInfo.js) rather than accepting it from the request body. This enforces a server-side invariant: the GUID from the authenticated session is the source of truth for registration identity, preventing bad actors from bypassing third-party duplicate-registration checks by submitting alternate email addresses. Tests in create.test.js validate this constraint.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/393"
+        },
+        {
+          "type": "pattern",
+          "summary": "Invite-only events require a valid campaign URL parameter (?campaign=) to enable RSVP; gating occurs at button-disable and form-build stages with dictionary-driven error messaging.",
+          "details": "When an event has inviteOnly=true, RSVP is blocked unless a valid campaign ID is present in the URL query string. Validation uses getValidCampaignIdFromUrl() (utils/utils.js) against CAMPAIGN_ID_PATTERN (utils/constants.js). Gating is enforced in two places: (1) updateRSVPButtonState in decorate.js disables the button early via setCtaState('inviteOnlyNoCampaign'), and (2) events-form.js handleProfile blocks form construction entirely and renders an error message keyed to rsvp-invite-only-no-campaign-cta-text in the dictionary. The campaign ID is then passed to submitForm for server-side validation.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/77"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "AttendeeTextField maxLength relaxed from 100 to 200 chars to prevent ESL from being a stricter validation gate than upstream ESP for invitedBy and campaignId fields.",
+          "details": "ESP encountered PROD failures when legacy attendee records exceeded the 100-char cap on AttendeeTextField in GET /v1/events/{eventId}/attendees responses. ESL's POST /events/{eventId}/attendees/{attendeeId} validates invitedBy and campaignId via the same AttendeeTextField schema ($ref in openapi.json:2006). To maintain schema alignment and prevent ESL from rejecting valid payloads that ESP accepts, maxLength was bumped to 200. The injection pattern (^(?!.*<[^>]*>).*$) remains unchanged. PhoneNumber and mobilePhone/businessPhone fields were not ported because they have zero $refs in ESL's spec.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/444"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not use non-unique identifiers (consentId) as HTML select option values when the same ID appears across multiple rows; use a unique key (countryCode) as value and store the non-unique ID in a data attribute.",
+          "details": "In event-libs/v1/blocks/events-form/events-form.js, the consent country selector was setting `select.value = consentId`, which caused HTML's native select behavior to match only the first option with that value, leading to wrong country pre-population when the consent-query-index contained duplicate consentIds across countries. The fix: set `select.value = countryCode` (unique per country), store `consentId` in `data-consent-id` attribute on each option, then retrieve it via `selectedOption.dataset.consentId` during form submission. This pattern applies to any multi-row lookup where a non-unique identifier must be preserved for payload submission but a unique key is needed for DOM selection.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/89"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not send full config objects in hydrated event payloads; trim to only the fields actually used by the event (locales → selected only, rsvpFormFields → visible only, customAttributesConfig → omit entirely).",
+          "details": "In ServiceProcessor.js (aws/templates/lambda/events-kinesis-processor/src/), the hydrated event payload sent to Kinesis must filter config fields to reduce payload size and prevent frontend confusion from unused definitions. Specifically: (1) `locales` should contain only `{ locale → urlCode }` entries for locales in `event.localizations` keys, not the full config; (2) `rsvpConfig.rsvpFormFields` should be filtered to only fields where `event.rsvpFormFields.visible` is true; (3) `customAttributesConfig` should be omitted entirely. This prevents frontends from receiving and potentially rendering stale or irrelevant field definitions.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/920"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC frontend uses centralized design tokens (LAYOUT_DIMENSIONS, COLORS, Z_INDEX, pre-composed style objects) imported from `/web-src/src/styles/designSystem.ts` to enforce UI consistency and maintainability.",
+          "details": "All layout dimensions (GNAV_HEIGHT=56px, ACTION_BAR_HEIGHT=60px, SIDE_NAV_WIDTH=240px), colors (COLORS.ADOBE_RED, COLORS.GRAY_*), z-index layering (Z_INDEX.MODAL=600, Z_INDEX.GNAV=1000), and common style patterns (STICKY_GNAV_STYLES, FIXED_ACTION_BAR_STYLES, SCROLLABLE_CONTENT_STYLES) must be imported from designSystem.ts rather than hardcoded. Helper functions like createFixedHeightStyle() and createActionBarPadding() compute viewport-relative dimensions. Button state colors (BUTTON_HOVER_OVERLAY, BUTTON_ACTIVE_OVERLAY) are defined but legacy—Spectrum defaults are preferred. This centralizes all UI constants and prevents drift across components.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DESIGN_SYSTEM.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "ESP owns session/event/series/cloud entities and their integrations; Rainfocus scheduler is a separate ingest layer that transforms RF data into ESP schema via ESL API.",
+          "details": "The architecture establishes clear ownership: ESP (via ESL API) owns the DynamoDB Events Table (sessions, events, series, clouds, integrations); the events-scheduler Lambda is a separate ingest component that pulls from Rainfocus, transforms via RainfocusDataProcessor, and writes via POST/PUT /api/v1/sessions/{id}. The integration layer (events-integration-processor) consumes DynamoDB Kinesis streams and executes integrations scoped to session/event/series/cloud. This means: (1) ESP does not own Rainfocus polling logic, (2) integrations are defined per entity scope and triggered by DynamoDB change events, (3) the scheduler is stateless except for optional S3 config (lastRunTimestamp).",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:docs/architecture-rf-scheduler-and-integration.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "profile-cards block supports a `modal` variant that renders full profile content in a Milo modal on card interaction, with hover elevation styling and responsive image constraints (max 385px width).",
+          "details": "The profile-cards block in event-libs/v1/blocks/profile-cards/ now accepts a `modal` variant class that triggers Milo modal rendering for profile details. The variant applies hover elevation styling via CSS and enforces a 385px maximum width constraint on modal images. This pattern applies to both metadata-driven cards (from ESP) and static-authored cards, maintaining responsive behavior across viewport sizes. Implementation spans profile-cards.js (modal trigger logic), profile-cards.css (elevation + image constraints), and corresponding test fixtures.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/71"
+        },
+        {
+          "type": "pattern",
+          "summary": "Attendees resource has dual CRUD surfaces: standalone /v1/attendees/* for lifecycle management, and nested /v1/events/:eventId/attendees/* for event-specific membership operations only.",
+          "details": "The attendees CRUD operations split across two route hierarchies: /v1/attendees/{create,read,update,delete}.js handle attendee entity lifecycle (create new attendee, read attendee details, update attendee profile, delete attendee). The nested /v1/events/:eventId/attendees/* routes (in src/routes/events/attendees/) handle only event membership: POST adds an *existing* attendee to an event (does not create attendees), GET lists attendees for an event, DELETE removes attendee from event, PUT updates attendee's event-specific state. This separation prevents attendee creation from being coupled to event enrollment. Enforce via attendeesMgr.js and eventsMgr.js: standalone routes call attendeesMgr directly; nested routes validate attendee exists before calling eventsMgr membership methods.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/190"
+        },
+        {
+          "type": "pattern",
+          "summary": "ESL attendee schemas must stay synchronized with ESP spec; use generic field names (requiresTicket) at ESL layer even when ESP uses domain-specific names (requiresSxswTicket).",
+          "details": "When ESP (events-service-platform) adds a new attendee field, ESL (events-service-layer) must mirror it in both EventAttendeeBody (request schema in src/api/openapi.json) and EventAttendee (response schema). ESL renames domain-specific ESP fields to generic names for reusability—e.g., ESP's requiresSxswTicket becomes requiresTicket at ESL. Since ESL passes attendee bodies directly through to ESP without transformation, the schema addition alone is sufficient; no transformer logic is required. Bump the OpenAPI spec version when adding fields.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/457"
+        },
+        {
+          "type": "pattern",
+          "summary": "Event deletion must cascade to attendees via batch delete; use partition-aware queries to fetch all attendees before deletion.",
+          "details": "When deleting an event in eventsMgr.delete(), first retrieve the Event partition and query all attendees for that event, then batch-delete them together. The attendeesMgr.listAttendees() method accepts an 'inflate' boolean parameter to control whether attendee records are hydrated—use inflate=false when fetching for deletion to minimize payload. This prevents orphaned attendee records and ensures referential integrity across the events-service-platform data model.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/299"
+        },
+        {
+          "type": "pattern",
+          "summary": "DynamoDB single-table design uses composite PK/SK patterns (e.g., SCOPE#{id}, USER#{email}) to support access patterns like listing scope children, group members, and user→group reverse lookups without secondary indexes.",
+          "details": "All entities (Scope, Group, Role, Config, User) and their relationships live in one DynamoDB table. Entity items use self-keyed PK/SK (e.g., PK=SCOPE#{scopeId}, SK=SCOPE#{scopeId}). Relationships use composite keys: group membership is PK=GROUP#{groupId}, SK=USER#{email}; scope hierarchy is PK=SCOPE#{parentId}, SK=CHILD#{childId}; user→group index is PK=USER#{email}, SK=GROUP#{groupId}. This enables efficient queries like 'list all children of a scope' (query PK=SCOPE#{parentId}, SK begins_with CHILD#) and 'list all groups for a user' (query PK=USER#{email}, SK begins_with GROUP#). Future agents should follow this pattern when adding new relationships.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.85,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:docs/design-scopes-rbac-detail.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC dark mode uses system prefers-color-scheme via usePreferredColorScheme hook, syncs React Spectrum 2 colorScheme prop, and defines semantic CSS tokens (--emc-field-*, --emc-event-form-shell-bg) that mirror compiled S2 Field colors (dark #111 fill, #444 border) under both @media and html[data-color-scheme] selectors for hydration safety.",
+          "details": "The usePreferredColorScheme hook (web-src/src/hooks/usePreferredColorScheme.ts) subscribes to matchMedia('(prefers-color-scheme: dark)') and sets document.documentElement.dataset.colorScheme, which is passed to S2Provider colorScheme prop in App/AuthGate/RBACGate. index.css defines light :root defaults and dark @media (prefers-color-scheme: dark) overrides for both legacy --spectrum-global-* and new semantic tokens (--emc-field-bg, --emc-field-border, --emc-field-focus-ring). Tokens are duplicated under html[data-color-scheme='dark'] selector to ensure first paint and post-effect hydration alignment. Custom controls (Quill RTE via .rte-field-shell, Google Places venue field via .emc-field-like) suppress UA outline and use :focus-visible for keyboard focus rings while relying on border changes for mouse focus, matching S2 behavior. designSystem.ts SURFACES enum (shell/card/format-dialog) centralizes surface-level background tokens.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/EMC/pull/113"
+        },
+        {
+          "type": "pattern",
+          "summary": "ESP resources use modificationTime for optimistic concurrency on PUT; clients must round-trip it",
+          "details": "Every ESP PUT on an updatable resource (event, series, session, speaker) requires the modificationTime field to match the server's last-known value. If they differ, PUT returns 409 with the current server state. Clients must therefore: (a) capture modificationTime on every GET, (b) send it back unchanged on the next PUT, (c) re-fetch on 409 and merge. Dropping or recomputing modificationTime client-side is the most common cause of silent edit failures on EMC.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.95,
+          "source_pod_name": "sandbox-seed-optimistic-concurrency-modtime"
         }
       ],
-      "total_matching": 3,
-      "truncated": false
+      "total_matching": 190,
+      "truncated": true
     },
     "recentUpdates": [
       {

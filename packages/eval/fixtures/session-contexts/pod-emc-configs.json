@@ -1,6 +1,6 @@
 {
   "podId": "pod-emc-configs",
-  "pulledAt": "2026-05-08T02:07:39.164Z",
+  "pulledAt": "2026-05-13T02:43:23.274Z",
   "payload": {
     "pod": {
       "pod_id": "pod-emc-configs",
@@ -92,40 +92,438 @@
     "relevantLearnings": {
       "nodes": [
         {
-          "type": "decision",
-          "summary": "RSVP form fields defined as a JSON schema stored at scope level, rendered by a generic FormRenderer component",
-          "details": "Form schema (field types, labels, placeholders, validation, ordering) is stored at the scope level in the Configs service. A generic FormRenderer interprets the schema and renders the form. Decouples form layout from code so organizers can customize without developer involvement.",
+          "type": "scope_insight",
+          "summary": "Scope configs unify RSVP forms, locales, and custom attributes under a single typed config system with scope-inherited hierarchy (org → team) and full-replace merge semantics.",
+          "details": "All configuration for the events console — RSVP form fields, locale definitions, and custom attribute definitions — is managed through a single `/v1/scopes/{scopeId}/configs` API with `type` field (e.g., 'rsvp', 'locales', 'custom-attributes'). Configs inherit down the scope hierarchy with full-replace merge per type. Frontend reads merged configs via `GET /v1/events/{eventId}/configs` or `GET /v1/series/{seriesId}/configs` with optional `?type=` filter. Custom attributes are a config type, not a separate entity. Admin management uses POST/PUT/DELETE on `/v1/scopes/{scopeId}/configs/{configId}` and requires `config:read`, `config:write`, or `config:delete` permissions.",
           "domains": [
             "backend",
-            "frontend"
+            "frontend",
+            "design"
           ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Registration Forms v1"
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-fe-integration-guide.md"
         },
         {
           "type": "pattern",
-          "summary": "Localization overlays on RSVP forms: base field definitions + per-locale label/placeholder overrides",
-          "details": "Form schema has a base layer (field types, ordering, validation) and per-locale overlays that override only label and placeholder strings. FormRenderer selects the overlay matching the user's locale, falling back to the base layer.",
+          "summary": "Attendees resource has dual CRUD surfaces: standalone /v1/attendees/* for lifecycle management, and nested /v1/events/:eventId/attendees/* for event-specific membership operations only.",
+          "details": "The attendees CRUD operations split across two route hierarchies: /v1/attendees/{create,read,update,delete}.js handle attendee entity lifecycle (create new attendee, read attendee details, update attendee profile, delete attendee). The nested /v1/events/:eventId/attendees/* routes (in src/routes/events/attendees/) handle only event membership: POST adds an *existing* attendee to an event (does not create attendees), GET lists attendees for an event, DELETE removes attendee from event, PUT updates attendee's event-specific state. This separation prevents attendee creation from being coupled to event enrollment. Enforce via attendeesMgr.js and eventsMgr.js: standalone routes call attendeesMgr directly; nested routes validate attendee exists before calling eventsMgr membership methods.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/190"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope configs (rsvp, locales, customAttributes) are the authoritative source for event metadata; publishing profiles are deprecated but retained for backward compatibility during migration.",
+          "details": "Events created under Creative Events (25f26faa-f8e2-4e99-b341-81a3995ef9af) and Enterprise Events (d758a3bc-ff31-4bfe-a2f5-343f074aec6c) scopes must define four config types: rsvp (pool of form fields), locales (localeNames, localeUrlCodes), and customAttributes (with primaryProductName and promotionalItems attributes). The Kinesis processor (events-kinesis-processor/ServiceProcessor.applyRelatedData) must call GET /v1/events/{eventId}/configs to hydrate event.locales, event.customAttributesConfig, and event.rsvpConfig at stream-processing time; event DDB records store only user selections (rsvpFormFields, customAttributes[] with valueId), not full definitions. Publishing profiles remain in the payload for backward compat but are no longer the source of truth. hoolihan-webhooks must read primary product from event.customAttributes[] where attribute='primaryProductName', promotional items from customAttributes[] where attribute='promotionalItems', RSVP pool from event.rsvpConfig.rsvpFormFields[], and locales from event.locales.localeNames/localeUrlCodes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-wcms-aio-migration-plan.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Manager classes in events-service-platform automatically persist request body fields via spread operator; schema changes alone are sufficient for new optional fields without code changes.",
+          "details": "The `sponsorsMgr.js` manager spreads the full request body into `itemData` during POST/PUT operations, meaning any new optional field added to OpenAPI schemas (e.g., `ordinal` in EventSponsorCreateBody, EventSponsorUpdateBody) is automatically persisted and returned without requiring manager code changes. This pattern applies to sponsor creation, updates, and retrieval. When adding optional fields to event entities, verify the manager uses spread semantics before adding schema-only changes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/961"
+        },
+        {
+          "type": "pattern",
+          "summary": "All DELETE endpoints return 204 No Content; all database managers export singleton instances; event images are a first-class resource with full CRUD routes.",
+          "details": "DELETE operations across all routes (eventSeries/delete.js, events/delete.js, events/attendees/delete.js, events/speakers/delete.js, events/images/delete.js) now return HTTP 204 No Content instead of 200 with an empty array. All manager classes in src/managers/ (attendeesMgr.js, eventsMgr.js, seriesMgr.js, speakersMgr.js, venuesMgr.js) export a singleton instance rather than the class itself, requiring route handlers to call methods on the exported instance. Event images are now a managed resource with dedicated CRUD routes (src/routes/events/images/) backed by database implementation in eventsMgr.js.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/23"
+        },
+        {
+          "type": "pattern",
+          "summary": "Promotional content and dictionary manager support custom config location overrides via query parameters for testing and localization.",
+          "details": "The promotional-content block and dictionary-manager utility now accept custom config locations through query parameters (e.g., `eventlibs=adding-custom-config-locations`), allowing test URLs to load promo content and dictionary data from non-standard paths. This pattern enables A/B testing and regional content variants without code deployment. Implementation lives in event-libs/v1/blocks/promotional-content/promotional-content.js and event-libs/v1/utils/dictionary-manager.js; future work should follow this precedent when adding configurable content sources.",
           "domains": [
             "frontend",
             "design"
           ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Registration Forms v1"
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/40"
         },
         {
-          "type": "decision",
-          "summary": "Registration data stored separately from RSVP form schema — registrations are immutable once submitted",
-          "details": "Submitted registration records reference the form schema version they were submitted against. If the form schema changes after submission, existing registrations retain their original field values and validation.",
+          "type": "anti_pattern",
+          "summary": "Do not send full config objects in hydrated event payloads; trim to only the fields actually used by the event (locales → selected only, rsvpFormFields → visible only, customAttributesConfig → omit entirely).",
+          "details": "In ServiceProcessor.js (aws/templates/lambda/events-kinesis-processor/src/), the hydrated event payload sent to Kinesis must filter config fields to reduce payload size and prevent frontend confusion from unused definitions. Specifically: (1) `locales` should contain only `{ locale → urlCode }` entries for locales in `event.localizations` keys, not the full config; (2) `rsvpConfig.rsvpFormFields` should be filtered to only fields where `event.rsvpFormFields.visible` is true; (3) `customAttributesConfig` should be omitted entirely. This prevents frontends from receiving and potentially rendering stale or irrelevant field definitions.",
           "domains": [
             "backend"
           ],
-          "confidence_score": 0.9,
-          "source_pod_name": "Registration Forms v1"
+          "confidence_score": 0.78,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/920"
+        },
+        {
+          "type": "pattern",
+          "summary": "Orphaned page cleanup is triggered synchronously at Kinesis record-processing time by detecting detailPagePath changes via event history, not deferred to the handler loop.",
+          "details": "When a published, liveUpdate event is modified, EventDataStreamProcessor calls EventService.getEventHistory(eventId) to fetch the event's prior states. findLastPublishedHistory walks the history array newest-to-oldest, skipping entries whose timestamp matches the current modificationTime (race-condition guard), and returns the first entry with published=true && liveUpdate=true. If that entry's detailPagePath differs from the current one, sendEventDataToWebhook is called immediately with isDeleteEvent=true and the old path, allowing downstream consumers (e.g. SharePoint) to clean up orphaned pages without waiting for the main handler. History fetch failures are caught and logged; processing continues normally (no Kinesis retry). Timestamp comparison uses String() coercion on both sides to handle type differences between DynamoDB-unmarshalled numbers and history API values.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/929"
+        },
+        {
+          "type": "pattern",
+          "summary": "Scope configs support optional admin-set `label` field; UI falls back to `humanReadableType(type)` when label is absent, with raw type shown as muted secondary text.",
+          "details": "The `label` field is optional in `Config` and `ConfigCreateBody` OpenAPI schemas. Frontend renders `label ?? humanReadableType(type)` in the configs table (label in bold, type as muted secondary). The `humanReadableType()` helper converts camelCase type names to title case (e.g., `rsvp` → RSVP, `customAttributes` → Custom Attributes). Label is added to `SYSTEM_KEYS` to prevent KeyValueEditor from surfacing it as a raw field. Both Create and Edit modals include a Label TextField; Create omits it from payload if blank. Custom attribute items also support a label field between Name and Type rows in CustomAttributesEditor.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/946"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC migrated from sidebar to top navigation (gnav) layout; TopNav component in SideBar.tsx with UserPanel compact mode; App.tsx grid changed from ['sidebar', 'content'] to ['header', 'content'] with rows ['auto', '1fr'].",
+          "details": "The layout shift encodes a durable architectural pattern: (1) SideBar.tsx was repurposed as TopNav with horizontal nav items and brand logo on left, user panel on right; (2) UserPanel.tsx gained a `compact` prop that hides email/org and reduces avatar size for header context; (3) App.tsx grid layout changed from 2-column sidebar model to 2-row header model with grid areas ['header', 'content'] and rows ['auto', '1fr']; (4) Navigation links use `.nav-link` class with bottom border (3px solid transparent) for active state, not background highlight; (5) Content area must have `gridArea='content'` and overflow scroll enabled. This pattern is reusable for any future layout refactors and clarifies the component responsibility split.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/TOP_NAV_LAYOUT.md"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Scope-level configs (locales, rsvp, custom-attributes) are consolidated into a single typed config system with full-replace hierarchy merge per type, replacing publishing profiles and hardcoded locales.",
+          "details": "Configs are stored per scope (org/team only, not platform) with one config per type. Hierarchy merge is full-replace: if a team scope has a config of the same type as its parent org, the team's config completely replaces the parent's (not a partial merge). Custom attributes are NOT a separate entity—they are consolidated as `type: 'custom-attributes'` within the config system. Event custom attribute values are denormalized into the event's `itemData.customAttributes` array as `[{ attributeId, attribute, valueId, value, displayOrder }, ...]`. Backend manager methods: `createScopeConfig`, `getScopeConfigWithLocalizations`, `listConfigsForScope`, `updateScopeConfig`, `deleteScopeConfig` in `src/managers/scopesMgr.js`. Routes use `requirePermission('config', 'read/write/delete')`. DynamoDB stores config records with pk `config#<configId>`, localizations in separate row with sk `localizations`. Locales migration: `GET /v1/locales` deprecated in favor of `GET /v1/series/{seriesId}/configs?type=locales`; hardcoded fallback remains. Publishing profiles marked deprecated in OpenAPI but not removed.",
+          "domains": [
+            "backend",
+            "design",
+            "docs"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-and-custom-attributes.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC centralizes all API calls through a singleton ApiService class with consistent error handling, authentication management, and mock-to-real API switching via config.json action URLs.",
+          "details": "All external API calls route through ApiService.callAction<T>(actionName, params, method) in /web-src/src/services/api.ts. Authentication is set once via apiService.setAuthHeaders(token, org) and applied to all requests. Backend URLs are configured via apiService.setActionUrls(urls) from config.json, enabling mock-to-real switching without code changes: remove mock import, update the method to call this.callAction('actionName'), and add the URL to config.json actions object. Mock data lives in /web-src/src/mocks/ as TypeScript modules exporting both data and Promise-returning functions (with 300ms delay to simulate latency). This pattern decouples frontend from backend readiness and enables parallel development.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/API_CENTRALIZATION.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC frontend uses centralized design tokens (LAYOUT_DIMENSIONS, COLORS, Z_INDEX, pre-composed style objects) imported from `/web-src/src/styles/designSystem.ts` to enforce UI consistency and maintainability.",
+          "details": "All layout dimensions (GNAV_HEIGHT=56px, ACTION_BAR_HEIGHT=60px, SIDE_NAV_WIDTH=240px), colors (COLORS.ADOBE_RED, COLORS.GRAY_*), z-index layering (Z_INDEX.MODAL=600, Z_INDEX.GNAV=1000), and common style patterns (STICKY_GNAV_STYLES, FIXED_ACTION_BAR_STYLES, SCROLLABLE_CONTENT_STYLES) must be imported from designSystem.ts rather than hardcoded. Helper functions like createFixedHeightStyle() and createActionBarPadding() compute viewport-relative dimensions. Button state colors (BUTTON_HOVER_OVERLAY, BUTTON_ACTIVE_OVERLAY) are defined but legacy—Spectrum defaults are preferred. This centralizes all UI constants and prevents drift across components.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DESIGN_SYSTEM.md"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Event attendee route handlers use explicit field mappings instead of spreading req.body, causing OpenAPI-validated fields to silently drop before persistence.",
+          "details": "The attendee CRUD routes (create.js, update.js, read.js) in src/routes/events/attendees/ build eventAttendee objects by hand-picking fields rather than spreading req.body. This means fields validated by the OpenAPI spec (e.g., requiresTicket) can pass validation but never reach DynamoDB or the response. When adding a new attendee field, it must be explicitly added to all three route handlers' field mappings, or it will be silently dropped. Use explicit field mappings only when you need to exclude or transform fields; otherwise, spread req.body and filter at the schema layer.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/957"
+        },
+        {
+          "type": "pattern",
+          "summary": "Page metadata (PPN) fields require explicit user acknowledgment before save; use sentinel id 'no-${fieldKey}' to distinguish explicit *No* selection from unset state.",
+          "details": "EventFormData tracks metadataFieldAcknowledged (UI-only boolean map) to enforce that users must open each product/category dropdown and choose either a value or the *No* option before draft/publish. The *No* option uses stable id no-${fieldKey} (not startsWith('No ')) to persist correctly. After API load or successful save, hydrate acknowledgments so existing events remain usable without forced re-picking. Validate page-metadata fields only when catalogue fields exist. This prevents silent defaults and ensures intentional metadata decisions.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/138"
+        },
+        {
+          "type": "pattern",
+          "summary": "Dev token mode is explicitly opt-in via URL parameter and host allowlist; never interferes with real IMS in Experience Cloud Shell.",
+          "details": "Dev token UI and localStorage token usage are only active when URL contains `?devtokenmode=true` AND host is in allowlist (checked via `isDevTokenModeEnabled()` in env.ts). Two separate bootstrap paths exist: `bootstrapInExcShell()` always uses real IMS token and completely bypasses dev token system; `bootstrapStandalone()` uses dev token from localStorage only when dev token mode is enabled. This dual-path design ensures dev tokens never interfere with production shell deployments.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_GUIDE.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Unified search across resource metadata and nested relations (group + members) requires debounced query coordination, parallel prefetch, and match-type badges to disambiguate result sources.",
+          "details": "When implementing search that spans a parent resource (group) and its nested relations (members), use `onDebouncedQueryChange` and `searchLoading` props on the dashboard layout to coordinate async prefetch of related data (e.g., `getGroupUsers` calls) in parallel with the main query. Render match-type badges (e.g., 'Group match' vs 'Member match') to clarify which field matched. Auto-expand rows with member matches and scope the expanded panel's member list by the active query to avoid showing unrelated members. This pattern lives in `ResourceDashboardLayout` (coordination layer) and `ScopeGroupManagement` (search filter + prefetch logic).",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "github.com/adobecom/EMC/pull/140"
+        },
+        {
+          "type": "pattern",
+          "summary": "Parallel API queries for attendee status types are merged into a single result set; new status types require only type union updates and StatusBadge entries, not table/filter/export logic changes.",
+          "details": "In EMC's Registrations page, attendee statuses (registered, waitlisted, declined) are fetched via parallel `?type=X` queries in `getAllEventAttendees()` (web-src/src/services/api.ts) and merged into a single `AttendeeStats` result. The `RegistrationStatus` type union (web-src/src/types/attendee.ts) controls which statuses exist. Adding a new status requires: (1) extending the `RegistrationStatus` union, (2) adding a `StatusBadge` variant entry (web-src/src/components/shared/StatusBadge.tsx), and (3) updating `AttendeeStats` interface. Table rendering, filtering, and CSV export are data-driven and automatically support new statuses without code changes.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/128"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "ESP OpenAPI spec must define response schemas for all HTTP status codes returned by endpoints, including 200; missing schemas cause runtime validation failures.",
+          "details": "The events-service-platform validates responses against the OpenAPI spec at runtime. If an endpoint returns a 200 status code but the spec lacks a schema definition for that code, the request fails with 'no schema defined for status code' error. This applies to POST /v1/events/{eventId}/attendees and all other endpoints. Always add response schema definitions (including status code, content-type, and body shape) to src/api/openapi.json when adding or modifying endpoints, even for success cases.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/88"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not use Kinesis payload as source of truth for event metadata; always rehydrate from DynamoDB on every stream record, even for localization-only updates.",
+          "details": "EMC emits two Kinesis records per event save (one for event, one for localization), but only the first carries full metadata (e.g., cloud-type). In EventDataStreamProcessor.js processRecord(), the prior logic conditionally rehydrated from DynamoDB only when liveUpdate=true, causing localization records to forward partial payloads downstream. This broke `.page` preview RSVP forms when the second (partial) write overwrote the first (complete) write. Fix: always rebuild newData.itemData from liveData (DynamoDB), falling back to Kinesis payload only for localizations and localizationOverrides fields. This ensures both eventData and localization Kinesis records produce fully hydrated payloads to Hoolihan/AIO DA.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/937"
+        },
+        {
+          "type": "pattern",
+          "summary": "Speakers and sponsors are grouped by role/tier with per-group drag-and-drop reordering; role/tier changes move items to the end of the new group and trigger per-group ordinal recomputation.",
+          "details": "In SpeakersComponent.tsx and SponsorsComponent.tsx, items are grouped by speakerType and tier respectively. Drag-and-drop is restricted to within-group moves only (cross-group drops are blocked). When a speaker's role or sponsor's tier is changed via inline picker, the item is moved to the end of the new group. On save, onAfterSave computes per-group ordinals for both components. SponsorData now includes an optional ordinal field, and updateSponsorInEvent in api.ts explicitly preserves ordinal in the merge logic. Both components display a disclaimer note that group display order on the DA page is governed by template configuration, not EMC form ordering.",
+          "domains": [
+            "frontend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/142"
+        },
+        {
+          "type": "scope_insight",
+          "summary": "Events Service Platform implements a three-tier hierarchical RBAC system (Platform → Org → Team) with type-scoped permissions, where all non-exempt endpoints require x-adobe-esp-group-id header and role resolution via middleware.",
+          "details": "The authorization model enforces a strict scope hierarchy: Platform owns Orgs, Orgs own Teams. Each scope maintains its own Groups, and users belong to Groups (not directly to scopes). All endpoints except public read/list series/events/sessions require the x-adobe-esp-group-id header. Express middleware resolves the user's role by looking up groupId in the scopes manager (pk: group#groupId, sk: role), then attaches the role object to UserInfo. Scope endpoints support type-scoped permissions (e.g., scope-team:write, scope-org:read) in addition to broad permissions (scope:*). The permission structure is {resource}:{access} where resources include scope, group, user, role, config, integration, series, event, session, and * for all; access includes read, write, delete, and *. Wildcard permissions like *:* grant full access (platform super admin), and scope-team:* grants full access only to team-type scopes.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/Platform-Org-Team-Support.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC dev token system uses two-path bootstrap architecture: ExC Shell path (real IMS) vs. standalone path (dev token), with dev token activation gated by both hostname allowlist AND ?devtokenmode=true URL parameter.",
+          "details": "The dev token system is never active in Experience Cloud Shell (bootstrapInExcShell() path); it only activates in standalone mode (bootstrapStandalone()) when both hostname is in DEV_TOKEN_ALLOWED_HOSTNAMES (localhost, 127.0.0.1, or specific adobeio-static.net subdomains) AND URL contains ?devtokenmode=true. The isDevTokenModeEnabled() function in web-src/src/config/env.ts enforces this dual gate. Dev token button visibility, token storage use in ApiService.getAuthToken(), and useDevToken hook all depend on this check. This ensures dev tokens never leak into production/staging deployments and cannot interfere with real IMS sessions in the shell.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/DEV_TOKEN_SECURITY.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Timing Framework uses two-phase schedule positioning: Phase 1 finds initial position by toggleTime traversal, Phase 2 validates against plugin conditions (Mobile Rider, metadata) before finalizing content display.",
+          "details": "The framework determines schedule position via getStartScheduleItemByToggleTime() which traverses a double-linked list to find the last item whose toggleTime has passed, then validates this position against active Mobile Rider sessions and metadata conditions. This two-phase approach ensures quick initial positioning while handling edge cases like MR session overrun. Plugins communicate state changes via BroadcastChannel, and the worker polls at random intervals (500-1500ms) to prevent thundering herd. The Chronobox block returns a Promise from init() that resolves when the first schedule item is received (with 3-second timeout), enabling CLS prevention while maintaining async framework behavior.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:event-libs/v1/features/timing-framework/README.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Webhook integration payload structure uses nested resource/trigger/action schema with field-level mapping transforms to shape delivery payloads.",
+          "details": "Webhook integrations are configured at org or team scope via POST/PUT to /orgs/{orgId}/[teams/{teamId}/]integrations. The payload specifies: resource (e.g. 'session'), trigger (e.g. 'create'), conditions (filter expressions supporting eq, ne, gt, lt, ge, le, and, or operators), and action.endpoint + action.data. The action.data.objects array lists which entity types to include; action.data.transforms.[resourceType].mapping defines field renames (e.g. 'id' → 'sessionId') applied before delivery. Deliveries are tracked separately and can be redelivered via POST /orgs/{orgId}/[teams/{teamId}/]integrations/{integrationId}/deliveries/{deliveryId}/actions/redeliver.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.8,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/webhook integration payload.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "Batch reads for attendee hydration use a paged doBatchRead helper in BaseMgr to avoid N+1 queries and handle large result sets.",
+          "details": "The attendeesMgr delegates list operations to BaseMgr.doBatchRead(), which handles pagination internally rather than loading all attendees at once. This pattern centralizes batch-fetch logic and prevents unbounded memory use when hydrating attendees for events. The listAttendeesForEvent endpoint no longer enforces its own limit; pagination is managed by doBatchRead. Use this pattern for any manager needing to hydrate related entities at scale.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/228"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Localization Kinesis records omit non-localization fields like rsvpFormFields; always fetch the full event record before scope filtering when hydrating from a localization change.",
+          "details": "In ServiceProcessor.js, when a localization record change triggers `callHydratedEvent` with `forceSpWrite=true`, the hydrated payload lacks `rsvpFormFields` because Kinesis localization records only carry localization-scoped fields. The full event record (sk: event) must be fetched via `eventService.getEventData()` before scope config filtering runs, otherwise `rsvpConfig.rsvpFormFields` will be empty. Check for `forceSpWrite && !rsvpFormFields` to gate this parallel fetch and avoid redundant calls on non-localization event modifications.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/921"
+        },
+        {
+          "type": "pattern",
+          "summary": "When hydrating event payloads from DynamoDB kinesis records with sk=localizations, source seriesId and detailPagePath from the pre-fetched liveData object, not from newData.itemData (which lacks these fields).",
+          "details": "In EventDataStreamProcessor.js, when processing a localization record change (sk=localizations), the newData.itemData payload contains only localizations and localizationOverrides. To build a complete hydrated event for ESL, pull seriesId and detailPagePath from liveData (fetched via eventService.getEventData at processRecord start), not from newData.itemData. This is safe because EventService.updateVenue writes the new detailPagePath to DynamoDB before the venue record fires the kinesis stream, ensuring liveData.detailPagePath is current. Omitting these fields causes DA webhook page creation to fail or write to wrong locations.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/917"
+        },
+        {
+          "type": "decision",
+          "summary": "ESP event-speaker PUT body contract is { speakerId, speakerType, ordinal, creationTime, modificationTime } and nothing else",
+          "details": "Per ESP OpenAPI, /v1/events/:eventId/speakers/:speakerId PUT accepts only those five fields. Echoing the full GET response (spreading dependentData) fails server-side validation and has been the root cause of repeated 400s on edit. When using callWithDependency's body-builder, fall back to dependentData per-field: body.X ?? dependentData.X. creationTime and modificationTime are server-issued; do not let callers override them. The same pattern applies to all ESP PUTs on speaker resources.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.95,
+          "source_pod_name": "sandbox-seed-event-speaker-put-contract"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC is a frontend-only ExC Shell SPA with no backend repo; all mutations and queries call external Adobe APIs (ESP, ESL) directly through a centralized ApiService with caching, validation, and dry-run support.",
+          "details": "EMC (web-src/src/) is a React 18 + TypeScript + React Spectrum S2 SPA deployed via Adobe App Builder. There is no backend in this repo. All API calls route through services/api.ts (ApiService) and cachedApi wrapper: GET requests use 10s caching with request dedup and pattern-based invalidation; all mutations require input validation via validateString()/validateObject() before dispatch; all fetch calls pass through safeFetch() with ALLOWED_HOSTS validation. Two external backends: Adobe ESP (events/series/speakers endpoints) and ESL (lifecycle/venues/attendees). Auth uses Bearer token (IMS in prod, dev token locally) + x-gw-ims-org-id header. Dry-run mode available via apiService.enableDryRun(). Form state (EventForm, SeriesForm) persists to sessionStorage with debounced auto-save; multi-step FormWizard uses useEventFormComponent hook lifecycle (onGatherPayload, onAfterSave, onLoadResponse, validate) for step registration.",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "github.com/adobecom/EMC/doc:CLAUDE.md"
+        },
+        {
+          "type": "resolved_conflict",
+          "summary": "Response validation must be permissive for legacy attendee data; request-side validation is decoupled and handled separately by RSVP forms.",
+          "details": "PhoneNumber and AttendeeTextField schemas in GET /v1/events/{eventId}/attendees responses were over-constrained (pattern: ^\\+?[0-9]+$, maxLength: 20 for phone; pattern rejecting all HTML for text fields with maxLength: 100), causing 12.8% of production attendee records to fail HTTP 418 validation. The fix relaxes response schemas (PhoneNumber: drop pattern, maxLength 30; AttendeeTextField: newline-tolerant pattern ^(?![\\s\\S]*<[^>]*>)[\\s\\S]*$, maxLength 200) while explicitly documenting that form-side input validation remains the responsibility of RSVP-form frontends. This resolves the architectural tension: the service layer must accept and return legacy data as-is; sanitization and strict validation belong upstream.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/935"
+        },
+        {
+          "type": "pattern",
+          "summary": "EMC frontend organizes event form as 13 modular components under EventForm/ directory, each owning a logical section (venue, speakers, agenda, etc.), composed by EventForm.tsx wizard container.",
+          "details": "The EventForm/ directory contains 13 specialized components (EventFormatComponent, EventInfoComponent, VenueComponent, SpeakersComponent, SponsorsComponent, AgendaComponent, EventImagesComponent, ProfilesComponent, RegistrationConfigComponent, RegistrationFieldsComponent, PageMetadataComponent, plus index.ts barrel export) that are composed into a multi-step wizard by the parent EventForm.tsx container. Each component owns a logical domain (e.g., VenueComponent handles Google Places integration, SpeakersComponent manages speaker CRUD, RegistrationFieldsComponent configures RSVP form fields). This modular decomposition enables independent testing, reuse, and maintenance of form sections. The barrel export (index.ts) centralizes imports for the parent wizard.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.8,
+          "source_pod_name": "github.com/adobecom/EMC/doc:docs/FRONTEND.md"
+        },
+        {
+          "type": "pattern",
+          "summary": "RSVP field metadata is loaded from external event-libs config via configService.getRsvpConfig; boolean attendee fields render as 'Yes'/'No' in UI and CSV exports.",
+          "details": "RegistrationFieldsComponent loads RSVP field catalogs via configService.getRsvpConfig (with caching/retry), and renders each field's Label from the JSON config. In AttendeeTableComponent, boolean columns (e.g., requiresSxswTicket) display as 'yes'/'no' in table cells; AttendeeFiltersComponent maps filter chips to 'Yes'/'No'; ExportDialog normalizes boolean columns to 'Yes'/'No' in CSV. The field definition lives in external event-libs experiencecloud.json (not in EMC repo), following the Type/Options conventions of other Experience Cloud RSVP fields. Add requiresSxswTicket?: boolean to attendee.ts type definitions.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "github.com/adobecom/EMC/pull/150"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Asymmetric state transitions in attendee status updates can cause count underflow: registered→waitlisted must mirror waitlisted→registered with symmetric increment/decrement and gsi_sk rewrites, guarded by the same validation rules.",
+          "details": "In `src/managers/attendeesMgr.js`, `updateEventAttendee` had a `movingOffWaitlist` branch (waitlisted→registered) that decremented `waitlistAttendeeCount` and incremented `attendeeCount`, but no symmetric `movingOntoWaitlist` branch (registered→waitlisted). This caused the counts to drift: when an attendee later transitioned back to registered, the decrement ran against a count that was never incremented, resulting in negative values that violated OpenAPI schema validation (`minimum: 0`). The fix adds a `movingOntoWaitlist` transaction that: (1) decrements `attendeeCount` and increments `waitlistAttendeeCount` on both event and campaign rows (when `campaignId` present), (2) rewrites `gsi_sk` from `attendee#<id>` to `waitlist#<now>#<id>` so `listWaitlistForEvent` queries find the row, (3) gates both branches with identical `allowWaitlisting` and `waitlistAttendeeLimit` guards, and (4) adds defensive `waitlistAttendeeCount > 0` conditions to the decrement operations to prevent further underflow from pre-existing drift.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.88,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/931"
+        },
+        {
+          "type": "pattern",
+          "summary": "Localization workflow delegates project initialization to Glaas API; events-service-layer updates DB with returned task metadata after async Glaas call.",
+          "details": "When a localization task is created via POST /events/localization-task, the service calls Glaas API to start the project (GlaasProvider.startProject()), then persists the returned task info (task ID, status, timestamps) to the events DB via LocalizationService. This establishes the contract: Glaas owns project lifecycle and returns task metadata; events-service-layer owns the DB record and webhook ingestion (glaas-esl/event-update.js) for async status updates. The pattern appears in src/routes/events/localization-task/create.js and src/services/events/localization/LocalizationService.js.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.75,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-layer/pull/255"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not apply strict input validation schemas to GET response bodies; use separate input and output schemas to preserve backward compatibility with legacy data.",
+          "details": "In events-service-platform, attendee phone fields (`mobilePhone`, `businessPhone`) must support two schemas: a strict `PhoneNumberInput` pattern `^[+\\d\\s\\-().]+$` for POST/PUT writes, and a permissive `PhoneNumber` schema for GET responses. Implement this via OpenAPI `allOf` composition on request bodies (`requestBodies/BaseAttendee`, `requestBodies/Attendee`) while keeping response schemas unchanged. This prevents validation errors on legacy data (e.g. `\"None\"`, `\"N/A\"`) that exists in the database but should not be accepted on new writes. See `src/api/openapi.json` for the schema structure and `src/api/test/openapi-attendees-validation.test.js` for validation test patterns.",
+          "domains": [
+            "backend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/940"
+        },
+        {
+          "type": "pattern",
+          "summary": "Placeholder syntax for array iteration ([[@array(path.attr)separator]]) and conditional rendering ([[condition?(true):(false)]]) with BlockMediator store integration (@BM.storeName.property) enables dynamic content decoration in event templates.",
+          "details": "The events-milo frontend supports two core decoration patterns: (1) Array iteration via [[@array(metadata-path.attribute)separator]] syntax in events/scripts/utils.js, which extracts attributes from object arrays and joins with custom separators (default: space); (2) Conditional rendering via [[condition?(true-content):(false-content)]] supporting equality/inequality checks, AND (&) and OR (||) operators, and reactive BlockMediator store references (@BM.storeName.property). Store references automatically subscribe to changes and re-render content. These patterns are processed by parseMetadataPath, parseConditionalContent, and content-update.js. Use these for dynamic event state display (registration status, capacity, user type) without modifying template HTML.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "github.com/adobecom/event-libs/doc:docs/advanced-decoration-feature.md"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not use undefined in History.diff.deleted payloads; convert to null for DynamoDb compatibility.",
+          "details": "DynamoDb does not serialize undefined values, causing deleted item fields to be silently dropped from History records. In src/utils/History.js, the diff.deleted property must convert undefined values to null before storage. This ensures audit trails accurately reflect which fields were present in deleted items. Apply this conversion in the History utility layer, not at the service boundary, to prevent data loss in event audit logs.",
+          "domains": [
+            "backend"
+          ],
+          "confidence_score": 0.82,
+          "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/747"
+        },
+        {
+          "type": "pattern",
+          "summary": "profile-cards block supports a `modal` variant that renders full profile content in a Milo modal on card interaction, with hover elevation styling and responsive image constraints (max 385px width).",
+          "details": "The profile-cards block in event-libs/v1/blocks/profile-cards/ now accepts a `modal` variant class that triggers Milo modal rendering for profile details. The variant applies hover elevation styling via CSS and enforces a 385px maximum width constraint on modal images. This pattern applies to both metadata-driven cards (from ESP) and static-authored cards, maintaining responsive behavior across viewport sizes. Implementation spans profile-cards.js (modal trigger logic), profile-cards.css (elevation + image constraints), and corresponding test fixtures.",
+          "domains": [
+            "frontend",
+            "design"
+          ],
+          "confidence_score": 0.72,
+          "source_pod_name": "github.com/adobecom/event-libs/pull/71"
+        },
+        {
+          "type": "anti_pattern",
+          "summary": "Do not omit detailPagePath from event PUT payloads; instead, use dataFilters to toggle submittable: true when title changes, coordinating with backend OpenAPI spec updates.",
+          "details": "When updating an event via ESL PUT, detailPagePath was previously omitted because the backend marked it read-only. However, title changes require a new detailPagePath (new DA page). The fix: in useEventFormSave.ts, call dataFilters to set detailPagePath.submittable = true before the PUT, and detect title changes to trigger the DA page path dialog. This requires coordinated backend changes to the OpenAPI spec to allow the field in PUT requests. The anti-pattern is assuming a read-only field can never be submitted; instead, use conditional submittability flags in dataFilters based on business logic (e.g., title mutation).",
+          "domains": [
+            "frontend",
+            "backend"
+          ],
+          "confidence_score": 0.78,
+          "source_pod_name": "github.com/adobecom/EMC/pull/119"
         }
       ],
-      "total_matching": 3,
-      "truncated": false
+      "total_matching": 190,
+      "truncated": true
     },
     "recentUpdates": [
       {

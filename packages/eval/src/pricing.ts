@@ -30,6 +30,7 @@ export const PRICING: Record<string, ModelPricing> = {
   "us.anthropic.claude-sonnet-4-6": { input: 3, output: 15, cacheCreate: 3.75, cacheRead: 0.3 },
   "us.anthropic.claude-opus-4-7": { input: 15, output: 75, cacheCreate: 18.75, cacheRead: 1.5 },
   "us.anthropic.claude-haiku-4-5": { input: 1, output: 5, cacheCreate: 1.25, cacheRead: 0.1 },
+  "us.anthropic.claude-haiku-4-5-20251001-v1:0": { input: 1, output: 5, cacheCreate: 1.25, cacheRead: 0.1 },
 };
 
 export function priceFor(model: string): ModelPricing | null {

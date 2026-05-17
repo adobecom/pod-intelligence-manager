@@ -17,7 +17,7 @@ import {
 const API_BASE = process.env.PIM_API_URL ?? "http://localhost:4000";
 const CALLBACK_PORT = parseInt(process.env.PIM_CALLBACK_PORT ?? "9876", 10);
 
-interface HealthResponse {
+interface CliConfigResponse {
   auth_mode?: "trust" | "ims";
   ims_client_id?: string;
   ims_env?: ImsEnv;
@@ -141,12 +141,13 @@ export function registerAuthTools(server: McpServer): void {
         }
       }
 
-      // Probe server health for client_id + ims config
-      let health: HealthResponse;
+      // Fetch CLI config (includes ims_cli_client_secret). /api/health intentionally
+      // omits the secret per the security split documented in server/src/index.ts.
+      let cliConfig: CliConfigResponse;
       try {
-        const res = await fetch(`${API_BASE}/api/health`);
+        const res = await fetch(`${API_BASE}/api/cli-config`);
         if (!res.ok) throw new Error(`status ${res.status}`);
-        health = (await res.json()) as HealthResponse;
+        cliConfig = (await res.json()) as CliConfigResponse;
       } catch (err) {
         throw new Error(
           `Cannot reach PIM server at ${API_BASE}: ${err instanceof Error ? err.message : err}. ` +
@@ -154,14 +155,14 @@ export function registerAuthTools(server: McpServer): void {
         );
       }
 
-      if (health.auth_mode === "trust") {
+      if (cliConfig.auth_mode === "trust") {
         return json({
           status: "trust_mode",
           message: "Server is in trust mode — authentication is not required.",
         });
       }
 
-      const clientId = process.env.PIM_IMS_CLIENT_ID ?? health.ims_cli_client_id ?? health.ims_client_id;
+      const clientId = process.env.PIM_IMS_CLIENT_ID ?? cliConfig.ims_cli_client_id ?? cliConfig.ims_client_id;
       if (!clientId) {
         throw new Error(
           "Server did not advertise an IMS client_id. " +
@@ -169,9 +170,9 @@ export function registerAuthTools(server: McpServer): void {
         );
       }
 
-      const clientSecret = process.env.PIM_IMS_CLIENT_SECRET ?? health.ims_cli_client_secret;
-      const imsEnv: ImsEnv = (process.env.PIM_IMS_ENV as ImsEnv) ?? health.ims_env ?? "stg1";
-      const scope = process.env.PIM_IMS_SCOPES ?? health.ims_cli_scopes ?? "AdobeID,openid";
+      const clientSecret = process.env.PIM_IMS_CLIENT_SECRET ?? cliConfig.ims_cli_client_secret;
+      const imsEnv: ImsEnv = (process.env.PIM_IMS_ENV as ImsEnv) ?? cliConfig.ims_env ?? "stg1";
+      const scope = process.env.PIM_IMS_SCOPES ?? cliConfig.ims_cli_scopes ?? "AdobeID,openid";
 
       const pkce = generatePkce();
       const state = generateState();
@@ -278,6 +279,7 @@ export function registerAuthTools(server: McpServer): void {
         email: profile.email,
         ims_user_id: profile.userId,
         client_id: auth.clientId,
+        client_secret: auth.clientSecret,
         ims_env: auth.imsEnv,
       };
       saveCredentials(creds);

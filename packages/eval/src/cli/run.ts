@@ -24,11 +24,17 @@ interface CliArgs {
   armIds?: string[];
   runnerName?: "bedrock" | "anthropic";
   model?: string;
+  /** Per-arm model override, e.g. {"control":"us.anthropic.claude-sonnet-4-6","pim-full":"us.anthropic.claude-haiku-4-5-20251001-v1:0"}. Falls back to --model for arms not listed. */
+  armModels?: Record<string, string>;
   judgeRunnerName?: "bedrock" | "anthropic";
   judgeModel?: string;
   reportPath?: string;
   bypassJudgeCache?: boolean;
   maxOutputTokens?: number;
+  /** Number of times to run each (task, arm) combination. Default 1. */
+  seeds?: number;
+  /** Sampling temperature override. Auto-bumps to 0.3 when seeds > 1 unless user sets it. */
+  temperature?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -41,11 +47,24 @@ function parseArgs(argv: string[]): CliArgs {
       case "arms": out.armIds = val.split(","); break;
       case "runner": out.runnerName = val as "bedrock" | "anthropic"; break;
       case "model": out.model = val; break;
+      case "arm-models": {
+        // Comma-separated arm:model pairs. The model value can itself contain colons
+        // (cross-region inference profiles like "us.anthropic...") so split on the FIRST colon only.
+        out.armModels = {};
+        for (const pair of val.split(",")) {
+          const colon = pair.indexOf(":");
+          if (colon <= 0) throw new Error(`--arm-models entry "${pair}" must be armId:model`);
+          out.armModels[pair.slice(0, colon).trim()] = pair.slice(colon + 1).trim();
+        }
+        break;
+      }
       case "judge-runner": out.judgeRunnerName = val as "bedrock" | "anthropic"; break;
       case "judge-model": out.judgeModel = val; break;
       case "report": out.reportPath = val; break;
       case "no-judge-cache": out.bypassJudgeCache = true; break;
       case "max-output-tokens": out.maxOutputTokens = Number(val); break;
+      case "seeds": out.seeds = Number(val); break;
+      case "temperature": out.temperature = Number(val); break;
       default:
         // ignore unknown
         break;
@@ -90,13 +109,15 @@ async function runOne(
   judgeModel: string,
   bypassJudgeCache: boolean,
   maxOutputTokens: number,
+  temperature: number | undefined,
+  seed: number,
 ): Promise<EvalRow> {
   const segments = arm.build(task, fixture);
 
   // Step 1: runner — if this throws, we have no output to judge.
   let runnerResult;
   try {
-    runnerResult = await runner.run(segments, { model, maxOutputTokens });
+    runnerResult = await runner.run(segments, { model, maxOutputTokens, temperature });
   } catch (err) {
     return {
       taskId: task.id,
@@ -147,6 +168,8 @@ async function runOne(
     judge,
     costUsd: costFor(runnerResult.model, runnerResult.usage),
     signalsHit: findSignals(runnerResult.text, task.expectedSignals),
+    tags: task.tags,
+    seed,
     ...(judgeError ? { error: judgeError } : {}),
   };
 }
@@ -166,9 +189,31 @@ async function main(): Promise<void> {
   const model = args.model ?? defaultModelFor(runner.name);
   const judgeModel = args.judgeModel ?? defaultJudgeModelFor(judgeRunner.name);
   const maxOutputTokens = args.maxOutputTokens ?? 4096;
+  const seeds = args.seeds && args.seeds > 0 ? args.seeds : 1;
+  // When seeds > 1 we want sampling variance for an honest pass-rate distribution.
+  // If the caller didn't override, bump temperature to 0.3 — enough to diverge across
+  // seeds without going chaotic. When seeds === 1 we leave temperature as the caller
+  // set it (undefined → model default), preserving prior behavior.
+  const temperature =
+    args.temperature !== undefined
+      ? args.temperature
+      : seeds > 1
+        ? 0.3
+        : undefined;
+  // Judge cache must be bypassed when seeds > 1; otherwise identical outputs across
+  // seeds (or even minor variations that produce the same cache key) would reuse the
+  // same judge verdict and mask variance.
+  const bypassJudgeCache = (args.bypassJudgeCache ?? false) || seeds > 1;
 
+  const armModelFor = (armId: string): string => args.armModels?.[armId] ?? model;
   console.log(`[run] runner=${runner.name} model=${model} judgeRunner=${judgeRunner.name} judgeModel=${judgeModel}`);
-  console.log(`[run] tasks=${tasks.length} arms=[${arms.map((a) => a.id).join(",")}]`);
+  if (args.armModels) {
+    for (const arm of arms) {
+      const m = armModelFor(arm.id);
+      if (m !== model) console.log(`[run]   arm=${arm.id} -> model=${m}`);
+    }
+  }
+  console.log(`[run] tasks=${tasks.length} arms=[${arms.map((a) => a.id).join(",")}] seeds=${seeds}${temperature !== undefined ? ` temp=${temperature}` : ""}`);
 
   const podIds = Array.from(new Set(tasks.map((t) => t.podId)));
   const fixtures = new Map<string, SessionContextFixture>();
@@ -181,20 +226,35 @@ async function main(): Promise<void> {
   const ordered = [...tasks].sort((a, b) => (a.podId === b.podId ? 0 : a.podId.localeCompare(b.podId)));
 
   const rows: EvalRow[] = [];
-  for (const arm of arms) {
-    for (const task of ordered) {
-      const fixture = fixtures.get(task.podId) ?? null;
-      const t0 = Date.now();
-      const row = await runOne(task, arm, fixture, runner, model, judgeRunner, judgeModel, args.bypassJudgeCache ?? false, maxOutputTokens);
-      const elapsed = Date.now() - t0;
-      const status = row.judge.passed ? "PASS" : "FAIL";
-      console.log(
-        `[run] ${arm.id.padEnd(10)} ${task.id.padEnd(34)} ${status} ` +
-        `score=${row.judge.score.toFixed(2)} ` +
-        `in=${row.usage.inputTokens} out=${row.usage.outputTokens} cacheR=${row.usage.cacheReadTokens} cacheW=${row.usage.cacheCreationTokens} ` +
-        `cost=$${row.costUsd.toFixed(4)} t=${elapsed}ms`,
-      );
-      rows.push(row);
+  for (let seed = 0; seed < seeds; seed++) {
+    for (const arm of arms) {
+      for (const task of ordered) {
+        const fixture = fixtures.get(task.podId) ?? null;
+        const t0 = Date.now();
+        const row = await runOne(
+          task,
+          arm,
+          fixture,
+          runner,
+          armModelFor(arm.id),
+          judgeRunner,
+          judgeModel,
+          bypassJudgeCache,
+          maxOutputTokens,
+          temperature,
+          seed,
+        );
+        const elapsed = Date.now() - t0;
+        const status = row.judge.passed ? "PASS" : "FAIL";
+        const seedTag = seeds > 1 ? ` seed=${seed}` : "";
+        console.log(
+          `[run] ${arm.id.padEnd(10)} ${task.id.padEnd(34)}${seedTag} ${status} ` +
+          `score=${row.judge.score.toFixed(2)} ` +
+          `in=${row.usage.inputTokens} out=${row.usage.outputTokens} cacheR=${row.usage.cacheReadTokens} cacheW=${row.usage.cacheCreationTokens} ` +
+          `cost=$${row.costUsd.toFixed(4)} t=${elapsed}ms`,
+        );
+        rows.push(row);
+      }
     }
   }
 

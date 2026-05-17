@@ -47,6 +47,17 @@ export interface Task {
   testHarness?: string;
   /** Content-gen only. */
   rubric?: Rubric;
+  /**
+   * Optional reference output (e.g., the merged patch on a real-PR task).
+   * When present, ground-truth-aware judges include it as reference material
+   * so the model is scored against what the team actually shipped.
+   */
+  groundTruth?: {
+    /** The reference output. For real-PR tasks this is the merged diff (unified format). */
+    output: string;
+    /** Where this came from: repo + PR # + merge SHA, or any provenance note. */
+    note?: string;
+  };
   /** Tag tasks for filtering: e.g., "smoke", "rbac". */
   tags?: string[];
 }
