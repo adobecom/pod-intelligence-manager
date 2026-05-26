@@ -1,29 +1,29 @@
 # npm / Artifactory (internal packages)
 
-This monorepo publishes **`ado-pim`**, **`@pim/shared`**, **`@pim/sdk`**, and **`@pim/mcp-server`** to Adobe Artifactory using the **`npm-adobe-release`** repository.
+This monorepo publishes **`ado-pim`**, **`@pim/shared`**, **`@pim/sdk`**, and **`@pim/mcp-server`** to Adobe Artifactory using the **`npm-adobe-pim-release`** repository.
 
 ## Registry URL (authoritative)
 
-Use the URL from **Artifactory → npm-adobe-release → Set me up**. It should match:
+`https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/`
 
-`https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/`
+Root **`.npmrc`** in git sets **`@pim:registry=…`** to this URL (no secrets). **`ado-pim`** and all `@pim/*` packages use **`publishConfig.registry`** in their `package.json` as well.
 
-Root **`.npmrc`** in git sets **`@pim:registry=…`** only (no secrets). **`ado-pim`** uses **`publishConfig.registry`** in `packages/cli/package.json`.
+> **Common mistake:** `~/.npmrc` may have `@pim:registry` pointing to `npm-adobe-release` (the broader Adobe registry). The `@pim` packages live on `npm-adobe-pim-release` — ensure your user config matches the repo `.npmrc`.
 
 ## Authentication (never commit tokens)
 
 1. Prefer **browser login** (per Artifactory UI):
 
    ```bash
-   npm login --registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/ --auth-type=web --scope=@pim
+   npm login --registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/ --auth-type=web --scope=@pim
    ```
 
 2. Or put the **scoped** snippet in your **user** **`~/.npmrc`**, not the repo:
 
    ```ini
-   @pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
-   //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:_authToken=<token>
-   //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/:email=you@adobe.com
+   @pim:registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/
+   //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/:_authToken=<token>
+   //artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/:email=you@adobe.com
    ```
 
    Omit **`//.../:always-auth`** — Artifactory’s “Set me up” snippet often includes it, but **npm 11+** treats per-registry **`always-auth`** as an unknown key and will drop it in a future major. A **`_authToken`** for that host is enough for Artifactory in practice.
@@ -31,7 +31,7 @@ Root **`.npmrc`** in git sets **`@pim:registry=…`** only (no secrets). **`ado-
 3. Verify:
 
    ```bash
-   npm whoami --registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-release/
+   npm whoami --registry=https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/
    ```
 
 If a token was ever pasted into the **repo** `.npmrc`, **revoke it** in Artifactory and create a new one.

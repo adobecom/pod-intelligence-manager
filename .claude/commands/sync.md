@@ -1,8 +1,8 @@
 Pull the latest PIM pod context and summarize what's relevant to your current work.
 
 Steps:
-1. Run: pim context --pod pod-pim-live-demo-prep-848a3e --scope frontend --diff
-2. If no previous context exists, run without --diff: pim context --pod pod-pim-live-demo-prep-848a3e --scope frontend --brief
+1. Run: pim context --pod pod-emc-webhook-integration-84aa08 --scope frontend --diff
+2. If no previous context exists, run without --diff: pim context --pod pod-emc-webhook-integration-84aa08 --scope frontend --brief
 3. Parse the output and summarize:
    - Current pod pressure and day number
    - Any open conflicts that affect scope "frontend"
