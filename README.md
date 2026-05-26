@@ -36,7 +36,7 @@ Optional:
 | Goal | Easiest command |
 |------|----------------|
 | **Just the CLI** (no clone needed) | Install from Artifactory: `npm install -g ado-pim --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/` — then `pim --help`. You’ll need Artifactory credentials (see below). |
-| **Just the MCP for Claude Desktop** (no clone needed) | Log in to Artifactory once (see below), then add the `npx` config to your Claude Desktop `mcpServers`. See **`@pim/mcp-server`** later in this file. |
+| **Just the MCP for Claude Desktop** (no clone needed) | Log in to Artifactory once (see below), `npm install -g @pim/mcp-server`, then add the `node` config to your Claude Desktop `mcpServers`. See **`@pim/mcp-server`** later in this file. |
 | **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and **`ado-pim`** (CLI package), links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
 | **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
 
@@ -211,18 +211,24 @@ The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, t
 
 **Setup:**
 
-**Option A — npm package (recommended, no clone needed):**
+**Option A — npm global install (recommended, no clone needed):**
 
 1. Log in to Artifactory once (see Artifactory credentials above).
 
-2. Add to your Claude Desktop `~/Library/Application Support/Claude/claude_desktop_config.json`:
+2. Install globally:
+
+```bash
+npm install -g @pim/mcp-server
+```
+
+3. Add to your Claude Desktop `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "pim": {
-      "command": "npx",
-      "args": ["-y", "@pim/mcp-server@0.1.0"],
+      "command": "node",
+      "args": ["/opt/homebrew/lib/node_modules/@pim/mcp-server/dist/index.js"],
       "env": {
         "PIM_API_URL": "https://d1ygncl0yqo6sv.cloudfront.net"
       }
@@ -231,7 +237,9 @@ The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, t
 }
 ```
 
-3. Restart Claude Desktop. `npx` downloads and caches the package on first launch.
+> If your npm global root differs from `/opt/homebrew/lib`, run `npm root -g` to find the correct path.
+
+4. Restart Claude Desktop. It runs the installed binary directly — no registry hit on startup, so an expired Artifactory token won't break it. Only re-run `npm install -g @pim/mcp-server` when upgrading.
 
 **Option B — local build (contributors):**
 
