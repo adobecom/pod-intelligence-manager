@@ -181,12 +181,16 @@ export function _resetForTests(): void {
 
 // --- Token Estimation ---
 
-const TOKENS_PER_SUMMARY = 20;
-const TOKENS_PER_DETAILS = 80;
+// ~4 chars/token is the Anthropic rule-of-thumb. We measure actual node content
+// because real summaries vary 30–1500+ chars and details swing wider still; a
+// flat per-node constant lets queryKnowledge admit ~2x its declared max_tokens
+// worth of content when include_details=true.
+const CHARS_PER_TOKEN = 4;
 const TOKENS_PER_EDGE = 10;
 
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
-  return TOKENS_PER_SUMMARY + (includeDetails ? TOKENS_PER_DETAILS : 0);
+  const chars = node.summary.length + (includeDetails ? node.details.length : 0);
+  return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN));
 }
 
 /** Omit embedding from serialized query results unless explicitly requested (debug). */
