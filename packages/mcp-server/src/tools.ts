@@ -509,14 +509,17 @@ export function registerTools(server: McpServer) {
       confidence_min: z
         .number()
         .optional()
-        .describe("Minimum confidence score (0.0-1.0). Defaults to 0.8; pass 0 for curation/debug sweeps."),
+        .describe("Minimum confidence score (0.0-1.0). Defaults to 0.7; pass 0 for curation/debug sweeps."),
       curated_only: z.boolean().optional().describe("Only return human-curated nodes"),
-      text_search: z.string().optional().describe("Substring filter on summary+details (narrows candidates)."),
+      text_search: z
+        .string()
+        .optional()
+        .describe("Word-level filter on summary+details via keyword index (narrows candidates)."),
       query_text: z
         .string()
         .optional()
         .describe(
-          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it, filters out weak cosine-similarity matches, then ranks results; unlike text_search it is concept-level rather than literal token matching. Prefer this for concept-level lookups.",
+          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it, ranks by cosine similarity, and falls back to keyword overlap when embeddings are weak or missing. Prefer this over text_search for concept-level lookups.",
         ),
       max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
       include_details: z.boolean().optional().describe("Include full node details"),
@@ -526,7 +529,7 @@ export function registerTools(server: McpServer) {
       const { max_tokens, include_details, limit, query_text, ...filters } = args;
       const result = await apiPost("/api/knowledge/query", {
         filters,
-        max_tokens,
+        max_tokens: max_tokens ?? 2000,
         include_details,
         limit,
         ...(query_text ? { query_text } : {}),

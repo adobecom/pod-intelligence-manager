@@ -187,7 +187,13 @@ export function _resetForTests(): void {
 // worth of content when include_details=true.
 const CHARS_PER_TOKEN = 4;
 const TOKENS_PER_EDGE = 10;
-const DEFAULT_CONFIDENCE_MIN = 0.8;
+/** Aligns with ad-hoc submission default (0.7) so submit_knowledge_learning nodes are queryable. */
+const DEFAULT_CONFIDENCE_MIN = 0.7;
+const DEFAULT_QUERY_MAX_TOKENS = 2000;
+/** Minimum share of query keywords that must appear on a node to bypass the cosine gate. */
+const KEYWORD_OVERLAP_GATE_RATIO = 0.5;
+/** Minimum absolute keyword hits (when the query has many terms). */
+const KEYWORD_OVERLAP_GATE_MIN_HITS = 2;
 
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
@@ -361,7 +367,7 @@ export async function addLearningsToGraph(
 
 // --- Query Knowledge ---
 
-function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string[] {
+function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"], queryText?: string): string[] {
   const fromExplicit =
     filters.keywords?.map((k) => k.toLowerCase().trim()).filter((k) => k.length > 2) ?? [];
   const fromTextSearch = filters.text_search
@@ -370,14 +376,115 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"]): string
         .filter((w) => w.length > 2)
         .map((w) => w.toLowerCase())
     : [];
+  const fromQueryText = queryText ? keywordsFromTexts([queryText]) : [];
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const w of [...fromExplicit, ...fromTextSearch]) {
+  for (const w of [...fromExplicit, ...fromTextSearch, ...fromQueryText]) {
     if (seen.has(w)) continue;
     seen.add(w);
     out.push(w);
   }
   return out;
+}
+
+function hasExactShortKeywordMatch(nodeKeywords: Set<string> | undefined, keywords: string[]): boolean {
+  if (!nodeKeywords || keywords.length === 0 || keywords.length > 2) return false;
+  return keywords.every((kw) => nodeKeywords.has(kw.toLowerCase()));
+}
+
+function countKeywordMatches(nodeKeywords: Set<string> | undefined, keywords: string[]): number {
+  if (!nodeKeywords || keywords.length === 0) return 0;
+  let hits = 0;
+  for (const kw of keywords) {
+    if (nodeKeywords.has(kw.toLowerCase())) hits++;
+  }
+  return hits;
+}
+
+/** Lets keyword-strong or short exact matches through the cosine gate (incl. unembedded nodes). */
+function passesSemanticRelevanceGate(
+  nodeKeywords: Set<string> | undefined,
+  keywords: string[],
+  querySimilarity: number | undefined,
+  minQuerySimilarity: number,
+): boolean {
+  if (hasExactShortKeywordMatch(nodeKeywords, keywords)) return true;
+  if (querySimilarity !== undefined && querySimilarity >= minQuerySimilarity) return true;
+
+  const kwHits = countKeywordMatches(nodeKeywords, keywords);
+  if (kwHits === 0 || keywords.length === 0) return false;
+  if (keywords.length <= 2) return kwHits === keywords.length;
+  return kwHits >= KEYWORD_OVERLAP_GATE_MIN_HITS && kwHits / keywords.length >= KEYWORD_OVERLAP_GATE_RATIO;
+}
+
+type ScoredNode = {
+  node: KnowledgeNode;
+  querySimilarity?: number;
+  exactShortKeywordMatch: boolean;
+  keywordHits: number;
+  score: number;
+};
+
+function scoreCandidates(
+  candidates: KnowledgeNode[],
+  state: OrgGraphState,
+  scopes: string[],
+  keywords: string[],
+  queryEmbedding: number[] | null | undefined,
+  hubIds: Set<string>,
+  graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
+): ScoredNode[] {
+  return candidates.map((node) => {
+    const precomputedKeywords = state.nodeKeywords.get(node.id);
+    const querySimilarity =
+      queryEmbedding && node.embedding
+        ? cosineSimilarity(queryEmbedding, node.embedding)
+        : undefined;
+    return {
+      node,
+      querySimilarity,
+      exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, keywords),
+      keywordHits: countKeywordMatches(precomputedKeywords, keywords),
+      score: scoreRelevance(
+        node,
+        { scopes, keywords, querySimilarity, precomputedKeywords },
+        hubIds,
+        graphTuning,
+      ),
+    };
+  });
+}
+
+function applySemanticGate(
+  scored: ScoredNode[],
+  state: OrgGraphState,
+  keywords: string[],
+  queryEmbedding: number[] | null | undefined,
+  minQuerySimilarity: number,
+): ScoredNode[] {
+  if (!queryEmbedding) return scored;
+
+  const gated = scored.filter(({ node, querySimilarity }) =>
+    passesSemanticRelevanceGate(
+      state.nodeKeywords.get(node.id),
+      keywords,
+      querySimilarity,
+      minQuerySimilarity,
+    ),
+  );
+
+  // Cosine gate eliminated everyone — fall back to keyword-strong matches only.
+  if (gated.length === 0 && keywords.length > 0) {
+    return scored
+      .filter(({ keywordHits }) => {
+        if (keywordHits === 0) return false;
+        if (keywords.length <= 3) return keywordHits >= 1;
+        return keywordHits >= KEYWORD_OVERLAP_GATE_MIN_HITS;
+      })
+      .sort((a, b) => b.keywordHits - a.keywordHits || b.score - a.score);
+  }
+
+  return gated;
 }
 
 // `null` means "no filter applied yet — all nodes qualify".
@@ -398,6 +505,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     include_embeddings = false,
     limit,
     query_embedding,
+    query_text,
   } = options;
 
   // Step 1: Filter candidates using index-based set intersections.
@@ -468,31 +576,22 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
 
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
-  const keywords = mergeScoringKeywords(filters);
+  const keywords = mergeScoringKeywords(filters, query_text);
   const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
 
-  let scored = candidates.map((node) => {
-    const querySimilarity =
-      query_embedding && node.embedding
-        ? cosineSimilarity(query_embedding, node.embedding)
-        : undefined;
-    return {
-      node,
-      querySimilarity,
-      score: scoreRelevance(
-        node,
-        { scopes, keywords, querySimilarity, precomputedKeywords: state.nodeKeywords.get(node.id) },
-        hubIds,
-        graphTuning,
-      ),
-    };
-  });
+  let scored = scoreCandidates(
+    candidates,
+    state,
+    scopes,
+    keywords,
+    query_embedding,
+    hubIds,
+    graphTuning,
+  );
 
   if (query_embedding) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
-    scored = scored.filter(({ querySimilarity }) =>
-      querySimilarity !== undefined && querySimilarity >= minQuerySimilarity,
-    );
+    scored = applySemanticGate(scored, state, keywords, query_embedding, minQuerySimilarity);
   }
 
   const totalMatching = scored.length;
@@ -502,7 +601,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   const resultNodes: KnowledgeNode[] = [];
   let tokenCount = 0;
   const effectiveLimit = limit ?? scored.length;
-  const tokenBudget = max_tokens ?? Infinity;
+  const tokenBudget = max_tokens ?? DEFAULT_QUERY_MAX_TOKENS;
 
   for (const { node } of scored) {
     if (resultNodes.length >= effectiveLimit) break;

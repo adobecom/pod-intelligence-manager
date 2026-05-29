@@ -180,7 +180,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
         details: "",
         domains: ["backend"],
         confidence: "inferred",
-        confidence_score: 0.79,
+        confidence_score: 0.69,
       },
     ]);
 
@@ -267,6 +267,64 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.truncated).toBe(false);
   });
 
+  it("keeps exact short keyword matches even when semantic similarity is weak", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "EMC frontend route shell layout pattern",
+        details: "EMC pages share global shell navigation and layout conventions.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Timing framework schedule positioning",
+        details: "Schedule position is computed from toggle time traversal.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: {},
+      max_tokens: 20_000,
+      query_text: "EMC",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["EMC frontend route shell layout pattern"]);
+    expect(q.total_matching).toBe(1);
+  });
+
+  it("does not let partial keyword overlap from a long semantic query bypass the gate", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Session mtime cache invalidation pattern",
+        details: "Use file modification timestamps during session updates.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: {},
+      max_tokens: 20_000,
+      query_text: "PIM pod agent protocol requires pulling session context before substantive work",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
   it("returns strong semantic matches after applying the cosine relevance gate", async () => {
     const orgId = await seedGraph([
       {
@@ -338,7 +396,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.total_matching).toBe(2);
   });
 
-  it("does not return unembedded nodes for semantic queries", async () => {
+  it("does not return unembedded nodes for embedding-only queries with no keyword overlap", async () => {
     const orgId = await seedGraph([
       {
         type: "pattern",
@@ -359,6 +417,63 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(q.nodes).toHaveLength(0);
     expect(q.total_matching).toBe(0);
+  });
+
+  it("returns unembedded nodes when query_text keyword overlap is strong", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Legacy unembedded backend learning",
+        details: "Created before embedding backfill completed.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = undefined;
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_text: "legacy unembedded backend learning",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(1);
+    expect(q.nodes[0]?.summary).toContain("unembedded");
+  });
+
+  it("falls back to keyword ranking when semantic gate matches nothing", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Redis session cache invalidation pattern",
+        details: "Use Redis TTL for session expiry.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Webhook payload structure convention",
+        details: "Normalize inbound webhook payloads before persistence.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_text: "redis session cache",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["Redis session cache invalidation pattern"]);
   });
 
   it("getRelevantLearnings with projectId filters out nodes tagged to other projects", async () => {

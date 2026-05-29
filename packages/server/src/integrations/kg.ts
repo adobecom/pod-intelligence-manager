@@ -64,6 +64,7 @@ export async function searchKG(opts: IntegrationSearchOpts): Promise<Integration
       include_details: true,
       limit,
       query_embedding: embedding,
+      ...(queryText ? { query_text: queryText } : {}),
     });
 
     if (result.nodes.length === 0) {

@@ -100,9 +100,14 @@ export default async function graphRoutes(app: FastifyInstance) {
   // If `query_text` is provided and `query_embedding` is not, we generate the embedding
   // server-side so callers without Bedrock creds can still get semantic scoring.
   app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req) => {
-    const { query_text, query_embedding, ...rest } = req.body;
+    const { query_text, query_embedding, max_tokens, ...rest } = req.body;
     const embedding = query_embedding ?? (query_text ? await generateEmbedding(query_text) : null);
-    return queryKnowledge(req.org!.org_id, { ...rest, query_embedding: embedding });
+    return queryKnowledge(req.org!.org_id, {
+      ...rest,
+      query_text,
+      query_embedding: embedding,
+      max_tokens: max_tokens ?? 2000,
+    });
   });
 
   // Convenience: relevant learnings for given scopes.

@@ -97,12 +97,12 @@ export interface KnowledgeQueryFilters {
    * tagged with this project; exclude nodes tagged with other projects.
    */
   include_project_id?: string;
-  /** Minimum confidence score. queryKnowledge defaults to 0.8 when omitted. */
+  /** Minimum confidence score. queryKnowledge defaults to 0.7 when omitted (matches ad-hoc submission default). */
   confidence_min?: number;
   curated_only?: boolean;
   /** When false (default), nodes with `superseded_by` set are excluded. Pass true to include them. */
   include_superseded?: boolean;
-  /** Substring filter on summary + details (unchanged behavior). */
+  /** Word-level filter via the keyword index (summary + details tokenized; not substring). */
   text_search?: string;
   /**
    * Terms for relevance scoring only (does not filter candidates).

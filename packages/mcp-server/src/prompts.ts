@@ -207,11 +207,12 @@ Assess:
       domains: z.string().optional().describe("Comma-separated domain tags to filter by"),
     },
     async ({ query, domains }) => {
-      const filters: Record<string, unknown> = { text_search: query };
+      const filters: Record<string, unknown> = {};
       if (domains) filters.domains = domains.split(",").map((d) => d.trim());
 
       const result = await apiPost<KnowledgeQueryResult>("/api/knowledge/query", {
         filters,
+        query_text: query,
         max_tokens: 3000,
         include_details: true,
       });
