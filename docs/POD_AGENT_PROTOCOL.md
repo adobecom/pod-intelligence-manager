@@ -22,7 +22,7 @@ Every agent and human contributor working in a **pod** overseen by PIM must foll
 
 **If conflict pressure is critical (≥ 0.8)** or ingestion is halted: stop and surface open conflicts; do not proceed with changes that add contested context until humans resolve blocking items.
 
-**Optional — external context:** `pullSessionContext({ externalQuery })` (SDK) or the `external_query` argument on the MCP `get_agent_session_context` tool adds a cross-source lookup (Slack, Jira, Confluence, GitHub, Fluffyjaws, local git) to the same bundle. Use this when the work depends on context that is not yet in the living doc — e.g. "pay endpoint failing" or the name of a feature you are picking up mid-stream. See [Context Search](#5-context-search-on-demand) below.
+**Optional — external context:** `pullSessionContext({ externalQuery })` (SDK) or the `external_query` argument on the MCP `get_agent_session_context` tool uses that task-specific text to sharpen KG learning retrieval and adds a cross-source lookup (Slack, Jira, Confluence, GitHub, Fluffyjaws, local git) to the same bundle. Use this when the work depends on context that is not yet in the living doc — e.g. "pay endpoint failing" or the name of a feature you are picking up mid-stream. See [Context Search](#5-context-search-on-demand) below.
 
 ## 2. Report after meaningful lock-in
 

@@ -302,11 +302,14 @@ export class PimClient {
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
     // Fetch the pod first so we can scope learnings to its project (avoids cross-project knowledge bleed).
-    // The pod response also carries the milestone name which we use as a semantic query for embedding scoring.
+    // Do not use the milestone name as the default semantic query: it is broad
+    // enough to hard-gate away task-relevant learnings. A caller-supplied
+    // externalQuery is task-specific, so it is safe to use for KG ranking.
     const pod = await this.getPod();
+    const taskQuery = opts?.externalQuery?.trim() || undefined;
     const learningsOpts = {
       projectId: pod.project_id ?? null,
-      query: pod.milestone?.name,
+      query: taskQuery,
     };
 
     const baseFetches = [
@@ -359,11 +362,15 @@ export class PimClient {
     const maxTokens = opts?.learningsMaxTokens ?? 2000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
-    // Fetch project first so its name can drive the semantic query for learnings.
+    // Fetch project first for metadata. Project names are intentionally not used
+    // as the default semantic KG query because they are too broad and can filter
+    // out task-relevant learnings. Use externalQuery when a task-specific query
+    // is available.
     const project = await this.getProject();
+    const taskQuery = opts?.externalQuery?.trim() || undefined;
     const learningsOpts = {
       projectId: this.config.projectId ?? null,
-      query: project.name,
+      query: taskQuery,
     };
 
     const baseFetches = [

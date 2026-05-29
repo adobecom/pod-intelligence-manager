@@ -246,7 +246,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query; the same task-specific query also sharpens KG learning retrieval. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
@@ -256,7 +256,7 @@ export function registerTools(server: McpServer) {
       external_query: z
         .string()
         .optional()
-        .describe("Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup."),
+        .describe("Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings."),
     },
     async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
       const maxTok = learnings_max_tokens ?? 2000;
@@ -266,9 +266,8 @@ export function registerTools(server: McpServer) {
       // Fetch pod first so we can scope learnings by its project_id (prevents cross-project knowledge bleed).
       const pod = await apiFetch<{ project_id?: string | null; milestone?: { name?: string } }>(`/api/pods/${pod_id}`);
       const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
-      // Use the milestone name as a semantic query so scoring uses embedding similarity rather than keyword-only fallback.
-      const milestoneQuery = pod.milestone?.name?.trim();
-      const queryParam = milestoneQuery ? `&query=${encodeURIComponent(milestoneQuery)}` : "";
+      const taskQuery = external_query?.trim();
+      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
 
       const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context] =
         await Promise.all([
@@ -344,7 +343,7 @@ export function registerTools(server: McpServer) {
         .string()
         .optional()
         .describe(
-          "Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup. The project_id is passed automatically to scope the fan-out to this project's resources.",
+          "Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings. The project_id is passed automatically to scope the fan-out to this project's resources.",
         ),
     },
     async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
@@ -353,9 +352,12 @@ export function registerTools(server: McpServer) {
       const scopes = encodeURIComponent(scope);
       const projectParam = `&projectId=${encodeURIComponent(project_id)}`;
 
-      // Fetch project first so we can use its name as the semantic query (embedding scoring on learnings).
+      // Fetch project metadata for the response and project-scoped lookup. The
+      // project name is too broad for semantic KG filtering; use only the
+      // task-specific external_query when provided.
       const project = await apiFetch<{ name?: string }>(`/api/projects/${encodeURIComponent(project_id)}`);
-      const queryParam = project.name ? `&query=${encodeURIComponent(project.name)}` : "";
+      const taskQuery = external_query?.trim();
+      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
 
       const [project_updates, relevant_learnings, external_context] = await Promise.all([
         apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),
