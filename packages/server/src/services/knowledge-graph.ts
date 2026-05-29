@@ -187,6 +187,7 @@ export function _resetForTests(): void {
 // worth of content when include_details=true.
 const CHARS_PER_TOKEN = 4;
 const TOKENS_PER_EDGE = 10;
+const DEFAULT_CONFIDENCE_MIN = 0.8;
 
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
@@ -451,6 +452,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     : [...candidateIds].map((id) => state.nodeById.get(id)).filter((n): n is KnowledgeNode => !!n);
 
   // P1: Exclude superseded nodes by default so agents don't receive stale decisions.
+  const confidenceMin = filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN;
   const candidates: KnowledgeNode[] = baseNodes.filter((node) => {
     if (filters.source_project_ids?.length) {
       if (!node.source_project_id || !filters.source_project_ids.includes(node.source_project_id)) return false;
@@ -458,7 +460,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     if (filters.include_project_id) {
       if (node.source_project_id && node.source_project_id !== filters.include_project_id) return false;
     }
-    if (filters.confidence_min !== undefined && node.confidence_score < filters.confidence_min) return false;
+    if (node.confidence_score < confidenceMin) return false;
     if (filters.curated_only && !node.curated) return false;
     if (!filters.include_superseded && node.superseded_by) return false;
     return true;

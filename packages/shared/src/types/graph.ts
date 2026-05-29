@@ -97,6 +97,7 @@ export interface KnowledgeQueryFilters {
    * tagged with this project; exclude nodes tagged with other projects.
    */
   include_project_id?: string;
+  /** Minimum confidence score. queryKnowledge defaults to 0.8 when omitted. */
   confidence_min?: number;
   curated_only?: boolean;
   /** When false (default), nodes with `superseded_by` set are excluded. Pass true to include them. */

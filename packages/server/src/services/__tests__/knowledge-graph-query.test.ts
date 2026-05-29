@@ -164,6 +164,42 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.nodes.length).toBe(2);
   });
 
+  it("filters low-confidence nodes by default but allows explicit opt-in", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "High confidence retrieval pattern",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.8,
+      },
+      {
+        type: "pattern",
+        summary: "Low confidence retrieval guess",
+        details: "",
+        domains: ["backend"],
+        confidence: "inferred",
+        confidence_score: 0.79,
+      },
+    ]);
+
+    const defaultQuery = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 500,
+    });
+    expect(defaultQuery.nodes.map((n) => n.summary)).toEqual(["High confidence retrieval pattern"]);
+
+    const explicitLowConfidence = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], confidence_min: 0 },
+      max_tokens: 500,
+    });
+    expect(explicitLowConfidence.nodes.map((n) => n.summary).sort()).toEqual([
+      "High confidence retrieval pattern",
+      "Low confidence retrieval guess",
+    ]);
+  });
+
   it("merges filters.keywords with text_search tokens for scoring", async () => {
     const orgId = await seedGraph([
       {

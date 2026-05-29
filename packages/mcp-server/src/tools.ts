@@ -506,7 +506,10 @@ export function registerTools(server: McpServer) {
         .describe(
           "Return org-wide nodes plus any tagged with this project; excludes nodes tagged with OTHER projects. Pass the current agent's project for clean project-scoped queries.",
         ),
-      confidence_min: z.number().optional().describe("Minimum confidence score (0.0-1.0)"),
+      confidence_min: z
+        .number()
+        .optional()
+        .describe("Minimum confidence score (0.0-1.0). Defaults to 0.8; pass 0 for curation/debug sweeps."),
       curated_only: z.boolean().optional().describe("Only return human-curated nodes"),
       text_search: z.string().optional().describe("Substring filter on summary+details (narrows candidates)."),
       query_text: z
