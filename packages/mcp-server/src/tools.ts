@@ -516,7 +516,7 @@ export function registerTools(server: McpServer) {
         .string()
         .optional()
         .describe(
-          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it and ranks results by cosine similarity; unlike text_search this does not narrow candidates, only reorders them. Prefer this for concept-level lookups.",
+          "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it, filters out weak cosine-similarity matches, then ranks results; unlike text_search it is concept-level rather than literal token matching. Prefer this for concept-level lookups.",
         ),
       max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
       include_details: z.boolean().optional().describe("Include full node details"),

@@ -466,20 +466,19 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     return true;
   });
 
-  const totalMatching = candidates.length;
-
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters);
   const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
 
-  const scored = candidates.map((node) => {
+  let scored = candidates.map((node) => {
     const querySimilarity =
       query_embedding && node.embedding
         ? cosineSimilarity(query_embedding, node.embedding)
         : undefined;
     return {
       node,
+      querySimilarity,
       score: scoreRelevance(
         node,
         { scopes, keywords, querySimilarity, precomputedKeywords: state.nodeKeywords.get(node.id) },
@@ -488,6 +487,15 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
       ),
     };
   });
+
+  if (query_embedding) {
+    const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
+    scored = scored.filter(({ querySimilarity }) =>
+      querySimilarity !== undefined && querySimilarity >= minQuerySimilarity,
+    );
+  }
+
+  const totalMatching = scored.length;
   scored.sort((a, b) => b.score - a.score);
 
   // Step 3: Apply token budget and/or limit

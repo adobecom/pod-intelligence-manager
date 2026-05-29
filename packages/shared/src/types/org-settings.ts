@@ -51,6 +51,7 @@ export interface OrgTuning {
     recencyDecayDays: number;       // default 90
     samePodDedupThreshold: number;  // default 0.85
     crossPodDedupThreshold: number; // default 0.95
+    minQuerySimilarity: number;     // default 0.75
   };
   lint: {
     stalenessHours: number;        // default 8
@@ -69,7 +70,7 @@ export const DEFAULT_ORG_TUNING: OrgTuning = {
   pressure:        { normalMax: 0.3, cautiousMax: 0.6, degradedMax: 0.8 },
   pressureWeights: { blockingBase: 0.15, nonBlockingBase: 0.08, ageFactorCap: 0.1, ageWindowHours: 48 },
   conflictScout:   { additiveMinConf: 0.65, overlapForceMinConf: 0.65, suppressMergeMinConf: 0.65, peerWindow: 15, detailsCap: 900 },
-  graphScoring:    { recencyDecayDays: 90, samePodDedupThreshold: 0.85, crossPodDedupThreshold: 0.95 },
+  graphScoring:    { recencyDecayDays: 90, samePodDedupThreshold: 0.85, crossPodDedupThreshold: 0.95, minQuerySimilarity: 0.75 },
   lint:            { stalenessHours: 8, maxLlmFindings: 8, livingDocMaxChars: 10_000, updateDetailsMaxChars: 800 },
   classifier:      { peerWindow: 5, overlapKeywordMin: 3, highPressureOverride: 0.6 },
 };

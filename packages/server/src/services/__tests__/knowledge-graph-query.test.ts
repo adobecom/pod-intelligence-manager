@@ -232,6 +232,135 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.nodes[0]?.summary.toLowerCase()).toContain("zebra");
   });
 
+  it("returns no nodes when a semantic query has no useful cosine match", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Session mtime cache invalidation pattern",
+        details: "Use file modification timestamps to detect cache invalidation.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Webhook payload structure convention",
+        details: "Normalize inbound webhook payloads before persistence.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+    expect(q.token_estimate).toBe(0);
+    expect(q.truncated).toBe(false);
+  });
+
+  it("returns strong semantic matches after applying the cosine relevance gate", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "OAuth token refresh retry strategy",
+        details: "Refresh expired access tokens once before surfacing auth failures.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Static asset CDN cache policy",
+        details: "Use immutable URLs for long-lived static asset caching.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const authNode = getGraph(orgId).nodes.find((n) => n.summary.includes("OAuth"));
+    const cdnNode = getGraph(orgId).nodes.find((n) => n.summary.includes("CDN"));
+    expect(authNode).toBeDefined();
+    expect(cdnNode).toBeDefined();
+    authNode!.embedding = [0, 1, 0];
+    cdnNode!.embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["OAuth token refresh retry strategy"]);
+    expect(q.total_matching).toBe(1);
+  });
+
+  it("keeps domain fallback behavior for non-semantic queries", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Backend queue retry policy",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Backend worker concurrency limit",
+        details: "",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+    });
+
+    expect(q.nodes.map((n) => n.summary).sort()).toEqual([
+      "Backend queue retry policy",
+      "Backend worker concurrency limit",
+    ]);
+    expect(q.total_matching).toBe(2);
+  });
+
+  it("does not return unembedded nodes for semantic queries", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Legacy unembedded backend learning",
+        details: "Created before embedding backfill completed.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = undefined;
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
   it("getRelevantLearnings with projectId filters out nodes tagged to other projects", async () => {
     const orgId = nextOrgId("kg-test");
     initializeKnowledgeGraph(orgId);
