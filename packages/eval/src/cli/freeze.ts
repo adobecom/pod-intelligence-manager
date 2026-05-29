@@ -70,6 +70,7 @@ async function fetchLiveLearnings(podId: string): Promise<FixtureLearnings> {
   const pod = demoPods[podId];
   const scopes = Array.from(new Set((pod?.areas ?? []).map((a) => a.scope)));
   const domains = scopes.length > 0 ? scopes : ["frontend", "backend"];
+  const projectId = pod?.project_id?.trim();
 
   const auth = await getAuthHeader();
   const res = await fetch(`${EVAL_PIM_BASE_URL}/api/knowledge/query`, {
@@ -80,7 +81,10 @@ async function fetchLiveLearnings(podId: string): Promise<FixtureLearnings> {
       "X-Pim-Org": EVAL_PIM_ORG_SLUG,
     },
     body: JSON.stringify({
-      filters: { domains },
+      filters: {
+        domains,
+        ...(projectId ? { include_project_id: projectId } : {}),
+      },
       max_tokens: 4000,
       include_details: true,
     }),

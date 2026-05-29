@@ -248,15 +248,13 @@ Synthesize these learnings into actionable guidance. Highlight:
       const pod = await apiFetch<Pod & { project_id?: string | null }>(`/api/pods/${pod_id}`);
       const scopeParam = scope ? `&scopes=${encodeURIComponent(scope)}` : "";
       const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
-      const milestoneQuery = pod.milestone?.name?.trim();
-      const queryParam = milestoneQuery ? `&query=${encodeURIComponent(milestoneQuery)}` : "";
 
       const [livingDoc, conflicts, updates, learnings] = await Promise.all([
         apiFetchText(`/api/pods/${pod_id}/living-doc`),
         apiFetch<Conflict[]>(`/api/pods/${pod_id}/conflicts`),
         apiFetch<ContextUpdate[]>(`/api/pods/${pod_id}/context-updates`),
         apiFetch<KnowledgeQueryResult>(
-          `/api/knowledge/relevant?maxTokens=2000${scopeParam}${projectParam}${queryParam}`,
+          `/api/knowledge/relevant?maxTokens=2000${scopeParam}${projectParam}`,
         ),
       ]);
 

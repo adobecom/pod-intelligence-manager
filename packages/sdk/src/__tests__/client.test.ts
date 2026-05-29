@@ -327,4 +327,65 @@ describe("PimClient", () => {
       expect(knowledgeUrl).toContain("query=speaker%20put%20contract");
     });
   });
+
+  describe("pullProjectSessionContext", () => {
+    function mockProjectSessionContextResponses() {
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes("/api/projects/project-demo/context-updates")) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+        }
+        if (url.includes("/knowledge/relevant")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ nodes: [], total_matching: 0, truncated: false }),
+          });
+        }
+        if (url.includes("/api/context-search")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ query: "speaker put contract", hits: [], sources_used: [] }),
+          });
+        }
+        if (url.includes("/api/projects/project-demo")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                project_id: "project-demo",
+                name: "Demo Project",
+                description: "",
+                created_at: "",
+              }),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 404, text: () => Promise.resolve("") });
+      });
+    }
+
+    it("does not use the project name as the default KG query", async () => {
+      mockProjectSessionContextResponses();
+
+      const client = makeClient({ podId: undefined, projectId: "project-demo" });
+      await client.pullProjectSessionContext();
+
+      const knowledgeUrl = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes("/knowledge/relevant"));
+      expect(knowledgeUrl).toBe(
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&projectId=project-demo",
+      );
+    });
+
+    it("uses externalQuery as the project KG query when supplied", async () => {
+      mockProjectSessionContextResponses();
+
+      const client = makeClient({ podId: undefined, projectId: "project-demo" });
+      await client.pullProjectSessionContext({ externalQuery: "speaker put contract" });
+
+      const knowledgeUrl = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes("/knowledge/relevant"));
+      expect(knowledgeUrl).toContain("query=speaker%20put%20contract");
+    });
+  });
 });
