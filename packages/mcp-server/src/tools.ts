@@ -1,7 +1,16 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildArtifact } from "./artifact-template.js";
-import { apiFetch, apiFetchText, apiPatch, apiPost, apiPut } from "./api.js";
+import {
+  apiDelete,
+  apiFetch,
+  apiFetchText,
+  apiPatch,
+  apiPost,
+  apiPut,
+  getOrgSelectionStatus,
+  setActiveOrg,
+} from "./api.js";
 import { registerAuthTools } from "./auth-tools.js";
 
 /* ------------------------------------------------------------------ */
@@ -46,14 +55,44 @@ const ProjectResourcesSchema = z.object({
     .object({
       project_keys: z.array(z.string()).optional(),
       team: z.string().optional().describe("Jira 'Team' custom field value (e.g. 'Strata')"),
+      epics: z.array(z.string()).optional(),
+      issue_keys: z.array(z.string()).optional(),
+      fix_versions: z.array(z.string()).optional(),
     })
     .optional(),
-  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
-  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
-  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  github: z.object({
+    repos: z.array(z.string()).optional(),
+    default_branches: z.record(z.string()).optional(),
+  }).optional(),
+  slack: z.object({
+    channels: z.array(z.string()).optional(),
+    thread_urls: z.array(z.string()).optional(),
+  }).optional(),
+  confluence: z.object({
+    space_keys: z.array(z.string()).optional(),
+    page_ids: z.array(z.string()).optional(),
+    page_urls: z.array(z.string()).optional(),
+  }).optional(),
   git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
   aliases: z.array(z.string()).optional(),
+  glossary: z.array(z.object({
+    term: z.string().min(1),
+    definition: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
+  })).optional(),
 });
+
+const ProjectResourcesPatchSchema = ProjectResourcesSchema.deepPartial();
+
+const ProjectResourceBindingSchema = {
+  project_id: ProjectId,
+  source: z.enum(["project", "jira", "github", "slack", "confluence", "git"]),
+  field: z
+    .string()
+    .min(1)
+    .describe("Array field to modify, e.g. jira.project_keys, github.repos, slack.thread_urls, project.aliases. Use source='jira', field='team' to set/remove the Jira Team value."),
+  value: z.string().min(1).describe("Binding value to add or remove"),
+};
 
 const ActorSchema = z.object({
   email: z.string().email().optional(),
@@ -69,6 +108,26 @@ const ActorSchema = z.object({
 export function registerTools(server: McpServer) {
   // ── auth ─────────────────────────────────────────────────────────
   registerAuthTools(server);
+
+  server.tool(
+    "list_orgs",
+    "List the orgs available to the authenticated user and show which org slug this MCP process will send in X-Pim-Org.",
+    {},
+    async () => {
+      return json(await getOrgSelectionStatus());
+    },
+  );
+
+  server.tool(
+    "set_active_org",
+    "Persist the default org slug for standalone MCP usage in ~/.pim/config.json. PIM_ORG_SLUG and repo .pim.json still override this saved default.",
+    {
+      org_slug: z.string().min(1).describe("Org slug to use, e.g. adobecom"),
+    },
+    async ({ org_slug }) => {
+      return json(await setActiveOrg(org_slug));
+    },
+  );
 
   // ── org config & projects ───────────────────────────────────────
 
@@ -132,6 +191,57 @@ export function registerTools(server: McpServer) {
     },
     async ({ project_id, resources }) => {
       const result = await apiPut(`/api/projects/${encodeURIComponent(project_id)}/resources`, resources);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "get_project_profile",
+    "Read a project's context profile. This is the richer resources_json profile used to scope ingestion, context_search, Project Answers, and KG promotion.",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const result = await apiFetch(`/api/projects/${encodeURIComponent(project_id)}/profile`);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "patch_project_profile",
+    "Safely patch a project's context profile without replacing unspecified fields. Use this for adding Jira epics/fixVersions, GitHub default branch hints, Slack thread URLs, Confluence pages, aliases, or glossary terms while preserving existing bindings.",
+    {
+      project_id: ProjectId,
+      patch: ProjectResourcesPatchSchema.describe("Partial profile to merge into the current profile"),
+    },
+    async ({ project_id, patch }) => {
+      const result = await apiPatch(`/api/projects/${encodeURIComponent(project_id)}/profile`, patch);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "add_project_resource_binding",
+    "Add one binding to a project profile without replacing the profile. Examples: source=jira field=project_keys value=MWPW, source=github field=repos value=adobe/aio, source=slack field=thread_urls value=https://...",
+    ProjectResourceBindingSchema,
+    async ({ project_id, source, field, value }) => {
+      const result = await apiPost(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {
+        source,
+        field,
+        value,
+      });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "remove_project_resource_binding",
+    "Remove one binding from a project profile without replacing the profile. Uses the same source/field/value tuple as add_project_resource_binding.",
+    ProjectResourceBindingSchema,
+    async ({ project_id, source, field, value }) => {
+      const result = await apiDelete(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {
+        source,
+        field,
+        value,
+      });
       return json(result);
     },
   );

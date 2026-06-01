@@ -12,7 +12,7 @@ export type KnowledgeNodeType =
 export type ConfidenceLevel = "extracted" | "inferred";
 
 /** Provenance for nodes not produced by pod archival or a single ad-hoc human submission. */
-export type KnowledgeIngestionProvenanceKind = "scheduled_synthesis";
+export type KnowledgeIngestionProvenanceKind = "scheduled_synthesis" | "project_evidence";
 
 export interface KnowledgeIngestionProvenance {
   kind: KnowledgeIngestionProvenanceKind;
@@ -21,6 +21,19 @@ export interface KnowledgeIngestionProvenance {
   /** Existing graph nodes cited as evidence (must be valid ids at ingest time). */
   evidence_node_ids: string[];
   lint_finding_ids?: string[];
+  /** Project working-memory evidence ids cited for a promoted node. */
+  evidence_item_ids?: string[];
+}
+
+export type KnowledgeAudience = "org" | "project" | "pod";
+
+export interface KnowledgeProvenance {
+  source: string;
+  source_id?: string;
+  title?: string;
+  url?: string;
+  occurred_at?: string;
+  evidence_item_id?: string;
 }
 
 export interface KnowledgeNode {
@@ -33,6 +46,8 @@ export interface KnowledgeNode {
   /** When set, this node is also attributable to a long-lived project (e.g. off-pod updates). */
   source_project_id?: string;
   source_project_name?: string;
+  audience?: KnowledgeAudience;
+  provenance?: KnowledgeProvenance[];
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number; // 0.0–1.0
@@ -161,6 +176,8 @@ export interface EnhancedPodLearning {
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number;
+  audience?: KnowledgeAudience;
+  provenance?: KnowledgeProvenance[];
   /** When set, persisted on the created `KnowledgeNode` (e.g. scheduled graph synthesis). */
   ingestion_provenance?: KnowledgeIngestionProvenance;
 }

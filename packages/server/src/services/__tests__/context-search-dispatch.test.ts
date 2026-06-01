@@ -85,6 +85,7 @@ import { searchFluffyjaws } from "../../integrations/fluffyjaws.js";
 import { searchKG } from "../../integrations/kg.js";
 import { callLLM } from "../../pim/llm.js";
 
+const TEST_ORG_ID = "org-test";
 let userEmail: string;
 
 beforeAll(() => {
@@ -102,7 +103,7 @@ beforeAll(() => {
   const creator = upsertUserByIms({ email: "creator@adobe.com", display_name: "Creator" });
   const u1 = upsertUserByIms({ email: "rea01581@adobe.com", display_name: "Rayyan Khan" });
   userEmail = u1.email;
-  const org = createOrg({ slug: "acme", name: "Acme", creatorUserId: creator.user_id });
+  const org = createOrg({ orgId: TEST_ORG_ID, slug: "acme", name: "Acme", creatorUserId: creator.user_id });
   testDb
     .prepare("INSERT INTO memberships (org_id, user_id, role, created_at) VALUES (?, ?, 'member', ?)")
     .run(org.org_id, u1.user_id, new Date().toISOString());
@@ -131,8 +132,6 @@ beforeEach(() => {
   vi.mocked(callLLM).mockClear();
   testDb.exec("DELETE FROM identity_cache");
 });
-
-const TEST_ORG_ID = "org-test";
 
 describe("searchContext per-integration opts", () => {
   it("when IMS fallback fires, only Jira receives the actor; other sources stay broad", async () => {

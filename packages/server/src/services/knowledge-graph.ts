@@ -282,6 +282,8 @@ export async function addLearningsToGraph(
       ...(project
         ? { source_project_id: project.project_id, source_project_name: project.project_name }
         : {}),
+      ...(learning.audience ? { audience: learning.audience } : {}),
+      ...(learning.provenance ? { provenance: learning.provenance } : {}),
       domains: learning.domains,
       confidence: learning.confidence,
       confidence_score: learning.confidence_score,
@@ -487,6 +489,19 @@ function applySemanticGate(
   return gated;
 }
 
+function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
+  return !!(
+    filters.domains?.length ||
+    filters.types?.length ||
+    filters.source_pod_ids?.length ||
+    filters.source_project_ids?.length ||
+    filters.include_project_id ||
+    filters.confidence_min !== undefined ||
+    filters.curated_only ||
+    filters.text_search?.trim()
+  );
+}
+
 // `null` means "no filter applied yet — all nodes qualify".
 function intersectIds(a: Set<string> | null, b: Set<string>): Set<string> {
   if (a === null) return new Set(b);
@@ -591,7 +606,13 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
 
   if (query_embedding) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
-    scored = applySemanticGate(scored, state, keywords, query_embedding, minQuerySimilarity);
+    const gated = applySemanticGate(scored, state, keywords, query_embedding, minQuerySimilarity);
+    const shouldUseFilteredCandidatesAsRecallFallback =
+      gated.length === 0 &&
+      scored.length > 0 &&
+      !!query_text?.trim() &&
+      hasHardCandidateFilter(filters);
+    scored = shouldUseFilteredCandidatesAsRecallFallback ? scored : gated;
   }
 
   const totalMatching = scored.length;

@@ -13,6 +13,7 @@ import {
   type ImsEnv,
   type Credentials,
 } from "@pim/shared/auth";
+import { getOrgSelectionStatus, type OrgSelectionStatus } from "./api.js";
 
 const API_BASE = process.env.PIM_API_URL ?? "http://localhost:4000";
 const CALLBACK_PORT = parseInt(process.env.PIM_CALLBACK_PORT ?? "9876", 10);
@@ -109,6 +110,28 @@ const json = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
 });
 
+function withOrgStatus<T extends Record<string, unknown>>(
+  data: T,
+  orgStatus: OrgSelectionStatus,
+): T & {
+  active_org_slug: string | null;
+  effective_source: OrgSelectionStatus["effective_source"];
+  needs_org_selection?: boolean;
+  no_orgs_available?: boolean;
+  orgs: OrgSelectionStatus["orgs"];
+  org_status: OrgSelectionStatus;
+} {
+  return {
+    ...data,
+    active_org_slug: orgStatus.active_org_slug,
+    effective_source: orgStatus.effective_source,
+    ...(orgStatus.needs_org_selection ? { needs_org_selection: true } : {}),
+    ...(orgStatus.no_orgs_available ? { no_orgs_available: true } : {}),
+    orgs: orgStatus.orgs,
+    org_status: orgStatus,
+  };
+}
+
 export function registerAuthTools(server: McpServer): void {
   server.tool(
     "authenticate",
@@ -131,11 +154,14 @@ export function registerAuthTools(server: McpServer): void {
             clientId: fresh.client_id,
             accessToken: fresh.access_token,
           });
-          return json({
+          const orgStatus = await getOrgSelectionStatus();
+          return json(withOrgStatus({
             status: "already_authenticated",
             email: profile.email ?? existing.email,
-            message: "Already signed in. No need to call complete_authentication.",
-          });
+            message: orgStatus.needs_org_selection
+              ? "Already signed in. Choose an org with set_active_org before using org-scoped tools."
+              : "Already signed in. No need to call complete_authentication.",
+          }, orgStatus));
         } catch {
           // Token dead — fall through to fresh login
         }
@@ -156,10 +182,13 @@ export function registerAuthTools(server: McpServer): void {
       }
 
       if (cliConfig.auth_mode === "trust") {
-        return json({
+        const orgStatus = await getOrgSelectionStatus();
+        return json(withOrgStatus({
           status: "trust_mode",
-          message: "Server is in trust mode — authentication is not required.",
-        });
+          message: orgStatus.needs_org_selection
+            ? "Server is in trust mode — authentication is not required. Choose an org with set_active_org before using org-scoped tools."
+            : "Server is in trust mode — authentication is not required.",
+        }, orgStatus));
       }
 
       const clientId = process.env.PIM_IMS_CLIENT_ID ?? cliConfig.ims_cli_client_id ?? cliConfig.ims_client_id;
@@ -283,12 +312,15 @@ export function registerAuthTools(server: McpServer): void {
         ims_env: auth.imsEnv,
       };
       saveCredentials(creds);
+      const orgStatus = await getOrgSelectionStatus();
 
-      return json({
+      return json(withOrgStatus({
         status: "success",
         email: profile.email ?? profile.userId ?? "Adobe user",
-        message: `Signed in as ${profile.email ?? profile.userId ?? "Adobe user"}. Credentials saved to ~/.pim/credentials.json.`,
-      });
+        message: orgStatus.needs_org_selection
+          ? `Signed in as ${profile.email ?? profile.userId ?? "Adobe user"}. Credentials saved to ~/.pim/credentials.json. Choose an org with set_active_org before using org-scoped tools.`
+          : `Signed in as ${profile.email ?? profile.userId ?? "Adobe user"}. Credentials saved to ~/.pim/credentials.json.`,
+      }, orgStatus));
     },
   );
 }
