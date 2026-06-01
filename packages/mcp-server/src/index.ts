@@ -17,6 +17,7 @@ You are connected to the PIM (Pod Intelligence Manager) MCP server. PIM is an or
 ### Authentication (check before first tool call each session)
 Call \`authenticate\` at the start of any session that will use PIM tools.
 - If it returns \`status: "already_authenticated"\` or \`status: "trust_mode"\` — proceed immediately.
+- If it returns \`needs_org_selection: true\` — call \`list_orgs\`, choose the correct org slug with the user, then call \`set_active_org(org_slug)\` before org-scoped tools.
 - If it returns \`status: "pending"\` — show the user the \`auth_url\`, ask them to sign in, then call \`complete_authentication\`. Wait for confirmation before continuing.
 - If any subsequent tool call returns a 401 or an error mentioning credentials — call \`authenticate\` again (the token may have expired mid-session) and repeat the flow.
 
@@ -40,6 +41,8 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 ### Authentication
 - \`authenticate\` — Start Adobe IMS OAuth sign-in. Returns an auth URL to open in the browser. If already signed in, returns immediately. Call this if any tool returns a 401 or "run pim login" error.
 - \`complete_authentication\` — Finish sign-in after the user has visited the URL. Exchanges the code for tokens and writes \`~/.pim/credentials.json\`. Call this after the user confirms their browser shows "Signed in".
+- \`list_orgs\` — Show available orgs and the org slug currently sent as \`X-Pim-Org\`.
+- \`set_active_org\` — Persist the standalone MCP default org slug in \`~/.pim/config.json\`. \`PIM_ORG_SLUG\` and repo \`.pim.json\` override this default.
 
 ### Org & Projects
 - \`get_org_config\` — read the org scope list (ids + labels). Call this before any tool that takes a scope id.

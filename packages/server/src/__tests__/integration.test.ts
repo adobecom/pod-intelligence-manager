@@ -20,6 +20,18 @@ vi.mock("../db/connection.js", () => ({
 vi.mock("../services/knowledge-graph.js", () => ({
   initializeKnowledgeGraph: vi.fn(),
   refreshAnalysis: vi.fn(),
+  addLearningsToGraph: vi.fn().mockResolvedValue({
+    nodesAdded: 1,
+    edgesAdded: 0,
+    nodeIds: ["kn-integration"],
+  }),
+  queryKnowledge: vi.fn().mockReturnValue({
+    nodes: [],
+    edges: [],
+    total_matching: 0,
+    token_estimate: 0,
+    truncated: false,
+  }),
   getRelevantLearnings: vi.fn().mockResolvedValue({
     nodes: [],
     truncated: false,
@@ -316,13 +328,57 @@ describe("Integration: API endpoints", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/projects",
-      payload: { name: "Integration Project Alpha" },
+      payload: {
+        name: "Integration Project Alpha",
+        resources: {
+          jira: { project_keys: ["MWPW"], epics: ["MWPW-1"], fix_versions: ["T3-26.16"] },
+          github: { repos: ["adobe/app"] },
+          slack: { thread_urls: ["https://slack.example/archives/C/p1"] },
+          aliases: ["IPA"],
+        },
+      },
     });
     expect(res.statusCode).toBe(201);
-    const body = res.json() as { project_id: string; name: string; anatomy: { internal: unknown[] } };
+    const body = res.json() as { project_id: string; name: string; anatomy: { internal: unknown[] }; resources: { jira?: { epics?: string[] } } };
     expect(body.project_id).toMatch(/^project-integration-project-alpha-[a-f0-9]{6}$/);
     expect(body.name).toBe("Integration Project Alpha");
     expect(body.anatomy.internal).toEqual([]);
+    expect(body.resources.jira?.epics).toEqual(["MWPW-1"]);
+  });
+
+  it("project profile endpoints patch and bind resources without whole-object replacement", async () => {
+    const pr = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Profile Patch Project", resources: { github: { repos: ["adobe/old"] } } },
+    });
+    expect(pr.statusCode).toBe(201);
+    const projectId = (pr.json() as { project_id: string }).project_id;
+
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/projects/${projectId}/profile`,
+      payload: { jira: { issue_keys: ["MWPW-77"] }, glossary: [{ term: "PAF", definition: "Project answers" }] },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect((patch.json() as { github?: { repos?: string[] }; jira?: { issue_keys?: string[] } }).github?.repos).toEqual(["adobe/old"]);
+    expect((patch.json() as { jira?: { issue_keys?: string[] } }).jira?.issue_keys).toEqual(["MWPW-77"]);
+
+    const add = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/resources/bindings`,
+      payload: { source: "github", field: "repos", value: "adobe/new" },
+    });
+    expect(add.statusCode).toBe(200);
+    expect((add.json() as { github: { repos: string[] } }).github.repos).toEqual(["adobe/old", "adobe/new"]);
+
+    const remove = await app.inject({
+      method: "DELETE",
+      url: `/api/projects/${projectId}/resources/bindings`,
+      payload: { source: "github", field: "repos", value: "adobe/old" },
+    });
+    expect(remove.statusCode).toBe(200);
+    expect((remove.json() as { github: { repos: string[] } }).github.repos).toEqual(["adobe/new"]);
   });
 
   it("POST /api/pods accepts optional project_id", async () => {
@@ -410,6 +466,23 @@ describe("Integration: API endpoints", () => {
     const list = await app.inject({ method: "GET", url: `/api/projects/${projectId}/context-updates` });
     expect(list.statusCode).toBe(200);
     expect((list.json() as { agent_id: string }[])[0].agent_id).toBe("agent-proj");
+
+    const evidence = await app.inject({ method: "GET", url: `/api/projects/${projectId}/evidence` });
+    expect(evidence.statusCode).toBe(200);
+    expect((evidence.json() as { source: string; summary: string }[])[0].source).toBe("project_update");
+
+    const candidates = await app.inject({ method: "GET", url: `/api/projects/${projectId}/memory-candidates?status=pending` });
+    expect(candidates.statusCode).toBe(200);
+    expect((candidates.json() as { summary: string }[])[0].summary).toBe("Chose SQLite for local dev");
+
+    const answer = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/answers`,
+      payload: { query: "What decision was made about SQLite?" },
+    });
+    expect(answer.statusCode).toBe(200);
+    expect((answer.json() as { sources_used: string[]; citations: unknown[] }).sources_used).toContain("project_evidence");
+    expect((answer.json() as { citations: unknown[] }).citations.length).toBeGreaterThan(0);
   });
 
   it("GET /api/org/config returns scopes", async () => {

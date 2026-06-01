@@ -267,6 +267,98 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.truncated).toBe(false);
   });
 
+  it("returns type-filtered candidates when query_text semantic scoring is weak", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use PKCE for standalone MCP authentication",
+        details: "Desktop clients use loopback OAuth with PKCE.",
+        domains: ["auth"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Cache static UI assets at the edge",
+        details: "Use immutable URLs for bundled assets.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: { types: ["decision"] },
+      max_tokens: 20_000,
+      query_text: "unrelated deployment checklist",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["Use PKCE for standalone MCP authentication"]);
+    expect(q.total_matching).toBe(1);
+  });
+
+  it("respects confidence_min when filtered query_text semantic scoring is weak", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "High confidence auth retry pattern",
+        details: "Retry access-token refresh once before surfacing auth failure.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Low confidence auth retry guess",
+        details: "Tentative note that should stay filtered out.",
+        domains: ["backend"],
+        confidence: "inferred",
+        confidence_score: 0.6,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) {
+      node.embedding = [1, 0, 0];
+    }
+
+    const q = queryKnowledge(orgId, {
+      filters: { confidence_min: 0.85 },
+      max_tokens: 20_000,
+      query_text: "unrelated release note",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["High confidence auth retry pattern"]);
+    expect(q.total_matching).toBe(1);
+  });
+
+  it("broad query_text with weak semantic and no keyword match still returns zero", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Session mtime cache invalidation pattern",
+        details: "Use file modification timestamps to detect cache invalidation.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: {},
+      max_tokens: 20_000,
+      query_text: "mobile checkout animation storyboard",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
   it("keeps exact short keyword matches even when semantic similarity is weak", async () => {
     const orgId = await seedGraph([
       {

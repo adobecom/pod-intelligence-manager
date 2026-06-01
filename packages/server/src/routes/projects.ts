@@ -14,20 +14,49 @@ import { broadcastToAll } from "../ws/index.js";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 import { getOrgScopeIds } from "../services/org-settings.js";
+import {
+  getProjectSourceHealthLive,
+  listProjectEvidence,
+  listProjectMemoryCandidates,
+  pollProjectSources,
+  promoteProjectMemoryCandidate,
+  rejectProjectMemoryCandidate,
+} from "../services/project-memory.js";
+import { answerProjectQuestion } from "../services/project-answers.js";
 
 const ResourcesSchema = z.object({
   jira: z
     .object({
       project_keys: z.array(z.string()).optional(),
       team: z.string().optional(),
+      epics: z.array(z.string()).optional(),
+      issue_keys: z.array(z.string()).optional(),
+      fix_versions: z.array(z.string()).optional(),
     })
     .optional(),
-  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
-  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
-  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  github: z.object({
+    repos: z.array(z.string()).optional(),
+    default_branches: z.record(z.string()).optional(),
+  }).optional(),
+  slack: z.object({
+    channels: z.array(z.string()).optional(),
+    thread_urls: z.array(z.string()).optional(),
+  }).optional(),
+  confluence: z.object({
+    space_keys: z.array(z.string()).optional(),
+    page_ids: z.array(z.string()).optional(),
+    page_urls: z.array(z.string()).optional(),
+  }).optional(),
   git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
   aliases: z.array(z.string()).optional(),
+  glossary: z.array(z.object({
+    term: z.string().min(1),
+    definition: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
+  })).optional(),
 });
+
+const ResourcesPatchSchema = ResourcesSchema.deepPartial();
 
 const CreateProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()),
@@ -50,6 +79,17 @@ const PatchProjectSchema = z.object({
   name: z.string().min(1).transform(s => s.trim()).optional(),
   description: z.union([z.string(), z.null()]).optional(),
   anatomy: ProjectAnatomyBodySchema.optional(),
+});
+
+const ResourceBindingSchema = z.object({
+  source: z.enum(["project", "jira", "github", "slack", "confluence", "git"]),
+  field: z.string().min(1),
+  value: z.string().min(1).transform(s => s.trim()),
+});
+
+const AnswerProjectSchema = z.object({
+  query: z.string().min(1).transform(s => s.trim()),
+  include_raw_hits: z.boolean().optional(),
 });
 
 function parseResources(raw: string | null | undefined): ProjectResources | undefined {
@@ -99,6 +139,95 @@ function rowToArchivedProject(row: {
   };
 }
 
+function mergeProfile(current: ProjectResources, patch: Partial<ProjectResources>): ProjectResources {
+  return {
+    ...current,
+    ...patch,
+    jira: patch.jira ? { ...current.jira, ...patch.jira } : current.jira,
+    github: patch.github ? { ...current.github, ...patch.github } : current.github,
+    slack: patch.slack ? { ...current.slack, ...patch.slack } : current.slack,
+    confluence: patch.confluence ? { ...current.confluence, ...patch.confluence } : current.confluence,
+    git: patch.git ? { ...current.git, ...patch.git } : current.git,
+  };
+}
+
+function projectResourceRow(projectId: string, orgId: string): { resources_json: string | null } | undefined {
+  return db
+    .prepare("SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?")
+    .get(projectId, orgId) as { resources_json: string | null } | undefined;
+}
+
+function saveProjectResources(projectId: string, orgId: string, resources: ProjectResources): void {
+  db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ? AND org_id = ?").run(
+    JSON.stringify(resources),
+    projectId,
+    orgId,
+  );
+}
+
+function bindingArray(resources: ProjectResources, source: string, field: string): string[] | null {
+  if (source === "project" && field === "aliases") {
+    resources.aliases ??= [];
+    return resources.aliases;
+  }
+  if (source === "jira") {
+    resources.jira ??= {};
+    if (["project_keys", "epics", "issue_keys", "fix_versions"].includes(field)) {
+      const key = field as "project_keys" | "epics" | "issue_keys" | "fix_versions";
+      resources.jira[key] ??= [];
+      return resources.jira[key]!;
+    }
+  }
+  if (source === "github" && field === "repos") {
+    resources.github ??= {};
+    resources.github.repos ??= [];
+    return resources.github.repos;
+  }
+  if (source === "slack" && ["channels", "thread_urls"].includes(field)) {
+    resources.slack ??= {};
+    const key = field as "channels" | "thread_urls";
+    resources.slack[key] ??= [];
+    return resources.slack[key]!;
+  }
+  if (source === "confluence" && ["space_keys", "page_ids", "page_urls"].includes(field)) {
+    resources.confluence ??= {};
+    const key = field as "space_keys" | "page_ids" | "page_urls";
+    resources.confluence[key] ??= [];
+    return resources.confluence[key]!;
+  }
+  if (source === "git" && field === "repo_paths") {
+    resources.git ??= {};
+    resources.git.repo_paths ??= [];
+    return resources.git.repo_paths;
+  }
+  return null;
+}
+
+function addBinding(resources: ProjectResources, source: string, field: string, value: string): ProjectResources | null {
+  if (source === "jira" && field === "team") {
+    return { ...resources, jira: { ...resources.jira, team: value } };
+  }
+  const arr = bindingArray(resources, source, field);
+  if (!arr) return null;
+  if (!arr.includes(value)) arr.push(value);
+  return resources;
+}
+
+function removeBinding(resources: ProjectResources, source: string, field: string, value: string): ProjectResources | null {
+  if (source === "jira" && field === "team") {
+    if (resources.jira?.team === value) {
+      const { team: _team, ...jira } = resources.jira;
+      return { ...resources, jira };
+    }
+    return resources;
+  }
+  const arr = bindingArray(resources, source, field);
+  if (!arr) return null;
+  const idx = arr.indexOf(value);
+  if (idx >= 0) arr.splice(idx, 1);
+  return resources;
+}
+
 export default async function projectRoutes(app: FastifyInstance) {
   app.get("/api/projects", async (req) => {
     const rows = db
@@ -126,8 +255,8 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources",
     async (req, reply) => {
       const row = db
-        .prepare("SELECT resources_json FROM projects WHERE project_id = ?")
-        .get(req.params.projectId) as { resources_json: string | null } | undefined;
+        .prepare("SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?")
+        .get(req.params.projectId, req.org!.org_id) as { resources_json: string | null } | undefined;
       if (!row) {
         reply.code(404);
         return { error: "Project not found" };
@@ -144,18 +273,83 @@ export default async function projectRoutes(app: FastifyInstance) {
     { preHandler: validateBody(ResourcesSchema) },
     async (req, reply) => {
       const exists = db
-        .prepare("SELECT project_id FROM projects WHERE project_id = ?")
-        .get(req.params.projectId);
+        .prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?")
+        .get(req.params.projectId, req.org!.org_id);
       if (!exists) {
         reply.code(404);
         return { error: "Project not found" };
       }
       const json = JSON.stringify(req.body);
-      db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ?").run(
+      db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ? AND org_id = ?").run(
         json,
         req.params.projectId,
+        req.org!.org_id,
       );
       return req.body;
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/profile", async (req, reply) => {
+    const row = projectResourceRow(req.params.projectId, req.org!.org_id);
+    if (!row) {
+      reply.code(404);
+      return { error: "Project not found" };
+    }
+    return parseResources(row.resources_json) ?? {};
+  });
+
+  app.patch<{ Params: { projectId: string }; Body: Partial<ProjectResources> }>(
+    "/api/projects/:projectId/profile",
+    { preHandler: validateBody(ResourcesPatchSchema) },
+    async (req, reply) => {
+      const row = projectResourceRow(req.params.projectId, req.org!.org_id);
+      if (!row) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const merged = mergeProfile(parseResources(row.resources_json) ?? {}, req.body);
+      saveProjectResources(req.params.projectId, req.org!.org_id, merged);
+      return merged;
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: z.infer<typeof ResourceBindingSchema> }>(
+    "/api/projects/:projectId/resources/bindings",
+    { preHandler: validateBody(ResourceBindingSchema) },
+    async (req, reply) => {
+      const row = projectResourceRow(req.params.projectId, req.org!.org_id);
+      if (!row) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const current = parseResources(row.resources_json) ?? {};
+      const next = addBinding(current, req.body.source, req.body.field, req.body.value);
+      if (!next) {
+        reply.code(400);
+        return { error: `Unsupported resource binding ${req.body.source}.${req.body.field}` };
+      }
+      saveProjectResources(req.params.projectId, req.org!.org_id, next);
+      return next;
+    },
+  );
+
+  app.delete<{ Params: { projectId: string }; Body: z.infer<typeof ResourceBindingSchema> }>(
+    "/api/projects/:projectId/resources/bindings",
+    { preHandler: validateBody(ResourceBindingSchema) },
+    async (req, reply) => {
+      const row = projectResourceRow(req.params.projectId, req.org!.org_id);
+      if (!row) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      const current = parseResources(row.resources_json) ?? {};
+      const next = removeBinding(current, req.body.source, req.body.field, req.body.value);
+      if (!next) {
+        reply.code(400);
+        return { error: `Unsupported resource binding ${req.body.source}.${req.body.field}` };
+      }
+      saveProjectResources(req.params.projectId, req.org!.org_id, next);
+      return next;
     },
   );
 
@@ -238,9 +432,9 @@ export default async function projectRoutes(app: FastifyInstance) {
       .prepare(
         `SELECT id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score,
                 blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha
-         FROM project_context_updates WHERE project_id = ?${includeRetracted ? "" : " AND retracted_at IS NULL"} ORDER BY timestamp DESC`,
+         FROM project_context_updates WHERE project_id = ? AND org_id = ?${includeRetracted ? "" : " AND retracted_at IS NULL"} ORDER BY timestamp DESC`,
       )
-      .all(req.params.projectId) as Array<{
+      .all(req.params.projectId, req.org!.org_id) as Array<{
         id: string;
         agent_id: string;
         timestamp: string;
@@ -321,6 +515,91 @@ export default async function projectRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  app.get<{ Params: { projectId: string }; Querystring: { limit?: string } }>(
+    "/api/projects/:projectId/evidence",
+    async (req, reply) => {
+      const limit = Math.max(1, Math.min(500, parseInt(req.query.limit ?? "100", 10)));
+      const rows = listProjectEvidence(req.org!.org_id, req.params.projectId, limit);
+      if (!rows) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return rows;
+    },
+  );
+
+  app.get<{ Params: { projectId: string }; Querystring: { status?: string } }>(
+    "/api/projects/:projectId/memory-candidates",
+    async (req, reply) => {
+      const status = req.query.status as "pending" | "promoted" | "rejected" | undefined;
+      if (status && !["pending", "promoted", "rejected"].includes(status)) {
+        reply.code(400);
+        return { error: "Invalid status" };
+      }
+      const rows = listProjectMemoryCandidates(req.org!.org_id, req.params.projectId, status);
+      if (!rows) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return rows;
+    },
+  );
+
+  app.post<{ Params: { projectId: string; candidateId: string } }>(
+    "/api/projects/:projectId/memory-candidates/:candidateId/promote",
+    async (req, reply) => {
+      const candidate = await promoteProjectMemoryCandidate(req.org!.org_id, req.params.projectId, req.params.candidateId);
+      if (!candidate) {
+        reply.code(404);
+        return { error: "Candidate not found" };
+      }
+      return candidate;
+    },
+  );
+
+  app.post<{ Params: { projectId: string; candidateId: string } }>(
+    "/api/projects/:projectId/memory-candidates/:candidateId/reject",
+    async (req, reply) => {
+      const candidate = rejectProjectMemoryCandidate(req.org!.org_id, req.params.projectId, req.params.candidateId);
+      if (!candidate) {
+        reply.code(404);
+        return { error: "Candidate not found" };
+      }
+      return candidate;
+    },
+  );
+
+  app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/source-health", async (req, reply) => {
+    const health = await getProjectSourceHealthLive(req.org!.org_id, req.params.projectId);
+    if (!health) {
+      reply.code(404);
+      return { error: "Project not found" };
+    }
+    return health;
+  });
+
+  app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/ingest/poll", async (req, reply) => {
+    const result = await pollProjectSources(req.org!.org_id, req.params.projectId);
+    if (!result) {
+      reply.code(404);
+      return { error: "Project not found" };
+    }
+    return result;
+  });
+
+  app.post<{ Params: { projectId: string }; Body: z.infer<typeof AnswerProjectSchema> }>(
+    "/api/projects/:projectId/answers",
+    { preHandler: validateBody(AnswerProjectSchema) },
+    async (req, reply) => {
+      const answer = answerProjectQuestion(req.org!.org_id, req.params.projectId, req.body.query);
+      if (!answer) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return answer;
+    },
+  );
+
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
     const projectId = req.params.projectId;
     const orgId = req.org!.org_id;
@@ -342,13 +621,16 @@ export default async function projectRoutes(app: FastifyInstance) {
     const anatomyJson = row.anatomy_json ?? JSON.stringify(EMPTY_PROJECT_ANATOMY);
 
     const run = () => {
-      db.prepare("DELETE FROM project_context_updates WHERE project_id = ?").run(projectId);
-      db.prepare("UPDATE pods SET project_id = NULL WHERE project_id = ?").run(projectId);
+      db.prepare("DELETE FROM project_context_updates WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
+      db.prepare("DELETE FROM project_memory_candidates WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
+      db.prepare("DELETE FROM project_evidence_items WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
+      db.prepare("DELETE FROM project_ingestion_cursors WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
+      db.prepare("UPDATE pods SET project_id = NULL WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
       db.prepare(
         `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date, org_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate, orgId);
-      db.prepare("DELETE FROM projects WHERE project_id = ?").run(projectId);
+      db.prepare("DELETE FROM projects WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
     };
     withTransaction(run);
 

@@ -69,7 +69,7 @@ Claude Desktop / Claude Code                PIM UI            pim CLI
                         { summary_md, hits, sources_used, missing_sources, … }
 ```
 
-**Agent auto-pull path:** `PimClient.pullSessionContext({externalQuery})` adds a sixth fetch to the existing `Promise.allSettled` in the pod-agent protocol's pull step. The MCP's `get_agent_session_context` exposes the same param. Both return the context-search result bundled under `externalContext` / `external_context` alongside the living doc, conflicts, learnings, and recent updates.
+**Agent auto-pull path:** `PimClient.pullSessionContext({externalQuery})` adds a sixth fetch to the existing `Promise.allSettled` in the pod-agent protocol's pull step. The MCP's `get_agent_session_context` exposes the same param. The same task-specific query also guides KG learning retrieval; when omitted, learnings use broad scope-ranked retrieval rather than pod milestone or project-name filtering. Both return the context-search result bundled under `externalContext` / `external_context` alongside the living doc, conflicts, learnings, and recent updates.
 
 ## Sources
 

@@ -1,7 +1,16 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildArtifact } from "./artifact-template.js";
-import { apiFetch, apiFetchText, apiPatch, apiPost, apiPut } from "./api.js";
+import {
+  apiDelete,
+  apiFetch,
+  apiFetchText,
+  apiPatch,
+  apiPost,
+  apiPut,
+  getOrgSelectionStatus,
+  setActiveOrg,
+} from "./api.js";
 import { registerAuthTools } from "./auth-tools.js";
 
 /* ------------------------------------------------------------------ */
@@ -46,14 +55,44 @@ const ProjectResourcesSchema = z.object({
     .object({
       project_keys: z.array(z.string()).optional(),
       team: z.string().optional().describe("Jira 'Team' custom field value (e.g. 'Strata')"),
+      epics: z.array(z.string()).optional(),
+      issue_keys: z.array(z.string()).optional(),
+      fix_versions: z.array(z.string()).optional(),
     })
     .optional(),
-  github: z.object({ repos: z.array(z.string()).optional() }).optional(),
-  slack: z.object({ channels: z.array(z.string()).optional() }).optional(),
-  confluence: z.object({ space_keys: z.array(z.string()).optional() }).optional(),
+  github: z.object({
+    repos: z.array(z.string()).optional(),
+    default_branches: z.record(z.string()).optional(),
+  }).optional(),
+  slack: z.object({
+    channels: z.array(z.string()).optional(),
+    thread_urls: z.array(z.string()).optional(),
+  }).optional(),
+  confluence: z.object({
+    space_keys: z.array(z.string()).optional(),
+    page_ids: z.array(z.string()).optional(),
+    page_urls: z.array(z.string()).optional(),
+  }).optional(),
   git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
   aliases: z.array(z.string()).optional(),
+  glossary: z.array(z.object({
+    term: z.string().min(1),
+    definition: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
+  })).optional(),
 });
+
+const ProjectResourcesPatchSchema = ProjectResourcesSchema.deepPartial();
+
+const ProjectResourceBindingSchema = {
+  project_id: ProjectId,
+  source: z.enum(["project", "jira", "github", "slack", "confluence", "git"]),
+  field: z
+    .string()
+    .min(1)
+    .describe("Array field to modify, e.g. jira.project_keys, github.repos, slack.thread_urls, project.aliases. Use source='jira', field='team' to set/remove the Jira Team value."),
+  value: z.string().min(1).describe("Binding value to add or remove"),
+};
 
 const ActorSchema = z.object({
   email: z.string().email().optional(),
@@ -69,6 +108,26 @@ const ActorSchema = z.object({
 export function registerTools(server: McpServer) {
   // ── auth ─────────────────────────────────────────────────────────
   registerAuthTools(server);
+
+  server.tool(
+    "list_orgs",
+    "List the orgs available to the authenticated user and show which org slug this MCP process will send in X-Pim-Org.",
+    {},
+    async () => {
+      return json(await getOrgSelectionStatus());
+    },
+  );
+
+  server.tool(
+    "set_active_org",
+    "Persist the default org slug for standalone MCP usage in ~/.pim/config.json. PIM_ORG_SLUG and repo .pim.json still override this saved default.",
+    {
+      org_slug: z.string().min(1).describe("Org slug to use, e.g. adobecom"),
+    },
+    async ({ org_slug }) => {
+      return json(await setActiveOrg(org_slug));
+    },
+  );
 
   // ── org config & projects ───────────────────────────────────────
 
@@ -132,6 +191,57 @@ export function registerTools(server: McpServer) {
     },
     async ({ project_id, resources }) => {
       const result = await apiPut(`/api/projects/${encodeURIComponent(project_id)}/resources`, resources);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "get_project_profile",
+    "Read a project's context profile. This is the richer resources_json profile used to scope ingestion, context_search, Project Answers, and KG promotion.",
+    { project_id: ProjectId },
+    async ({ project_id }) => {
+      const result = await apiFetch(`/api/projects/${encodeURIComponent(project_id)}/profile`);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "patch_project_profile",
+    "Safely patch a project's context profile without replacing unspecified fields. Use this for adding Jira epics/fixVersions, GitHub default branch hints, Slack thread URLs, Confluence pages, aliases, or glossary terms while preserving existing bindings.",
+    {
+      project_id: ProjectId,
+      patch: ProjectResourcesPatchSchema.describe("Partial profile to merge into the current profile"),
+    },
+    async ({ project_id, patch }) => {
+      const result = await apiPatch(`/api/projects/${encodeURIComponent(project_id)}/profile`, patch);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "add_project_resource_binding",
+    "Add one binding to a project profile without replacing the profile. Examples: source=jira field=project_keys value=MWPW, source=github field=repos value=adobe/aio, source=slack field=thread_urls value=https://...",
+    ProjectResourceBindingSchema,
+    async ({ project_id, source, field, value }) => {
+      const result = await apiPost(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {
+        source,
+        field,
+        value,
+      });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "remove_project_resource_binding",
+    "Remove one binding from a project profile without replacing the profile. Uses the same source/field/value tuple as add_project_resource_binding.",
+    ProjectResourceBindingSchema,
+    async ({ project_id, source, field, value }) => {
+      const result = await apiDelete(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {
+        source,
+        field,
+        value,
+      });
       return json(result);
     },
   );
@@ -246,7 +356,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query; the same task-specific query also sharpens KG learning retrieval. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
@@ -256,7 +366,7 @@ export function registerTools(server: McpServer) {
       external_query: z
         .string()
         .optional()
-        .describe("Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup."),
+        .describe("Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings."),
     },
     async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
       const maxTok = learnings_max_tokens ?? 2000;
@@ -266,9 +376,8 @@ export function registerTools(server: McpServer) {
       // Fetch pod first so we can scope learnings by its project_id (prevents cross-project knowledge bleed).
       const pod = await apiFetch<{ project_id?: string | null; milestone?: { name?: string } }>(`/api/pods/${pod_id}`);
       const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
-      // Use the milestone name as a semantic query so scoring uses embedding similarity rather than keyword-only fallback.
-      const milestoneQuery = pod.milestone?.name?.trim();
-      const queryParam = milestoneQuery ? `&query=${encodeURIComponent(milestoneQuery)}` : "";
+      const taskQuery = external_query?.trim();
+      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
 
       const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context] =
         await Promise.all([
@@ -344,7 +453,7 @@ export function registerTools(server: McpServer) {
         .string()
         .optional()
         .describe(
-          "Optional query to also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup. The project_id is passed automatically to scope the fan-out to this project's resources.",
+          "Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings. The project_id is passed automatically to scope the fan-out to this project's resources.",
         ),
     },
     async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
@@ -353,9 +462,12 @@ export function registerTools(server: McpServer) {
       const scopes = encodeURIComponent(scope);
       const projectParam = `&projectId=${encodeURIComponent(project_id)}`;
 
-      // Fetch project first so we can use its name as the semantic query (embedding scoring on learnings).
+      // Fetch project metadata for the response and project-scoped lookup. The
+      // project name is too broad for semantic KG filtering; use only the
+      // task-specific external_query when provided.
       const project = await apiFetch<{ name?: string }>(`/api/projects/${encodeURIComponent(project_id)}`);
-      const queryParam = project.name ? `&query=${encodeURIComponent(project.name)}` : "";
+      const taskQuery = external_query?.trim();
+      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
 
       const [project_updates, relevant_learnings, external_context] = await Promise.all([
         apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),

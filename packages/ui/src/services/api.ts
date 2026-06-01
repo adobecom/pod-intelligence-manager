@@ -21,6 +21,9 @@ import type {
   ContextSearchRequest,
   ContextSearchResult,
   ProjectResources,
+  ProjectMemoryCandidate,
+  ProjectAnswerResponse,
+  ProjectSourceHealth,
 } from "@pim/shared";
 
 // Module-level getters injected by the Auth/Org contexts at mount so the
@@ -296,6 +299,85 @@ export async function putProjectResources(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(resources),
     },
+  );
+}
+
+export async function getProjectProfile(projectId: string): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/profile`,
+  );
+}
+
+export async function patchProjectProfile(
+  projectId: string,
+  patch: Partial<ProjectResources>,
+): Promise<ProjectResources> {
+  return fetchJSON<ProjectResources>(
+    `/api/projects/${encodeURIComponent(projectId)}/profile`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export async function getProjectSourceHealth(projectId: string): Promise<ProjectSourceHealth[]> {
+  return fetchJSON<ProjectSourceHealth[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/source-health`,
+  );
+}
+
+export async function getProjectMemoryCandidates(
+  projectId: string,
+  status = "pending",
+): Promise<ProjectMemoryCandidate[]> {
+  return fetchJSON<ProjectMemoryCandidate[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/memory-candidates?status=${encodeURIComponent(status)}`,
+  );
+}
+
+export async function promoteProjectMemoryCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<ProjectMemoryCandidate> {
+  return fetchJSON<ProjectMemoryCandidate>(
+    `/api/projects/${encodeURIComponent(projectId)}/memory-candidates/${encodeURIComponent(candidateId)}/promote`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectProjectMemoryCandidate(
+  projectId: string,
+  candidateId: string,
+): Promise<ProjectMemoryCandidate> {
+  return fetchJSON<ProjectMemoryCandidate>(
+    `/api/projects/${encodeURIComponent(projectId)}/memory-candidates/${encodeURIComponent(candidateId)}/reject`,
+    { method: "POST" },
+  );
+}
+
+export async function answerProjectQuestion(
+  projectId: string,
+  query: string,
+): Promise<ProjectAnswerResponse> {
+  return fetchJSON<ProjectAnswerResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/answers`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    },
+  );
+}
+
+export async function pollProjectSources(projectId: string): Promise<{
+  results: Array<{ source: string; ingested: number; missing?: string }>;
+  health: ProjectSourceHealth[];
+}> {
+  return fetchJSON(
+    `/api/projects/${encodeURIComponent(projectId)}/ingest/poll`,
+    { method: "POST" },
   );
 }
 

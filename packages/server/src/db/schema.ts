@@ -236,6 +236,61 @@ export function createTables() {
     CREATE INDEX IF NOT EXISTS idx_project_context_updates_project_time
       ON project_context_updates(project_id, timestamp DESC);
 
+    CREATE TABLE IF NOT EXISTS project_evidence_items (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      source_url TEXT,
+      source_title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      body TEXT NOT NULL,
+      author TEXT,
+      occurred_at TEXT NOT NULL,
+      ingested_at TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      confidence_score REAL NOT NULL DEFAULT 0.0,
+      promotable INTEGER NOT NULL DEFAULT 0,
+      promoted_node_id TEXT,
+      UNIQUE (org_id, project_id, source, source_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_evidence_project_time
+      ON project_evidence_items(org_id, project_id, occurred_at DESC);
+
+    CREATE TABLE IF NOT EXISTS project_memory_candidates (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      evidence_item_id TEXT NOT NULL REFERENCES project_evidence_items(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT NOT NULL,
+      domains_json TEXT NOT NULL DEFAULT '[]',
+      confidence_score REAL NOT NULL DEFAULT 0.0,
+      source TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','promoted','rejected')),
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      promoted_node_id TEXT,
+      UNIQUE (org_id, project_id, evidence_item_id, summary)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_memory_candidates_project_status
+      ON project_memory_candidates(org_id, project_id, status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS project_ingestion_cursors (
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      cursor_key TEXT NOT NULL,
+      cursor_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (org_id, project_id, source, cursor_key)
+    );
+
     CREATE TABLE IF NOT EXISTS ingestion_queue (
       id TEXT PRIMARY KEY,
       pod_id TEXT NOT NULL REFERENCES pods(pod_id),
@@ -259,6 +314,61 @@ export function createTables() {
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_rationale TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN retracted_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE project_context_updates ADD COLUMN retracted_at TEXT"); } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS project_evidence_items (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        source_url TEXT,
+        source_title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        body TEXT NOT NULL,
+        author TEXT,
+        occurred_at TEXT NOT NULL,
+        ingested_at TEXT NOT NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        confidence_score REAL NOT NULL DEFAULT 0.0,
+        promotable INTEGER NOT NULL DEFAULT 0,
+        promoted_node_id TEXT,
+        UNIQUE (org_id, project_id, source, source_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_evidence_project_time
+        ON project_evidence_items(org_id, project_id, occurred_at DESC);
+      CREATE TABLE IF NOT EXISTS project_memory_candidates (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+        evidence_item_id TEXT NOT NULL REFERENCES project_evidence_items(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        domains_json TEXT NOT NULL DEFAULT '[]',
+        confidence_score REAL NOT NULL DEFAULT 0.0,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','promoted','rejected')),
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        promoted_node_id TEXT,
+        UNIQUE (org_id, project_id, evidence_item_id, summary)
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_memory_candidates_project_status
+        ON project_memory_candidates(org_id, project_id, status, created_at DESC);
+      CREATE TABLE IF NOT EXISTS project_ingestion_cursors (
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        cursor_key TEXT NOT NULL,
+        cursor_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (org_id, project_id, source, cursor_key)
+      );
+    `);
+  } catch { /* already exists */ }
 
   // Projects + pod membership (existing DBs) — projects table must exist before ALTER pods
   try {

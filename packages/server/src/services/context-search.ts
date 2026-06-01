@@ -145,15 +145,21 @@ function writeCache(
   }
 }
 
-function loadProjectRow(projectId: string):
+function loadProjectRow(projectId: string, orgId?: string):
   | { project_id: string; name: string; resources_json: string | null }
   | null {
   try {
-    const row = db
-      .prepare(
-        "SELECT project_id, name, resources_json FROM projects WHERE project_id = ?",
-      )
-      .get(projectId) as
+    const row = (orgId
+      ? db
+          .prepare(
+            "SELECT project_id, name, resources_json FROM projects WHERE project_id = ? AND org_id = ?",
+          )
+          .get(projectId, orgId)
+      : db
+          .prepare(
+            "SELECT project_id, name, resources_json FROM projects WHERE project_id = ?",
+          )
+          .get(projectId)) as
       | { project_id: string; name: string; resources_json: string | null }
       | undefined;
     return row ?? null;
@@ -182,13 +188,18 @@ function escapeRegex(s: string): string {
 // "EMC" hit in a different project).
 function detectProjectFromQuery(
   query: string,
+  orgId?: string,
 ): { projectId: string; matchedTerms: string[] } | undefined {
   if (!query || query.trim().length === 0) return undefined;
   let rows: Array<{ project_id: string; name: string; resources_json: string | null }>;
   try {
-    rows = db
-      .prepare("SELECT project_id, name, resources_json FROM projects")
-      .all() as typeof rows;
+    rows = orgId
+      ? db
+          .prepare("SELECT project_id, name, resources_json FROM projects WHERE org_id = ?")
+          .all(orgId) as typeof rows
+      : db
+          .prepare("SELECT project_id, name, resources_json FROM projects")
+          .all() as typeof rows;
   } catch {
     return undefined;
   }
@@ -247,23 +258,35 @@ function stripTerms(query: string, terms: string[]): string {
 // project_id or pod and doesn't text-match any onboarded project. Returns
 // [] when the user has no orgs, when their orgs have no projects, or when
 // none of those projects have configured Jira keys.
-export function loadJiraKeysForUserOrgs(email: string): string[] {
+export function loadJiraKeysForUserOrgs(email: string, orgId?: string): string[] {
   let rows: { resources_json: string }[];
   try {
     // Case-insensitive email match: IMS can return the same address in
     // different cases across sessions, and findUserByEmail (services/users.ts)
     // already follows this pattern. Matching exactly would silently drop
     // the user's project keys when their stored email casing differs.
-    rows = db
-      .prepare(
-        `SELECT p.resources_json
-           FROM projects p
-           JOIN memberships m ON m.org_id = p.org_id
-           JOIN users u       ON u.user_id = m.user_id
-          WHERE lower(u.email) = lower(?)
-            AND p.resources_json IS NOT NULL`,
-      )
-      .all(email) as { resources_json: string }[];
+    rows = orgId
+      ? db
+          .prepare(
+            `SELECT p.resources_json
+               FROM projects p
+               JOIN memberships m ON m.org_id = p.org_id
+               JOIN users u       ON u.user_id = m.user_id
+              WHERE lower(u.email) = lower(?)
+                AND p.org_id = ?
+                AND p.resources_json IS NOT NULL`,
+          )
+          .all(email, orgId) as { resources_json: string }[]
+      : db
+          .prepare(
+            `SELECT p.resources_json
+               FROM projects p
+               JOIN memberships m ON m.org_id = p.org_id
+               JOIN users u       ON u.user_id = m.user_id
+              WHERE lower(u.email) = lower(?)
+                AND p.resources_json IS NOT NULL`,
+          )
+          .all(email) as { resources_json: string }[];
   } catch {
     return [];
   }
@@ -277,17 +300,34 @@ export function loadJiraKeysForUserOrgs(email: string): string[] {
 
 export async function resolveScope(
   req: ContextSearchRequest,
-  authenticatedUserEmail?: string,
+  orgIdOrAuthenticatedUserEmail?: string,
+  authenticatedUserEmailArg?: string,
 ): Promise<ResolvedScope> {
+  const secondArgLooksLikeEmail = orgIdOrAuthenticatedUserEmail?.includes("@") ?? false;
+  const orgId = authenticatedUserEmailArg !== undefined
+    ? orgIdOrAuthenticatedUserEmail
+    : secondArgLooksLikeEmail
+      ? undefined
+      : orgIdOrAuthenticatedUserEmail;
+  const authenticatedUserEmail =
+    authenticatedUserEmailArg !== undefined
+      ? authenticatedUserEmailArg
+      : secondArgLooksLikeEmail
+        ? orgIdOrAuthenticatedUserEmail
+        : undefined;
   const scope: ResolvedScope = {};
 
   // 1. Project: explicit > inferred from pod > detected from query text
   let projectId = req.project_id;
   if (!projectId && req.pod_id) {
     try {
-      const row = db
-        .prepare("SELECT project_id FROM pods WHERE pod_id = ?")
-        .get(req.pod_id) as { project_id: string | null } | undefined;
+      const row = (orgId
+        ? db
+            .prepare("SELECT project_id FROM pods WHERE pod_id = ? AND org_id = ?")
+            .get(req.pod_id, orgId)
+        : db
+            .prepare("SELECT project_id FROM pods WHERE pod_id = ?")
+            .get(req.pod_id)) as { project_id: string | null } | undefined;
       projectId = row?.project_id ?? undefined;
     } catch {
       /* ignore */
@@ -295,14 +335,14 @@ export async function resolveScope(
   }
   let detectedTerms: string[] = [];
   if (!projectId) {
-    const detected = detectProjectFromQuery(req.query);
+    const detected = detectProjectFromQuery(req.query, orgId);
     if (detected) {
       projectId = detected.projectId;
       detectedTerms = detected.matchedTerms;
     }
   }
   if (projectId) {
-    const row = loadProjectRow(projectId);
+    const row = loadProjectRow(projectId, orgId);
     if (row) {
       scope.project_id = row.project_id;
       scope.project_name = row.name;
@@ -351,7 +391,7 @@ export async function resolveScope(
     if (actor) {
       scope.actor = actor;
       scope.fallback = "authenticated_user";
-      const orgProjectKeys = loadJiraKeysForUserOrgs(authenticatedUserEmail);
+      const orgProjectKeys = loadJiraKeysForUserOrgs(authenticatedUserEmail, orgId);
       if (orgProjectKeys.length > 0) {
         scope.project_resources = {
           ...scope.project_resources,
@@ -523,7 +563,7 @@ export async function searchContext(
   const ttlSec = parseInt(process.env.CONTEXT_SEARCH_CACHE_TTL_SEC ?? String(DEFAULT_CACHE_TTL_SEC), 10);
   const useCache = req.use_cache !== false;
 
-  const scope = await resolveScope(req, opts.authenticatedUserEmail);
+  const scope = await resolveScope(req, orgId, opts.authenticatedUserEmail);
 
   const key = cacheKey(req, scope, orgId);
   if (useCache) {

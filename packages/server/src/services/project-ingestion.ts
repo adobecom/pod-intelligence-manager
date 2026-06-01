@@ -7,6 +7,7 @@ import { broadcastToAll } from "../ws/index.js";
 import type { ProjectContextUpdate } from "@pim/shared";
 import { scheduleProjectGitHookEnrichment } from "./git-hook-enrichment.js";
 import type { PimResult } from "../pim/master.js";
+import { recordProjectEvidence } from "./project-memory.js";
 
 export interface ProjectIngestionResult {
   success: boolean;
@@ -104,6 +105,29 @@ export async function ingestProjectContextUpdate(
     commitSha,
     project.org_id,
   );
+
+  if (project.org_id) {
+    await recordProjectEvidence({
+      org_id: project.org_id,
+      project_id: projectId,
+      source: "project_update",
+      source_type: update.type,
+      source_id: update.id,
+      source_title: update.summary,
+      summary: update.summary,
+      body: update.details,
+      author: update.agent_id,
+      occurred_at: update.timestamp,
+      metadata: {
+        scope: update.scope,
+        status: update.status,
+        artifacts: update.artifacts,
+        domains: [update.scope],
+      },
+      confidence_score: Math.max(0.5, Math.min(0.8, update.quality_score ?? 0.5)),
+      promotable: false,
+    });
+  }
 
   broadcastToAll({
     type: "project_context_update_added",
