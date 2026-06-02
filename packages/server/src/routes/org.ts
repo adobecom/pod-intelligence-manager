@@ -6,7 +6,7 @@ import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { validateBody } from "../middleware/validation.js";
 import { getOrgConfig, setOrgConfig, getOrgTuning, deleteOrgTuning } from "../services/org-settings.js";
 import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
-import { addLearningsToGraph } from "../services/knowledge-graph.js";
+import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { broadcastToAll } from "../ws/index.js";
 import { computeCurrentDay } from "../services/pod-day.js";
 import { runTuningAgent, getOrgTuningHistory } from "../pim/agents/tuning-agent.js";
@@ -151,10 +151,11 @@ export default async function orgRoutes(app: FastifyInstance) {
             | undefined;
           if (pr) projectMeta = { project_id: pod.project_id, project_name: pr.name };
         }
+        // Route through the ingestion gateway (sanitize → normalize domains →
+        // clamp confidence) before embedding + dedup + relational edge-building.
         // Defer community/hub recompute to the periodic refreshAnalysisIfStale tick
-        // (matches the ad-hoc POST /api/knowledge/nodes path). Keeps the archive
-        // request off the main-thread CPU spike for graphs of any size.
-        const result = await addLearningsToGraph(req.org!.org_id, learnings, podId, pod.name, projectMeta, { skipAnalysis: true });
+        // to keep the archive request off the main-thread CPU spike.
+        const result = await ingestLearnings(req.org!.org_id, learnings, podId, pod.name, "pod_archival", projectMeta, { skipAnalysis: true });
         learningsExtracted = result.nodesAdded;
         broadcastToAll({ type: "knowledge_updated", podId, payload: { learnings_extracted: learningsExtracted } });
       }

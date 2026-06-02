@@ -19,7 +19,6 @@ import type {
   KnowledgeQueryOptions,
 } from "@pim/shared";
 import {
-  addLearningsToGraph,
   curateNode,
   getGraph,
   getPrecedents,
@@ -28,6 +27,7 @@ import {
   queryKnowledge,
   stripEmbeddingsFromGraph,
 } from "../services/knowledge-graph.js";
+import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
 import { generateEmbedding } from "../services/embeddings.js";
 
@@ -72,6 +72,9 @@ const AdHocLearningSchema = z.object({
 
 const AD_HOC_POD_ID = "adhoc";
 const AD_HOC_DEFAULT_LABEL = "Ad-Hoc Submission";
+// Natural default when caller omits confidence_score. The ingestion gateway
+// (source="ad_hoc") enforces a hard ceiling of 0.7, so even if a caller
+// supplies a higher value it will be clamped there.
 const AD_HOC_DEFAULT_CONFIDENCE = 0.7;
 
 export default async function graphRoutes(app: FastifyInstance) {
@@ -137,8 +140,8 @@ export default async function graphRoutes(app: FastifyInstance) {
 
   // Ad-hoc learning submission. For confirmed learnings outside any active pod
   // (bug fixes, chatbot/agent conversations, anything an operator deems worth keeping).
-  // Submitted nodes enter the curation queue (`curated: false`) and are deduplicated
-  // synchronously against existing nodes via embedding cosine similarity.
+  // Submitted nodes pass through the ingestion gateway (sanitize → normalize domains
+  // → clamp confidence) before embedding + dedup + relational edge-building.
   app.post<{ Body: AdHocLearningInput }>(
     "/api/knowledge/nodes",
     { preHandler: validateBody(AdHocLearningSchema) },
@@ -152,14 +155,21 @@ export default async function graphRoutes(app: FastifyInstance) {
         confidence: "extracted" satisfies ConfidenceLevel,
         confidence_score: body.confidence_score ?? AD_HOC_DEFAULT_CONFIDENCE,
       };
-      const result = await addLearningsToGraph(
+      const result = await ingestLearnings(
         req.org!.org_id,
         [learning],
         AD_HOC_POD_ID,
         body.source_label ?? AD_HOC_DEFAULT_LABEL,
+        "ad_hoc",
         undefined,
         { skipAnalysis: true },
       );
+      if (result.droppedCount > 0 && result.nodesAdded === 0) {
+        // Learning was rejected by the quality gate before reaching dedup — distinct
+        // from a near-duplicate hit. 422 signals "invalid content" to the caller.
+        reply.code(422);
+        return { error: "Submission rejected by quality gate — summary, details, or domains failed minimum thresholds after sanitization." };
+      }
       if (result.nodesAdded === 0) {
         reply.code(409);
         return { error: "Near-duplicate of an existing node — not added." };

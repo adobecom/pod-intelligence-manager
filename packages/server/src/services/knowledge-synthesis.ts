@@ -1,6 +1,6 @@
 /**
  * Scheduled graph synthesis — proposes composite learnings from the existing graph
- * plus persisted lint findings. Ingests via addLearningsToGraph (skipAnalysis).
+ * plus persisted lint findings. Ingests via the ingestion gateway (skipAnalysis).
  */
 
 import crypto from "node:crypto";
@@ -16,7 +16,8 @@ import type {
 import db from "../db/connection.js";
 import { callLLMJSON, isLLMAvailable, MODELS } from "../pim/llm.js";
 import { identifyHubs } from "./graph-analysis.js";
-import { getGraph, addLearningsToGraph } from "./knowledge-graph.js";
+import { getGraph } from "./knowledge-graph.js";
+import { ingestLearnings } from "./ingestion-gateway.js";
 import { isEmbeddingAvailable } from "./embeddings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -318,11 +319,11 @@ export async function runScheduledGraphSynthesis(orgId: string): Promise<GraphSy
   }
 
   try {
-    const result = await addLearningsToGraph(orgId, learnings, SYNTHESIS_SOURCE_POD_ID, SYNTHESIS_SOURCE_POD_NAME, undefined, {
+    const result = await ingestLearnings(orgId, learnings, SYNTHESIS_SOURCE_POD_ID, SYNTHESIS_SOURCE_POD_NAME, "synthesis", undefined, {
       skipAnalysis: true,
     });
     console.log(
-      `[knowledge-synthesis] run ${run_id} (org ${orgId}): added ${result.nodesAdded} node(s), ${result.edgesAdded} edge(s)`,
+      `[knowledge-synthesis] run ${run_id} (org ${orgId}): added ${result.nodesAdded} node(s), ${result.edgesAdded} edge(s), dropped ${result.droppedCount} in pre-processing`,
     );
     return {
       ok: true,
@@ -332,7 +333,7 @@ export async function runScheduledGraphSynthesis(orgId: string): Promise<GraphSy
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[knowledge-synthesis] addLearningsToGraph failed:", err);
+    console.error("[knowledge-synthesis] ingestLearnings failed:", err);
     return { ok: false, error: message, run_id };
   }
 }
