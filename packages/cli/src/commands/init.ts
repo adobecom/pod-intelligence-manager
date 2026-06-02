@@ -15,6 +15,7 @@ import {
 } from "../templates/pod-agent-protocol.md.js";
 import { renderSyncCommand } from "../templates/sync-command.md.js";
 import {
+  type StandardsSource,
   type WizardSourceData,
   fetchStandardsForWizard,
   checkForUpdates,
@@ -47,6 +48,7 @@ export interface RunInitOptions {
   skipClaudeMd: boolean;
   skipMcp: boolean;
   selectedSources?: string[];
+  virtualSources?: StandardsSource[];
 }
 
 function isInteractiveSession(): boolean {
@@ -70,6 +72,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
     skipClaudeMd,
     skipMcp,
     selectedSources,
+    virtualSources,
   } = opts;
 
   const templateScope = scope ?? defaultScopeId;
@@ -250,7 +253,7 @@ export async function runInit(opts: RunInitOptions): Promise<void> {
   // 8. Install shared standards skills
   if (selectedSources?.length) {
     console.log(chalk.dim("\n  Installing shared standards..."));
-    await installSelectedSources(root, selectedSources);
+    await installSelectedSources(root, selectedSources, virtualSources);
   }
 
   console.log(chalk.bold.green("\n  PIM initialized!\n"));
@@ -278,7 +281,7 @@ async function runWizard(
   orgConfig: OrgConfig,
   root: string,
   initial: { project?: string; scope?: string; agent?: string },
-): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string; selectedSources: string[] }> {
+): Promise<{ podId?: string; projectId?: string; scope?: string; agentId?: string; selectedSources: string[]; virtualSources: StandardsSource[] }> {
   // Pod selection — optional; user can skip to project-only mode
   const pods = await fetchOrgPods(serverUrl);
   let podId: string | undefined;
@@ -355,8 +358,10 @@ async function runWizard(
 
   // Shared Standards — per-vendor sections with individual item checkboxes
   let selectedSources: string[] = [];
+  let virtualSources: StandardsSource[] = [];
   console.log(chalk.dim("  Fetching shared standards catalogue..."));
-  const wizardSources = await fetchStandardsForWizard();
+  const { wizardData: wizardSources, virtualSources: fetchedVirtualSources } = await fetchStandardsForWizard();
+  virtualSources = fetchedVirtualSources;
   if (wizardSources.length > 0) {
     type CheckboxChoice = { name: string; value: string; checked: boolean; disabled?: string | boolean };
     const choices: Array<CheckboxChoice | Separator> = [];
@@ -413,7 +418,7 @@ async function runWizard(
     process.exit(0);
   }
 
-  return { podId, projectId, scope, agentId, selectedSources };
+  return { podId, projectId, scope, agentId, selectedSources, virtualSources };
 }
 
 export function registerInitCommand(program: Command): void {
@@ -531,6 +536,7 @@ export function registerInitCommand(program: Command): void {
       let scope: string | undefined = opts.scope;
       let agentId: string | undefined = opts.agent;
       let selectedSources: string[] = [];
+      let virtualSources: StandardsSource[] = [];
 
       if (interactive && !opts.pod) {
         let w: Awaited<ReturnType<typeof runWizard>>;
@@ -554,6 +560,7 @@ export function registerInitCommand(program: Command): void {
         scope = w.scope;
         agentId = w.agentId;
         selectedSources = w.selectedSources;
+        virtualSources = w.virtualSources;
       } else {
         if (!podId?.trim() && !projectIdOpt?.trim()) {
           console.error(chalk.red("\n  Missing --pod or --project (at least one required in non-interactive mode / CI).\n"));
@@ -608,6 +615,7 @@ export function registerInitCommand(program: Command): void {
         skipClaudeMd: !!opts.skipClaudeMd,
         skipMcp: !!opts.skipMcp || !!opts.skipClaude,
         selectedSources,
+        virtualSources,
       });
     });
 }

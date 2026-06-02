@@ -35,7 +35,19 @@ export function registerUpdateStandardsCommand(program: Command): void {
       let errored = 0;
 
       for (const lockedSource of lock.sources) {
-        const source = STANDARDS_CATALOGUE.find(s => s.id === lockedSource.id);
+        const source =
+          STANDARDS_CATALOGUE.find(s => s.id === lockedSource.id) ??
+          (lockedSource.files
+            ? {
+                id: lockedSource.id,
+                name: lockedSource.id,
+                description: "",
+                repo: lockedSource.repo,
+                branch: lockedSource.branch,
+                path: lockedSource.path,
+                files: lockedSource.files,
+              }
+            : undefined);
         if (!source) {
           console.log(chalk.yellow(`  Unknown source "${lockedSource.id}" — skipped`));
           continue;

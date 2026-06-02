@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import { STANDARDS_CATALOGUE, type StandardsSource } from "./standards-catalogue.js";
+export type { StandardsSource };
 
 const GITHUB_API = "https://api.github.com";
 const GITHUB_RAW = "https://raw.githubusercontent.com";
@@ -14,6 +15,9 @@ export interface StandardsLockSource {
   path: string;
   installedSha: string;
   installedItems: string[];
+  /** Stored for virtual sources (discovered via marketplace.json) so that
+   *  update-standards can reconstruct the source without a catalogue lookup. */
+  files?: string[];
 }
 
 export interface StandardsLock {
@@ -131,17 +135,23 @@ export function parseStandardsSelections(
   return Array.from(map.entries()).map(([sourceId, items]) => ({ sourceId, items }));
 }
 
-export async function installSelectedSources(root: string, encodedValues: string[]): Promise<void> {
+export async function installSelectedSources(
+  root: string,
+  encodedValues: string[],
+  virtualSources: StandardsSource[] = [],
+): Promise<void> {
+  const allSources = [...STANDARDS_CATALOGUE, ...virtualSources];
   const now = new Date().toISOString();
   const lock = readStandardsLock(root) ?? { version: 1, updatedAt: now, lastChecked: now, sources: [] };
   const selections = parseStandardsSelections(encodedValues);
 
   for (const { sourceId, items } of selections) {
-    const source = STANDARDS_CATALOGUE.find(s => s.id === sourceId);
+    const source = allSources.find(s => s.id === sourceId);
     if (!source) continue;
     console.log(chalk.dim(`  Installing ${source.name}...`));
     try {
       const result = await installSourceStandards(root, source, msg => console.log(msg), items.length ? items : undefined);
+      const isVirtual = !STANDARDS_CATALOGUE.find(s => s.id === sourceId);
       const entry: StandardsLockSource = {
         id: sourceId,
         repo: source.repo,
@@ -149,6 +159,7 @@ export async function installSelectedSources(root: string, encodedValues: string
         path: source.path,
         installedSha: result.sha,
         installedItems: result.installedItems,
+        ...(isVirtual ? { files: source.files } : {}),
       };
       const idx = lock.sources.findIndex(s => s.id === sourceId);
       if (idx >= 0) {
@@ -203,19 +214,89 @@ export interface WizardSourceData {
   fallback: boolean;
 }
 
+interface MarketplacePlugin {
+  name: string;
+  source: string; // e.g. "./plugins/adobe-analytics"
+  description?: string;
+}
+
+function prettifyName(slug: string): string {
+  const acronyms = new Set(["aem", "lts", "eds", "api", "ai"]);
+  return slug
+    .split("-")
+    .map(word => (acronyms.has(word) ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1)))
+    .join(" ");
+}
+
+async function fetchMarketplacePlugins(source: StandardsSource): Promise<MarketplacePlugin[]> {
+  const url = `${GITHUB_RAW}/${source.repo}/${source.branch}/${source.marketplacePath}`;
+  const res = await fetch(url, {
+    headers: { "User-Agent": "pim-cli" },
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`GitHub raw ${res.status} for ${source.repo}/${source.marketplacePath}`);
+  const data = (await res.json()) as { plugins?: MarketplacePlugin[] };
+  return data.plugins ?? [];
+}
+
+function buildVirtualSource(parent: StandardsSource, plugin: MarketplacePlugin): StandardsSource {
+  const pluginPath = plugin.source.replace(/^\.\//, "");
+  return {
+    id: `${parent.id}:${plugin.name}`,
+    name: prettifyName(plugin.name),
+    description: plugin.description ?? "",
+    repo: parent.repo,
+    branch: parent.branch,
+    path: `${pluginPath}/skills`,
+    files: parent.files,
+  };
+}
+
 /**
  * Fetches item listings for all catalogue sources in parallel.
- * Never throws — failed sources are returned with fallback: true.
+ * Marketplace-driven sources (marketplacePath set) are expanded into one
+ * WizardSourceData per plugin. Never throws.
  */
-export async function fetchStandardsForWizard(): Promise<WizardSourceData[]> {
-  return Promise.all(
-    STANDARDS_CATALOGUE.map(async (source) => {
+export async function fetchStandardsForWizard(): Promise<{
+  wizardData: WizardSourceData[];
+  virtualSources: StandardsSource[];
+}> {
+  const virtualSources: StandardsSource[] = [];
+
+  const groups = await Promise.all(
+    STANDARDS_CATALOGUE.map(async (source): Promise<WizardSourceData[]> => {
+      if (source.marketplacePath) {
+        let plugins: MarketplacePlugin[];
+        try {
+          plugins = await fetchMarketplacePlugins(source);
+        } catch {
+          return [{ source, items: source.staticItems ?? [], fallback: true }];
+        }
+
+        const results = await Promise.allSettled(
+          plugins.map(async (plugin): Promise<WizardSourceData> => {
+            const virtual = buildVirtualSource(source, plugin);
+            virtualSources.push(virtual);
+            try {
+              const items = await fetchItemListing(virtual);
+              return { source: virtual, items, fallback: false };
+            } catch {
+              return { source: virtual, items: [], fallback: true };
+            }
+          }),
+        );
+
+        return results.flatMap(r => (r.status === "fulfilled" ? [r.value] : []));
+      }
+
       try {
         const items = await fetchItemListing(source);
-        return { source, items, fallback: false };
+        return [{ source, items, fallback: false }];
       } catch {
-        return { source, items: source.staticItems ?? [], fallback: true };
+        return [{ source, items: source.staticItems ?? [], fallback: true }];
       }
     }),
   );
+
+  return { wizardData: groups.flat(), virtualSources };
 }
