@@ -10,6 +10,10 @@ export interface StandardsSource {
   staticItems?: string[];
   /** Adobe-enforced: pre-selected in the wizard and cannot be deselected. */
   mandatory?: boolean;
+  /** Path to a marketplace.json registry within the repo. When set, the system
+   *  fetches this file at runtime to discover plugin sub-sources dynamically.
+   *  Each plugin's skills are expected at {plugin.source}/skills/. */
+  marketplacePath?: string;
 }
 
 export const STANDARDS_CATALOGUE: StandardsSource[] = [
@@ -22,5 +26,15 @@ export const STANDARDS_CATALOGUE: StandardsSource[] = [
     branch: "main",
     path: ".claude/skills",
     files: ["SKILL.md", "README.md"],
+  },
+  {
+    id: "adobe-skills",
+    name: "Adobe Skills",
+    description: "Official Adobe product skills library",
+    repo: "adobe/skills",
+    branch: "main",
+    path: "plugins",
+    marketplacePath: ".claude-plugin/marketplace.json",
+    files: ["SKILL.md"],
   },
 ];
