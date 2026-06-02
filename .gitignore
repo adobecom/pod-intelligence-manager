@@ -23,3 +23,6 @@ packages/infra/outputs.json
 
 fiestaHarness.md
 fiestaHarness-review.md
+
+# Scout local index (ML models + embeddings — generated, not source)
+.scout/
