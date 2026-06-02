@@ -9,7 +9,7 @@ import type {
   ProjectResources,
   ProjectSourceHealth,
 } from "@pim/shared";
-import { addLearningsToGraph } from "./knowledge-graph.js";
+import { ingestLearnings } from "./ingestion-gateway.js";
 
 const AUTO_PROMOTE_CONFIDENCE_MIN = 0.85;
 const SOURCE_HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -284,11 +284,12 @@ export async function promoteProjectMemoryCandidate(
     },
   };
 
-  const result = await addLearningsToGraph(
+  const result = await ingestLearnings(
     orgId,
     [learning],
     `project-${projectId}`,
     project.name,
+    "project_memory",
     { project_id: projectId, project_name: project.name },
     { skipAnalysis: true },
   );

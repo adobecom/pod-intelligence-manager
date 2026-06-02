@@ -5,7 +5,8 @@
  */
 
 import type { EnhancedPodLearning } from "@pim/shared";
-import { getGraph, addLearningsToGraph } from "../services/knowledge-graph.js";
+import { getGraph } from "../services/knowledge-graph.js";
+import { ingestLearnings } from "../services/ingestion-gateway.js";
 
 // --- Event CRUD v1 (pod-emc-event-crud, completed 2026-04-04) ---
 
@@ -223,21 +224,23 @@ export async function seedKnowledgeGraph(orgId: string): Promise<void> {
 
   console.log(`[knowledge-graph] Seeding mock knowledge from archived EMC pods (org "${orgId}")...`);
 
-  const result1 = await addLearningsToGraph(
+  const result1 = await ingestLearnings(
     orgId,
     eventCrudLearnings,
     "pod-emc-event-crud",
     "Event CRUD v1",
+    "seed",
   );
   console.log(
     `[knowledge-graph] Event CRUD v1: ${result1.nodesAdded} nodes, ${result1.edgesAdded} edges`,
   );
 
-  const result2 = await addLearningsToGraph(
+  const result2 = await ingestLearnings(
     orgId,
     registrationLearnings,
     "pod-emc-registration",
     "Registration Forms v1",
+    "seed",
   );
   console.log(
     `[knowledge-graph] Registration Forms v1: ${result2.nodesAdded} nodes, ${result2.edgesAdded} edges`,
