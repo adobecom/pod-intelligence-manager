@@ -431,7 +431,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     const rows = db
       .prepare(
         `SELECT id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score,
-                blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha
+                retrieval_text, entity_refs_json, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha
          FROM project_context_updates WHERE project_id = ? AND org_id = ?${includeRetracted ? "" : " AND retracted_at IS NULL"} ORDER BY timestamp DESC`,
       )
       .all(req.params.projectId, req.org!.org_id) as Array<{
@@ -443,6 +443,8 @@ export default async function projectRoutes(app: FastifyInstance) {
         scope: ProjectContextUpdate["scope"];
         summary: string;
         details: string;
+        retrieval_text: string | null;
+        entity_refs_json: string | null;
         artifacts_json: string;
         status: ProjectContextUpdate["status"];
         quality_score: number;
@@ -462,6 +464,8 @@ export default async function projectRoutes(app: FastifyInstance) {
       scope: r.scope,
       summary: r.summary,
       details: r.details,
+      retrieval_text: r.retrieval_text ?? undefined,
+      entity_refs: JSON.parse(r.entity_refs_json ?? "[]") as ProjectContextUpdate["entity_refs"],
       artifacts: JSON.parse(r.artifacts_json) as ProjectContextUpdate["artifacts"],
       status: r.status,
       quality_score: r.quality_score,

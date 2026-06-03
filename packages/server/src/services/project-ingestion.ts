@@ -8,6 +8,10 @@ import type { ProjectContextUpdate } from "@pim/shared";
 import { scheduleProjectGitHookEnrichment } from "./git-hook-enrichment.js";
 import type { PimResult } from "../pim/master.js";
 import { recordProjectEvidence } from "./project-memory.js";
+import {
+  buildProjectContextUpdateMemory,
+  recordTemporalRelationshipsForUpdate,
+} from "./memory-enrichment.js";
 
 export interface ProjectIngestionResult {
   success: boolean;
@@ -83,9 +87,15 @@ export async function ingestProjectContextUpdate(
     source: data.source,
   };
 
+  const memory = buildProjectContextUpdateMemory(project.org_id ?? "", update);
+  update.retrieval_text = memory.retrieval_text;
+  update.entity_refs = memory.entity_refs;
+
   db.prepare(
-    `INSERT INTO project_context_updates (id, agent_id, timestamp, project_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO project_context_updates
+       (id, agent_id, timestamp, project_id, type, scope, summary, details, retrieval_text, entity_refs_json,
+        artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     update.id,
     update.agent_id,
@@ -95,6 +105,8 @@ export async function ingestProjectContextUpdate(
     update.scope,
     update.summary,
     update.details,
+    update.retrieval_text ?? null,
+    JSON.stringify(update.entity_refs ?? []),
     JSON.stringify(update.artifacts),
     update.status,
     update.quality_score ?? 0,
@@ -105,6 +117,18 @@ export async function ingestProjectContextUpdate(
     commitSha,
     project.org_id,
   );
+
+  if (project.org_id) {
+    recordTemporalRelationshipsForUpdate({
+      orgId: project.org_id,
+      updateId: update.id,
+      timestamp: update.timestamp,
+      type: update.type,
+      entityRefs: update.entity_refs ?? [],
+      artifacts: update.artifacts,
+      reason: update.summary,
+    });
+  }
 
   if (project.org_id) {
     await recordProjectEvidence({

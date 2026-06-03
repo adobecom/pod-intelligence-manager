@@ -7,6 +7,7 @@ import type {
 } from "./context-update.js";
 import type { Scope } from "./pod.js";
 import type { KnowledgeNodeType } from "./graph.js";
+import type { MemoryEntityRef } from "./memory.js";
 
 /** Project-local vocabulary used to expand searches and Project Answers queries. */
 export interface ProjectGlossaryTerm {
@@ -87,6 +88,8 @@ export interface ProjectContextUpdate {
   scope: Scope;
   summary: string;
   details: string;
+  retrieval_text?: string;
+  entity_refs?: MemoryEntityRef[];
   artifacts: Artifact[];
   status: WorkStatus;
   blocks: string[];

@@ -27,6 +27,7 @@ export type IngestionSource =
   | "ad_hoc"
   | "synthesis"
   | "project_memory"
+  | "agent_run"
   | "seed";
 
 // Ad-hoc (uncurated external) submissions are capped here so they cannot

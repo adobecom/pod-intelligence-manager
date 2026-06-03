@@ -96,6 +96,26 @@ export type {
 } from "./types/graph.js";
 
 export type {
+  MemoryEntityType,
+  MemoryEntityRef,
+  TemporalQueryMode,
+  RetrievalTier,
+  TemporalRelationship,
+  AgentSessionStatus,
+  AgentRunStatus,
+  AgentRunEventType,
+  AgentSession,
+  AgentRun,
+  AgentRunEvent,
+  AgentCheckpoint,
+  MemoryCandidateStatus,
+  MemoryCandidate,
+  AgentResumeContext,
+} from "./types/memory.js";
+
+export { AGENT_RUN_EVENT_TYPES } from "./types/memory.js";
+
+export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,

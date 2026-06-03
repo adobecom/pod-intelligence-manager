@@ -43,6 +43,8 @@ export interface ContextSearchRequest {
   max_hits_per_source?: number;
   synthesize?: boolean;
   use_cache?: boolean;
+  query_mode?: TemporalQueryMode;
+  as_of?: string;
 }
 
 export interface ContextSearchHit {
@@ -86,3 +88,4 @@ export interface ContextSearchResult {
   cached_at?: string;
   generated_at: string;
 }
+import type { TemporalQueryMode } from "./memory.js";

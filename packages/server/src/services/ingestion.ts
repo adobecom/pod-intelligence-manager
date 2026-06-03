@@ -11,6 +11,10 @@ import { scheduleAsyncQualityScore } from "./async-quality-score.js";
 import { scheduleGitHookEnrichment } from "./git-hook-enrichment.js";
 import { getOrgScopeIds } from "./org-settings.js";
 import { getOrgIdForPod } from "./orgs.js";
+import {
+  buildPodContextUpdateMemory,
+  recordTemporalRelationshipsForUpdate,
+} from "./memory-enrichment.js";
 
 const ScopeSchema = z.string().min(1);
 const UpdateTypeSchema = z.enum(["progress", "blocker", "spec_change", "question", "decision"]);
@@ -160,18 +164,36 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
     source: data.source,
   };
 
+  const memory = buildPodContextUpdateMemory(orgId, update);
+  update.retrieval_text = memory.retrieval_text;
+  update.entity_refs = memory.entity_refs;
+
   // 6. Write to database
   db.prepare(
-    `INSERT INTO context_updates (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO context_updates
+       (id, agent_id, timestamp, pod_id, type, scope, summary, details, retrieval_text, entity_refs_json,
+        artifacts_json, status, quality_score, blocks_json, blocked_by_json, needs_input_from_json, source, commit_sha, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     update.id, update.agent_id, update.timestamp, update.pod_id,
     update.type, update.scope, update.summary, update.details,
+    update.retrieval_text ?? null,
+    JSON.stringify(update.entity_refs ?? []),
     JSON.stringify(update.artifacts), update.status, update.quality_score ?? null,
     JSON.stringify(update.blocks), JSON.stringify(update.blocked_by),
     JSON.stringify(update.needs_input_from),
     update.source ?? "manual", commitSha, orgId,
   );
+
+  recordTemporalRelationshipsForUpdate({
+    orgId,
+    updateId: update.id,
+    timestamp: update.timestamp,
+    type: update.type,
+    entityRefs: update.entity_refs ?? [],
+    artifacts: update.artifacts,
+    reason: update.summary,
+  });
 
   // 6.5 Denormalize pod_areas + milestone % + org agent_count from context stream
   refreshPodSnapshotFromContext(podId);

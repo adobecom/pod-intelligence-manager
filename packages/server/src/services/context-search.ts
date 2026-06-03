@@ -88,6 +88,8 @@ export function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId:
     time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
     max_hits_per_source: req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE,
     synthesize: req.synthesize !== false,
+    query_mode: req.query_mode ?? "current",
+    as_of: req.as_of ?? null,
     pod_id: req.pod_id ?? null,
     project_id: scope.project_id ?? null,
     project_resources: scope.project_resources ?? null,
@@ -592,6 +594,8 @@ export async function searchContext(
     project_name: scope.project_name,
     project_resources: scope.project_resources,
     actor: scope.actor,
+    query_mode: req.query_mode ?? "current",
+    as_of: req.as_of,
   };
   // When the actor came from the IMS-authenticated-user fallback, only
   // Jira needs it to satisfy its fail-closed scope guard. Carrying it to
