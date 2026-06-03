@@ -19,7 +19,10 @@ export type MemoryEntityType =
 
 export interface MemoryEntityRef {
   type: MemoryEntityType;
+  /** Org-scoped storage id. This is safe to use as memory_entities.id. */
   id: string;
+  /** Org-agnostic normalized key for explicit cross-org entity queries. */
+  key: string;
   label?: string;
   source?: string;
 }

@@ -22,22 +22,28 @@ function stableId(prefix: string, parts: unknown[]): string {
   return `${prefix}-${hash}`;
 }
 
-function entityId(type: MemoryEntityType, key: string): string {
-  return stableId("me", [type, key.toLowerCase()]);
+function normalizeEntityKey(key: string): string {
+  return key.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function entityId(orgId: string, type: MemoryEntityType, key: string): string {
+  return stableId("me", [orgId, type, normalizeEntityKey(key)]);
 }
 
 function cleanLabel(label: string): string {
   return label.trim().replace(/\s+/g, " ").slice(0, 200);
 }
 
-function addRef(refs: MemoryEntityRef[], type: MemoryEntityType, key: string, label?: string, source?: string): void {
+function addRef(refs: MemoryEntityRef[], orgId: string, type: MemoryEntityType, key: string, label?: string, source?: string): void {
   const cleanedKey = key.trim();
   if (!cleanedKey) return;
-  const id = entityId(type, cleanedKey);
+  const normalizedKey = normalizeEntityKey(cleanedKey);
+  const id = entityId(orgId, type, cleanedKey);
   if (refs.some((r) => r.id === id)) return;
   refs.push({
     type,
     id,
+    key: normalizedKey,
     label: cleanLabel(label ?? cleanedKey),
     source,
   });
@@ -54,7 +60,7 @@ function artifactsToText(artifacts: Artifact[]): string[] {
 }
 
 export function extractEntityRefs(input: {
-  orgId?: string;
+  orgId: string;
   project?: { project_id: string; name?: string | null } | null;
   pod?: { pod_id: string; name?: string | null } | null;
   scope?: string | null;
@@ -66,13 +72,13 @@ export function extractEntityRefs(input: {
   source?: string;
 }): MemoryEntityRef[] {
   const refs: MemoryEntityRef[] = [];
-  if (input.project?.project_id) addRef(refs, "project", input.project.project_id, input.project.name ?? input.project.project_id, "project");
-  if (input.pod?.pod_id) addRef(refs, "pod", input.pod.pod_id, input.pod.name ?? input.pod.pod_id, "pod");
+  if (input.project?.project_id) addRef(refs, input.orgId, "project", input.project.project_id, input.project.name ?? input.project.project_id, "project");
+  if (input.pod?.pod_id) addRef(refs, input.orgId, "pod", input.pod.pod_id, input.pod.name ?? input.pod.pod_id, "pod");
   if (input.scope) {
-    addRef(refs, "scope", input.scope, input.scope, "scope");
-    addRef(refs, "workstream", input.scope, input.scope, "scope");
+    addRef(refs, input.orgId, "scope", input.scope, input.scope, "scope");
+    addRef(refs, input.orgId, "workstream", input.scope, input.scope, "scope");
   }
-  if (input.agentId) addRef(refs, "agent", input.agentId, input.agentId, "agent");
+  if (input.agentId) addRef(refs, input.orgId, "agent", input.agentId, input.agentId, "agent");
 
   const artifacts = input.artifacts ?? [];
   const text = [
@@ -82,28 +88,28 @@ export function extractEntityRefs(input: {
     ...artifactsToText(artifacts),
   ].filter(Boolean).join("\n");
 
-  for (const issue of uniqueMatches(text, JIRA_RE)) addRef(refs, "jira_issue", issue, issue, "text");
-  for (const pr of uniqueMatches(text, GH_PR_RE)) addRef(refs, "github_pr", pr, pr, "text");
-  for (const api of uniqueMatches(text, HTTP_PATH_RE)) addRef(refs, "api_contract", api, api, "text");
-  for (const api of uniqueMatches(text, API_NAME_RE)) addRef(refs, "api_contract", api, api, "text");
+  for (const issue of uniqueMatches(text, JIRA_RE)) addRef(refs, input.orgId, "jira_issue", issue, issue, "text");
+  for (const pr of uniqueMatches(text, GH_PR_RE)) addRef(refs, input.orgId, "github_pr", pr, pr, "text");
+  for (const api of uniqueMatches(text, HTTP_PATH_RE)) addRef(refs, input.orgId, "api_contract", api, api, "text");
+  for (const api of uniqueMatches(text, API_NAME_RE)) addRef(refs, input.orgId, "api_contract", api, api, "text");
 
   for (const identifier of uniqueMatches(text, IDENTIFIER_RE)) {
     if (identifier.length < 4) continue;
-    addRef(refs, "component", identifier, identifier, "identifier");
+    addRef(refs, input.orgId, "component", identifier, identifier, "identifier");
   }
 
   for (const artifact of artifacts) {
     const value = artifact.path ?? artifact.url;
     if (!value) continue;
-    addRef(refs, "artifact", value, value, artifact.type || "artifact");
+    addRef(refs, input.orgId, "artifact", value, value, artifact.type || "artifact");
     if (artifact.path) {
       const component = artifact.path.split(/[\\/]/).filter(Boolean).slice(0, 4).join("/");
-      if (component) addRef(refs, "component", component, component, "artifact_path");
+      if (component) addRef(refs, input.orgId, "component", component, component, "artifact_path");
     }
   }
 
   if (input.type === "decision") {
-    addRef(refs, "decision", input.summary ?? stableId("decision", [input.summary, input.details]), input.summary ?? "Decision", "update");
+    addRef(refs, input.orgId, "decision", input.summary ?? stableId("decision", [input.summary, input.details]), input.summary ?? "Decision", "update");
   }
 
   return refs;
@@ -286,8 +292,8 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
-function entityRowId(orgId: string, ref: MemoryEntityRef): string {
-  return stableId("me-row", [orgId, ref.id]);
+function memoryEntityKey(ref: MemoryEntityRef): string {
+  return (ref.key || ref.id).trim();
 }
 
 export function persistMemoryEntities(orgId: string, refs: MemoryEntityRef[], metadata: JsonRecord = {}): void {
@@ -297,12 +303,14 @@ export function persistMemoryEntities(orgId: string, refs: MemoryEntityRef[], me
     `INSERT INTO memory_entities (id, org_id, entity_type, entity_key, label, aliases_json, metadata_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?)
      ON CONFLICT(org_id, entity_type, entity_key) DO UPDATE SET
+       id = excluded.id,
        label = excluded.label,
        metadata_json = excluded.metadata_json,
        updated_at = excluded.updated_at`,
   );
   for (const ref of refs) {
-    stmt.run(entityRowId(orgId, ref), orgId, ref.type, ref.id, ref.label ?? ref.id, JSON.stringify(metadata), now, now);
+    const key = memoryEntityKey(ref);
+    stmt.run(ref.id, orgId, ref.type, key, ref.label ?? key, JSON.stringify(metadata), now, now);
   }
 }
 
@@ -327,11 +335,11 @@ function insertRelationship(input: {
   reason: string;
   confidence?: number;
 }): void {
-  const sourceRowId = entityRowId(input.orgId, input.source);
-  const targetRowId = entityRowId(input.orgId, input.target);
-  if (sourceRowId === targetRowId) return;
-  if (relationshipExists(input.orgId, sourceRowId, targetRowId, input.type, input.updateId)) return;
-  const id = stableId("mr", [input.orgId, sourceRowId, targetRowId, input.type, input.updateId]);
+  const sourceId = input.source.id;
+  const targetId = input.target.id;
+  if (sourceId === targetId) return;
+  if (relationshipExists(input.orgId, sourceId, targetId, input.type, input.updateId)) return;
+  const id = stableId("mr", [input.orgId, sourceId, targetId, input.type, input.updateId]);
   db.prepare(
     `INSERT INTO memory_relationships
        (id, org_id, source_entity_id, target_entity_id, relation_type, valid_from, committed_at,
@@ -340,8 +348,8 @@ function insertRelationship(input: {
   ).run(
     id,
     input.orgId,
-    sourceRowId,
-    targetRowId,
+    sourceId,
+    targetId,
     input.type,
     input.at,
     input.at,

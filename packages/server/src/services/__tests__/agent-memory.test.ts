@@ -346,30 +346,31 @@ describe("agent run memory", () => {
     expect(context?.project_memory.map((candidate) => candidate.id)).toEqual(["mc-promoted"]);
   });
 
-  it("persists the same entity ref in multiple orgs without primary-key collision", () => {
+  it("persists the same logical entity key in multiple orgs without primary-key collision", () => {
     const now = new Date().toISOString();
     testDb
       .prepare("INSERT INTO orgs (org_id, slug, name, created_by_user_id, created_at) VALUES (?, ?, ?, ?, ?)")
       .run("org-agent-memory-2", "agent-memory-2", "Agent Memory 2", "user-agent", now);
 
-    const ref = { type: "component" as const, id: "me-shared", label: "Shared Component" };
-    persistMemoryEntities(ORG_ID, [ref]);
-    persistMemoryEntities("org-agent-memory-2", [ref]);
+    const ref1 = { type: "component" as const, id: "me-org-1-shared", key: "shared-component", label: "Shared Component" };
+    const ref2 = { type: "component" as const, id: "me-org-2-shared", key: "shared-component", label: "Shared Component" };
+    persistMemoryEntities(ORG_ID, [ref1]);
+    persistMemoryEntities("org-agent-memory-2", [ref2]);
 
     const rows = testDb
-      .prepare("SELECT org_id, entity_key FROM memory_entities WHERE entity_key = ? ORDER BY org_id")
-      .all(ref.id) as Array<{ org_id: string; entity_key: string }>;
+      .prepare("SELECT id, org_id, entity_key FROM memory_entities WHERE entity_key = ? ORDER BY org_id")
+      .all(ref1.key) as Array<{ id: string; org_id: string; entity_key: string }>;
     expect(rows).toHaveLength(2);
     expect(rows).toEqual(expect.arrayContaining([
-      { org_id: ORG_ID, entity_key: ref.id },
-      { org_id: "org-agent-memory-2", entity_key: ref.id },
+      { id: ref1.id, org_id: ORG_ID, entity_key: ref1.key },
+      { id: ref2.id, org_id: "org-agent-memory-2", entity_key: ref2.key },
     ]));
   });
 
-  it("stores temporal relationships against persisted entity row ids", () => {
+  it("stores temporal relationships against memory entity ref ids", () => {
     const now = new Date().toISOString();
-    const agent = { type: "agent" as const, id: "me-agent-local", label: "Agent Local" };
-    const pod = { type: "pod" as const, id: "me-pod-local", label: "Pod Local" };
+    const agent = { type: "agent" as const, id: "me-agent-local", key: "agent-local", label: "Agent Local" };
+    const pod = { type: "pod" as const, id: "me-pod-local", key: "pod-local", label: "Pod Local" };
 
     recordTemporalRelationshipsForUpdate({
       orgId: ORG_ID,
@@ -391,7 +392,7 @@ describe("agent run memory", () => {
 
     expect(entityIds).toContain(relationship.source_entity_id);
     expect(entityIds).toContain(relationship.target_entity_id);
-    expect(relationship.source_entity_id).not.toBe(agent.id);
-    expect(relationship.target_entity_id).not.toBe(pod.id);
+    expect(relationship.source_entity_id).toBe(agent.id);
+    expect(relationship.target_entity_id).toBe(pod.id);
   });
 });
