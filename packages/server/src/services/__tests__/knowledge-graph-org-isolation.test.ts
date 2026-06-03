@@ -118,13 +118,13 @@ describe("knowledge graph org isolation", () => {
     const aNodeId = getGraph(ORG_A).nodes[0].id;
 
     // Org B cannot curate org A's node — returns false (not found in B's slot).
-    await expect(curateNode(ORG_B, aNodeId, "approve")).resolves.toBe(false);
+    expect(curateNode(ORG_B, aNodeId, "approve")).toBe(false);
 
     // And the node in org A was not curated.
     expect(getGraph(ORG_A).nodes[0].curated).toBe(false);
 
     // Same call from org A succeeds.
-    await expect(curateNode(ORG_A, aNodeId, "approve")).resolves.toBe(true);
+    expect(curateNode(ORG_A, aNodeId, "approve")).toBe(true);
     expect(getGraph(ORG_A).nodes[0].curated).toBe(true);
   });
 
@@ -157,7 +157,7 @@ describe("curateNode index consistency", () => {
     _resetForTests();
   });
 
-	  it("edit action: old domain no longer returns the node, new domain does", async () => {
+  it("edit action: old domain no longer returns the node, new domain does", async () => {
     // Gap 1: _removeNodeFromIndexes + _indexNode must be called around the edit so
     // the domain index stays coherent.
     const orgId = "org-curate-edit";
@@ -179,7 +179,7 @@ describe("curateNode index consistency", () => {
     expect(beforeEdit.nodes.map((n) => n.id)).toContain(nodeId);
 
     // Edit: move node from "backend" to "frontend".
-    const edited = await curateNode(orgId, nodeId, "edit", { domains: ["frontend"] });
+    const edited = curateNode(orgId, nodeId, "edit", { domains: ["frontend"] });
     expect(edited).toBe(true);
 
     // Old domain must no longer return the node.
@@ -195,27 +195,6 @@ describe("curateNode index consistency", () => {
       max_tokens: 2000,
     });
     expect(afterNewDomain.nodes.map((n) => n.id)).toContain(nodeId);
-  });
-
-  it("edit action: clears stale embeddings when regeneration is unavailable", async () => {
-    const orgId = "org-curate-embedding";
-    initializeKnowledgeGraph(orgId);
-    await addLearningsToGraph(
-      orgId,
-      [learning("Embedding stale node", "pre-edit details")],
-      "pod-embedding",
-      "Embedding Pod",
-    );
-
-    const node = getGraph(orgId).nodes[0];
-    node.embedding = [1, 0, 0];
-    node.embedding_text_hash = "old-hash";
-
-    const edited = await curateNode(orgId, node.id, "edit", { details: "post-edit details" });
-
-    expect(edited).toBe(true);
-    expect(getGraph(orgId).nodes[0].embedding).toBeUndefined();
-    expect(getGraph(orgId).nodes[0].embedding_text_hash).toBeUndefined();
   });
 
   it("reject action: node is absent from domain, type, and keyword index queries", async () => {
@@ -239,7 +218,7 @@ describe("curateNode index consistency", () => {
     });
     expect(beforeReject.nodes.map((n) => n.id)).toContain(nodeId);
 
-    const rejected = await curateNode(orgId, nodeId, "reject");
+    const rejected = curateNode(orgId, nodeId, "reject");
     expect(rejected).toBe(true);
 
     // Must be absent from graph.nodes.

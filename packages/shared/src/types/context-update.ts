@@ -1,5 +1,4 @@
 import type { Scope } from "./pod.js";
-import type { MemoryEntityRef } from "./memory.js";
 
 export type ContextUpdateSource =
   | "manual"
@@ -17,8 +16,6 @@ export interface ContextUpdate {
   scope: Scope;
   summary: string;
   details: string;
-  retrieval_text?: string;
-  entity_refs?: MemoryEntityRef[];
   artifacts: Artifact[];
   status: WorkStatus;
   blocks: string[];

@@ -27,7 +27,6 @@ import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
   detectCommunities,
-  extractIdentifiers,
   extractKeywords,
   identifyHubs,
   keywordsFromTexts,
@@ -36,13 +35,11 @@ import {
 import {
   generateEmbedding,
   embedText,
-  embeddingTextHash,
   batchEmbedWithRateLimit,
   cosineSimilarity,
   isEmbeddingAvailable,
 } from "./embeddings.js";
 import { getGraphAnalysisPool, isGraphWorkerEnabled } from "./graph-analysis-pool.js";
-import { buildKnowledgeNodeMemory } from "./memory-enrichment.js";
 
 // --- In-Memory Cache (per-org) ---
 
@@ -53,11 +50,8 @@ interface NodeIndexes {
   domainIndex: Map<string, Set<string>>;
   typeIndex: Map<string, Set<string>>;
   podIndex: Map<string, Set<string>>;
-  entityIndex: Map<string, Set<string>>;
   nodeKeywords: Map<string, Set<string>>;
   keywordIndex: Map<string, Set<string>>;
-  nodeIdentifiers: Map<string, Set<string>>;
-  identifierIndex: Map<string, Set<string>>;
 }
 
 interface OrgGraphState extends NodeIndexes {
@@ -67,19 +61,9 @@ interface OrgGraphState extends NodeIndexes {
   // Lets ad-hoc POSTs return fast without leaving the graph permanently stale —
   // the periodic interval (or the next archival batch) picks up the work.
   analysisStale: boolean;
-  // Retrieval counters are useful telemetry, but query paths must not persist the
-  // whole graph synchronously. Flush these updates from the periodic graph tick.
-  retrievalTelemetryDirty: boolean;
 }
 
 const orgStates = new Map<string, OrgGraphState>();
-
-export class KnowledgeQueryValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "KnowledgeQueryValidationError";
-  }
-}
 
 // --- Index helpers ---
 
@@ -89,11 +73,8 @@ function buildIndexes(nodes: KnowledgeNode[]): NodeIndexes {
     domainIndex: new Map(),
     typeIndex: new Map(),
     podIndex: new Map(),
-    entityIndex: new Map(),
     nodeKeywords: new Map(),
     keywordIndex: new Map(),
-    nodeIdentifiers: new Map(),
-    identifierIndex: new Map(),
   };
   for (const node of nodes) _indexNode(node, idx);
   return idx;
@@ -109,22 +90,11 @@ function _indexNode(node: KnowledgeNode, idx: NodeIndexes): void {
   idx.typeIndex.get(node.type)!.add(node.id);
   if (!idx.podIndex.has(node.source_pod_id)) idx.podIndex.set(node.source_pod_id, new Set());
   idx.podIndex.get(node.source_pod_id)!.add(node.id);
-  for (const ref of node.entity_refs ?? []) {
-    if (!idx.entityIndex.has(ref.id)) idx.entityIndex.set(ref.id, new Set());
-    idx.entityIndex.get(ref.id)!.add(node.id);
-  }
-  const searchText = `${node.summary} ${node.details} ${node.retrieval_text ?? ""} ${(node.entity_refs ?? []).map((r) => `${r.type} ${r.label ?? r.id}`).join(" ")}`;
-  const kws = extractKeywords(searchText);
+  const kws = extractKeywords(`${node.summary} ${node.details}`);
   idx.nodeKeywords.set(node.id, kws);
   for (const kw of kws) {
     if (!idx.keywordIndex.has(kw)) idx.keywordIndex.set(kw, new Set());
     idx.keywordIndex.get(kw)!.add(node.id);
-  }
-  const identifiers = extractIdentifiers(searchText);
-  idx.nodeIdentifiers.set(node.id, identifiers);
-  for (const ident of identifiers) {
-    if (!idx.identifierIndex.has(ident)) idx.identifierIndex.set(ident, new Set());
-    idx.identifierIndex.get(ident)!.add(node.id);
   }
 }
 
@@ -133,17 +103,11 @@ function _removeNodeFromIndexes(node: KnowledgeNode, idx: NodeIndexes): void {
   for (const d of node.domains) idx.domainIndex.get(d)?.delete(node.id);
   idx.typeIndex.get(node.type)?.delete(node.id);
   idx.podIndex.get(node.source_pod_id)?.delete(node.id);
-  for (const ref of node.entity_refs ?? []) idx.entityIndex.get(ref.id)?.delete(node.id);
   const kws = idx.nodeKeywords.get(node.id);
   if (kws) {
     for (const kw of kws) idx.keywordIndex.get(kw)?.delete(node.id);
   }
   idx.nodeKeywords.delete(node.id);
-  const identifiers = idx.nodeIdentifiers.get(node.id);
-  if (identifiers) {
-    for (const ident of identifiers) idx.identifierIndex.get(ident)?.delete(node.id);
-  }
-  idx.nodeIdentifiers.delete(node.id);
 }
 
 function emptyGraph(orgId: string): KnowledgeGraph {
@@ -162,14 +126,8 @@ function buildState(graph: KnowledgeGraph): OrgGraphState {
     graph,
     hubIds: new Set(identifyHubs(graph)),
     analysisStale: false,
-    retrievalTelemetryDirty: false,
     ...buildIndexes(graph.nodes),
   };
-}
-
-function persistGraph(orgId: string, state: OrgGraphState): void {
-  saveGraph(orgId, state.graph);
-  state.retrievalTelemetryDirty = false;
 }
 
 // --- Initialization ---
@@ -182,12 +140,12 @@ export function initializeKnowledgeGraph(orgId: string): void {
     `[knowledge-graph] Loaded graph for org "${orgId}": ${graph.nodes.length} nodes, ${graph.edges.length} edges`,
   );
 
-  const staleEmbeddingCount = graph.nodes.filter((n) => !n.embedding || n.embedding_text_hash !== embeddingTextHash(embedText(n))).length;
-  if (staleEmbeddingCount > 0 && isEmbeddingAvailable()) {
-    console.log(`[knowledge-graph] Scheduling background embedding backfill for ${staleEmbeddingCount} nodes (org "${orgId}")`);
+  const unembeddedCount = graph.nodes.filter((n) => !n.embedding).length;
+  if (unembeddedCount > 0 && isEmbeddingAvailable()) {
+    console.log(`[knowledge-graph] Scheduling background embedding backfill for ${unembeddedCount} nodes (org "${orgId}")`);
     // Fire-and-forget: does not block server startup
     batchEmbedWithRateLimit(graph.nodes, () => {
-      persistGraph(orgId, state);
+      saveGraph(orgId, state.graph);
     }).catch((err) => console.error(`[knowledge-graph] Backfill failed for org "${orgId}":`, err));
   }
 }
@@ -274,20 +232,6 @@ function shapeNodeForQueryResponse(
 
 // --- Helpers ---
 
-async function refreshNodeEmbedding(node: KnowledgeNode, clearOnFailure = false): Promise<void> {
-  const text = embedText(node);
-  const embedding = await generateEmbedding(text);
-  if (embedding) {
-    node.embedding = embedding;
-    node.embedding_text_hash = embeddingTextHash(text);
-    return;
-  }
-  if (clearOnFailure) {
-    delete node.embedding;
-    delete node.embedding_text_hash;
-  }
-}
-
 // P1: After edges are built, mark older nodes whose decisions were superseded.
 function markSupersededEdges(edges: KnowledgeEdge[], allNodes: KnowledgeNode[]): void {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
@@ -345,16 +289,10 @@ export async function addLearningsToGraph(
       confidence_score: learning.confidence_score,
       created_at: now,
       curated: false,
-      retrieval_tier: "hot",
-      retention_score: Math.max(0.5, learning.confidence_score),
-      retrieval_count: 0,
       ...(learning.ingestion_provenance ? { ingestion_provenance: learning.ingestion_provenance } : {}),
     };
 
-    const memory = buildKnowledgeNodeMemory({ node, orgId });
-    node.retrieval_text = learning.retrieval_text ?? memory.retrieval_text;
-    node.entity_refs = learning.entity_refs ?? memory.entity_refs;
-    await refreshNodeEmbedding(node);
+    node.embedding = (await generateEmbedding(embedText(node))) ?? undefined;
 
     // P0 + P2: Skip if a near-identical node already exists in the graph.
     // Same-pod threshold catches incremental-signal nodes re-extracted at archival.
@@ -420,7 +358,7 @@ export async function addLearningsToGraph(
     state.analysisStale = false;
   }
 
-  persistGraph(orgId, state);
+  saveGraph(orgId, graph);
 
   return {
     nodesAdded: newNodes.length,
@@ -441,24 +379,14 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"], queryTe
         .map((w) => w.toLowerCase())
     : [];
   const fromQueryText = queryText ? keywordsFromTexts([queryText]) : [];
-  const identifiers = queryText ? [...extractIdentifiers(queryText)] : [];
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const w of [...fromExplicit, ...fromTextSearch, ...fromQueryText, ...identifiers]) {
+  for (const w of [...fromExplicit, ...fromTextSearch, ...fromQueryText]) {
     if (seen.has(w)) continue;
     seen.add(w);
     out.push(w);
   }
   return out;
-}
-
-function mergeQueryIdentifiers(filters: KnowledgeQueryOptions["filters"], queryText?: string): string[] {
-  const text = [
-    queryText,
-    filters.text_search,
-    ...(filters.keywords ?? []),
-  ].filter(Boolean).join(" ");
-  return [...extractIdentifiers(text)];
 }
 
 function hasExactShortKeywordMatch(nodeKeywords: Set<string> | undefined, keywords: string[]): boolean {
@@ -475,40 +403,13 @@ function countKeywordMatches(nodeKeywords: Set<string> | undefined, keywords: st
   return hits;
 }
 
-function countIdentifierMatches(nodeIdentifiers: Set<string> | undefined, identifiers: string[]): number {
-  if (!nodeIdentifiers || identifiers.length === 0) return 0;
-  let hits = 0;
-  for (const ident of identifiers) {
-    if (nodeIdentifiers.has(ident.toLowerCase())) hits++;
-  }
-  return hits;
-}
-
-function sourceAuthorityScore(node: KnowledgeNode): number {
-  let score = 0;
-  if (node.curated) score += 0.12;
-  if (node.ingestion_provenance?.kind === "project_evidence") score += 0.08;
-  if (node.ingestion_provenance?.kind === "agent_run") score += 0.06;
-  if (node.ingestion_provenance?.kind === "scheduled_synthesis") score += 0.04;
-  if (node.audience === "project") score += 0.03;
-  return score;
-}
-
-function retrievalTierScore(node: KnowledgeNode): number {
-  if (node.retrieval_tier === "hot" || node.retrieval_tier === undefined) return 0.04;
-  if (node.retrieval_tier === "warm") return 0.01;
-  return -0.08;
-}
-
 /** Lets keyword-strong or short exact matches through the cosine gate (incl. unembedded nodes). */
 function passesSemanticRelevanceGate(
   nodeKeywords: Set<string> | undefined,
   keywords: string[],
-  identifierHits: number,
   querySimilarity: number | undefined,
   minQuerySimilarity: number,
 ): boolean {
-  if (identifierHits > 0) return true;
   if (hasExactShortKeywordMatch(nodeKeywords, keywords)) return true;
   if (querySimilarity !== undefined && querySimilarity >= minQuerySimilarity) return true;
 
@@ -523,9 +424,7 @@ type ScoredNode = {
   querySimilarity?: number;
   exactShortKeywordMatch: boolean;
   keywordHits: number;
-  identifierHits: number;
   score: number;
-  graphExpanded?: boolean;
 };
 
 function scoreCandidates(
@@ -533,31 +432,27 @@ function scoreCandidates(
   state: OrgGraphState,
   scopes: string[],
   keywords: string[],
-  identifiers: string[],
   queryEmbedding: number[] | null | undefined,
   hubIds: Set<string>,
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
 ): ScoredNode[] {
   return candidates.map((node) => {
     const precomputedKeywords = state.nodeKeywords.get(node.id);
-    const precomputedIdentifiers = state.nodeIdentifiers.get(node.id);
     const querySimilarity =
       queryEmbedding && node.embedding
         ? cosineSimilarity(queryEmbedding, node.embedding)
         : undefined;
-    const identifierHits = countIdentifierMatches(precomputedIdentifiers, identifiers);
     return {
       node,
       querySimilarity,
       exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, keywords),
       keywordHits: countKeywordMatches(precomputedKeywords, keywords),
-      identifierHits,
       score: scoreRelevance(
         node,
         { scopes, keywords, querySimilarity, precomputedKeywords },
         hubIds,
         graphTuning,
-      ) + identifierHits * 0.18 + sourceAuthorityScore(node) + retrievalTierScore(node),
+      ),
     };
   });
 }
@@ -571,11 +466,10 @@ function applySemanticGate(
 ): ScoredNode[] {
   if (!queryEmbedding) return scored;
 
-  const gated = scored.filter(({ node, querySimilarity, identifierHits }) =>
+  const gated = scored.filter(({ node, querySimilarity }) =>
     passesSemanticRelevanceGate(
       state.nodeKeywords.get(node.id),
       keywords,
-      identifierHits,
       querySimilarity,
       minQuerySimilarity,
     ),
@@ -584,8 +478,7 @@ function applySemanticGate(
   // Cosine gate eliminated everyone — fall back to keyword-strong matches only.
   if (gated.length === 0 && keywords.length > 0) {
     return scored
-      .filter(({ keywordHits, identifierHits }) => {
-        if (identifierHits > 0) return true;
+      .filter(({ keywordHits }) => {
         if (keywordHits === 0) return false;
         if (keywords.length <= 3) return keywordHits >= 1;
         return keywordHits >= KEYWORD_OVERLAP_GATE_MIN_HITS;
@@ -609,121 +502,10 @@ function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): bool
   );
 }
 
-function timestampMs(value?: string): number {
-  if (!value) return Number.NaN;
-  return new Date(value).getTime();
-}
-
-function validateTemporalQuery(mode: NonNullable<KnowledgeQueryOptions["query_mode"]>, asOf: string | undefined): void {
-  if (mode !== "as_of") return;
-  if (Number.isNaN(timestampMs(asOf))) {
-    throw new KnowledgeQueryValidationError("query_mode 'as_of' requires a valid as_of timestamp");
-  }
-}
-
-function isSupersededAsOf(node: KnowledgeNode, state: OrgGraphState, asOfMs: number): boolean {
-  if (!node.superseded_by) return false;
-  const superseding = state.nodeById.get(node.superseded_by);
-  if (!superseding) return false;
-  const supersedingCreated = timestampMs(superseding.created_at);
-  return !Number.isNaN(supersedingCreated) && supersedingCreated <= asOfMs;
-}
-
-function visibleForQueryMode(
-  node: KnowledgeNode,
-  state: OrgGraphState,
-  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
-  asOf: string | undefined,
-  filters: KnowledgeQueryOptions["filters"],
-): boolean {
-  if (filters.retrieval_tiers?.length && !filters.retrieval_tiers.includes(node.retrieval_tier ?? "hot")) return false;
-
-  if (mode === "history" || mode === "why_changed") return true;
-
-  if (mode === "as_of") {
-    const asOfMs = timestampMs(asOf);
-    if (Number.isNaN(asOfMs)) return false;
-    const created = timestampMs(node.created_at);
-    if (!Number.isNaN(created) && created > asOfMs) return false;
-    if (!filters.include_superseded && isSupersededAsOf(node, state, asOfMs)) return false;
-    return true;
-  }
-
-  if (!filters.retrieval_tiers?.length && node.retrieval_tier === "cold") return false;
-  if (!filters.include_superseded && node.superseded_by) return false;
-  return true;
-}
-
 // `null` means "no filter applied yet — all nodes qualify".
 function intersectIds(a: Set<string> | null, b: Set<string>): Set<string> {
   if (a === null) return new Set(b);
   return new Set([...b].filter((id) => a.has(id)));
-}
-
-function expandWithGraphNeighbors(
-  scored: ScoredNode[],
-  state: OrgGraphState,
-  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
-  asOf: string | undefined,
-  filters: KnowledgeQueryOptions["filters"],
-): ScoredNode[] {
-  if (scored.length === 0 || state.graph.edges.length === 0) return scored;
-  const byId = new Map(scored.map((s) => [s.node.id, s]));
-  const seeds = scored
-    .filter((s) => s.score >= 0.45 || s.exactShortKeywordMatch || s.identifierHits > 0 || (s.querySimilarity ?? 0) >= 0.75)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
-  if (seeds.length === 0) return scored;
-  const seedIds = new Set(seeds.map((s) => s.node.id));
-  const seedById = new Map(seeds.map((s) => [s.node.id, s]));
-  const candidateEdges = state.graph.edges
-    .map((edge) => {
-      const seedSide = seedIds.has(edge.source) ? edge.source : seedIds.has(edge.target) ? edge.target : null;
-      return seedSide ? { edge, seedSide } : null;
-    })
-    .filter((entry): entry is { edge: KnowledgeEdge; seedSide: string } => !!entry)
-    .sort((a, b) => {
-      const weightDelta = (b.edge.weight ?? 0) - (a.edge.weight ?? 0);
-      if (weightDelta !== 0) return weightDelta;
-      return (seedById.get(b.seedSide)?.score ?? 0) - (seedById.get(a.seedSide)?.score ?? 0);
-    });
-  let added = 0;
-  for (const { edge, seedSide } of candidateEdges) {
-    if (added >= 20) break;
-    const neighborId = edge.source === seedSide ? edge.target : edge.source;
-    if (byId.has(neighborId)) continue;
-    const neighbor = state.nodeById.get(neighborId);
-    if (!neighbor) continue;
-    if (neighbor.confidence_score < (filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN)) continue;
-    if (!visibleForQueryMode(neighbor, state, mode, asOf, filters)) continue;
-    const seed = seedById.get(seedSide)!;
-    const graphScore = seed.score * 0.72 + Math.min(1, edge.weight) * 0.18 + sourceAuthorityScore(neighbor);
-    const expanded: ScoredNode = {
-      node: neighbor,
-      exactShortKeywordMatch: false,
-      keywordHits: 0,
-      identifierHits: 0,
-      score: graphScore,
-      graphExpanded: true,
-    };
-    byId.set(neighbor.id, expanded);
-    added++;
-  }
-  return [...byId.values()];
-}
-
-function recordRetrievals(state: OrgGraphState, nodes: KnowledgeNode[]): void {
-  if (nodes.length === 0) return;
-  const now = new Date().toISOString();
-  const ids = new Set(nodes.map((n) => n.id));
-  for (const id of ids) {
-    const node = state.nodeById.get(id);
-    if (!node) continue;
-    node.retrieval_count = (node.retrieval_count ?? 0) + 1;
-    node.last_retrieved_at = now;
-    if ((node.retrieval_count ?? 0) >= 5 && node.retrieval_tier === "warm") node.retrieval_tier = "hot";
-  }
-  state.retrievalTelemetryDirty = true;
 }
 
 export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): KnowledgeQueryResult {
@@ -739,12 +521,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     limit,
     query_embedding,
     query_text,
-    query_mode = "current",
-    as_of,
-    expand_graph,
-	  } = options;
-
-  validateTemporalQuery(query_mode, as_of);
+  } = options;
 
   // Step 1: Filter candidates using index-based set intersections.
   // Indexed dimensions (domain, type, pod, keyword) resolve to candidate sets in O(result)
@@ -784,22 +561,12 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   // or punctuation-heavy queries (e.g. getPrecedents with a 100-char conflict summary).
   if (filters.text_search) {
     const queryKws = extractKeywords(filters.text_search);
-    const queryIdentifiers = extractIdentifiers(filters.text_search);
     if (queryKws.size > 0) {
       const textMatches = new Set<string>();
       for (const qk of queryKws) {
         for (const id of state.keywordIndex.get(qk) ?? []) textMatches.add(id);
       }
-      for (const ident of queryIdentifiers) {
-        for (const id of state.identifierIndex.get(ident) ?? []) textMatches.add(id);
-      }
       candidateIds = intersectIds(candidateIds, textMatches);
-    } else if (queryIdentifiers.size > 0) {
-      const identifierMatches = new Set<string>();
-      for (const ident of queryIdentifiers) {
-        for (const id of state.identifierIndex.get(ident) ?? []) identifierMatches.add(id);
-      }
-      candidateIds = intersectIds(candidateIds, identifierMatches);
     }
   }
 
@@ -818,14 +585,13 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     }
     if (node.confidence_score < confidenceMin) return false;
     if (filters.curated_only && !node.curated) return false;
-    if (!visibleForQueryMode(node, state, query_mode, as_of, filters)) return false;
+    if (!filters.include_superseded && node.superseded_by) return false;
     return true;
   });
 
   // Step 2: Score and sort by relevance
   const scopes = filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters, query_text);
-  const identifiers = mergeQueryIdentifiers(filters, query_text);
   const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
 
   let scored = scoreCandidates(
@@ -833,7 +599,6 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     state,
     scopes,
     keywords,
-    identifiers,
     query_embedding,
     hubIds,
     graphTuning,
@@ -848,12 +613,6 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
       !!query_text?.trim() &&
       hasHardCandidateFilter(filters);
     scored = shouldUseFilteredCandidatesAsRecallFallback ? scored : gated;
-  }
-
-  const shouldExpand =
-    expand_graph ?? Boolean(query_text?.trim() || query_mode === "why_changed" || query_mode === "history" || query_mode === "as_of");
-  if (shouldExpand) {
-    scored = expandWithGraphNeighbors(scored, state, query_mode, as_of, filters);
   }
 
   const totalMatching = scored.length;
@@ -876,11 +635,9 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     resultNodes.push(shapeNodeForQueryResponse(node, include_details, include_embeddings));
   }
 
-  recordRetrievals(state, resultNodes);
-
   // Step 4: Include edges if requested
   let resultEdges: KnowledgeEdge[] = [];
-  if (include_edges || query_mode === "why_changed") {
+  if (include_edges) {
     const nodeIds = new Set(resultNodes.map((n) => n.id));
     resultEdges = graph.edges.filter(
       (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
@@ -894,8 +651,6 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     total_matching: totalMatching,
     token_estimate: tokenCount,
     truncated: resultNodes.length < totalMatching,
-    query_mode,
-    as_of,
   };
 }
 
@@ -952,12 +707,12 @@ export async function getPrecedents(
 
 // --- Curation ---
 
-export async function curateNode(
+export function curateNode(
   orgId: string,
   nodeId: string,
   action: CurationAction,
   edits?: Partial<Pick<KnowledgeNode, "summary" | "details" | "domains">>,
-): Promise<boolean> {
+): boolean {
   const state = getOrgState(orgId);
   const { graph } = state;
 
@@ -983,10 +738,6 @@ export async function curateNode(
     if (edits.summary !== undefined) node.summary = edits.summary;
     if (edits.details !== undefined) node.details = edits.details;
     if (edits.domains !== undefined) node.domains = edits.domains;
-    const memory = buildKnowledgeNodeMemory({ node, orgId });
-    node.retrieval_text = memory.retrieval_text;
-    node.entity_refs = memory.entity_refs;
-    await refreshNodeEmbedding(node, true);
     node.curated = true;
     _indexNode(node, state);
   }
@@ -1000,7 +751,7 @@ export async function curateNode(
     state.hubIds = new Set(identifyHubs(graph));
   }
 
-  persistGraph(orgId, state);
+  saveGraph(orgId, graph);
   return true;
 }
 
@@ -1065,7 +816,7 @@ export function refreshAnalysis(orgId: string): void {
   graph.communities = detectCommunities(graph);
   state.hubIds = new Set(identifyHubs(graph));
   state.analysisStale = false;
-  persistGraph(orgId, state);
+  saveGraph(orgId, graph);
 }
 
 /**
@@ -1116,13 +867,7 @@ export async function refreshAnalysisWithWorker(orgId: string): Promise<boolean>
     if (cid) node.community_id = cid;
   }
   liveState.analysisStale = false;
-  persistGraph(orgId, liveState);
-  return true;
-}
-
-function flushRetrievalTelemetryIfDirty(orgId: string, state: OrgGraphState): boolean {
-  if (!state.retrievalTelemetryDirty) return false;
-  persistGraph(orgId, state);
+  saveGraph(orgId, liveState.graph);
   return true;
 }
 
@@ -1143,19 +888,15 @@ export function refreshAnalysisIfStale(orgId?: string): boolean | Promise<boolea
   }
   if (orgId) {
     const state = orgStates.get(orgId);
-    if (!state) return false;
-    if (!state.analysisStale) return flushRetrievalTelemetryIfDirty(orgId, state);
+    if (!state?.analysisStale) return false;
     refreshAnalysis(orgId);
     return true;
   }
   let didWork = false;
   for (const [id, state] of orgStates) {
-    if (state.analysisStale) {
-      refreshAnalysis(id);
-      didWork = true;
-      continue;
-    }
-    if (flushRetrievalTelemetryIfDirty(id, state)) didWork = true;
+    if (!state.analysisStale) continue;
+    refreshAnalysis(id);
+    didWork = true;
   }
   return didWork;
 }
@@ -1163,8 +904,7 @@ export function refreshAnalysisIfStale(orgId?: string): boolean | Promise<boolea
 async function refreshAnalysisIfStaleAsync(orgId?: string): Promise<boolean> {
   if (orgId) {
     const state = orgStates.get(orgId);
-    if (!state) return false;
-    if (!state.analysisStale) return flushRetrievalTelemetryIfDirty(orgId, state);
+    if (!state?.analysisStale) return false;
     return refreshAnalysisWithWorker(orgId);
   }
   let didWork = false;
@@ -1172,13 +912,9 @@ async function refreshAnalysisIfStaleAsync(orgId?: string): Promise<boolean> {
   // loaded mid-iteration) so we don't want to iterate a live view.
   for (const id of [...orgStates.keys()]) {
     const state = orgStates.get(id);
-    if (!state) continue;
-    if (state.analysisStale) {
-      const ran = await refreshAnalysisWithWorker(id);
-      if (ran) didWork = true;
-      continue;
-    }
-    if (flushRetrievalTelemetryIfDirty(id, state)) didWork = true;
+    if (!state?.analysisStale) continue;
+    const ran = await refreshAnalysisWithWorker(id);
+    if (ran) didWork = true;
   }
   return didWork;
 }
@@ -1191,86 +927,64 @@ export function isAnalysisStale(orgId: string): boolean {
 // --- Pruning ---
 
 /**
- * Retention scoring replaces hard deletion. Low-retention nodes move to `cold`
- * retrieval so current-mode queries stay clean while history/as_of/why_changed
- * can still recover stale lineage.
+ * Drop low-confidence, uncurated, stale nodes that no human has approved or edited.
+ * Curated and superseded nodes are protected; superseded nodes are filtered at query
+ * time and may still be useful for history. Runs once and rebuilds analysis at the end.
  *
- * With no orgId, scores every loaded org's graph — matches the periodic-interval shape.
+ * With no orgId, prunes every loaded org's graph — matches the periodic-interval shape.
  */
 const PRUNE_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
-function computeRetentionScore(node: KnowledgeNode, state: OrgGraphState, now: Date): number {
-  const ageMs = now.getTime() - new Date(node.created_at).getTime();
-  const ageDays = Number.isNaN(ageMs) ? 0 : Math.max(0, ageMs / (24 * 60 * 60 * 1000));
-  const ageScore = Math.max(0, 1 - ageDays / 365);
-  const degree = state.graph.edges.filter((e) => e.source === node.id || e.target === node.id).length;
-  let score =
-    node.confidence_score * 0.55 +
-    (node.curated ? 0.25 : 0) +
-    Math.min(0.15, degree * 0.02) +
-    Math.min(0.12, (node.retrieval_count ?? 0) * 0.02) +
-    ageScore * 0.25;
-  if (node.type === "decision" || node.type === "resolved_conflict") score += 0.08;
-  if (node.superseded_by) score += 0.25;
-  return Math.max(0, Math.min(1, score));
-}
-
-function tierForRetention(score: number): "hot" | "warm" | "cold" {
-  if (score >= 0.68) return "hot";
-  if (score >= 0.38) return "warm";
-  return "cold";
-}
-
-export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { removed: number; moved_to_cold: number; rescored: number } {
+export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { removed: number } {
   if (!orgId) {
-    let moved = 0;
-    let rescored = 0;
+    let total = 0;
     for (const id of orgStates.keys()) {
-      const result = pruneStaleNodes(id, now);
-      moved += result.moved_to_cold;
-      rescored += result.rescored;
+      total += pruneStaleNodes(id, now).removed;
     }
-    return { removed: 0, moved_to_cold: moved, rescored };
+    return { removed: total };
   }
 
   const state = orgStates.get(orgId);
-  if (!state || state.graph.nodes.length === 0) return { removed: 0, moved_to_cold: 0, rescored: 0 };
+  if (!state || state.graph.nodes.length === 0) return { removed: 0 };
   const { graph } = state;
 
   const cutoff = now.getTime() - PRUNE_AGE_MS;
-  let movedToCold = 0;
-  let rescored = 0;
+  const toRemove = new Set<string>();
   for (const node of graph.nodes) {
-    const score = computeRetentionScore(node, state, now);
-    const priorTier = node.retrieval_tier ?? "hot";
-    const nextTier = tierForRetention(score);
+    if (node.curated) continue;
+    if (node.confidence_score >= 0.5) continue;
+    if (node.superseded_by) continue;
     const created = new Date(node.created_at).getTime();
-    const staleEnough = !Number.isNaN(created) && created <= cutoff;
-    node.retention_score = score;
-    if (nextTier !== "cold" || staleEnough) {
-      node.retrieval_tier = nextTier;
-    }
-    rescored++;
-    if (priorTier !== "cold" && nextTier === "cold" && staleEnough) movedToCold++;
+    if (Number.isNaN(created) || created > cutoff) continue;
+    toRemove.add(node.id);
   }
 
-  if (rescored === 0) return { removed: 0, moved_to_cold: 0, rescored: 0 };
+  if (toRemove.size === 0) return { removed: 0 };
+
+  graph.nodes = graph.nodes.filter((n) => !toRemove.has(n.id));
+  graph.edges = graph.edges.filter(
+    (e) => !toRemove.has(e.source) && !toRemove.has(e.target),
+  );
+  // Clear stale superseded_by references pointing into removed nodes.
+  for (const n of graph.nodes) {
+    if (n.superseded_by && toRemove.has(n.superseded_by)) {
+      n.superseded_by = undefined;
+    }
+  }
 
   graph.version++;
   graph.updated_at = now.toISOString();
-  state.analysisStale = true;
+  graph.communities = detectCommunities(graph);
+  state.hubIds = new Set(identifyHubs(graph));
   const freshIndexes = buildIndexes(graph.nodes);
   state.nodeById = freshIndexes.nodeById;
   state.domainIndex = freshIndexes.domainIndex;
   state.typeIndex = freshIndexes.typeIndex;
   state.podIndex = freshIndexes.podIndex;
-  state.entityIndex = freshIndexes.entityIndex;
   state.nodeKeywords = freshIndexes.nodeKeywords;
   state.keywordIndex = freshIndexes.keywordIndex;
-  state.nodeIdentifiers = freshIndexes.nodeIdentifiers;
-  state.identifierIndex = freshIndexes.identifierIndex;
-  persistGraph(orgId, state);
+  saveGraph(orgId, graph);
 
-  console.log(`[knowledge-graph] Retention-scored ${rescored} node(s), moved ${movedToCold} to cold for org "${orgId}"`);
-  return { removed: 0, moved_to_cold: movedToCold, rescored };
+  console.log(`[knowledge-graph] Pruned ${toRemove.size} stale node(s) for org "${orgId}"`);
+  return { removed: toRemove.size };
 }

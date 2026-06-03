@@ -13,8 +13,6 @@ import { rbacDecisionRationale } from "./content-gen/rbac-decision-rationale.js"
 import { sessionBlockerSummary } from "./content-gen/session-blocker-summary.js";
 import { configDecisionWriteup } from "./content-gen/config-decision-writeup.js";
 import { progressUpdatePermissions } from "./content-gen/progress-update-permissions.js";
-import { memoryCurrentVsStale } from "./content-gen/memory-current-vs-stale.js";
-import { memoryWhyChanged } from "./content-gen/memory-why-changed.js";
 
 import { eventSpeakerPutContract } from "./real-emc/event-speaker-put-contract.js";
 import { eventSpeakerPutContractVague } from "./real-emc/event-speaker-put-contract-vague.js";
@@ -44,8 +42,6 @@ export const ALL_TASKS: Task[] = [
   sessionBlockerSummary,
   configDecisionWriteup,
   progressUpdatePermissions,
-  memoryCurrentVsStale,
-  memoryWhyChanged,
   eventSpeakerPutContract,
   eventSpeakerPutContractVague,
   sessionTimeNoRefresh,

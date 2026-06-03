@@ -10,8 +10,6 @@ import type {
   ProjectSourceHealth,
 } from "@pim/shared";
 import { ingestLearnings } from "./ingestion-gateway.js";
-import { queryKnowledge } from "./knowledge-graph.js";
-import { extractIdentifiers, extractKeywords } from "./graph-analysis.js";
 
 const AUTO_PROMOTE_CONFIDENCE_MIN = 0.85;
 const SOURCE_HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -153,53 +151,6 @@ function shouldAutoPromote(evidence: ProjectEvidenceItem): boolean {
   if (evidence.source === "github" && evidence.source_type === "merged_pr") return true;
   if (evidence.source === "jira" && evidence.source_type === "resolved_issue") return true;
   return false;
-}
-
-function hasMeaningfulOverlap(a: string, b: string): boolean {
-  const aIdentifiers = extractIdentifiers(a);
-  const bIdentifiers = extractIdentifiers(b);
-  for (const identifier of aIdentifiers) {
-    if (bIdentifiers.has(identifier)) return true;
-  }
-
-  const aKeywords = extractKeywords(a);
-  const bKeywords = extractKeywords(b);
-  let keywordHits = 0;
-  for (const keyword of aKeywords) {
-    if (bKeywords.has(keyword)) keywordHits++;
-    if (keywordHits >= 2) return true;
-  }
-  return false;
-}
-
-function antiPatternContradictsEvidence(evidenceText: string, nodeText: string): boolean {
-  const text = nodeText.toLowerCase();
-  if (/\b(contradict|contradicts|conflict|conflicts|incompatible|superseded|rejected)\b/.test(text)) return true;
-  if (/\b(do not|don't|must not|should not|never)\b/.test(text)) return true;
-  if (!/\bavoid\b/.test(text)) return false;
-  return hasMeaningfulOverlap(evidenceText, nodeText);
-}
-
-function hasCurrentContradiction(evidence: ProjectEvidenceItem): boolean {
-  try {
-    const evidenceText = `${evidence.summary} ${evidence.body}`;
-    const result = queryKnowledge(evidence.org_id, {
-      filters: {
-        types: ["anti_pattern"],
-        include_project_id: evidence.project_id,
-        confidence_min: 0.75,
-      },
-      query_text: evidenceText,
-      max_tokens: 800,
-      limit: 3,
-    });
-    return result.nodes.some((node) => {
-      const text = `${node.summary} ${node.details}`;
-      return antiPatternContradictsEvidence(evidenceText, text);
-    });
-  } catch {
-    return false;
-  }
 }
 
 function candidateTypeFor(evidence: ProjectEvidenceItem): KnowledgeNodeType {
@@ -428,7 +379,7 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
   const row = db.prepare("SELECT * FROM project_evidence_items WHERE id = ?").get(id) as unknown as EvidenceRow;
   const evidence = rowToEvidence(row);
   const candidate = createOrLoadCandidate(evidence);
-  if (shouldAutoPromote(evidence) && !hasCurrentContradiction(evidence) && candidate.status !== "promoted") {
+  if (shouldAutoPromote(evidence) && candidate.status !== "promoted") {
     await promoteProjectMemoryCandidate(input.org_id, input.project_id, candidate.id);
   }
   return rowToEvidence(db.prepare("SELECT * FROM project_evidence_items WHERE id = ?").get(id) as unknown as EvidenceRow);

@@ -3,7 +3,6 @@ import type {
   ContextSearchHit,
   ContextSource,
   ProjectResources,
-  TemporalQueryMode,
 } from "@pim/shared";
 
 export interface IntegrationSearchOpts {
@@ -20,8 +19,6 @@ export interface IntegrationSearchOpts {
   project_name?: string;
   project_resources?: ProjectResources;
   actor?: ContextSearchActor;
-  query_mode?: TemporalQueryMode;
-  as_of?: string;
 }
 
 export interface IntegrationResult {

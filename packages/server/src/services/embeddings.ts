@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import type { KnowledgeNode } from "@pim/shared";
 
 const DEFAULT_DIMENSIONS = 512;
@@ -15,15 +14,9 @@ function getEmbeddingDimensions(): number {
 }
 
 /** Produces the text fed to the embedding model for a given node. */
-export function embedText(node: Pick<KnowledgeNode, "summary" | "details" | "retrieval_text">): string {
-  const retrievalText = node.retrieval_text?.trim();
-  if (retrievalText) return retrievalText;
+export function embedText(node: Pick<KnowledgeNode, "summary" | "details">): string {
   const details = node.details?.trim();
   return details ? `${node.summary}. ${details}` : node.summary;
-}
-
-export function embeddingTextHash(text: string): string {
-  return crypto.createHash("sha256").update(text).digest("hex");
 }
 
 const BEDROCK_TIMEOUT_MS = 8_000;
@@ -93,8 +86,7 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * Embeds all nodes that lack an `embedding` field or have a stale source-text hash,
- * rate-limited to ~1 req/sec.
+ * Embeds all nodes that lack an `embedding` field, rate-limited to ~1 req/sec.
  * Calls `onBatchSave` every 10 nodes so the graph is persisted incrementally.
  */
 export async function batchEmbedWithRateLimit(
@@ -102,30 +94,26 @@ export async function batchEmbedWithRateLimit(
   onBatchSave: () => void,
   delayMs = EMBED_DELAY_MS,
 ): Promise<void> {
-  const stale = nodes.filter((n) => !n.embedding || n.embedding_text_hash !== embeddingTextHash(embedText(n)));
-  if (stale.length === 0) return;
+  const unembedded = nodes.filter((n) => !n.embedding);
+  if (unembedded.length === 0) return;
 
-  console.log(`[embeddings] Backfilling or refreshing ${stale.length} stale node embeddings...`);
+  console.log(`[embeddings] Backfilling ${unembedded.length} nodes without embeddings...`);
   let processed = 0;
   const BATCH_SIZE = 10;
 
-  for (let i = 0; i < stale.length; i++) {
-    const node = stale[i];
-    const text = embedText(node);
-    const embedding = await generateEmbedding(text);
-    if (embedding) {
-      node.embedding = embedding;
-      node.embedding_text_hash = embeddingTextHash(text);
-    }
+  for (let i = 0; i < unembedded.length; i++) {
+    const node = unembedded[i];
+    const embedding = await generateEmbedding(embedText(node));
+    if (embedding) node.embedding = embedding;
     processed++;
 
     if (processed % BATCH_SIZE === 0) {
       onBatchSave();
-      console.log(`[embeddings] Backfill progress: ${processed}/${stale.length}`);
+      console.log(`[embeddings] Backfill progress: ${processed}/${unembedded.length}`);
     }
 
     // Rate-limit between requests, but not after the last one
-    if (i < stale.length - 1) {
+    if (i < unembedded.length - 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
     }
   }

@@ -31,10 +31,6 @@ import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
 import { generateEmbedding } from "../services/embeddings.js";
 
-function isValidTimestamp(value: string | undefined): boolean {
-  return !!value && !Number.isNaN(new Date(value).getTime());
-}
-
 const KnowledgeQuerySchema = z.object({
   filters: z.object({
     domains: z.array(z.string()).optional(),
@@ -44,8 +40,6 @@ const KnowledgeQuerySchema = z.object({
     include_project_id: z.string().optional(),
     confidence_min: z.number().min(0).max(1).optional(),
     curated_only: z.boolean().optional(),
-    include_superseded: z.boolean().optional(),
-    retrieval_tiers: z.array(z.enum(["hot", "warm", "cold"])).optional(),
     text_search: z.string().optional(),
     keywords: z.array(z.string()).optional(),
   }),
@@ -56,17 +50,6 @@ const KnowledgeQuerySchema = z.object({
   query_embedding: z.array(z.number()).nullable().optional(),
   query_text: z.string().min(1).optional(),
   include_embeddings: z.boolean().optional(),
-  query_mode: z.enum(["current", "history", "as_of", "why_changed"]).optional(),
-  as_of: z.string().optional(),
-  expand_graph: z.boolean().optional(),
-}).superRefine((body, ctx) => {
-  if (body.query_mode === "as_of" && !isValidTimestamp(body.as_of)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["as_of"],
-      message: "as_of must be a valid timestamp when query_mode is as_of",
-    });
-  }
 });
 
 const CurationSchema = z.object({
@@ -206,7 +189,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const { nodeId } = req.params;
       const { action, edits } = req.body;
-      const success = await curateNode(req.org!.org_id, nodeId, action, edits);
+      const success = curateNode(req.org!.org_id, nodeId, action, edits);
       if (!success) {
         reply.code(404);
         return { error: "Node not found" };

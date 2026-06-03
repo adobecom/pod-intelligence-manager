@@ -19,7 +19,6 @@ import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./
 //     query won't substring-match a node titled "OAuth handshake retry").
 
 const TOKEN_BUDGET = 1500;
-const MAX_QUERY_VARIANTS = 2;
 
 function nodeToHit(node: KnowledgeNode): ContextSearchHit {
   const typeLabel = node.type.replace(/_/g, " ");
@@ -30,7 +29,7 @@ function nodeToHit(node: KnowledgeNode): ContextSearchHit {
     source: "kg",
     title,
     url: `/knowledge#${node.id}`,
-    snippet: truncate(node.retrieval_text || node.details || node.summary, 600),
+    snippet: truncate(node.details || node.summary, 600),
     timestamp: node.created_at,
     metadata: {
       node_id: node.id,
@@ -42,72 +41,40 @@ function nodeToHit(node: KnowledgeNode): ContextSearchHit {
       source_pod_id: node.source_pod_id,
       source_pod_name: node.source_pod_name,
       source_project_id: node.source_project_id,
-      retrieval_tier: node.retrieval_tier,
-      entity_refs: node.entity_refs,
     },
   };
-}
-
-function queryVariants(query: string, opts: IntegrationSearchOpts): string[] {
-  const q = query.trim();
-  if (!q) return [""];
-  const variants = new Set<string>([q]);
-  const expansions: string[] = [];
-  if (/\/[A-Za-z0-9_./:{}-]+|[A-Z][A-Za-z0-9]*(?:API|Service|Controller|Contract|Endpoint)|[A-Z][A-Z0-9]+-\d+|#\d+/.test(q)) {
-    expansions.push(`${q} artifact source API contract component`);
-  }
-  if (opts.query_mode && opts.query_mode !== "current") {
-    expansions.push(`${q} historical decision transition as of ${opts.as_of ?? ""}`.trim());
-  }
-  if (/\bwhy\b|\bchanged\b|\bsuperseded\b|\bhistory\b/i.test(q)) {
-    expansions.push(`${q} decision precedent superseded conflict`);
-  }
-  if (opts.project_name) expansions.push(`${opts.project_name} ${q}`);
-  for (const variant of expansions) {
-    if (variants.size >= MAX_QUERY_VARIANTS) break;
-    variants.add(variant);
-  }
-  return [...variants];
 }
 
 export async function searchKG(opts: IntegrationSearchOpts): Promise<IntegrationResult> {
   try {
     const limit = Math.max(1, Math.min(opts.max_hits_per_source, 8));
     const queryText = opts.query?.trim() ?? "";
-    const byId = new Map<string, KnowledgeNode>();
+
+    // Embed the original query (before any per-integration cleaning) so the
+    // semantic recall benefits from the actor and intent context.
     const embedding = queryText && isEmbeddingAvailable()
       ? await generateEmbedding(queryText)
       : null;
 
-    for (const variant of queryVariants(queryText, opts)) {
-      const result = queryKnowledge(opts.org_id, {
-        filters: {
-          ...(opts.project_id ? { include_project_id: opts.project_id } : {}),
-          ...(opts.query_mode && opts.query_mode !== "current" ? { include_superseded: true, retrieval_tiers: ["hot", "warm", "cold"] } : {}),
-        },
-        max_tokens: TOKEN_BUDGET,
-        include_details: true,
-        include_edges: opts.query_mode === "why_changed",
-        limit,
-        query_embedding: embedding,
-        query_mode: opts.query_mode ?? "current",
-        as_of: opts.as_of,
-        ...(variant ? { query_text: variant } : {}),
-      });
-      for (const node of result.nodes) {
-        if (!byId.has(node.id)) byId.set(node.id, node);
-      }
-      if (byId.size >= limit) break;
-    }
+    const result = queryKnowledge(opts.org_id, {
+      filters: {
+        ...(opts.project_id ? { include_project_id: opts.project_id } : {}),
+      },
+      max_tokens: TOKEN_BUDGET,
+      include_details: true,
+      limit,
+      query_embedding: embedding,
+      ...(queryText ? { query_text: queryText } : {}),
+    });
 
-    if (byId.size === 0) {
+    if (result.nodes.length === 0) {
       // Empty graph or no matches under the project filter — surface as a
       // soft "no hits" rather than an integration failure so the synthesis
       // step can still emit a deterministic "no org learnings yet" line.
       return { source: "kg", hits: [] };
     }
 
-    return { source: "kg", hits: [...byId.values()].slice(0, limit).map(nodeToHit) };
+    return { source: "kg", hits: result.nodes.map(nodeToHit) };
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
     // queryKnowledge throws when the graph is uninitialized — treat that as

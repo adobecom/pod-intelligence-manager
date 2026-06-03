@@ -37,7 +37,7 @@ import {
   recordProjectEvidence,
 } from "../project-memory.js";
 import { answerProjectQuestion } from "../project-answers.js";
-import { addLearningsToGraph, queryKnowledge } from "../knowledge-graph.js";
+import { addLearningsToGraph } from "../knowledge-graph.js";
 
 const ORG_ID = "org_project_memory";
 const PROJECT_ID = "project-memory-alpha";
@@ -82,14 +82,6 @@ beforeEach(() => {
   delete process.env.JIRA_TOKEN;
   delete process.env.JIRA_EMAIL;
   testDb.exec(`
-    PRAGMA foreign_keys = OFF;
-    DROP TABLE IF EXISTS memory_relationships;
-    DROP TABLE IF EXISTS memory_entities;
-    DROP TABLE IF EXISTS memory_candidates;
-    DROP TABLE IF EXISTS agent_checkpoints;
-    DROP TABLE IF EXISTS agent_run_events;
-    DROP TABLE IF EXISTS agent_runs;
-    DROP TABLE IF EXISTS agent_sessions;
     DROP TABLE IF EXISTS project_ingestion_cursors;
     DROP TABLE IF EXISTS project_memory_candidates;
     DROP TABLE IF EXISTS project_evidence_items;
@@ -103,7 +95,6 @@ beforeEach(() => {
     DROP TABLE IF EXISTS org_settings;
     DROP TABLE IF EXISTS orgs;
     DROP TABLE IF EXISTS users;
-    PRAGMA foreign_keys = ON;
   `);
   createTables();
   seedProject();
@@ -184,38 +175,6 @@ describe("project working memory promotion", () => {
 
     expect(addLearningsToGraph).not.toHaveBeenCalled();
     expect(listProjectMemoryCandidates(ORG_ID, PROJECT_ID)?.[0].status).toBe("pending");
-  });
-
-  it("does not block auto-promotion on unrelated anti-patterns that only say avoid", async () => {
-    vi.mocked(queryKnowledge).mockReturnValueOnce({
-      nodes: [
-        {
-          summary: "Avoid legacy checkout deployment coupling",
-          details: "Avoid risky release sequencing for LegacyCheckoutService.",
-        },
-      ],
-      edges: [],
-      total_matching: 1,
-      token_estimate: 10,
-      truncated: false,
-      query_mode: "current",
-    } as any);
-
-    await recordProjectEvidence({
-      org_id: ORG_ID,
-      project_id: PROJECT_ID,
-      source: "github",
-      source_type: "merged_pr",
-      source_id: "adobe/app#45",
-      source_title: "PR #45: Cache answer citations",
-      summary: "Cache answer citations",
-      body: "Merged implementation for cached project answer citations.",
-      occurred_at: "2026-05-05T00:00:00.000Z",
-      confidence_score: 0.9,
-    });
-
-    expect(addLearningsToGraph).toHaveBeenCalledTimes(1);
-    expect(listProjectMemoryCandidates(ORG_ID, PROJECT_ID)?.[0].status).toBe("promoted");
   });
 });
 

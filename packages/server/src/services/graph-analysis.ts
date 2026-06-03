@@ -30,8 +30,6 @@ const STOP_WORDS = new Set([
   "no", "only", "own", "same", "than", "too", "very", "just", "because",
   "this", "that", "these", "those", "it", "its", "they", "them", "their",
   "we", "us", "our", "you", "your", "he", "him", "his", "she", "her",
-  "memory", "kind", "pod", "agent", "source", "workstream", "knowledge",
-  "node", "context",
 ]);
 
 export function extractKeywords(text: string): Set<string> {
@@ -42,26 +40,6 @@ export function extractKeywords(text: string): Set<string> {
       .split(/\s+/)
       .filter((w) => w.length > 2 && !STOP_WORDS.has(w)),
   );
-}
-
-export function extractIdentifiers(text: string): Set<string> {
-  const identifiers = new Set<string>();
-  const patterns = [
-    /\b[A-Z][A-Z0-9]+-\d+\b/g,
-    /\b(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g,
-    /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
-    /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+\b/g,
-    /\b[A-Za-z_$][A-Za-z0-9_$]*(?:_[A-Za-z0-9_$]+)+\b/g,
-    /\b[A-Z][A-Za-z0-9]*(?:API|Api|Service|Controller|Contract|Endpoint)\b/g,
-    /\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of text.match(pattern) ?? []) {
-      const cleaned = match.trim().toLowerCase();
-      if (cleaned.length > 2) identifiers.add(cleaned);
-    }
-  }
-  return identifiers;
 }
 
 /** Tokenize and de-duplicate text for query-time scoring (stop words stripped). */

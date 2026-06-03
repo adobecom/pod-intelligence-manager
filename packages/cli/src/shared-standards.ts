@@ -274,19 +274,19 @@ export async function fetchStandardsForWizard(): Promise<{
         }
 
         const results = await Promise.allSettled(
-          plugins.map(async (plugin): Promise<WizardSourceData | null> => {
+          plugins.map(async (plugin): Promise<WizardSourceData> => {
             const virtual = buildVirtualSource(source, plugin);
+            virtualSources.push(virtual);
             try {
               const items = await fetchItemListing(virtual);
-              virtualSources.push(virtual);
               return { source: virtual, items, fallback: false };
             } catch {
-              return null;
+              return { source: virtual, items: [], fallback: true };
             }
           }),
         );
 
-        return results.flatMap(r => (r.status === "fulfilled" && r.value ? [r.value] : []));
+        return results.flatMap(r => (r.status === "fulfilled" ? [r.value] : []));
       }
 
       try {
