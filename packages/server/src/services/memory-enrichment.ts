@@ -286,6 +286,10 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+function entityRowId(orgId: string, ref: MemoryEntityRef): string {
+  return stableId("me-row", [orgId, ref.id]);
+}
+
 export function persistMemoryEntities(orgId: string, refs: MemoryEntityRef[], metadata: JsonRecord = {}): void {
   if (refs.length === 0) return;
   const now = new Date().toISOString();
@@ -298,7 +302,7 @@ export function persistMemoryEntities(orgId: string, refs: MemoryEntityRef[], me
        updated_at = excluded.updated_at`,
   );
   for (const ref of refs) {
-    stmt.run(stableId("me-row", [orgId, ref.id]), orgId, ref.type, ref.id, ref.label ?? ref.id, JSON.stringify(metadata), now, now);
+    stmt.run(entityRowId(orgId, ref), orgId, ref.type, ref.id, ref.label ?? ref.id, JSON.stringify(metadata), now, now);
   }
 }
 
@@ -323,9 +327,11 @@ function insertRelationship(input: {
   reason: string;
   confidence?: number;
 }): void {
-  if (input.source.id === input.target.id) return;
-  if (relationshipExists(input.orgId, input.source.id, input.target.id, input.type, input.updateId)) return;
-  const id = stableId("mr", [input.orgId, input.source.id, input.target.id, input.type, input.updateId]);
+  const sourceRowId = entityRowId(input.orgId, input.source);
+  const targetRowId = entityRowId(input.orgId, input.target);
+  if (sourceRowId === targetRowId) return;
+  if (relationshipExists(input.orgId, sourceRowId, targetRowId, input.type, input.updateId)) return;
+  const id = stableId("mr", [input.orgId, sourceRowId, targetRowId, input.type, input.updateId]);
   db.prepare(
     `INSERT INTO memory_relationships
        (id, org_id, source_entity_id, target_entity_id, relation_type, valid_from, committed_at,
@@ -334,8 +340,8 @@ function insertRelationship(input: {
   ).run(
     id,
     input.orgId,
-    input.source.id,
-    input.target.id,
+    sourceRowId,
+    targetRowId,
     input.type,
     input.at,
     input.at,

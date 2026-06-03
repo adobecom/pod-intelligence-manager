@@ -622,7 +622,7 @@ describe("retention scoring", () => {
     const ages: { id: string; created_at: string; confidence_score: number; curated: boolean; superseded?: boolean }[] = [
       { id: "kn-stale-junk", created_at: old, confidence_score: 0.3, curated: false }, // SHOULD prune
       { id: "kn-curated-old", created_at: old, confidence_score: 0.3, curated: true }, // protected (curated)
-      { id: "kn-recent-junk", created_at: recent, confidence_score: 0.3, curated: false }, // protected (recent)
+      { id: "kn-recent-junk", created_at: recent, confidence_score: 0.1, curated: false }, // protected (recent)
       { id: "kn-old-confident", created_at: old, confidence_score: 0.8, curated: false }, // protected (high confidence)
       { id: "kn-old-superseded", created_at: old, confidence_score: 0.3, curated: false, superseded: true }, // protected (superseded)
     ];
@@ -656,6 +656,15 @@ describe("retention scoring", () => {
     expect(ids).toContain("kn-old-confident");
     expect(ids).toContain("kn-old-superseded");
     expect(getGraph(orgId).nodes.find((n) => n.id === "kn-stale-junk")?.retrieval_tier).toBe("cold");
+    expect(getGraph(orgId).nodes.find((n) => n.id === "kn-recent-junk")?.retrieval_tier).not.toBe("cold");
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], confidence_min: 0 },
+      max_tokens: 2000,
+    });
+    const currentIds = current.nodes.map((n) => n.id);
+    expect(currentIds).not.toContain("kn-stale-junk");
+    expect(currentIds).toContain("kn-recent-junk");
   });
 
   it("returns 0 removed on an empty graph", () => {

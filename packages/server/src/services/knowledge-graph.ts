@@ -1244,11 +1244,13 @@ export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { remov
     const score = computeRetentionScore(node, state, now);
     const priorTier = node.retrieval_tier ?? "hot";
     const nextTier = tierForRetention(score);
-    node.retention_score = score;
-    node.retrieval_tier = nextTier;
-    rescored++;
     const created = new Date(node.created_at).getTime();
     const staleEnough = !Number.isNaN(created) && created <= cutoff;
+    node.retention_score = score;
+    if (nextTier !== "cold" || staleEnough) {
+      node.retrieval_tier = nextTier;
+    }
+    rescored++;
     if (priorTier !== "cold" && nextTier === "cold" && staleEnough) movedToCold++;
   }
 

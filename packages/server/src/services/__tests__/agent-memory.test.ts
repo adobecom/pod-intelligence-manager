@@ -49,7 +49,7 @@ import {
   updateAgentSessionWorkingState,
 } from "../agent-memory.js";
 import { ingestLearnings } from "../ingestion-gateway.js";
-import { persistMemoryEntities } from "../memory-enrichment.js";
+import { persistMemoryEntities, recordTemporalRelationshipsForUpdate } from "../memory-enrichment.js";
 
 const ORG_ID = "org_agent_memory";
 const PROJECT_ID = "project-agent-memory";
@@ -364,5 +364,34 @@ describe("agent run memory", () => {
       { org_id: ORG_ID, entity_key: ref.id },
       { org_id: "org-agent-memory-2", entity_key: ref.id },
     ]));
+  });
+
+  it("stores temporal relationships against persisted entity row ids", () => {
+    const now = new Date().toISOString();
+    const agent = { type: "agent" as const, id: "me-agent-local", label: "Agent Local" };
+    const pod = { type: "pod" as const, id: "me-pod-local", label: "Pod Local" };
+
+    recordTemporalRelationshipsForUpdate({
+      orgId: ORG_ID,
+      updateId: "context-update-1",
+      timestamp: now,
+      type: "status",
+      entityRefs: [agent, pod],
+      artifacts: [],
+      reason: "agent contributed to pod context",
+    });
+
+    const relationship = testDb
+      .prepare("SELECT source_entity_id, target_entity_id FROM memory_relationships WHERE org_id = ?")
+      .get(ORG_ID) as { source_entity_id: string; target_entity_id: string };
+    const entityRows = testDb
+      .prepare("SELECT id FROM memory_entities WHERE org_id = ?")
+      .all(ORG_ID) as Array<{ id: string }>;
+    const entityIds = entityRows.map((row) => row.id);
+
+    expect(entityIds).toContain(relationship.source_entity_id);
+    expect(entityIds).toContain(relationship.target_entity_id);
+    expect(relationship.source_entity_id).not.toBe(agent.id);
+    expect(relationship.target_entity_id).not.toBe(pod.id);
   });
 });

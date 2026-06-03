@@ -22,28 +22,54 @@ db.exec("PRAGMA foreign_keys = ON");
 // 5s retry window absorbs normal write contention under concurrent load.
 db.exec("PRAGMA busy_timeout = 5000");
 
-export function withTransaction<T>(fn: () => T): T {
-  db.exec("BEGIN");
+type NonPromise<T> = T extends PromiseLike<unknown> ? never : T;
+
+let savepointSeq = 0;
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === "object" && value !== null && "then" in value && typeof (value as { then?: unknown }).then === "function";
+}
+
+function runSyncTransaction<T>(beginSql: string, fn: () => T): T {
+  const nested = db.isTransaction;
+  const savepoint = nested ? `pim_tx_${++savepointSeq}` : "";
+  let settled = false;
+
+  db.exec(nested ? `SAVEPOINT ${savepoint}` : beginSql);
   try {
     const result = fn();
-    db.exec("COMMIT");
+    if (isPromiseLike(result)) {
+      if (nested) {
+        db.exec(`ROLLBACK TO ${savepoint}`);
+        db.exec(`RELEASE ${savepoint}`);
+      } else {
+        db.exec("ROLLBACK");
+      }
+      settled = true;
+      throw new TypeError("Database transaction callbacks must be synchronous");
+    }
+    db.exec(nested ? `RELEASE ${savepoint}` : "COMMIT");
+    settled = true;
     return result;
   } catch (e) {
-    db.exec("ROLLBACK");
+    if (!settled) {
+      if (nested) {
+        db.exec(`ROLLBACK TO ${savepoint}`);
+        db.exec(`RELEASE ${savepoint}`);
+      } else {
+        db.exec("ROLLBACK");
+      }
+    }
     throw e;
   }
 }
 
-export function withImmediateTransaction<T>(fn: () => T): T {
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    const result = fn();
-    db.exec("COMMIT");
-    return result;
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
+export function withTransaction<T>(fn: () => NonPromise<T>): NonPromise<T> {
+  return runSyncTransaction("BEGIN", fn) as NonPromise<T>;
+}
+
+export function withImmediateTransaction<T>(fn: () => NonPromise<T>): NonPromise<T> {
+  return runSyncTransaction("BEGIN IMMEDIATE", fn) as NonPromise<T>;
 }
 
 export default db;
