@@ -14,6 +14,7 @@ const { testDb } = vi.hoisted(() => {
 vi.mock("../db/connection.js", () => ({
   default: testDb,
   withTransaction: (fn: () => unknown) => fn(),
+  withImmediateTransaction: (fn: () => unknown) => fn(),
 }));
 
 // Mock knowledge graph (depends on filesystem state)
@@ -61,6 +62,7 @@ import livingDocRoutes from "../routes/living-doc.js";
 import projectRoutes from "../routes/projects.js";
 import orgRoutes from "../routes/org.js";
 import orgsRoutes from "../routes/orgs.js";
+import agentMemoryRoutes from "../routes/agent-memory.js";
 
 let app: FastifyInstance;
 
@@ -107,6 +109,7 @@ beforeAll(async () => {
   app.register(conflictRoutes);
   app.register(contextUpdateRoutes);
   app.register(livingDocRoutes);
+  app.register(agentMemoryRoutes);
 
   await app.ready();
 });
@@ -218,6 +221,66 @@ describe("Integration: API endpoints", () => {
     const updates = res.json();
     expect(updates.length).toBeGreaterThanOrEqual(1);
     expect(updates[0].agent_id).toBe("agent-fe");
+  });
+
+  it("POST /api/agent-sessions creates a session and appends run events", async () => {
+    const sessionRes = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: {
+        pod_id: integrationPodId,
+        scope: "frontend",
+        agent_id: "agent-fe",
+        goal: "Continue frontend integration work",
+      },
+    });
+    expect(sessionRes.statusCode).toBe(201);
+    const session = sessionRes.json() as { session_id: string };
+
+    const runRes = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${session.session_id}/runs`,
+      payload: { model: "test-model", input_prompt: "resume" },
+    });
+    expect(runRes.statusCode).toBe(201);
+    const run = runRes.json() as { run_id: string };
+
+    const eventRes = await app.inject({
+      method: "POST",
+      url: `/api/agent-runs/${run.run_id}/events`,
+      payload: { event_type: "tool_call", summary: "Read frontend files", expected_seq: 1, created_at: "1900-01-01T00:00:00.000Z" },
+    });
+    expect(eventRes.statusCode).toBe(201);
+    const event = eventRes.json() as { seq: number; created_at: string };
+    expect(event.seq).toBe(1);
+    expect(event.created_at).not.toBe("1900-01-01T00:00:00.000Z");
+
+    const invalidEventRes = await app.inject({
+      method: "POST",
+      url: `/api/agent-runs/${run.run_id}/events`,
+      payload: { event_type: "freeform_event", summary: "Invalid" },
+    });
+    expect(invalidEventRes.statusCode).toBe(400);
+
+    const invalidLimitRes = await app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.session_id}/resume-context?event_limit=garbage`,
+    });
+    expect(invalidLimitRes.statusCode).toBe(400);
+
+    const endRes = await app.inject({
+      method: "PATCH",
+      url: `/api/agent-runs/${run.run_id}/end`,
+      payload: { status: "completed", final_output: "Finished integration run." },
+    });
+    expect(endRes.statusCode).toBe(200);
+
+    const lateEventRes = await app.inject({
+      method: "POST",
+      url: `/api/agent-runs/${run.run_id}/events`,
+      payload: { event_type: "model_output", summary: "Too late" },
+    });
+    expect(lateEventRes.statusCode).toBe(409);
   });
 
   it("GET /api/pods/:podId/living-doc returns markdown", async () => {

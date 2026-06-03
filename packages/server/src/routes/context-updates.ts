@@ -17,6 +17,8 @@ interface ContextUpdateRow {
   scope: string;
   summary: string;
   details: string;
+  retrieval_text?: string | null;
+  entity_refs_json?: string | null;
   artifacts_json: string;
   status: string;
   quality_score: number;
@@ -37,6 +39,8 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
     scope: row.scope as ContextUpdate["scope"],
     summary: row.summary,
     details: row.details,
+    retrieval_text: row.retrieval_text ?? undefined,
+    entity_refs: JSON.parse(row.entity_refs_json ?? "[]") as ContextUpdate["entity_refs"],
     artifacts: JSON.parse(row.artifacts_json) as Artifact[],
     status: row.status as ContextUpdate["status"],
     quality_score: row.quality_score ?? 0,

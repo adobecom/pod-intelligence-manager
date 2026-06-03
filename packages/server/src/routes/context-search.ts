@@ -23,6 +23,10 @@ const ActorSchema = z
   })
   .optional();
 
+function isValidTimestamp(value: string | undefined): boolean {
+  return !!value && !Number.isNaN(new Date(value).getTime());
+}
+
 const ContextSearchRequestSchema = z.object({
   query: z.string().min(1, "query is required"),
   sources: z.array(ContextSourceSchema).optional(),
@@ -33,6 +37,16 @@ const ContextSearchRequestSchema = z.object({
   max_hits_per_source: z.number().int().positive().max(50).optional(),
   synthesize: z.boolean().optional(),
   use_cache: z.boolean().optional(),
+  query_mode: z.enum(["current", "history", "as_of", "why_changed"]).optional(),
+  as_of: z.string().optional(),
+}).superRefine((body, ctx) => {
+  if (body.query_mode === "as_of" && !isValidTimestamp(body.as_of)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["as_of"],
+      message: "as_of must be a valid timestamp when query_mode is as_of",
+    });
+  }
 });
 
 export default async function contextSearchRoutes(app: FastifyInstance) {

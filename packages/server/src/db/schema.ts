@@ -88,6 +88,8 @@ export function createTables() {
       scope TEXT NOT NULL,
       summary TEXT NOT NULL,
       details TEXT NOT NULL,
+      retrieval_text TEXT,
+      entity_refs_json TEXT NOT NULL DEFAULT '[]',
       artifacts_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
       quality_score REAL NOT NULL DEFAULT 0.0,
@@ -211,6 +213,12 @@ export function createTables() {
       created_at TEXT NOT NULL,
       curated INTEGER NOT NULL DEFAULT 0,
       community_id TEXT,
+      retrieval_text TEXT,
+      entity_refs_json TEXT NOT NULL DEFAULT '[]',
+      retention_score REAL NOT NULL DEFAULT 0.5,
+      retrieval_tier TEXT NOT NULL DEFAULT 'hot',
+      retrieval_count INTEGER NOT NULL DEFAULT 0,
+      last_retrieved_at TEXT,
       embedding_json TEXT
     );
 
@@ -223,6 +231,8 @@ export function createTables() {
       scope TEXT NOT NULL,
       summary TEXT NOT NULL,
       details TEXT NOT NULL,
+      retrieval_text TEXT,
+      entity_refs_json TEXT NOT NULL DEFAULT '[]',
       artifacts_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
       quality_score REAL NOT NULL DEFAULT 0.0,
@@ -302,6 +312,165 @@ export function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_ingestion_queue_pod_status
       ON ingestion_queue(pod_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      session_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(project_id),
+      pod_id TEXT REFERENCES pods(pod_id),
+      scope TEXT,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','ended')),
+      goal TEXT,
+      current_task TEXT,
+      working_state_json TEXT NOT NULL DEFAULT '{}',
+      compacted_summary TEXT,
+      last_compacted_event_rowid INTEGER NOT NULL DEFAULT 0,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_pod
+      ON agent_sessions(org_id, pod_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_project
+      ON agent_sessions(org_id, project_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent
+      ON agent_sessions(org_id, agent_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      run_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(project_id),
+      pod_id TEXT REFERENCES pods(pod_id),
+      scope TEXT,
+      agent_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed','cancelled')),
+      input_prompt TEXT,
+      model TEXT,
+      provider TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      token_input_count INTEGER NOT NULL DEFAULT 0,
+      token_output_count INTEGER NOT NULL DEFAULT 0,
+      total_cost_usd REAL NOT NULL DEFAULT 0.0,
+      error_message TEXT,
+      final_output TEXT,
+      context_update_id TEXT,
+      compacted_summary TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_session_time
+      ON agent_runs(session_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_org_status
+      ON agent_runs(org_id, status, started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_run_events (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      summary TEXT,
+      artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+      token_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE (run_id, seq)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_run_events_run_seq
+      ON agent_run_events(run_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_agent_run_events_session_time
+      ON agent_run_events(session_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+      checkpoint_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+      run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL DEFAULT '{}',
+      summary TEXT,
+      artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session_seq
+      ON agent_checkpoints(session_id, seq DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_run_seq
+      ON agent_checkpoints(run_id, seq DESC);
+
+    CREATE TABLE IF NOT EXISTS memory_candidates (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(project_id),
+      pod_id TEXT REFERENCES pods(pod_id),
+      session_id TEXT REFERENCES agent_sessions(session_id) ON DELETE SET NULL,
+      run_id TEXT REFERENCES agent_runs(run_id) ON DELETE SET NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT NOT NULL,
+      retrieval_text TEXT,
+      entity_refs_json TEXT NOT NULL DEFAULT '[]',
+      domains_json TEXT NOT NULL DEFAULT '[]',
+      confidence_score REAL NOT NULL DEFAULT 0.0,
+      evidence_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','promoted','rejected','auto_promoted')),
+      promoted_node_id TEXT,
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_candidates_org_status
+      ON memory_candidates(org_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memory_candidates_session
+      ON memory_candidates(session_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memory_candidates_project
+      ON memory_candidates(org_id, project_id, status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS memory_entities (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL,
+      entity_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (org_id, entity_type, entity_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_entities_org_type
+      ON memory_entities(org_id, entity_type, label);
+
+    CREATE TABLE IF NOT EXISTS memory_relationships (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      source_entity_id TEXT NOT NULL,
+      target_entity_id TEXT NOT NULL,
+      relation_type TEXT NOT NULL,
+      valid_from TEXT NOT NULL,
+      valid_until TEXT,
+      committed_at TEXT NOT NULL,
+      source_update_refs_json TEXT NOT NULL DEFAULT '[]',
+      artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+      reason TEXT,
+      confidence_score REAL NOT NULL DEFAULT 0.7,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_memory_relationships_current
+      ON memory_relationships(org_id, source_entity_id, relation_type, valid_until);
+    CREATE INDEX IF NOT EXISTS idx_memory_relationships_target
+      ON memory_relationships(org_id, target_entity_id, relation_type, valid_from DESC);
   `);
 
   // Migration guards for existing databases
@@ -313,7 +482,203 @@ export function createTables() {
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_commit_sha ON context_updates(commit_sha) WHERE commit_sha IS NOT NULL"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_rationale TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN retracted_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN retrieval_text TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE context_updates ADD COLUMN entity_refs_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE project_context_updates ADD COLUMN retracted_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_context_updates ADD COLUMN retrieval_text TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_context_updates ADD COLUMN entity_refs_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN retrieval_text TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN entity_refs_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN retention_score REAL NOT NULL DEFAULT 0.5"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN retrieval_tier TEXT NOT NULL DEFAULT 'hot'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN retrieval_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN last_retrieved_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE agent_sessions ADD COLUMN last_compacted_event_rowid INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS agent_sessions (
+        session_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT REFERENCES projects(project_id),
+        pod_id TEXT REFERENCES pods(pod_id),
+        scope TEXT,
+        agent_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','ended')),
+        goal TEXT,
+        current_task TEXT,
+        working_state_json TEXT NOT NULL DEFAULT '{}',
+        compacted_summary TEXT,
+        last_compacted_event_rowid INTEGER NOT NULL DEFAULT 0,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        ended_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_pod
+        ON agent_sessions(org_id, pod_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_org_project
+        ON agent_sessions(org_id, project_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent
+        ON agent_sessions(org_id, agent_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        run_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT REFERENCES projects(project_id),
+        pod_id TEXT REFERENCES pods(pod_id),
+        scope TEXT,
+        agent_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','completed','failed','cancelled')),
+        input_prompt TEXT,
+        model TEXT,
+        provider TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        token_input_count INTEGER NOT NULL DEFAULT 0,
+        token_output_count INTEGER NOT NULL DEFAULT 0,
+        total_cost_usd REAL NOT NULL DEFAULT 0.0,
+        error_message TEXT,
+        final_output TEXT,
+        context_update_id TEXT,
+        compacted_summary TEXT,
+        started_at TEXT NOT NULL,
+        ended_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_session_time
+        ON agent_runs(session_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_runs_org_status
+        ON agent_runs(org_id, status, started_at DESC);
+
+      CREATE TABLE IF NOT EXISTS agent_run_events (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        event_type TEXT NOT NULL,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        summary TEXT,
+        artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+        token_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE (run_id, seq)
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_run_events_run_seq
+        ON agent_run_events(run_id, seq);
+      CREATE INDEX IF NOT EXISTS idx_agent_run_events_session_time
+        ON agent_run_events(session_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS agent_checkpoints (
+        checkpoint_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        seq INTEGER NOT NULL,
+        snapshot_json TEXT NOT NULL DEFAULT '{}',
+        summary TEXT,
+        artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_session_seq
+        ON agent_checkpoints(session_id, seq DESC);
+      CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_run_seq
+        ON agent_checkpoints(run_id, seq DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_candidates (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT REFERENCES projects(project_id),
+        pod_id TEXT REFERENCES pods(pod_id),
+        session_id TEXT REFERENCES agent_sessions(session_id) ON DELETE SET NULL,
+        run_id TEXT REFERENCES agent_runs(run_id) ON DELETE SET NULL,
+        source_type TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        details TEXT NOT NULL,
+        retrieval_text TEXT,
+        entity_refs_json TEXT NOT NULL DEFAULT '[]',
+        domains_json TEXT NOT NULL DEFAULT '[]',
+        confidence_score REAL NOT NULL DEFAULT 0.0,
+        evidence_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','promoted','rejected','auto_promoted')),
+        promoted_node_id TEXT,
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_org_status
+        ON memory_candidates(org_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_session
+        ON memory_candidates(session_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_candidates_project
+        ON memory_candidates(org_id, project_id, status, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_entities (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        entity_type TEXT NOT NULL,
+        entity_key TEXT NOT NULL,
+        label TEXT NOT NULL,
+        aliases_json TEXT NOT NULL DEFAULT '[]',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (org_id, entity_type, entity_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_entities_org_type
+        ON memory_entities(org_id, entity_type, label);
+
+      CREATE TABLE IF NOT EXISTS memory_relationships (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        source_entity_id TEXT NOT NULL,
+        target_entity_id TEXT NOT NULL,
+        relation_type TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_until TEXT,
+        committed_at TEXT NOT NULL,
+        source_update_refs_json TEXT NOT NULL DEFAULT '[]',
+        artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+        reason TEXT,
+        confidence_score REAL NOT NULL DEFAULT 0.7,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_relationships_current
+        ON memory_relationships(org_id, source_entity_id, relation_type, valid_until);
+      CREATE INDEX IF NOT EXISTS idx_memory_relationships_target
+        ON memory_relationships(org_id, target_entity_id, relation_type, valid_from DESC);
+    `);
+	  } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      DELETE FROM memory_candidates
+      WHERE id IN (
+        SELECT id
+        FROM (
+          SELECT
+            id,
+            ROW_NUMBER() OVER (
+              PARTITION BY org_id, source_type, source_id
+              ORDER BY
+                CASE status
+                  WHEN 'promoted' THEN 0
+                  WHEN 'auto_promoted' THEN 0
+                  WHEN 'pending' THEN 1
+                  ELSE 2
+                END,
+                created_at DESC,
+                id ASC
+            ) AS duplicate_rank
+          FROM memory_candidates
+        )
+        WHERE duplicate_rank > 1
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_candidates_source_unique
+        ON memory_candidates(org_id, source_type, source_id);
+    `);
+  } catch { /* already exists */ }
 
   try {
     db.exec(`

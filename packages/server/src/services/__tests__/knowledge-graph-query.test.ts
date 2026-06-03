@@ -18,9 +18,12 @@ import {
   getRelevantLearnings,
   addLearningsToGraph,
   getGraph,
+  KnowledgeQueryValidationError,
   pruneStaleNodes,
+  refreshAnalysisIfStale,
   _resetForTests,
 } from "../knowledge-graph.js";
+import { saveGraph } from "../graph-storage.js";
 import type { EnhancedPodLearning, KnowledgeNode } from "@pim/shared";
 
 // Push a node directly into the graph (bypasses embedding/dedup so tests stay fast).
@@ -604,13 +607,13 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
 });
 
-describe("pruneStaleNodes", () => {
+describe("retention scoring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
   });
 
-  it("removes only stale, low-confidence, uncurated, non-superseded nodes", async () => {
+  it("moves stale, low-retention nodes to cold without deleting historical memory", async () => {
     const orgId = nextOrgId("kg-prune");
     initializeKnowledgeGraph(orgId);
 
@@ -619,7 +622,7 @@ describe("pruneStaleNodes", () => {
     const ages: { id: string; created_at: string; confidence_score: number; curated: boolean; superseded?: boolean }[] = [
       { id: "kn-stale-junk", created_at: old, confidence_score: 0.3, curated: false }, // SHOULD prune
       { id: "kn-curated-old", created_at: old, confidence_score: 0.3, curated: true }, // protected (curated)
-      { id: "kn-recent-junk", created_at: recent, confidence_score: 0.3, curated: false }, // protected (recent)
+      { id: "kn-recent-junk", created_at: recent, confidence_score: 0.1, curated: false }, // protected (recent)
       { id: "kn-old-confident", created_at: old, confidence_score: 0.8, curated: false }, // protected (high confidence)
       { id: "kn-old-superseded", created_at: old, confidence_score: 0.3, curated: false, superseded: true }, // protected (superseded)
     ];
@@ -644,13 +647,24 @@ describe("pruneStaleNodes", () => {
     }
 
     const result = pruneStaleNodes(orgId);
-    expect(result.removed).toBe(1);
+    expect(result.removed).toBe(0);
+    expect(result.moved_to_cold).toBe(1);
     const ids = getGraph(orgId).nodes.map((n) => n.id);
-    expect(ids).not.toContain("kn-stale-junk");
+    expect(ids).toContain("kn-stale-junk");
     expect(ids).toContain("kn-curated-old");
     expect(ids).toContain("kn-recent-junk");
     expect(ids).toContain("kn-old-confident");
     expect(ids).toContain("kn-old-superseded");
+    expect(getGraph(orgId).nodes.find((n) => n.id === "kn-stale-junk")?.retrieval_tier).toBe("cold");
+    expect(getGraph(orgId).nodes.find((n) => n.id === "kn-recent-junk")?.retrieval_tier).not.toBe("cold");
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], confidence_min: 0 },
+      max_tokens: 2000,
+    });
+    const currentIds = current.nodes.map((n) => n.id);
+    expect(currentIds).not.toContain("kn-stale-junk");
+    expect(currentIds).toContain("kn-recent-junk");
   });
 
   it("returns 0 removed on an empty graph", () => {
@@ -659,8 +673,8 @@ describe("pruneStaleNodes", () => {
     expect(pruneStaleNodes(orgId).removed).toBe(0);
   });
 
-  it("pruned node is absent from domain-index queries, not just from graph.nodes", async () => {
-    // Gap 3: verify the index is rebuilt after pruning so queries reflect the removal.
+  it("cold nodes are absent from current queries but available to history queries", async () => {
+    // Verify the index is rebuilt after retention scoring so current queries reflect tiering.
     const orgId = nextOrgId("kg-prune-index");
     initializeKnowledgeGraph(orgId);
 
@@ -696,18 +710,25 @@ describe("pruneStaleNodes", () => {
 
     pruneStaleNodes(orgId);
 
-    // After pruning the stale node should be gone from graph.nodes...
+    // After scoring the stale node remains in graph.nodes...
     const remainingIds = getGraph(orgId).nodes.map((n) => n.id);
-    expect(remainingIds).not.toContain("kn-prune-idx-stale");
+    expect(remainingIds).toContain("kn-prune-idx-stale");
 
-    // ...and a domain query must not surface it either (index consistency).
-    const q = queryKnowledge(orgId, {
+    // ...but a current domain query must not surface the cold node.
+    const current = queryKnowledge(orgId, {
       filters: { domains: ["backend"] },
       max_tokens: 2000,
     });
-    const queriedIds = q.nodes.map((n) => n.id);
-    expect(queriedIds).not.toContain("kn-prune-idx-stale");
-    expect(queriedIds.some((id) => id !== "kn-prune-idx-stale")).toBe(true);
+    const currentIds = current.nodes.map((n) => n.id);
+    expect(currentIds).not.toContain("kn-prune-idx-stale");
+    expect(currentIds.some((id) => id !== "kn-prune-idx-stale")).toBe(true);
+
+    const history = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], retrieval_tiers: ["hot", "warm", "cold"], confidence_min: 0 },
+      query_mode: "history",
+      max_tokens: 2000,
+    });
+    expect(history.nodes.map((n) => n.id)).toContain("kn-prune-idx-stale");
   });
 });
 
@@ -770,6 +791,224 @@ describe("text_search index behavior", () => {
 
     expect(q.nodes).toHaveLength(0);
     expect(q.total_matching).toBe(0);
+  });
+});
+
+describe("retrieval text, temporal modes, and graph expansion", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForTests();
+  });
+
+  it("indexes retrieval_text and uses identifiers to bypass weak semantic similarity", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Token refresh retry behavior",
+        details: "Retry token refresh once before showing auth failure.",
+        retrieval_text: "Applies to SessionTokenService and POST /internal/session/refresh in the auth API contract.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: {},
+      query_text: "SessionTokenService",
+      query_embedding: [0, 1, 0],
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes).toHaveLength(1);
+    expect(q.nodes[0].retrieval_text).toContain("SessionTokenService");
+  });
+
+	  it("supports current, history, and as_of modes for superseded decisions", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use full replace for config inheritance",
+        details: "Older config inheritance decision.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "decision",
+        summary: "Use deep merge for config inheritance",
+        details: "Newer config inheritance decision.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const oldDecision = graph.nodes.find((n) => n.summary.includes("full replace"))!;
+    const newDecision = graph.nodes.find((n) => n.summary.includes("deep merge"))!;
+    oldDecision.created_at = "2026-01-01T00:00:00.000Z";
+    newDecision.created_at = "2026-02-01T00:00:00.000Z";
+    oldDecision.superseded_by = newDecision.id;
+    newDecision.superseded_by = undefined;
+    graph.edges.push({ source: newDecision.id, target: oldDecision.id, type: "supersedes", weight: 0.95 });
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      max_tokens: 2000,
+    });
+    expect(current.nodes.map((n) => n.summary)).toEqual(["Use deep merge for config inheritance"]);
+
+    const asOf = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      query_mode: "as_of",
+      as_of: "2026-01-15T00:00:00.000Z",
+      max_tokens: 2000,
+    });
+    expect(asOf.nodes.map((n) => n.summary)).toEqual(["Use full replace for config inheritance"]);
+
+    const history = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      query_mode: "history",
+      max_tokens: 2000,
+    });
+	    expect(history.nodes.map((n) => n.summary).sort()).toEqual([
+	      "Use deep merge for config inheritance",
+	      "Use full replace for config inheritance",
+	    ]);
+	  });
+
+  it("rejects as_of mode without a valid as_of timestamp", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use temporal validation for KG",
+        details: "Invalid temporal queries should fail loudly.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    expect(() =>
+      queryKnowledge(orgId, {
+        filters: { domains: ["backend"] },
+        query_mode: "as_of",
+        max_tokens: 2000,
+      }),
+    ).toThrow(KnowledgeQueryValidationError);
+  });
+
+	  it("adds capped one-hop graph neighbors from strong KG hits", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "OAuth token refresh retry strategy",
+        details: "Refresh expired access tokens once before surfacing auth failures.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "resolved_conflict",
+        summary: "Auth fallback conflict resolved by retry limit",
+        details: "The prior conflict was resolved by limiting refresh retries.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const pattern = graph.nodes.find((n) => n.summary.includes("OAuth"))!;
+    const conflict = graph.nodes.find((n) => n.summary.includes("fallback conflict"))!;
+    pattern.embedding = [0, 1, 0];
+    conflict.embedding = [1, 0, 0];
+    graph.edges.push({ source: pattern.id, target: conflict.id, type: "resolved_by", weight: 0.9 });
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "OAuth token refresh retry",
+      query_embedding: [0, 1, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toContain("OAuth token refresh retry strategy");
+    expect(q.nodes.map((n) => n.summary)).toContain("Auth fallback conflict resolved by retry limit");
+  });
+
+  it("expands graph neighbors by strongest edge before applying the expansion cap", async () => {
+    const neighborLearnings: EnhancedPodLearning[] = Array.from({ length: 21 }, (_, i) => ({
+      type: "pattern",
+      summary: `Weak graph neighbor ${i}`,
+      details: "Connected to the seed by a weak edge.",
+      domains: ["backend"],
+      confidence: "extracted",
+      confidence_score: 0.9,
+    }));
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "SeedAPI primary recall node",
+        details: "This is the direct semantic hit.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      ...neighborLearnings,
+      {
+        type: "pattern",
+        summary: "Strong graph neighbor",
+        details: "This should survive the expansion cap even though its edge is last.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary === "SeedAPI primary recall node")!;
+    const strong = graph.nodes.find((n) => n.summary === "Strong graph neighbor")!;
+    for (const node of graph.nodes) node.embedding = node.id === seed.id ? [1, 0, 0] : [0, 1, 0];
+    graph.edges = [];
+    for (const weak of graph.nodes.filter((n) => n.summary.startsWith("Weak graph neighbor"))) {
+      graph.edges.push({ source: seed.id, target: weak.id, type: "relates_to", weight: 0.1 });
+    }
+    graph.edges.push({ source: seed.id, target: strong.id, type: "relates_to", weight: 1 });
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      limit: 25,
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toContain("Strong graph neighbor");
+  });
+
+  it("tracks retrieval counts in memory and defers persistence to the refresh interval", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Retrieval telemetry pattern",
+        details: "Track when nodes are retrieved.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    vi.mocked(saveGraph).mockClear();
+    queryKnowledge(orgId, { filters: { domains: ["backend"] }, max_tokens: 2000 });
+
+    const node = getGraph(orgId).nodes[0];
+    expect(node.retrieval_count).toBe(1);
+    expect(node.last_retrieved_at).toBeTruthy();
+    expect(saveGraph).not.toHaveBeenCalled();
+
+    expect(refreshAnalysisIfStale(orgId)).toBe(true);
+    expect(saveGraph).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,3 +1,5 @@
+import type { Artifact } from "./context-update.js";
+import type { MemoryEntityRef, RetrievalTier, TemporalQueryMode } from "./memory.js";
 import type { Scope } from "./pod.js";
 
 // --- Node Types ---
@@ -12,7 +14,7 @@ export type KnowledgeNodeType =
 export type ConfidenceLevel = "extracted" | "inferred";
 
 /** Provenance for nodes not produced by pod archival or a single ad-hoc human submission. */
-export type KnowledgeIngestionProvenanceKind = "scheduled_synthesis" | "project_evidence";
+export type KnowledgeIngestionProvenanceKind = "scheduled_synthesis" | "project_evidence" | "agent_run";
 
 export interface KnowledgeIngestionProvenance {
   kind: KnowledgeIngestionProvenanceKind;
@@ -41,6 +43,10 @@ export interface KnowledgeNode {
   type: KnowledgeNodeType;
   summary: string;
   details: string;
+  /** Retrieval-optimized expanded text. Display surfaces should keep using summary/details. */
+  retrieval_text?: string;
+  /** Resolved entities mentioned by or attributable to this node. */
+  entity_refs?: MemoryEntityRef[];
   source_pod_id: string;
   source_pod_name: string;
   /** When set, this node is also attributable to a long-lived project (e.g. off-pod updates). */
@@ -56,8 +62,14 @@ export interface KnowledgeNode {
   community_id?: string;
   /** Set when a newer node with a `supersedes` edge points to this one. Superseded nodes are excluded from queries by default. */
   superseded_by?: string;
+  retention_score?: number;
+  retrieval_tier?: RetrievalTier;
+  retrieval_count?: number;
+  last_retrieved_at?: string;
   /** Titan Text Embeddings v2 vector; absent on nodes created before embedding backfill. */
   embedding?: number[];
+  /** SHA-256 of the exact text used to produce `embedding`; missing or mismatched means the vector is stale. */
+  embedding_text_hash?: string;
   /** Optional audit trail for scheduled synthesis or future system ingestors. */
   ingestion_provenance?: KnowledgeIngestionProvenance;
 }
@@ -76,6 +88,12 @@ export interface KnowledgeEdge {
   target: string;
   type: KnowledgeEdgeType;
   weight: number; // 0.0–1.0
+  valid_from?: string;
+  valid_until?: string;
+  source_update_refs?: string[];
+  artifact_refs?: Artifact[];
+  reason?: string;
+  confidence_score?: number;
 }
 
 // --- Community / Cluster ---
@@ -117,6 +135,7 @@ export interface KnowledgeQueryFilters {
   curated_only?: boolean;
   /** When false (default), nodes with `superseded_by` set are excluded. Pass true to include them. */
   include_superseded?: boolean;
+  retrieval_tiers?: RetrievalTier[];
   /** Word-level filter via the keyword index (summary + details tokenized; not substring). */
   text_search?: string;
   /**
@@ -145,6 +164,11 @@ export interface KnowledgeQueryOptions {
    * Default false — embeddings are for server-side scoring only; omit them for token-efficient agent/API responses.
    */
   include_embeddings?: boolean;
+  query_mode?: TemporalQueryMode;
+  /** ISO timestamp required when `query_mode` is `as_of`; optional hint for temporal ranking otherwise. */
+  as_of?: string;
+  /** Defaults true for text/temporal queries; false disables one-hop graph expansion. */
+  expand_graph?: boolean;
 }
 
 export interface KnowledgeQueryResult {
@@ -153,6 +177,8 @@ export interface KnowledgeQueryResult {
   total_matching: number;
   token_estimate: number;
   truncated: boolean;
+  query_mode?: TemporalQueryMode;
+  as_of?: string;
 }
 
 // --- Stats ---
@@ -173,6 +199,8 @@ export interface EnhancedPodLearning {
   type: KnowledgeNodeType;
   summary: string;
   details: string;
+  retrieval_text?: string;
+  entity_refs?: MemoryEntityRef[];
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number;

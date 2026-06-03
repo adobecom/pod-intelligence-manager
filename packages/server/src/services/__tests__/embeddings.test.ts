@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "");
 vi.stubEnv("AWS_REGION", "");
 
-import { cosineSimilarity, embedText, isEmbeddingAvailable } from "../embeddings.js";
+import { cosineSimilarity, embedText, embeddingTextHash, isEmbeddingAvailable } from "../embeddings.js";
 import type { KnowledgeNode } from "@pim/shared";
 
 describe("cosineSimilarity", () => {
@@ -54,6 +54,13 @@ describe("embedText", () => {
 
   it("returns only summary when details is whitespace", () => {
     expect(embedText({ summary: "Use JWT for auth", details: "   " })).toBe("Use JWT for auth");
+  });
+});
+
+describe("embeddingTextHash", () => {
+  it("changes when the embedded text changes", () => {
+    expect(embeddingTextHash("alpha")).toBe(embeddingTextHash("alpha"));
+    expect(embeddingTextHash("alpha")).not.toBe(embeddingTextHash("beta"));
   });
 });
 
