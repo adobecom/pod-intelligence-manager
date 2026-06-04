@@ -37,7 +37,7 @@ Agents query via `getRelevantLearnings(tokenBudget)` — never dump the full gra
 - **Full spec & design rationale:** [SPEC.md](SPEC.md)
 - **Architecture quick reference** (orchestrator, committee, living doc, tunneling, security, knowledge graph, AWS map, milestones, monorepo layout): [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md)
 - **Pod agent protocol:** [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md)
-- **Deployment:** [docs/DEPLOY.md](docs/DEPLOY.md), [docs/DEPLOYMENT_CHECKLIST.md](docs/DEPLOYMENT_CHECKLIST.md)
+- **Deployment:** [docs/DEPLOY.md](docs/DEPLOY.md), [docs/AGENT_MANUAL_DEPLOY.md](docs/AGENT_MANUAL_DEPLOY.md) (manual/hosted redeploy for agents)
 - **Context search:** [docs/CONTEXT_SEARCH.md](docs/CONTEXT_SEARCH.md)
 
 
