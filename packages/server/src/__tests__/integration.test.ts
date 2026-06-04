@@ -21,6 +21,10 @@ vi.mock("../db/connection.js", () => ({
 vi.mock("../services/knowledge-graph.js", () => ({
   initializeKnowledgeGraph: vi.fn(),
   refreshAnalysis: vi.fn(),
+  getGraph: vi.fn().mockReturnValue({ nodes: [], edges: [] }),
+  getStats: vi.fn().mockReturnValue({ total_nodes: 0, by_type: {}, by_confidence: {}, by_domain: {} }),
+  stripEmbeddingsFromGraph: vi.fn((graph) => graph),
+  curateNode: vi.fn().mockResolvedValue(true),
   addLearningsToGraph: vi.fn().mockResolvedValue({
     nodesAdded: 1,
     edgesAdded: 0,
@@ -63,6 +67,9 @@ import projectRoutes from "../routes/projects.js";
 import orgRoutes from "../routes/org.js";
 import orgsRoutes from "../routes/orgs.js";
 import agentMemoryRoutes from "../routes/agent-memory.js";
+import graphRoutes from "../routes/graph.js";
+import { registerJsonBodyParser } from "../middleware/validation.js";
+import { addLearningsToGraph } from "../services/knowledge-graph.js";
 
 let app: FastifyInstance;
 
@@ -74,6 +81,7 @@ beforeAll(async () => {
 
   // Build a Fastify instance with routes (no websocket for integration tests)
   app = Fastify();
+  registerJsonBodyParser(app);
 
   // Add a minimal error handler
   app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
@@ -110,6 +118,7 @@ beforeAll(async () => {
   app.register(contextUpdateRoutes);
   app.register(livingDocRoutes);
   app.register(agentMemoryRoutes);
+  app.register(graphRoutes);
 
   await app.ready();
 });
@@ -223,6 +232,58 @@ describe("Integration: API endpoints", () => {
     expect(updates[0].agent_id).toBe("agent-fe");
   });
 
+  it("creates an open conflict for a later update overlapping a prior decision", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Decision Conflict Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = (create.json() as { pod_id: string }).pod_id;
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "agent-a",
+        type: "decision",
+        scope: "backend",
+        summary: "Use SQLite storage for agent sessions",
+        details: "The local persistence layer should use SQLite because the server already depends on node:sqlite for test and development workflows.",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(first.statusCode).toBe(201);
+
+    const second = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "agent-b",
+        type: "decision",
+        scope: "backend",
+        summary: "Use Postgres storage for agent sessions",
+        details: "The session storage implementation should move to Postgres so multiple workers can coordinate writes without local database coupling.",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(second.statusCode).toBe(201);
+    expect((second.json() as { pim: { conflictCreated: boolean } }).pim.conflictCreated).toBe(true);
+
+    const conflicts = await app.inject({ method: "GET", url: `/api/pods/${podId}/conflicts` });
+    expect(conflicts.statusCode).toBe(200);
+    const body = conflicts.json() as Array<{ status: string; sides: Array<{ contributor: string }> }>;
+    expect(body.some((c) => c.status === "open" && c.sides.some((s) => s.contributor === "agent-b"))).toBe(true);
+  });
+
   it("POST /api/agent-sessions creates a session and appends run events", async () => {
     const sessionRes = await app.inject({
       method: "POST",
@@ -281,6 +342,65 @@ describe("Integration: API endpoints", () => {
       payload: { event_type: "model_output", summary: "Too late" },
     });
     expect(lateEventRes.statusCode).toBe(409);
+  });
+
+  it("accepts empty application/json bodies on no-body POST actions", async () => {
+    const sessionRes = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions",
+      payload: {
+        pod_id: integrationPodId,
+        scope: "frontend",
+        agent_id: "agent-empty-json",
+        goal: "Exercise no-body actions",
+      },
+    });
+    expect(sessionRes.statusCode).toBe(201);
+    const session = sessionRes.json() as { session_id: string };
+
+    const runRes = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${session.session_id}/runs`,
+      payload: { input_prompt: "finish" },
+    });
+    expect(runRes.statusCode).toBe(201);
+    const run = runRes.json() as { run_id: string };
+    const endRun = await app.inject({
+      method: "PATCH",
+      url: `/api/agent-runs/${run.run_id}/end`,
+      payload: { status: "completed", final_output: "Completed no-body action coverage for memory candidates." },
+    });
+    expect(endRun.statusCode).toBe(200);
+
+    const rollup = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${session.session_id}/rollup`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(rollup.statusCode).toBe(200);
+    const candidates = rollup.json() as Array<{ id: string }>;
+    expect(candidates.length).toBeGreaterThan(0);
+
+    const promote = await app.inject({
+      method: "POST",
+      url: `/api/memory-candidates/${candidates[0].id}/promote`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(promote.statusCode).toBe(200);
+
+    const reject = await app.inject({
+      method: "POST",
+      url: `/api/memory-candidates/${candidates[0].id}/reject`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(reject.statusCode).toBe(200);
+
+    const endSession = await app.inject({
+      method: "POST",
+      url: `/api/agent-sessions/${session.session_id}/end`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(endSession.statusCode).toBe(200);
   });
 
   it("GET /api/pods/:podId/living-doc returns markdown", async () => {
@@ -385,6 +505,249 @@ describe("Integration: API endpoints", () => {
     expect(doc.statusCode).toBe(200);
     expect(doc.body).toContain("Custom Milestone Title");
     expect(doc.body).toContain("72% complete");
+  });
+
+  it("POST /api/pods/:podId/archive returns an async job and completes through status polling", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Async Archive Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = (create.json() as { pod_id: string }).pod_id;
+
+    const decision = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "agent-archive",
+        type: "decision",
+        scope: "backend",
+        summary: "Keep archive extraction asynchronous",
+        details: "Archive requests should persist the archived pod immediately and move knowledge extraction into a status-polled background job.",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(decision.statusCode).toBe(201);
+
+    const archive = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/archive`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(archive.statusCode).toBe(202);
+    const job = archive.json() as { job_id: string; status: string; status_url: string };
+    expect(job.job_id).toMatch(/^archive-/);
+    expect(job.status).toBe("running");
+
+    const statusPost = await app.inject({
+      method: "POST",
+      url: job.status_url,
+      headers: { "content-type": "application/json" },
+    });
+    expect([200, 202]).toContain(statusPost.statusCode);
+
+    let completed: { status: string; archived?: { pod_id: string; learnings_extracted?: number } } | null = null;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setImmediate(r));
+      const status = await app.inject({ method: "GET", url: job.status_url });
+      expect([200, 202]).toContain(status.statusCode);
+      const body = status.json() as { status: string; archived?: { pod_id: string; learnings_extracted?: number }; error?: string };
+      if (body.status === "failed") throw new Error(body.error ?? "archive failed");
+      if (body.status === "completed") {
+        completed = body;
+        break;
+      }
+    }
+    expect(completed?.archived?.pod_id).toBe(podId);
+    expect(completed?.archived?.learnings_extracted).toBe(1);
+
+    const active = await app.inject({ method: "GET", url: "/api/org/pods" });
+    expect((active.json() as { pod_id: string }[]).some((p) => p.pod_id === podId)).toBe(false);
+  });
+
+  it("POST /api/pods/:podId/archive retries extraction for incomplete archived pods after restart", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Restart Retry Archive Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = (create.json() as { pod_id: string }).pod_id;
+
+    const decision = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "agent-archive-retry",
+        type: "decision",
+        scope: "backend",
+        summary: "Retry archive extraction after restart",
+        details: "If the process restarts after archiving but before extraction completes, posting archive again should retry extraction.",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(decision.statusCode).toBe(201);
+
+    testDb
+      .prepare(
+        `INSERT OR REPLACE INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure, org_id, extraction_completed)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      )
+      .run(podId, "Restart Retry Archive Pod", "2026-01-01", 1, 0.1, "org_demo");
+    testDb.prepare("DELETE FROM org_pod_summaries WHERE pod_id = ? AND org_id = ?").run(podId, "org_demo");
+
+    const archive = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/archive`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(archive.statusCode).toBe(202);
+    const job = archive.json() as { status: string; status_url: string; archived?: { extraction_completed?: boolean } };
+    expect(job.status).toBe("running");
+    expect(job.archived?.extraction_completed).toBe(false);
+
+    let completed: { status: string; archived?: { extraction_completed?: boolean } } | null = null;
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setImmediate(r));
+      const status = await app.inject({ method: "GET", url: job.status_url });
+      expect([200, 202]).toContain(status.statusCode);
+      const body = status.json() as { status: string; archived?: { extraction_completed?: boolean }; error?: string };
+      if (body.status === "failed") throw new Error(body.error ?? "archive failed");
+      if (body.status === "completed") {
+        completed = body;
+        break;
+      }
+    }
+    expect(completed?.archived?.extraction_completed).toBe(true);
+  });
+
+  it("POST /api/pods/:podId/archive preserves archived duration when retrying incomplete extraction", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Preserve Retry Duration Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = (create.json() as { pod_id: string }).pod_id;
+
+    testDb
+      .prepare(
+        `INSERT OR REPLACE INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure, org_id, extraction_completed)
+         VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      )
+      .run(podId, "Preserve Retry Duration Pod", "2026-01-01", 2, 0.1, "org_demo");
+
+    const archive = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/archive`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(archive.statusCode).toBe(202);
+    const job = archive.json() as { status: string; archived?: { completed_date?: string; duration_days?: number } };
+    expect(job.status).toBe("running");
+    expect(job.archived?.completed_date).toBe("2026-01-01");
+    expect(job.archived?.duration_days).toBe(2);
+  });
+
+  it("POST /api/pods/:podId/archive marks timed-out extraction jobs failed so they can be retried", async () => {
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/pods",
+      payload: { name: "Timed Out Archive Pod" },
+    });
+    expect(create.statusCode).toBe(201);
+    const podId = (create.json() as { pod_id: string }).pod_id;
+
+    const decision = await app.inject({
+      method: "POST",
+      url: `/api/pods/${podId}/context-updates`,
+      payload: {
+        agent_id: "agent-archive-timeout",
+        type: "decision",
+        scope: "backend",
+        summary: "Force archive extraction timeout path",
+        details: "This decision gives deterministic extraction a learning to ingest while the graph write hangs.",
+        artifacts: [],
+        status: "completed",
+        blocks: [],
+        blocked_by: [],
+        needs_input_from: [],
+      },
+    });
+    expect(decision.statusCode).toBe(201);
+
+    const priorTimeout = process.env.ARCHIVE_EXTRACTION_TIMEOUT_MS;
+    process.env.ARCHIVE_EXTRACTION_TIMEOUT_MS = "1";
+    vi.mocked(addLearningsToGraph).mockReturnValueOnce(new Promise(() => {}));
+
+    try {
+      const archive = await app.inject({
+        method: "POST",
+        url: `/api/pods/${podId}/archive`,
+        headers: { "content-type": "application/json" },
+      });
+      expect(archive.statusCode).toBe(202);
+      const job = archive.json() as { status: string; status_url: string };
+      expect(job.status).toBe("running");
+
+      let failed: { status: string; error?: string; archived?: { extraction_completed?: boolean } } | null = null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 5));
+        const status = await app.inject({ method: "GET", url: job.status_url });
+        expect([200, 202]).toContain(status.statusCode);
+        const body = status.json() as { status: string; error?: string; archived?: { extraction_completed?: boolean } };
+        if (body.status === "failed") {
+          failed = body;
+          break;
+        }
+      }
+
+      expect(failed?.status).toBe("failed");
+      expect(failed?.error).toContain("timed out");
+      expect(failed?.archived?.extraction_completed).toBe(false);
+
+      const retry = await app.inject({
+        method: "POST",
+        url: `/api/pods/${podId}/archive`,
+        headers: { "content-type": "application/json" },
+      });
+      expect(retry.statusCode).toBe(202);
+      expect((retry.json() as { status: string }).status).toBe("running");
+    } finally {
+      if (priorTimeout === undefined) delete process.env.ARCHIVE_EXTRACTION_TIMEOUT_MS;
+      else process.env.ARCHIVE_EXTRACTION_TIMEOUT_MS = priorTimeout;
+      vi.mocked(addLearningsToGraph).mockResolvedValue({
+        nodesAdded: 1,
+        edgesAdded: 0,
+        nodeIds: ["kn-integration"],
+      });
+    }
+  });
+
+  it("GET /api/pods/:podId/archive/status reconstructs stable completed timestamps", async () => {
+    const podId = "pod-stable-archive-status";
+    testDb
+      .prepare(
+        `INSERT OR REPLACE INTO archived_pods (pod_id, name, completed_date, duration_days, final_pressure, org_id, extraction_completed)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(podId, "Stable Archive Status Pod", "2026-01-02", 3, 0.2, "org_demo");
+
+    const status = await app.inject({ method: "GET", url: `/api/pods/${podId}/archive/status` });
+    expect(status.statusCode).toBe(200);
+    const body = status.json() as { status: string; started_at: string; completed_at?: string };
+    expect(body.status).toBe("completed");
+    expect(body.started_at).toBe("2026-01-02T00:00:00.000Z");
+    expect(body.completed_at).toBe("2026-01-02T00:00:00.000Z");
   });
 
   it("POST /api/projects creates a project", async () => {
@@ -536,7 +899,21 @@ describe("Integration: API endpoints", () => {
 
     const candidates = await app.inject({ method: "GET", url: `/api/projects/${projectId}/memory-candidates?status=pending` });
     expect(candidates.statusCode).toBe(200);
-    expect((candidates.json() as { summary: string }[])[0].summary).toBe("Chose SQLite for local dev");
+    const projectCandidates = candidates.json() as { id: string; summary: string }[];
+    expect(projectCandidates[0].summary).toBe("Chose SQLite for local dev");
+
+    const promote = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/memory-candidates/${projectCandidates[0].id}/promote`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(promote.statusCode).toBe(200);
+    const reject = await app.inject({
+      method: "POST",
+      url: `/api/projects/${projectId}/memory-candidates/${projectCandidates[0].id}/reject`,
+      headers: { "content-type": "application/json" },
+    });
+    expect(reject.statusCode).toBe(200);
 
     const answer = await app.inject({
       method: "POST",
@@ -554,6 +931,20 @@ describe("Integration: API endpoints", () => {
     const body = res.json() as { scopes: { id: string }[] };
     expect(body.scopes.length).toBeGreaterThan(0);
     expect("roles" in body).toBe(false);
+  });
+
+  it("POST /api/knowledge/nodes rejects repeated-character garbage", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/knowledge/nodes",
+      payload: {
+        type: "pattern",
+        summary: "aaaaaaaaaa",
+        details: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        domains: ["backend"],
+      },
+    });
+    expect(res.statusCode).toBe(422);
   });
 
   it("PATCH /api/projects/:id updates anatomy", async () => {

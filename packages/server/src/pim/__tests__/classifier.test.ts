@@ -100,6 +100,76 @@ describe("classifyUpdate", () => {
     }))).toBe("overlapping");
   });
 
+  it("returns 'overlapping' for decision keyword overlap without contradiction signals", () => {
+    setupDb({
+      conflicts: [],
+      recentUpdates: [
+        {
+          id: "ctx-old",
+          agent_id: "agent-be",
+          scope: "frontend",
+          summary: "Use zod schema for checkout form validation",
+          details: "Decision recorded after frontend review.",
+        },
+      ],
+      pod: { conflict_pressure: 0 },
+    });
+
+    expect(classifyUpdate(makeUpdate({
+      type: "decision",
+      summary: "Use zod schema for checkout form validation",
+      details: "Confirmed the same validation approach for checkout.",
+    }))).toBe("overlapping");
+  });
+
+  it("returns 'contradictory' when overlapping updates include contradiction signals", () => {
+    setupDb({
+      conflicts: [],
+      recentUpdates: [
+        {
+          id: "ctx-old",
+          agent_id: "agent-be",
+          scope: "frontend",
+          summary: "Use zod schema for checkout form validation",
+          details: "Decision recorded after frontend review.",
+        },
+      ],
+      pod: { conflict_pressure: 0 },
+    });
+
+    expect(classifyUpdate(makeUpdate({
+      type: "decision",
+      summary: "Do not use zod schema for checkout form validation",
+      details: "The checkout form validation path must not use the prior schema.",
+    }))).toBe("contradictory");
+  });
+
+  it("does not classify new additive work as contradictory because old text used cautionary language", () => {
+    setupDb({
+      conflicts: [],
+      recentUpdates: [
+        {
+          id: "ctx-old",
+          agent_id: "agent-be",
+          scope: "backend",
+          summary: "Must not use redis for session state",
+          details: "Authentication sessions should stay in signed cookies.",
+        },
+      ],
+      pod: { conflict_pressure: 0 },
+    });
+
+    expect(classifyUpdate(makeUpdate({
+      scope: "backend",
+      summary: "Use redis for image caching",
+      details: "Cache rendered image variants in redis.",
+    }), {
+      peerWindow: 5,
+      overlapKeywordMin: 1,
+      highPressureOverride: 0.6,
+    })).toBe("overlapping");
+  });
+
   it("returns 'additive' when keyword overlap is below threshold (< 3)", () => {
     setupDb({
       conflicts: [],

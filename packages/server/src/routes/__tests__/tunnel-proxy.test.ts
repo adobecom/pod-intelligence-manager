@@ -27,6 +27,7 @@ import {
   unregisterTunnelConnection,
   resolvePendingRequest,
 } from "../../ws/tunnel-connections.js";
+import { registerJsonBodyParser } from "../../middleware/validation.js";
 import tunnelProxyRoutes from "../tunnel-proxy.js";
 
 function createMockWs() {
@@ -162,6 +163,51 @@ describe("tunnel-proxy routes", () => {
     const res = await resPromise;
     expect(res.statusCode).toBe(201);
     expect(res.json()).toEqual({ ok: true });
+  });
+
+  it("keeps the raw proxy parser scoped to tunnel routes", async () => {
+    const scopedApp = Fastify();
+    registerJsonBodyParser(scopedApp);
+    scopedApp.post("/echo", async (req) => ({ body: req.body }));
+    scopedApp.register(tunnelProxyRoutes);
+    await scopedApp.ready();
+
+    try {
+      const echo = await scopedApp.inject({
+        method: "POST",
+        url: "/echo",
+        headers: { "content-type": "application/json" },
+        payload: JSON.stringify({ ok: true }),
+      });
+      expect(echo.statusCode).toBe(200);
+      expect(echo.json()).toEqual({ body: { ok: true } });
+
+      const ws = createMockWs();
+      registerTunnelConnection("test-tunnel-1", "pod-1", 3000, ws);
+      const payload = JSON.stringify({ key: "value" });
+      const proxied = scopedApp.inject({
+        method: "POST",
+        url: `/tunnel/test-tunnel-1/${FIXTURE_TOKEN}/api/data`,
+        headers: { "content-type": "application/json" },
+        payload,
+      });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const sent = JSON.parse((ws.send as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+      expect(Buffer.from(sent.body, "base64").toString()).toBe(payload);
+      resolvePendingRequest("test-tunnel-1", {
+        type: "tunnel_response",
+        requestId: sent.requestId,
+        statusCode: 204,
+        headers: {},
+        body: null,
+      });
+      expect((await proxied).statusCode).toBe(204);
+    } finally {
+      unregisterTunnelConnection("test-tunnel-1");
+      await scopedApp.close();
+    }
   });
 
   it("returns 504 on timeout", async () => {

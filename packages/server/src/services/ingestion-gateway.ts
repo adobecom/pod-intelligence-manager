@@ -143,6 +143,48 @@ export function clampConfidence(score: number, source: IngestionSource): number 
   return source === "ad_hoc" ? Math.min(clamped, AD_HOC_CONFIDENCE_CEILING) : clamped;
 }
 
+function compactAlnum(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function tokenList(s: string): string[] {
+  return s.toLowerCase().match(/[a-z0-9][a-z0-9_-]*/g) ?? [];
+}
+
+function isRepeatedCharacterGarbage(s: string): boolean {
+  const compact = compactAlnum(s);
+  if (compact.length < 10) return false;
+  if (/(.)\1{9,}/.test(compact)) return true;
+  return new Set(compact).size <= 2 && compact.length >= 20;
+}
+
+function hasVeryLowUniqueTokenRatio(s: string): boolean {
+  const tokens = tokenList(s);
+  if (tokens.length < 8) return false;
+  const unique = new Set(tokens);
+  return unique.size / tokens.length < 0.25;
+}
+
+function isGarbageDomain(domain: string): boolean {
+  const trimmed = domain.trim().toLowerCase();
+  const alnum = compactAlnum(trimmed);
+  if (!alnum) return true;
+  if (alnum.length === 1) return true;
+  return alnum.length >= 4 && new Set(alnum).size === 1;
+}
+
+function isLowEntropyAdHocLearning(summary: string, details: string, domains: string[]): boolean {
+  if (isRepeatedCharacterGarbage(summary) || isRepeatedCharacterGarbage(details)) return true;
+  if (
+    hasVeryLowUniqueTokenRatio(summary) ||
+    hasVeryLowUniqueTokenRatio(details) ||
+    hasVeryLowUniqueTokenRatio(`${summary} ${details}`)
+  ) {
+    return true;
+  }
+  return domains.some(isGarbageDomain);
+}
+
 // ---------------------------------------------------------------------------
 // Preparation stage — pure, no I/O.
 // ---------------------------------------------------------------------------
@@ -203,6 +245,10 @@ export function prepareLearnings(
     const domains = normalizeDomains(learning.domains, known);
     if (domains.length === 0) {
       // A mis-tagged node is worse than a dropped one (poisons cross-domain queries).
+      droppedCount++;
+      continue;
+    }
+    if (source === "ad_hoc" && isLowEntropyAdHocLearning(summary, details, domains)) {
       droppedCount++;
       continue;
     }

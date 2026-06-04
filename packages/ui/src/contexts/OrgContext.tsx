@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { setOrgSlugGetter } from "../services/api";
+import { setOrgCountGetter, setOrgSlugGetter } from "../services/api";
 import { useAuth, type MeOrgSummary } from "./AuthContext";
 
 const ORG_STORAGE_KEY = "pim.currentOrgSlug";
@@ -64,10 +64,16 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
   const slugRef = useRef<string | null>(currentSlug);
   slugRef.current = currentSlug;
+  const orgCountRef = useRef(orgs.length);
+  orgCountRef.current = orgs.length;
 
   useEffect(() => {
     setOrgSlugGetter(() => slugRef.current);
-    return () => setOrgSlugGetter(null);
+    setOrgCountGetter(() => orgCountRef.current);
+    return () => {
+      setOrgSlugGetter(null);
+      setOrgCountGetter(null);
+    };
   }, []);
 
   const setCurrentOrg = useCallback(

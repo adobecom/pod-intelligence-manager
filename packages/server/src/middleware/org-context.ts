@@ -16,6 +16,16 @@ declare module "fastify" {
 
 const ORG_HEADER = "x-pim-org";
 
+function requiresExplicitOrg(url: string): boolean {
+  const path = url.split("?")[0] ?? url;
+  return (
+    path === "/api/agent-sessions" ||
+    path.startsWith("/api/agent-sessions/") ||
+    path.startsWith("/api/agent-runs/") ||
+    path.startsWith("/api/memory-candidates/")
+  );
+}
+
 /**
  * Resolves the request's org from either the `X-Pim-Org` header (slug) or,
  * when the header is absent, the authenticated user's first membership.
@@ -51,6 +61,11 @@ export async function resolveRequestOrg(req: FastifyRequest, reply: FastifyReply
   const orgs = listOrgsForUser(req.userRecord.user_id);
   if (orgs.length === 0) {
     return reply.code(409).send({ error: "User has no orgs; create one first" });
+  }
+  if (orgs.length > 1 && requiresExplicitOrg(req.url)) {
+    return reply.code(400).send({
+      error: "X-Pim-Org is required for agent-session and memory routes when the user belongs to multiple orgs",
+    });
   }
   const primary = orgs[0];
   req.org = {

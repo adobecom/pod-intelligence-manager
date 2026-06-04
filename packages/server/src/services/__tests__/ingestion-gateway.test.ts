@@ -333,7 +333,9 @@ describe("prepareLearnings", () => {
   });
 
   it("accepts summary at exact maximum boundary (500 chars)", () => {
-    const l = makeLearning({ summary: "a".repeat(500) });
+    const summary = Array.from({ length: 90 }, (_, i) => `token${i}`).join(" ").slice(0, 500);
+    expect(summary).toHaveLength(500);
+    const l = makeLearning({ summary });
     const { prepared, droppedCount } = prepareLearnings(ORG, [l], "ad_hoc");
     expect(droppedCount).toBe(0);
     expect(prepared).toHaveLength(1);
@@ -343,6 +345,44 @@ describe("prepareLearnings", () => {
     const l = makeLearning({ confidence_score: 1.5 });
     const { prepared } = prepareLearnings(ORG, [l], "pod_archival");
     expect(prepared[0].confidence_score).toBe(1);
+  });
+
+  it("drops repeated-character ad_hoc garbage", () => {
+    const l = makeLearning({
+      summary: "aaaaaaaaaa",
+      details: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    });
+    const { prepared, droppedCount } = prepareLearnings(ORG, [l], "ad_hoc");
+    expect(droppedCount).toBe(1);
+    expect(prepared).toHaveLength(0);
+  });
+
+  it("drops ad_hoc details with extremely low token diversity", () => {
+    const l = makeLearning({
+      summary: "Repeated token pattern should be rejected",
+      details: "token token token token token token token token token token token token",
+    });
+    const { prepared, droppedCount } = prepareLearnings(ORG, [l], "ad_hoc");
+    expect(droppedCount).toBe(1);
+    expect(prepared).toHaveLength(0);
+  });
+
+  it("drops single-character ad_hoc domains", () => {
+    const l = makeLearning({ domains: ["x"] });
+    const { prepared, droppedCount } = prepareLearnings(ORG, [l], "ad_hoc");
+    expect(droppedCount).toBe(1);
+    expect(prepared).toHaveLength(0);
+  });
+
+  it("allows short technical identifiers when paired with meaningful prose", () => {
+    const l = makeLearning({
+      summary: "AI gateway should preserve trace headers",
+      details: "AI gateway requests should preserve trace headers across service boundaries so debugging remains consistent.",
+      domains: ["ai"],
+    });
+    const { prepared, droppedCount } = prepareLearnings(ORG, [l], "ad_hoc");
+    expect(droppedCount).toBe(0);
+    expect(prepared[0].domains).toEqual(["ai"]);
   });
 });
 

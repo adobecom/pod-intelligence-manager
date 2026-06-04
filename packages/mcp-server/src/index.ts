@@ -56,7 +56,8 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 ### Pod Lifecycle
 - \`list_pods\` — all active pods with conflict pressure and open conflict counts.
 - \`create_pod\` — start a new sprint. Optionally pass \`milestone_name\`.
-- \`archive_pod\` — end the sprint and extract learnings into the org knowledge graph.
+- \`archive_pod\` — start sprint archival and background knowledge extraction.
+- \`archive_pod_status\` — check archive completion/failure and fetch the archived pod record.
 - \`render_pod_dashboard\` — returns a React artifact for interactive visualization of pod state.
 
 ### Session Context (MANDATORY — use before doing work)

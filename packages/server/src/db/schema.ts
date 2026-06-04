@@ -161,7 +161,8 @@ export function createTables() {
       name TEXT NOT NULL,
       completed_date TEXT NOT NULL,
       duration_days INTEGER NOT NULL,
-      final_pressure REAL NOT NULL
+      final_pressure REAL NOT NULL,
+      extraction_completed INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS archived_projects (
@@ -806,6 +807,7 @@ export function createTables() {
   try { db.exec("ALTER TABLE living_docs ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE archived_pods ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE archived_pods ADD COLUMN extraction_completed INTEGER NOT NULL DEFAULT 1"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE archived_projects ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE org_pod_summaries ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE cross_pod_overlaps ADD COLUMN org_id TEXT REFERENCES orgs(org_id)"); } catch { /* already exists */ }

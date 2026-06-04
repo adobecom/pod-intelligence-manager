@@ -103,7 +103,8 @@ Fastify server running on `localhost:4000`. Uses SQLite via Node's built-in [`no
 | GET | `/api/org/pods` | List active pods (org view) |
 | GET | `/api/org/overlaps` | List cross-pod overlaps |
 | GET | `/api/org/archived` | List archived pods |
-| POST | `/api/pods/:podId/archive` | Archive a pod |
+| POST | `/api/pods/:podId/archive` | Start pod archive; returns `202` with an archive job |
+| GET/POST | `/api/pods/:podId/archive/status` | Poll archive completion/failure; completed payload includes the archived pod |
 | WS | `/ws?podId=X` | WebSocket for real-time events |
 
 **WebSocket events:** `context_update_added`, `conflict_created`, `conflict_resolved`, `conflict_escalated`, `pressure_changed`, `living_doc_updated`, `tunnel_status_changed`, `lint_completed`.
@@ -334,8 +335,10 @@ pim leave --skip-claude-md --skip-sync --skip-config   # only adjust .pim.json, 
 pim pod create --name "My Sprint"        # Create a new pod
 pim pod list                              # List active pods
 pim pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
-pim pod archive pod-my-sprint-a1b2c3      # Archive a completed pod
+pim pod archive pod-my-sprint-a1b2c3      # Archive a completed pod; polls extraction status
 ```
+
+`query_knowledge.include_details` defaults to `false`, matching the REST API. Set it to `true` only when the caller needs full node details; detailed results increase `token_estimate` and may reduce the number of nodes that fit in `max_tokens`.
 
 **Context updates:**
 
