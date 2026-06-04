@@ -17,9 +17,9 @@ The stack is namespaced per developer via the `owner` CDK context value (default
 | Resource | Pattern | Example |
 |---|---|---|
 | Stack name | `PimEc2Stack-${owner}` | `PimEc2Stack-rkhan` |
-| UI bucket | `pim-${owner}-ui-${account}` | `pim-rkhan-ui-947495650207` |
-| Knowledge graph bucket | `pim-${owner}-kg-${account}` | `pim-rkhan-kg-947495650207` |
-| Backups bucket | `pim-${owner}-backups-${account}` | `pim-rkhan-backups-947495650207` |
+| UI bucket | `pim-${owner}-ui-${account}` | `pim-rkhan-ui-<account>` |
+| Knowledge graph bucket | `pim-${owner}-kg-${account}` | `pim-rkhan-kg-<account>` |
+| Backups bucket | `pim-${owner}-backups-${account}` | `pim-rkhan-backups-<account>` |
 | ECR repo | `pim-${owner}-server` | `pim-rkhan-server` |
 | CloudWatch log group | `/aws/ec2/pim-${owner}-server` | `/aws/ec2/pim-rkhan-server` |
 
@@ -131,6 +131,10 @@ The parameter's short name (after `/pim/`) becomes the env var name inside the c
 aws ssm send-command --instance-ids $INSTANCE --document-name AWS-RunShellScript \
   --parameters 'commands=["systemctl restart pim-server"]'
 ```
+
+## Manual redeploy (coding agents)
+
+For step-by-step instructions tuned for Cursor/Claude agents (Docker path on macOS, `docker pull` before restart, zsh `${ECR}:latest` pitfall, verification, one-shot script), see **[AGENT_MANUAL_DEPLOY.md](./AGENT_MANUAL_DEPLOY.md)**.
 
 ## Routine deploys (via GitHub Actions)
 
