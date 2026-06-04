@@ -33,6 +33,8 @@ const STOP_WORDS = new Set([
   "memory", "kind", "pod", "agent", "source", "workstream", "knowledge",
   "node", "context",
 ]);
+const BARE_HTTP_VERB_IDENTIFIERS = new Set(["get", "post", "put", "patch", "delete"]);
+const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set(["api", "current"]);
 
 export function extractKeywords(text: string): Set<string> {
   return new Set(
@@ -52,15 +54,26 @@ export function extractIdentifiers(text: string): Set<string> {
     /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:_[A-Za-z0-9_$]+)+\b/g,
+    /\b[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*\b/g,
+    /\b[A-Z]{2,}[A-Z0-9_]*\b/g,
+    /\b[A-Za-z0-9_-]+\.(?:ts|tsx|js|jsx|json|yaml|yml|openapi)\b/g,
     /\b[A-Z][A-Za-z0-9]*(?:API|Api|Service|Controller|Contract|Endpoint)\b/g,
     /\b[A-Z][A-Za-z0-9]+(?:[A-Z][A-Za-z0-9]+)+\b/g,
   ];
   for (const pattern of patterns) {
     for (const match of text.match(pattern) ?? []) {
       const cleaned = match.trim().toLowerCase();
+      if (STOP_WORDS.has(cleaned)) continue;
+      if (BARE_HTTP_VERB_IDENTIFIERS.has(cleaned)) continue;
       if (cleaned.length > 2) identifiers.add(cleaned);
     }
   }
+  return identifiers;
+}
+
+export function extractRetrievalIdentifiers(text: string): Set<string> {
+  const identifiers = extractIdentifiers(text);
+  for (const lowSignal of LOW_SIGNAL_RETRIEVAL_IDENTIFIERS) identifiers.delete(lowSignal);
   return identifiers;
 }
 
@@ -216,14 +229,6 @@ function inferEdgeType(
   // Resolved conflict links back
   if (newer.type === "resolved_conflict" || older.type === "resolved_conflict") {
     return "resolved_by";
-  }
-
-  // Newer decision supersedes older decision only when both share the same project scope.
-  // A project-specific decision must not supersede an org-wide decision (and vice versa)
-  // — that would silently drop global knowledge from project-scoped queries.
-  if (newer.type === "decision" && older.type === "decision") {
-    if (newer.source_project_id === older.source_project_id) return "supersedes";
-    return "relates_to";
   }
 
   // Pattern building on another pattern

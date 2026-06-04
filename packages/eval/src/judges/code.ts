@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Task, TestCase } from "../tasks/types.js";
 import type { JudgeResult } from "./types.js";
 
 const RESULT_PREFIX = "PIM_EVAL_RESULT::";
 const DEFAULT_TIMEOUT_MS = 30_000;
+const require = createRequire(import.meta.url);
+const TSX_LOADER_IMPORT_SPECIFIER = pathToFileURL(require.resolve("tsx")).href;
 
 interface RunnerResult {
   results: Array<{ name: string; passed: boolean; error?: string }>;
@@ -37,7 +41,7 @@ export async function judgeCode(task: Task, output: string): Promise<JudgeResult
     await writeFile(candidatePath, buildCandidate(code, task.testHarness));
     await writeFile(runnerPath, buildRunner(task.tests));
 
-    const exec = await runProcess("npx", ["tsx", runnerPath], {
+    const exec = await runProcess(process.execPath, ["--import", TSX_LOADER_IMPORT_SPECIFIER, runnerPath], {
       cwd: dir,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });

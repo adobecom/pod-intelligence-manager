@@ -27,8 +27,8 @@ import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
   detectCommunities,
-  extractIdentifiers,
   extractKeywords,
+  extractRetrievalIdentifiers,
   identifyHubs,
   keywordsFromTexts,
   scoreRelevance,
@@ -120,7 +120,7 @@ function _indexNode(node: KnowledgeNode, idx: NodeIndexes): void {
     if (!idx.keywordIndex.has(kw)) idx.keywordIndex.set(kw, new Set());
     idx.keywordIndex.get(kw)!.add(node.id);
   }
-  const identifiers = extractIdentifiers(searchText);
+  const identifiers = extractRetrievalIdentifiers(searchText);
   idx.nodeIdentifiers.set(node.id, identifiers);
   for (const ident of identifiers) {
     if (!idx.identifierIndex.has(ident)) idx.identifierIndex.set(ident, new Set());
@@ -221,6 +221,29 @@ export function _resetForTests(): void {
   orgStates.clear();
 }
 
+export interface LoadGraphForOfflineEvaluationOptions {
+  allowUnsafeOrgId?: boolean;
+  allowReplacingLoadedOrg?: boolean;
+}
+
+function isOfflineEvaluationOrgId(orgId: string): boolean {
+  return /(?:^|[-_])(eval|test|golden|offline)(?:$|[-_])/.test(orgId);
+}
+
+/** Test/eval helper: load a frozen graph into memory without touching persistent storage. */
+export function loadGraphForOfflineEvaluation(
+  graph: KnowledgeGraph,
+  options: LoadGraphForOfflineEvaluationOptions = {},
+): void {
+  if (!options.allowUnsafeOrgId && !isOfflineEvaluationOrgId(graph.org_id)) {
+    throw new Error(`Refusing to load offline evaluation graph for non-eval org "${graph.org_id}"`);
+  }
+  if (orgStates.has(graph.org_id) && !options.allowReplacingLoadedOrg && !isOfflineEvaluationOrgId(graph.org_id)) {
+    throw new Error(`Refusing to replace loaded graph state for org "${graph.org_id}" during offline evaluation`);
+  }
+  orgStates.set(graph.org_id, buildState(structuredClone(graph)));
+}
+
 // --- Token Estimation ---
 
 // ~4 chars/token is the Anthropic rule-of-thumb. We measure actual node content
@@ -236,7 +259,20 @@ const DEFAULT_QUERY_MAX_TOKENS = 2000;
 const KEYWORD_OVERLAP_GATE_RATIO = 0.5;
 /** Minimum absolute keyword hits (when the query has many terms). */
 const KEYWORD_OVERLAP_GATE_MIN_HITS = 2;
-
+const KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS = 4;
+const HTTP_METHOD_KEYWORDS = new Set(["get", "post", "put", "patch", "delete"]);
+const HTTP_CONTRACT_CONTEXT_FRAGMENTS = [
+  "api",
+  "contract",
+  "endpoint",
+  "http",
+  "openapi",
+  "payload",
+  "request",
+  "response",
+  "rest",
+  "route",
+];
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
   return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN));
@@ -441,7 +477,7 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"], queryTe
         .map((w) => w.toLowerCase())
     : [];
   const fromQueryText = queryText ? keywordsFromTexts([queryText]) : [];
-  const identifiers = queryText ? [...extractIdentifiers(queryText)] : [];
+  const identifiers = queryText ? [...extractRetrievalIdentifiers(queryText)] : [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const w of [...fromExplicit, ...fromTextSearch, ...fromQueryText, ...identifiers]) {
@@ -458,7 +494,7 @@ function mergeQueryIdentifiers(filters: KnowledgeQueryOptions["filters"], queryT
     filters.text_search,
     ...(filters.keywords ?? []),
   ].filter(Boolean).join(" ");
-  return [...extractIdentifiers(text)];
+  return [...extractRetrievalIdentifiers(text)];
 }
 
 function hasExactShortKeywordMatch(nodeKeywords: Set<string> | undefined, keywords: string[]): boolean {
@@ -480,6 +516,30 @@ function countIdentifierMatches(nodeIdentifiers: Set<string> | undefined, identi
   let hits = 0;
   for (const ident of identifiers) {
     if (nodeIdentifiers.has(ident.toLowerCase())) hits++;
+  }
+  return hits;
+}
+
+function hasHttpContractContext(keywords: string[], identifiers: string[]): boolean {
+  if (!keywords.some((kw) => HTTP_METHOD_KEYWORDS.has(kw.toLowerCase()))) return false;
+  return [...keywords, ...identifiers].some((value) => {
+    const signal = value.toLowerCase();
+    return (
+      /^(?:get|post|put|patch|delete)\s+\//.test(signal) ||
+      HTTP_CONTRACT_CONTEXT_FRAGMENTS.some((fragment) => signal.includes(fragment))
+    );
+  });
+}
+
+function countHttpContractMethodMatches(
+  nodeKeywords: Set<string> | undefined,
+  keywords: string[],
+  identifiers: string[],
+): number {
+  if (!nodeKeywords || !hasHttpContractContext(keywords, identifiers)) return 0;
+  let hits = 0;
+  for (const method of HTTP_METHOD_KEYWORDS) {
+    if (keywords.some((kw) => kw.toLowerCase() === method) && nodeKeywords.has(method)) hits++;
   }
   return hits;
 }
@@ -508,13 +568,29 @@ function passesSemanticRelevanceGate(
   querySimilarity: number | undefined,
   minQuerySimilarity: number,
 ): boolean {
-  if (identifierHits > 0) return true;
+  const kwHits = countKeywordMatches(nodeKeywords, keywords);
+  if (identifierHits >= 2 && (kwHits > 0 || (querySimilarity !== undefined && querySimilarity >= minQuerySimilarity))) {
+    return true;
+  }
+  if (
+    identifierHits === 1 &&
+    (kwHits >= KEYWORD_OVERLAP_GATE_MIN_HITS ||
+      (querySimilarity !== undefined && querySimilarity >= Math.max(0.45, minQuerySimilarity - 0.25)))
+  ) {
+    return true;
+  }
   if (hasExactShortKeywordMatch(nodeKeywords, keywords)) return true;
   if (querySimilarity !== undefined && querySimilarity >= minQuerySimilarity) return true;
 
-  const kwHits = countKeywordMatches(nodeKeywords, keywords);
   if (kwHits === 0 || keywords.length === 0) return false;
   if (keywords.length <= 2) return kwHits === keywords.length;
+  if (
+    keywords.length > 8 &&
+    (kwHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS + 1 ||
+      (kwHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS && (querySimilarity ?? 0) >= 0.25))
+  ) {
+    return true;
+  }
   return kwHits >= KEYWORD_OVERLAP_GATE_MIN_HITS && kwHits / keywords.length >= KEYWORD_OVERLAP_GATE_RATIO;
 }
 
@@ -527,6 +603,19 @@ type ScoredNode = {
   score: number;
   graphExpanded?: boolean;
 };
+
+function identifierMatchScore(identifierHits: number): number {
+  if (identifierHits <= 0) return 0;
+  return Math.min(identifierHits, 2) * 0.18 + Math.max(0, identifierHits - 2) * 0.05;
+}
+
+function directEvidenceBonus(querySimilarity: number | undefined, keywordHits: number, identifierHits: number): number {
+  let bonus = 0;
+  if ((querySimilarity ?? 0) >= 0.75) bonus += 0.08;
+  if (identifierHits > 0 && keywordHits >= 4 && (querySimilarity ?? 0) >= 0.4) bonus += 0.2;
+  if (identifierHits === 0 && keywordHits >= 4 && (querySimilarity ?? 0) >= 0.25) bonus += 0.12;
+  return bonus;
+}
 
 function scoreCandidates(
   candidates: KnowledgeNode[],
@@ -546,18 +635,24 @@ function scoreCandidates(
         ? cosineSimilarity(queryEmbedding, node.embedding)
         : undefined;
     const identifierHits = countIdentifierMatches(precomputedIdentifiers, identifiers);
+    const keywordHits = countKeywordMatches(precomputedKeywords, keywords);
+    const scoringIdentifierHits = identifierHits + countHttpContractMethodMatches(precomputedKeywords, keywords, identifiers);
     return {
       node,
       querySimilarity,
       exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, keywords),
-      keywordHits: countKeywordMatches(precomputedKeywords, keywords),
+      keywordHits,
       identifierHits,
       score: scoreRelevance(
         node,
         { scopes, keywords, querySimilarity, precomputedKeywords },
         hubIds,
         graphTuning,
-      ) + identifierHits * 0.18 + sourceAuthorityScore(node) + retrievalTierScore(node),
+      ) +
+        identifierMatchScore(scoringIdentifierHits) +
+        directEvidenceBonus(querySimilarity, keywordHits, scoringIdentifierHits) +
+        sourceAuthorityScore(node) +
+        retrievalTierScore(node),
     };
   });
 }
@@ -588,7 +683,10 @@ function applySemanticGate(
         if (identifierHits > 0) return true;
         if (keywordHits === 0) return false;
         if (keywords.length <= 3) return keywordHits >= 1;
-        return keywordHits >= KEYWORD_OVERLAP_GATE_MIN_HITS;
+        return keywordHits >= Math.max(
+          KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS + 1,
+          Math.ceil(keywords.length * KEYWORD_OVERLAP_GATE_RATIO),
+        );
       })
       .sort((a, b) => b.keywordHits - a.keywordHits || b.score - a.score);
   }
@@ -598,7 +696,6 @@ function applySemanticGate(
 
 function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
   return !!(
-    filters.domains?.length ||
     filters.types?.length ||
     filters.source_pod_ids?.length ||
     filters.source_project_ids?.length ||
@@ -660,6 +757,11 @@ function intersectIds(a: Set<string> | null, b: Set<string>): Set<string> {
   return new Set([...b].filter((id) => a.has(id)));
 }
 
+function allowsCurrentModePositiveExpansion(edge: KnowledgeEdge, mode: NonNullable<KnowledgeQueryOptions["query_mode"]>): boolean {
+  if (mode !== "current") return true;
+  return edge.type !== "contradicts" && edge.type !== "supersedes";
+}
+
 function expandWithGraphNeighbors(
   scored: ScoredNode[],
   state: OrgGraphState,
@@ -690,6 +792,7 @@ function expandWithGraphNeighbors(
   let added = 0;
   for (const { edge, seedSide } of candidateEdges) {
     if (added >= 20) break;
+    if (!allowsCurrentModePositiveExpansion(edge, mode)) continue;
     const neighborId = edge.source === seedSide ? edge.target : edge.source;
     if (byId.has(neighborId)) continue;
     const neighbor = state.nodeById.get(neighborId);
@@ -697,7 +800,12 @@ function expandWithGraphNeighbors(
     if (neighbor.confidence_score < (filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN)) continue;
     if (!visibleForQueryMode(neighbor, state, mode, asOf, filters)) continue;
     const seed = seedById.get(seedSide)!;
-    const graphScore = seed.score * 0.72 + Math.min(1, edge.weight) * 0.18 + sourceAuthorityScore(neighbor);
+    const edgeWeight = edge.weight ?? 0;
+    const graphScore =
+      seed.score * 0.35 +
+      Math.min(1, edgeWeight) * 0.08 +
+      sourceAuthorityScore(neighbor) +
+      retrievalTierScore(neighbor);
     const expanded: ScoredNode = {
       node: neighbor,
       exactShortKeywordMatch: false,
@@ -784,7 +892,7 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   // or punctuation-heavy queries (e.g. getPrecedents with a 100-char conflict summary).
   if (filters.text_search) {
     const queryKws = extractKeywords(filters.text_search);
-    const queryIdentifiers = extractIdentifiers(filters.text_search);
+    const queryIdentifiers = extractRetrievalIdentifiers(filters.text_search);
     if (queryKws.size > 0) {
       const textMatches = new Set<string>();
       for (const qk of queryKws) {
