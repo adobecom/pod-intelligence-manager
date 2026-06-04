@@ -15,6 +15,7 @@ dist/
 cdk.out/
 cdk.context.json
 packages/infra/outputs.json
+packages/eval/reports/
 
 
 # PIM local state

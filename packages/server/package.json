@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "retrieval-eval": "tsx scripts/kg-retrieval-eval.ts",
     "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts"
   },
   "dependencies": {

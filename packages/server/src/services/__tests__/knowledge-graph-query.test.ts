@@ -21,10 +21,12 @@ import {
   KnowledgeQueryValidationError,
   pruneStaleNodes,
   refreshAnalysisIfStale,
+  loadGraphForOfflineEvaluation,
   _resetForTests,
 } from "../knowledge-graph.js";
 import { saveGraph } from "../graph-storage.js";
-import type { EnhancedPodLearning, KnowledgeNode } from "@pim/shared";
+import { extractIdentifiers, extractRetrievalIdentifiers } from "../graph-analysis.js";
+import type { EnhancedPodLearning, KnowledgeGraph, KnowledgeNode } from "@pim/shared";
 
 // Push a node directly into the graph (bypasses embedding/dedup so tests stay fast).
 // The index is NOT updated here — caller must use addLearningsToGraph for index-aware
@@ -353,6 +355,54 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     const q = queryKnowledge(orgId, {
       filters: {},
+      max_tokens: 20_000,
+      query_text: "mobile checkout animation storyboard",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
+  it("does not let a bare HTTP verb identifier rescue unrelated semantic results", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Token refresh API contract",
+        details: "Use POST /auth/token when refreshing session credentials.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 20_000,
+      query_text: "POST deployment update dashboard animation storyboard",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
+  it("does not use a domain-only fallback when semantic query_text has no useful match", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Backend webhook payload retry policy",
+        details: "Retry webhook delivery with exponential backoff.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
       max_tokens: 20_000,
       query_text: "mobile checkout animation storyboard",
       query_embedding: [0, 1, 0],
@@ -792,6 +842,30 @@ describe("text_search index behavior", () => {
     expect(q.nodes).toHaveLength(0);
     expect(q.total_matching).toBe(0);
   });
+
+  it("extracts technical identifiers without treating bare HTTP verbs as identifiers", () => {
+    const text = "prepareEslEventPutPayload strips detailPagePath from PUT /events/{eventId} for ESP API CURRENT calls in dataFilters.ts and readOnly.openapi.validation failures.";
+    const ids = [...extractIdentifiers(text)];
+
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "prepareesleventputpayload",
+        "detailpagepath",
+        "put /events/{eventid}",
+        "esp",
+        "api",
+        "current",
+        "datafilters.ts",
+        "readonly.openapi.validation",
+      ]),
+    );
+    expect(ids).not.toContain("put");
+    const retrievalIds = [...extractRetrievalIdentifiers(text)];
+    expect(retrievalIds).toEqual(expect.arrayContaining(["prepareesleventputpayload", "put /events/{eventid}"]));
+    expect(retrievalIds).not.toContain("api");
+    expect(retrievalIds).not.toContain("current");
+    expect(retrievalIds).not.toContain("put");
+  });
 });
 
 describe("retrieval text, temporal modes, and graph expansion", () => {
@@ -878,6 +952,48 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
 	    ]);
 	  });
 
+  it("does not auto-supersede unrelated same-project decisions", async () => {
+    const orgId = nextOrgId("kg-decision-supersedes");
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [
+        {
+          type: "decision",
+          summary: "Use config cache TTL for feature flags",
+          details: "Cache feature flag config with a short TTL.",
+          domains: ["backend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+        {
+          type: "decision",
+          summary: "Use config validation schema for feature flags",
+          details: "Validate feature flag config before rollout.",
+          domains: ["backend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+      ],
+      "pod-decisions",
+      "Decision Pod",
+      { project_id: "proj-alpha", project_name: "Alpha" },
+    );
+
+    const graph = getGraph(orgId);
+    expect(graph.edges.some((edge) => edge.type === "supersedes")).toBe(false);
+    expect(graph.nodes.some((node) => node.superseded_by)).toBe(false);
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"], include_project_id: "proj-alpha" },
+      max_tokens: 2000,
+    });
+    expect(current.nodes.map((node) => node.summary).sort()).toEqual([
+      "Use config cache TTL for feature flags",
+      "Use config validation schema for feature flags",
+    ]);
+  });
+
   it("rejects as_of mode without a valid as_of timestamp", async () => {
     const orgId = await seedGraph([
       {
@@ -899,7 +1015,7 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
     ).toThrow(KnowledgeQueryValidationError);
   });
 
-	  it("adds capped one-hop graph neighbors from strong KG hits", async () => {
+  it("adds capped one-hop graph neighbors from strong KG hits", async () => {
     const orgId = await seedGraph([
       {
         type: "pattern",
@@ -935,6 +1051,52 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
 
     expect(q.nodes.map((n) => n.summary)).toContain("OAuth token refresh retry strategy");
     expect(q.nodes.map((n) => n.summary)).toContain("Auth fallback conflict resolved by retry limit");
+  });
+
+  it("does not expand contradicting nodes as current supporting context but preserves them in why_changed mode", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "PrimaryAuthTokenFlow retry strategy",
+        details: "Retry auth token refresh once before surfacing an auth failure.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "anti_pattern",
+        summary: "Legacy logout redirect loop",
+        details: "Redirect loops on logout should not support token refresh retry guidance.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary.includes("PrimaryAuthTokenFlow"))!;
+    const contradiction = graph.nodes.find((n) => n.summary.includes("Legacy logout"))!;
+    seed.embedding = [1, 0, 0];
+    contradiction.embedding = [0, 1, 0];
+    graph.edges.push({ source: seed.id, target: contradiction.id, type: "contradicts", weight: 1 });
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "PrimaryAuthTokenFlow",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+    expect(current.nodes.map((n) => n.id)).toEqual([seed.id]);
+
+    const whyChanged = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "PrimaryAuthTokenFlow",
+      query_embedding: [1, 0, 0],
+      query_mode: "why_changed",
+      max_tokens: 2000,
+    });
+    expect(whyChanged.nodes.map((n) => n.id)).toEqual(expect.arrayContaining([seed.id, contradiction.id]));
+    expect(whyChanged.edges.map((edge) => edge.type)).toContain("contradicts");
   });
 
   it("expands graph neighbors by strongest edge before applying the expansion cap", async () => {
@@ -985,6 +1147,72 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
     });
 
     expect(q.nodes.map((n) => n.summary)).toContain("Strong graph neighbor");
+  });
+
+  it("treats missing edge weights as zero during graph expansion ranking", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "SeedAPI primary recall node",
+        details: "This is the direct semantic hit.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Missing weight graph neighbor",
+        details: "Connected to the seed by a legacy edge without a weight.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Weighted graph neighbor",
+        details: "Connected to the seed by a weighted edge.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary === "SeedAPI primary recall node")!;
+    const missing = graph.nodes.find((n) => n.summary === "Missing weight graph neighbor")!;
+    const weighted = graph.nodes.find((n) => n.summary === "Weighted graph neighbor")!;
+    for (const node of graph.nodes) node.embedding = node.id === seed.id ? [1, 0, 0] : [0, 1, 0];
+    graph.edges = [
+      { source: seed.id, target: missing.id, type: "relates_to" } as KnowledgeGraph["edges"][number],
+      { source: seed.id, target: weighted.id, type: "relates_to", weight: 1 },
+    ];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      limit: 2,
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual([
+      "SeedAPI primary recall node",
+      "Weighted graph neighbor",
+    ]);
+  });
+
+  it("refuses unsafe offline evaluation org ids without an explicit override", () => {
+    const graph: KnowledgeGraph = {
+      version: 1,
+      org_id: "production-org",
+      updated_at: new Date().toISOString(),
+      nodes: [],
+      edges: [],
+      communities: [],
+    };
+
+    expect(() => loadGraphForOfflineEvaluation(graph)).toThrow(/non-eval org/);
+    expect(() => loadGraphForOfflineEvaluation({ ...graph, org_id: "kg-recall-golden" })).not.toThrow();
   });
 
   it("tracks retrieval counts in memory and defers persistence to the refresh interval", async () => {

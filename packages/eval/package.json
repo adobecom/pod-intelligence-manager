@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "freeze": "tsx src/cli/freeze.ts",
+    "freeze-kg-retrieval-oracle": "tsx scripts/freeze-kg-retrieval-oracle.ts",
     "run-eval": "tsx src/cli/run.ts"
   },
   "dependencies": {
