@@ -70,7 +70,7 @@ function setupDb(conflicting: any | undefined) {
     }
     // Get previous pressure
     if (sql.includes("SELECT") && sql.includes("conflict_pressure")) {
-      return { get: vi.fn().mockReturnValue({ conflict_pressure: 0.1 }) };
+      return { get: vi.fn().mockReturnValue({ conflict_pressure: 0.1, org_id: "org-1" }) };
     }
     // Insert conflict
     if (sql.includes("INSERT")) {
@@ -172,7 +172,12 @@ describe("createConflict", () => {
     expect(notifyConflictCreated).toHaveBeenCalledWith(
       expect.objectContaining({ pod_id: "pod-1" }),
     );
-    expect(notifyPressureThreshold).toHaveBeenCalledWith("pod-1", 0.3, 0.1);
+    expect(notifyPressureThreshold).toHaveBeenCalledWith(
+      "pod-1",
+      0.3,
+      0.1,
+      expect.objectContaining({ cautiousMax: expect.any(Number), degradedMax: expect.any(Number) }),
+    );
   });
 
   it("calls recalculatePressure inside the transaction", async () => {
@@ -185,6 +190,6 @@ describe("createConflict", () => {
     });
 
     await createConflict(makeUpdate());
-    expect(recalculatePressure).toHaveBeenCalledWith("pod-1");
+    expect(recalculatePressure).toHaveBeenCalledWith("pod-1", "org-1");
   });
 });

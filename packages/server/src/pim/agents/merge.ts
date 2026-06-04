@@ -13,6 +13,7 @@ export interface MergeResult {
   escalate?: boolean;
   conflictIndicators?: string[];
   degraded?: boolean;
+  held?: boolean;
   error?: string;
 }
 
@@ -56,9 +57,16 @@ function degradedOverlapMerge(update: ContextUpdate, error: string): MergeResult
   };
 }
 
+export interface LlmMergeContext {
+  normalMax: number;
+  podPressure: number;
+  openConflictCount: number;
+}
+
 // LLM-backed merge analysis
 export async function llmMerge(
   update: ContextUpdate,
+  pressureCtx?: LlmMergeContext,
 ): Promise<MergeResult> {
   if (!isLLMAvailable()) {
     return degradedOverlapMerge(update, "LLM merge unavailable; overlapping conflict detection was bypassed");
@@ -83,7 +91,7 @@ export async function llmMerge(
 ${recentUpdates.map(u => `- [${u.timestamp}] ${u.agent_id}: ${u.summary}\n  Details: ${u.details}`).join("\n") || "None"}
 
 ## Pod State
-- Conflict Pressure: ${pod?.conflict_pressure ?? 0}`;
+- Conflict Pressure: ${pod?.conflict_pressure ?? 0}${pressureCtx && pressureCtx.podPressure > pressureCtx.normalMax ? ` (cautious — prefer merge_with_note when near open conflicts; ${pressureCtx.openConflictCount} open)` : ""}`;
 
   try {
     const response = await callLLMJSON<LLMMergeResponse>({

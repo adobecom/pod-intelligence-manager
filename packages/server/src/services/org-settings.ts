@@ -185,5 +185,6 @@ function deepMergeTuning(defaults: OrgTuning, overrides: Partial<OrgTuning>): Or
     graphScoring:    { ...defaults.graphScoring,     ...(overrides.graphScoring    ?? {}) },
     lint:            { ...defaults.lint,             ...(overrides.lint            ?? {}) },
     classifier:      { ...defaults.classifier,       ...(overrides.classifier      ?? {}) },
+    kgPatternScout:  { ...defaults.kgPatternScout,   ...(overrides.kgPatternScout  ?? {}) },
   };
 }

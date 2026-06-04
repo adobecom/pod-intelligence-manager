@@ -20,7 +20,7 @@ Every agent and human contributor working in a **pod** overseen by PIM must foll
 - **CLI:** `pim context` (uses `PIM_POD_ID`, `PIM_AGENT_ID`, `PIM_SCOPE`, `PIM_SERVER_URL`)
 - **MCP:** `get_agent_session_context` tool
 
-**If conflict pressure is critical (≥ 0.8)** or ingestion is halted: stop and surface open conflicts; do not proceed with changes that add contested context until humans resolve blocking items.
+**If conflict pressure is critical (≥ 0.8):** stop substantive work and surface open conflicts. Context intake still succeeds (HTTP 202, `queued: true`); PIM orchestration is deferred until pressure drops. Do not rely on queued updates being merged into the living doc until blocking conflicts are resolved.
 
 **Optional — external context:** `pullSessionContext({ externalQuery })` (SDK) or the `external_query` argument on the MCP `get_agent_session_context` tool uses that task-specific text to sharpen KG learning retrieval and adds a cross-source lookup (Slack, Jira, Confluence, GitHub, Fluffyjaws, local git) to the same bundle. Use this when the work depends on context that is not yet in the living doc — e.g. "pay endpoint failing" or the name of a feature you are picking up mid-stream. See [Context Search](#5-context-search-on-demand) below.
 

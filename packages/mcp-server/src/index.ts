@@ -32,7 +32,7 @@ Call one of these — they are not optional:
 - On a project → call \`submit_project_context_update(project_id, ...)\`
 
 ### Conflict pressure gate
-If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 0.8\`, stop all work and surface the open conflicts to the user. Ingestion is halted at this threshold; \`submit_context_update\` will return 423. Do not proceed until conflicts are resolved.
+If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 0.8\` (critical), stop substantive work and surface open conflicts. Intake is still accepted: \`submit_context_update\` returns **202** with \`queued: true\` (validation runs; PIM orchestration is deferred until pressure drops). Do not treat queued updates as merged into the living doc until conflicts are resolved.
 
 ---
 
@@ -68,7 +68,7 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 
 ### Context Updates (MANDATORY after lock-in)
 - \`submit_context_update(pod_id, agent_id, type, scope, summary, details, status, ...)\`
-  Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`. Rejected (423) if pressure >= 0.8. High-signal types (decision, spec_change) are immediately added to the knowledge graph so concurrent pods see them.
+  Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\`. At critical pressure (>= 0.8), returns **202** with \`queued: true\` (orchestration deferred, not rejected). High-signal types (decision, spec_change) are immediately added to the knowledge graph so concurrent pods see them.
 - \`submit_project_context_update(project_id, ...)\` — same shape, stored in project memory. High-signal types may be added to the knowledge graph.
 
 ### Conflicts

@@ -108,7 +108,7 @@ Types: \`progress\` | \`blocker\` | \`spec_change\` | \`question\` | \`decision\
 ### Conflict Awareness
 
 - Check pod pressure with \`pim context --pod ${params.podId} --brief\`
-- If pressure is >= 0.8, ingestion is halted — resolve conflicts first
+- If pressure is >= 0.8, orchestration is queued (202) — resolve conflicts first
 - When your work overlaps with another area, PIM will detect it automatically
 
 ${PROTOCOL_MARKER_END}`;
