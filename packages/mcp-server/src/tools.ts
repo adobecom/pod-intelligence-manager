@@ -344,10 +344,20 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "archive_pod",
-    "Archive a pod and extract knowledge learnings into the org knowledge graph. Returns the archived pod record and the number of learnings extracted.",
+    "Start pod archival and background knowledge extraction. Returns an archive job; call archive_pod_status to fetch completion/failure and the archived pod record.",
     { pod_id: PodId },
     async ({ pod_id }) => {
       const result = await apiPost(`/api/pods/${pod_id}/archive`);
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "archive_pod_status",
+    "Get the status of a pod archive job. When complete, returns the archived pod record and the number of learnings extracted.",
+    { pod_id: PodId },
+    async ({ pod_id }) => {
+      const result = await apiFetch(`/api/pods/${pod_id}/archive/status`);
       return json(result);
     },
   );
@@ -634,7 +644,10 @@ export function registerTools(server: McpServer) {
           "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it, ranks by cosine similarity, and falls back to keyword overlap when embeddings are weak or missing. Prefer this over text_search for concept-level lookups.",
         ),
       max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
-      include_details: z.boolean().optional().describe("Include full node details"),
+      include_details: z
+        .boolean()
+        .optional()
+        .describe("Include full node details. Defaults to false, matching REST; true increases token_estimate."),
       limit: z.number().optional().describe("Max number of nodes to return"),
     },
     async (args) => {
@@ -642,7 +655,7 @@ export function registerTools(server: McpServer) {
       const result = await apiPost("/api/knowledge/query", {
         filters,
         max_tokens: max_tokens ?? 2000,
-        include_details,
+        ...(include_details !== undefined ? { include_details } : {}),
         limit,
         ...(query_text ? { query_text } : {}),
       });

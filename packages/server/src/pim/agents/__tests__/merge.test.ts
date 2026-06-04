@@ -69,6 +69,8 @@ describe("llmMerge", () => {
     const result = await llmMerge(makeUpdate());
     expect(result.merged).toBe(true);
     expect(result.note).toContain("overlaps");
+    expect(result.escalate).toBe(true);
+    expect(result.degraded).toBe(true);
     expect(callLLMJSON).not.toHaveBeenCalled();
   });
 
@@ -122,6 +124,8 @@ describe("llmMerge", () => {
     const result = await llmMerge(makeUpdate());
     expect(result.merged).toBe(true);
     expect(result.note).toContain("overlaps");
+    expect(result.escalate).toBe(true);
+    expect(result.degraded).toBe(true);
   });
 
   it("falls back to deterministic when LLM returns null", async () => {
@@ -131,5 +135,7 @@ describe("llmMerge", () => {
     const result = await llmMerge(makeUpdate());
     expect(result.merged).toBe(true);
     expect(result.note).toContain("overlaps");
+    expect(result.escalate).toBe(true);
+    expect(result.degraded).toBe(true);
   });
 });

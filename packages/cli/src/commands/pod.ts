@@ -4,6 +4,15 @@ import type { Pod, OrgPodSummary, ArchivedPod } from "@pim/shared";
 import { getPressureLevel, getPressureLabel } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
 
+interface PodArchiveJob {
+  job_id: string;
+  pod_id: string;
+  status: "running" | "completed" | "failed";
+  status_url: string;
+  archived?: ArchivedPod;
+  error?: string;
+}
+
 export function registerPodCommands(program: Command) {
   const pod = program.command("pod").description("Manage pods");
 
@@ -97,11 +106,36 @@ export function registerPodCommands(program: Command) {
     .argument("<podId>", "Pod ID")
     .action(async (podId: string) => {
       const base = getBaseUrl(program);
-      const result = await fetchJSON<ArchivedPod>(`${base}/api/pods/${podId}/archive`, {
+      const started = await fetchJSON<ArchivedPod | PodArchiveJob>(`${base}/api/pods/${podId}/archive`, {
         method: "POST",
       });
+      const result = isArchiveJob(started)
+        ? await pollArchiveJob(base, started)
+        : started;
       console.log(chalk.green(`\n  Archived: ${result.name}`));
       console.log(`  Duration: ${result.duration_days} days | Final pressure: ${result.final_pressure.toFixed(2)}`);
+      if (typeof result.learnings_extracted === "number") {
+        console.log(`  Learnings extracted: ${result.learnings_extracted}`);
+      }
       console.log();
     });
+}
+
+function isArchiveJob(value: ArchivedPod | PodArchiveJob): value is PodArchiveJob {
+  return "job_id" in value && "status" in value && "status_url" in value;
+}
+
+async function pollArchiveJob(base: string, initial: PodArchiveJob): Promise<ArchivedPod> {
+  let job = initial;
+  if (job.status === "completed" && job.archived) return job.archived;
+  if (job.status === "failed") throw new Error(job.error ?? "Archive failed");
+
+  console.log(chalk.yellow(`\n  Archive job started: ${job.job_id}`));
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    job = await fetchJSON<PodArchiveJob>(`${base}${job.status_url}`);
+    if (job.status === "completed" && job.archived) return job.archived;
+    if (job.status === "failed") throw new Error(job.error ?? "Archive failed");
+  }
+  throw new Error("Archive did not complete before the polling timeout");
 }

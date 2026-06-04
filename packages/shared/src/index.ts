@@ -119,6 +119,8 @@ export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  PodArchiveJob,
+  PodArchiveJobStatus,
   ArchivedProject,
 } from "./types/org.js";
 

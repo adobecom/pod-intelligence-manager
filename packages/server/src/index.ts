@@ -28,9 +28,11 @@ import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services
 import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
+import { registerJsonBodyParser } from "./middleware/validation.js";
 import db from "./db/connection.js";
 
 const app = Fastify({ logger: true });
+registerJsonBodyParser(app);
 
 // Global error handler — structured errors, no stack traces to clients
 app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {

@@ -223,11 +223,37 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
           });
         })
         .catch((err) => {
-          console.error(`[ingestion] Async PIM processing failed for update ${update.id}:`, err);
+          console.error("[ingestion] Async PIM processing failed after context update persisted", {
+            podId,
+            updateId: update.id,
+            scope: update.scope,
+            type: update.type,
+            agent_id: update.agent_id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
     });
   } else {
-    pimResult = await processUpdate(update, orgId);
+    try {
+      pimResult = await processUpdate(update, orgId);
+    } catch (err) {
+      console.error("[ingestion] PIM processing failed after context update persisted", {
+        podId,
+        updateId: update.id,
+        scope: update.scope,
+        type: update.type,
+        agent_id: update.agent_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      pimResult = {
+        classification: "additive",
+        merged: false,
+        conflictCreated: false,
+        degraded: true,
+        note: "Context update was persisted, but downstream PIM orchestration failed. Retry orchestration or inspect server logs.",
+        error: err instanceof Error ? err.message : "PIM orchestration failed",
+      };
+    }
   }
 
   // 9. Async AI quality score (non-blocking; updates row + WS when done)

@@ -506,8 +506,8 @@ function compactSessionIfNeeded(orgId: string, sessionId: string, runId?: string
          COUNT(*) AS event_count,
          COALESCE(SUM(LENGTH(COALESCE(summary, '')) + LENGTH(payload_json)), 0) AS char_count,
          COALESCE(MAX(rowid), ?) AS max_rowid
-       FROM agent_run_events
-       WHERE org_id = ? AND session_id = ? AND rowid > ?`,
+      FROM agent_run_events
+      WHERE org_id = ? AND session_id = ? AND rowid > ? AND event_type != 'run_compacted'`,
     )
     .get(lastCompactedRowid, orgId, sessionId, lastCompactedRowid) as unknown as EventCompactionStats;
   if (stats.event_count < eventThreshold && stats.char_count < charThreshold) return;
@@ -519,12 +519,14 @@ function compactSessionIfNeeded(orgId: string, sessionId: string, runId?: string
        WHERE org_id = ?
          AND session_id = ?
          AND rowid > ?
-         AND (event_type IN ('model_output','file_change','checkpoint_created','context_update_submitted','run_compacted')
+         AND rowid <= ?
+         AND event_type != 'run_compacted'
+         AND (event_type IN ('model_output','file_change','checkpoint_created','context_update_submitted')
               OR summary IS NOT NULL)
        ORDER BY rowid DESC
        LIMIT 20`,
     )
-    .all(orgId, sessionId, lastCompactedRowid) as unknown as EventCompactionRow[];
+    .all(orgId, sessionId, lastCompactedRowid, stats.max_rowid) as unknown as EventCompactionRow[];
   const durable = rows
     .reverse()
     .map((r) => `- #${r.seq} ${r.event_type}: ${r.summary ?? r.payload_json.slice(0, 160)}`);
@@ -550,7 +552,46 @@ function compactSessionIfNeeded(orgId: string, sessionId: string, runId?: string
       orgId,
       runId,
     );
+    insertCompactionEvent(orgId, sessionId, runId, {
+      summary,
+      compactedThroughRowid: stats.max_rowid,
+      eventCount: stats.event_count,
+      createdAt: now,
+    });
   }
+}
+
+function insertCompactionEvent(
+  orgId: string,
+  sessionId: string,
+  runId: string,
+  input: {
+    summary: string;
+    compactedThroughRowid: number;
+    eventCount: number;
+    createdAt: string;
+  },
+): void {
+  const run = getRunRow(orgId, runId);
+  if (!run || run.status !== "running") return;
+  const nextSeq = nextRunEventSeq(runId);
+  db.prepare(
+    `INSERT INTO agent_run_events
+       (id, run_id, session_id, org_id, seq, event_type, payload_json, summary, artifact_refs_json, token_count, created_at)
+     VALUES (?, ?, ?, ?, ?, 'run_compacted', ?, ?, '[]', 0, ?)`,
+  ).run(
+    id("are"),
+    runId,
+    sessionId,
+    orgId,
+    nextSeq,
+    JSON.stringify({
+      compacted_through_event_rowid: input.compactedThroughRowid,
+      event_count: input.eventCount,
+    }),
+    `Compacted ${input.eventCount} event(s) through row ${input.compactedThroughRowid}.`,
+    input.createdAt,
+  );
 }
 
 export async function endAgentRun(orgId: string, runId: string, input: {
@@ -747,6 +788,30 @@ function summarizeRun(run: RunRow, events: AgentRunEvent[]): { summary: string; 
   };
 }
 
+function scoreRunEvidenceConfidence(run: RunRow, events: AgentRunEvent[], text: { summary: string; details: string }): number {
+  if (run.status !== "completed") return 0.6;
+  let score = 0.6;
+  if (run.final_output?.trim()) score += 0.1;
+  if (run.context_update_id?.trim()) score += 0.15;
+  if (text.details.length >= 500) score += 0.05;
+  if (events.some((e) => e.event_type === "context_update_submitted")) score += 0.05;
+  if (events.some((e) => e.event_type === "file_change" || e.artifact_refs.length > 0)) score += 0.05;
+  return Math.min(0.95, score);
+}
+
+function hasAutoPromoteRunEvidence(run: RunRow, events: AgentRunEvent[]): boolean {
+  const hasContextUpdate = Boolean(run.context_update_id?.trim());
+  const hasSubmittedUpdateEvent = events.some((e) => e.event_type === "context_update_submitted");
+  const hasArtifactEvidence = events.some((e) => e.event_type === "file_change" || e.artifact_refs.length > 0);
+  return hasContextUpdate && hasSubmittedUpdateEvent && hasArtifactEvidence;
+}
+
+function capNormalRunConfidence(evidenceConfidence: number, run: RunRow, events: AgentRunEvent[]): number {
+  return evidenceConfidence >= AUTO_PROMOTE_CONFIDENCE_MIN && hasAutoPromoteRunEvidence(run, events)
+    ? evidenceConfidence
+    : Math.min(evidenceConfidence, AGENT_RUN_CONFIDENCE_CAP);
+}
+
 async function promoteCandidate(candidate: MemoryCandidate, auto: boolean): Promise<MemoryCandidate> {
   const project = candidate.project_id
     ? loadProject(candidate.org_id, candidate.project_id)
@@ -865,9 +930,8 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
     currentStatus: "current",
     provenance: [`session_id:${run.session_id}`, `run_id:${run.run_id}`],
   });
-  const confidence = run.status === "completed" && (run.final_output || run.context_update_id)
-    ? AGENT_RUN_CONFIDENCE_CAP
-    : 0.6;
+  const evidenceConfidence = scoreRunEvidenceConfidence(run, events, text);
+  const confidence = capNormalRunConfidence(evidenceConfidence, run, events);
   const candidateId = id("mc");
   const now = new Date().toISOString();
   const domains = [...new Set([run.scope, run.project_id, "agent-run"].filter((v): v is string => !!v))];
@@ -876,8 +940,9 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
     run_id: run.run_id,
     event_count: events.length,
     context_update_id: run.context_update_id,
+    evidence_confidence: evidenceConfidence,
   };
-  return withImmediateTransaction(() => {
+  const candidate = withImmediateTransaction(() => {
     const existing = db
       .prepare("SELECT * FROM memory_candidates WHERE org_id = ? AND source_type = 'agent_run' AND source_id = ?")
       .get(orgId, runId) as unknown as CandidateRow | undefined;
@@ -918,6 +983,14 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
     }
     return getMemoryCandidate(orgId, candidateId);
   });
+  if (candidate?.status === "pending" && candidate.confidence_score >= AUTO_PROMOTE_CONFIDENCE_MIN) {
+    try {
+      return await promoteCandidate(candidate, true);
+    } catch (err) {
+      console.error(`[agent-memory] auto-promote failed for ${candidate.id}:`, err);
+    }
+  }
+  return candidate;
 }
 
 export async function rollupAgentSession(orgId: string, sessionId: string): Promise<MemoryCandidate[]> {

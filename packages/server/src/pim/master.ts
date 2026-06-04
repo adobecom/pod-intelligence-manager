@@ -1,7 +1,7 @@
 import type { ContextUpdate } from "@pim/shared";
 import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { classifyUpdate, type Classification } from "./classifier.js";
-import { deterministicMerge, llmMerge } from "./agents/merge.js";
+import { deterministicMerge, llmMerge, type MergeResult } from "./agents/merge.js";
 import { createConflict } from "./agents/conflict.js";
 import { regenerateLivingDoc } from "./agents/summary.js";
 import { detectOverlaps } from "./agents/cross-pod.js";
@@ -23,6 +23,8 @@ export interface PimResult {
   note?: string;
   scout_used?: boolean;
   scout_recommendation?: ScoutRecommendation | null;
+  degraded?: boolean;
+  error?: string;
 }
 
 export async function processUpdate(update: ContextUpdate, orgId?: string): Promise<PimResult> {
@@ -36,9 +38,13 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
 
   if (shouldRunConflictScout(classification, update, scoutTuning)) {
     scout_used = true;
-    scoutResult = await runConflictScout(update, classification, scoutTuning);
-    if (scoutResult) {
-      scout_recommendation = scoutResult.recommendation;
+    try {
+      scoutResult = await runConflictScout(update, classification, scoutTuning);
+      if (scoutResult) {
+        scout_recommendation = scoutResult.recommendation;
+      }
+    } catch (err) {
+      console.error("[pim-master] Conflict scout failed (non-blocking):", err);
     }
   }
 
@@ -46,13 +52,15 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
   let conflictCreated = false;
   let conflictId: string | undefined;
   let note: string | undefined;
+  let degraded = false;
+  let error: string | undefined;
 
   // Scout-forced conflict on overlapping: skip merge LLM when scout is decisive
   if (
     classification === "overlapping" &&
     scoutSaysOpenConflict(scoutResult, scoutTuning.overlapForceMinConf)
   ) {
-    const conflict = await createConflict(update);
+    const conflict = await tryCreateConflict(update);
     if (conflict) {
       conflictCreated = true;
       conflictId = conflict.id;
@@ -66,7 +74,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
         merged = result.merged;
         note = result.note;
         if (scoutSaysOpenConflict(scoutResult, scoutTuning.additiveMinConf)) {
-          const conflict = await createConflict(update);
+          const conflict = await tryCreateConflict(update);
           if (conflict) {
             conflictCreated = true;
             conflictId = conflict.id;
@@ -76,26 +84,26 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
         break;
       }
       case "overlapping": {
-        if (isLLMAvailable()) {
-          const result = await llmMerge(update);
-          merged = result.merged;
-          note = result.note;
-          if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult, scoutTuning.suppressMergeMinConf)) {
-            const conflict = await createConflict(update);
-            if (conflict) {
-              conflictCreated = true;
-              conflictId = conflict.id;
-            }
+        const result = isLLMAvailable()
+          ? await tryLlmMerge(update)
+          : degradedOverlapMerge(update, "LLM merge unavailable; overlapping conflict detection was bypassed");
+        merged = result.merged;
+        note = result.note;
+        if (result.degraded) {
+          degraded = true;
+          error = result.error;
+        }
+        if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult, scoutTuning.suppressMergeMinConf)) {
+          const conflict = await tryCreateConflict(update);
+          if (conflict) {
+            conflictCreated = true;
+            conflictId = conflict.id;
           }
-        } else {
-          const result = deterministicMerge(update, classification);
-          merged = result.merged;
-          note = result.note;
         }
         break;
       }
       case "contradictory": {
-        const conflict = await createConflict(update);
+        const conflict = await tryCreateConflict(update);
         if (conflict) {
           conflictCreated = true;
           conflictId = conflict.id;
@@ -106,13 +114,13 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
     }
   }
 
-  regenerateLivingDoc(update.pod_id);
+  void regenerateLivingDoc(update.pod_id).catch((err) => {
+    console.error("[pim-master] Living doc regeneration failed (non-blocking):", err);
+  });
 
-  try {
-    detectOverlaps();
-  } catch {
-    // Non-critical
-  }
+  void detectOverlaps().catch((err) => {
+    console.error("[pim-master] Cross-pod overlap detection failed (non-blocking):", err);
+  });
 
   return {
     classification,
@@ -122,5 +130,36 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
     note,
     scout_used,
     scout_recommendation,
+    ...(degraded ? { degraded } : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+async function tryCreateConflict(update: ContextUpdate): Promise<Awaited<ReturnType<typeof createConflict>>> {
+  try {
+    return await createConflict(update);
+  } catch (err) {
+    console.error("[pim-master] Conflict creation failed (non-blocking):", err);
+    return null;
+  }
+}
+
+async function tryLlmMerge(update: ContextUpdate): Promise<MergeResult> {
+  try {
+    return await llmMerge(update);
+  } catch (err) {
+    console.error("[pim-master] LLM merge failed, using deterministic merge:", err);
+    return degradedOverlapMerge(update, err instanceof Error ? err.message : "LLM merge failed");
+  }
+}
+
+function degradedOverlapMerge(update: ContextUpdate, error: string): MergeResult {
+  const result = deterministicMerge(update, "overlapping");
+  return {
+    ...result,
+    escalate: true,
+    degraded: true,
+    error,
+    conflictIndicators: ["llm_merge_unavailable"],
   };
 }

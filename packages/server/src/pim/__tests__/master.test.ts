@@ -44,6 +44,9 @@ import {
 } from "../agents/conflict-scout.js";
 import { deterministicMerge, llmMerge } from "../agents/merge.js";
 import { createConflict } from "../agents/conflict.js";
+import { regenerateLivingDoc } from "../agents/summary.js";
+import { detectOverlaps } from "../agents/cross-pod.js";
+import { isLLMAvailable } from "../llm.js";
 import { processUpdate } from "../master.js";
 
 const baseUpdate = (): ContextUpdate => ({
@@ -72,6 +75,9 @@ describe("processUpdate + conflict scout", () => {
     vi.mocked(deterministicMerge).mockReturnValue({ merged: true });
     vi.mocked(llmMerge).mockResolvedValue({ merged: true });
     vi.mocked(createConflict).mockResolvedValue(null);
+    vi.mocked(regenerateLivingDoc).mockResolvedValue("");
+    vi.mocked(detectOverlaps).mockResolvedValue(undefined);
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
   });
 
   it("overlapping + scout forces conflict skips llmMerge", async () => {
@@ -124,6 +130,63 @@ describe("processUpdate + conflict scout", () => {
     const r = await processUpdate(baseUpdate());
     expect(r.conflictCreated).toBe(false);
     expect(llmMerge).toHaveBeenCalled();
+  });
+
+  it("overlapping fallback escalates and reports degraded when LLM is unavailable", async () => {
+    vi.mocked(classifyUpdate).mockReturnValue("overlapping");
+    vi.mocked(isLLMAvailable).mockReturnValue(false);
+    vi.mocked(deterministicMerge).mockReturnValue({
+      merged: true,
+      note: "Fallback overlap merge",
+    });
+    vi.mocked(createConflict).mockResolvedValue({
+      id: "C-FALLBACK",
+      pod_id: "p1",
+      created_at: "2026-01-01T00:00:00Z",
+      status: "open",
+      severity: "non_blocking",
+      summary: "fallback conflict",
+      sides: [],
+      master_analysis: "",
+      impact: [],
+      resolved_by: null,
+      resolution: null,
+      resolution_date: null,
+    });
+
+    const r = await processUpdate(baseUpdate());
+
+    expect(llmMerge).not.toHaveBeenCalled();
+    expect(r.conflictCreated).toBe(true);
+    expect(r.conflictId).toBe("C-FALLBACK");
+    expect(r.degraded).toBe(true);
+    expect(r.error).toContain("LLM merge unavailable");
+  });
+
+  it("runs cross-pod overlap detection fire-and-forget", async () => {
+    vi.mocked(classifyUpdate).mockReturnValue("additive");
+    vi.mocked(detectOverlaps).mockReturnValue(new Promise<void>(() => {}));
+
+    const outcome = await Promise.race([
+      processUpdate(baseUpdate()).then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 20)),
+    ]);
+
+    expect(outcome).toBe("resolved");
+    expect(detectOverlaps).toHaveBeenCalled();
+  });
+
+  it("runs living doc regeneration fire-and-forget", async () => {
+    vi.mocked(classifyUpdate).mockReturnValue("additive");
+    vi.mocked(regenerateLivingDoc).mockReturnValue(new Promise<string>(() => {}));
+
+    const outcome = await Promise.race([
+      processUpdate(baseUpdate()).then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 20)),
+    ]);
+
+    expect(outcome).toBe("resolved");
+    expect(regenerateLivingDoc).toHaveBeenCalledWith("p1");
   });
 
   it("additive + scout open_conflict creates conflict", async () => {

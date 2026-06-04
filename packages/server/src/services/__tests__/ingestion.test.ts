@@ -176,6 +176,20 @@ describe("ingestContextUpdate", () => {
     });
   });
 
+  it("returns degraded PIM success when synchronous orchestration fails after persistence", async () => {
+    vi.mocked(processUpdate).mockRejectedValueOnce(new Error("living doc failed"));
+    const result = await ingestContextUpdate("pod-1", validInput());
+    expect(result.success).toBe(true);
+    expect(result.update).toBeDefined();
+    expect(result.pim).toMatchObject({
+      classification: "additive",
+      merged: false,
+      conflictCreated: false,
+      degraded: true,
+      error: "living doc failed",
+    });
+  });
+
   it("writes the update to the database", async () => {
     const runMock = vi.fn();
     (db.prepare as Mock).mockImplementation((sql: string) => {

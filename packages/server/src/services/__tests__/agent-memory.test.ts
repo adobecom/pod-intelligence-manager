@@ -220,6 +220,11 @@ describe("agent run memory", () => {
       const firstSummary = row.compacted_summary;
       expect(firstCompactedRowid).toBeGreaterThan(0);
       expect(firstSummary).toContain("Events compacted in this segment: 2");
+      const marker = testDb
+        .prepare("SELECT event_type, summary FROM agent_run_events WHERE run_id = ? ORDER BY seq DESC LIMIT 1")
+        .get(run!.run_id) as { event_type: string; summary: string };
+      expect(marker.event_type).toBe("run_compacted");
+      expect(marker.summary).toContain("Compacted 2 event");
 
       appendAgentRunEvent(ORG_ID, run!.run_id, { event_type: "model_output", summary: "Third durable signal" });
       row = testDb
@@ -274,6 +279,62 @@ describe("agent run memory", () => {
     expect(promoted?.status).toBe("promoted");
     expect(promoted?.promoted_node_id).toBe("kn-agent-run");
     expect(ingestLearnings).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto-promotes high-confidence completed-run memory candidates", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Ship high confidence rollup",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish backend memory" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      summary: "Submitted durable implementation decision",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Updated the service and route tests",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-high-confidence",
+      final_output: "Implemented durable agent memory rollup with explicit context update evidence and route coverage.",
+    });
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("auto_promoted");
+    expect(candidates[0].confidence_score).toBeGreaterThanOrEqual(0.85);
+    expect(candidates[0].promoted_node_id).toBe("kn-agent-run");
+    expect(ingestLearnings).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps completed-run candidates review-gated without corroborating promotion evidence", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Avoid trivial auto-promotion",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish backend memory" });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-without-event",
+      final_output: "Implemented a durable backend memory change.",
+    });
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(candidates[0].confidence_score).toBe(0.7);
+    expect(ingestLearnings).not.toHaveBeenCalled();
   });
 
   it("rejecting a promoted candidate leaves the audit status promoted", async () => {

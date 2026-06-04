@@ -139,6 +139,7 @@ async function proxyRequest(
 
 export default async function tunnelProxyRoutes(app: FastifyInstance) {
   // Accept any content type on this plugin scope — we need raw bodies
+  app.removeContentTypeParser("application/json");
   app.addContentTypeParser("*", { parseAs: "buffer" }, (_req, body, done) => {
     done(null, body);
   });

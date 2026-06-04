@@ -13,6 +13,7 @@ interface RecentUpdateRow {
   agent_id: string;
   scope: string;
   summary: string;
+  details: string;
 }
 
 // Classify whether a new context update is additive, overlapping, or contradictory
@@ -35,15 +36,20 @@ export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classi
 
   // 2. Check if the update references entities from a different agent's recent work in the same scope
   const recentUpdates = db.prepare(
-    "SELECT id, agent_id, scope, summary FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT ?"
+    "SELECT id, agent_id, scope, summary, details FROM context_updates WHERE pod_id = ? AND scope = ? AND agent_id != ? ORDER BY timestamp DESC LIMIT ?"
   ).all(podId, update.scope, update.agent_id, t.peerWindow) as unknown as RecentUpdateRow[];
 
   if (recentUpdates.length > 0) {
-    const updateWords = extractKeywords(update.summary + " " + update.details);
+    const updateText = update.summary + " " + update.details;
+    const updateWords = extractKeywords(updateText);
     for (const recent of recentUpdates) {
-      const recentWords = extractKeywords(recent.summary);
+      const recentText = recent.summary + " " + (recent.details ?? "");
+      const recentWords = extractKeywords(recentText);
       const overlap = updateWords.filter(w => recentWords.includes(w));
       if (overlap.length >= t.overlapKeywordMin) {
+        if (hasContradictionSignal(updateText)) {
+          return "contradictory";
+        }
         return "overlapping";
       }
     }
@@ -77,4 +83,10 @@ function extractKeywords(text: string): string[] {
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter(w => w.length > 2 && !stopWords.has(w));
+}
+
+function hasContradictionSignal(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return /\b(contradict|contradicts|contradiction|incompatible|rejected|rejects|rollback|revert|supersede|supersedes|instead of|rather than|must not|should not|do not|don't|never)\b/.test(normalized)
+    || /\bconflicts?\s+with\b/.test(normalized);
 }

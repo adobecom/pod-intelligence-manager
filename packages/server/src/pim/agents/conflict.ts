@@ -75,13 +75,13 @@ export async function createConflict(
   }
 
   if (isLLMAvailable()) {
-    const pod = db.prepare("SELECT name, day_number, total_days, sprint_start, conflict_pressure, milestone_json FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
-    const currentDay = pod ? computeCurrentDay(pod.sprint_start, pod.total_days) : undefined;
-    const openConflictCount = (db.prepare("SELECT COUNT(*) as count FROM conflicts WHERE pod_id = ? AND status != 'resolved'").get(podId) as { count: number }).count;
-
-    const systemPrompt = fs.readFileSync(path.resolve(__dirname, "../../../../prompts/conflict-agent.md"), "utf-8");
-
-    const prompt = `## Side A
+    try {
+      const pod = db.prepare("SELECT name, day_number, total_days, sprint_start, conflict_pressure, milestone_json FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
+      const currentDay = pod ? computeCurrentDay(pod.sprint_start, pod.total_days) : undefined;
+      const openConflictCount = (db.prepare("SELECT COUNT(*) as count FROM conflicts WHERE pod_id = ? AND status != 'resolved'").get(podId) as { count: number }).count;
+      const systemPrompt = fs.readFileSync(path.resolve(__dirname, "../../../../prompts/conflict-agent.md"), "utf-8");
+      const milestoneName = pod ? safeMilestoneName(pod.milestone_json) : "Unknown";
+      const prompt = `## Side A
 - Agent: ${update.agent_id}
 - Position: ${update.summary}
 - Details: ${update.details}
@@ -98,9 +98,8 @@ export async function createConflict(
 - Day ${currentDay ?? "?"} of ${pod?.total_days ?? "?"}
 - Current conflict pressure: ${pod?.conflict_pressure ?? 0}
 - Open conflicts: ${openConflictCount}
-- Milestone: ${pod ? JSON.parse(pod.milestone_json).name : "Unknown"}${precedentsContext}`;
+- Milestone: ${milestoneName}${precedentsContext}`;
 
-    try {
       const response = await callLLMJSON<LLMConflictResponse>({
         model: MODELS.smart,
         system: systemPrompt,
@@ -151,37 +150,64 @@ export async function createConflict(
   const previousPressure = podRow?.conflict_pressure ?? 0;
   const orgId = podRow?.org_id ?? null;
 
-  const newPressure = withTransaction(() => {
-    db.prepare(
-      `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date, org_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
-      conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
-      conflict.master_analysis, JSON.stringify(conflict.impact),
-      conflict.resolved_by, conflict.resolution, conflict.resolution_date,
-      orgId,
-    );
+  let newPressure = previousPressure;
+  try {
+    newPressure = withTransaction(() => {
+      db.prepare(
+        `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
+        conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
+        conflict.master_analysis, JSON.stringify(conflict.impact),
+        conflict.resolved_by, conflict.resolution, conflict.resolution_date,
+        orgId,
+      );
 
-    return recalculatePressure(podId);
-  });
+      return recalculatePressure(podId);
+    });
+  } catch (err) {
+    console.error(`[conflict] failed to persist conflict ${conflict.id}:`, err);
+    throw err;
+  }
 
   // Broadcast and notify (outside transaction — side effects should not roll back)
-  broadcast({ type: "conflict_created", podId, payload: conflict });
-  broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
+  try {
+    broadcast({ type: "conflict_created", podId, payload: conflict });
+    broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
+  } catch (err) {
+    console.error(`[conflict] broadcast failed for ${conflict.id}:`, err);
+  }
 
   // Slack notifications — capture the posted message ts so later escalations/
   // resolutions can thread under it instead of posting new top-level messages.
   // Fire-and-forget: we don't block conflict creation on Slack round-trip.
-  notifyConflictCreated(conflict).then((ts) => {
-    if (!ts) return;
-    try {
-      db.prepare("UPDATE conflicts SET slack_message_ts = ? WHERE id = ?").run(ts, conflict.id);
-    } catch (err) {
-      console.error(`[conflict] failed to persist slack_message_ts for ${conflict.id}:`, (err as Error).message);
-    }
-  });
-  notifyPressureThreshold(podId, newPressure, previousPressure);
+  try {
+    notifyConflictCreated(conflict)
+      .then((ts) => {
+        if (!ts) return;
+        try {
+          db.prepare("UPDATE conflicts SET slack_message_ts = ? WHERE id = ?").run(ts, conflict.id);
+        } catch (err) {
+          console.error(`[conflict] failed to persist slack_message_ts for ${conflict.id}:`, (err as Error).message);
+        }
+      })
+      .catch((err) => {
+        console.error(`[conflict] Slack conflict notification failed for ${conflict.id}:`, err);
+      });
+    notifyPressureThreshold(podId, newPressure, previousPressure);
+  } catch (err) {
+    console.error(`[conflict] notification failed for ${conflict.id}:`, err);
+  }
 
   return conflict;
+}
+
+function safeMilestoneName(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { name?: unknown };
+    return typeof parsed.name === "string" && parsed.name.trim() ? parsed.name : "Unknown";
+  } catch {
+    return "Unknown";
+  }
 }

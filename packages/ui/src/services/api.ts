@@ -11,6 +11,7 @@ import type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  PodArchiveJob,
   ArchivedProject,
   PendingWork,
   KnowledgeGraph,
@@ -31,6 +32,7 @@ import type {
 // taking React context as a dependency.
 let authTokenGetter: (() => string | null) | null = null;
 let orgSlugGetter: (() => string | null) | null = null;
+let orgCountGetter: (() => number) | null = null;
 
 export function setAuthTokenGetter(getter: (() => string | null) | null): void {
   authTokenGetter = getter;
@@ -38,6 +40,10 @@ export function setAuthTokenGetter(getter: (() => string | null) | null): void {
 
 export function setOrgSlugGetter(getter: (() => string | null) | null): void {
   orgSlugGetter = getter;
+}
+
+export function setOrgCountGetter(getter: (() => number) | null): void {
+  orgCountGetter = getter;
 }
 
 /** Read current auth token — exposed for consumers that don't use apiFetch (e.g. WebSocket URL). */
@@ -60,7 +66,22 @@ function withAuthHeaders(init?: RequestInit): RequestInit {
 }
 
 export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const slug = orgSlugGetter?.();
+  const orgCount = orgCountGetter?.() ?? 0;
+  if (!slug && orgCount > 1 && isAgentMemoryPath(url)) {
+    throw new Error("X-Pim-Org is required for agent-session and memory routes when multiple orgs are available");
+  }
   return fetch(url, withAuthHeaders(init));
+}
+
+function isAgentMemoryPath(url: string): boolean {
+  const path = url.startsWith("http") ? new URL(url).pathname : url.split("?")[0];
+  return (
+    path === "/api/agent-sessions" ||
+    path.startsWith("/api/agent-sessions/") ||
+    path.startsWith("/api/agent-runs/") ||
+    path.startsWith("/api/memory-candidates/")
+  );
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -382,9 +403,33 @@ export async function pollProjectSources(projectId: string): Promise<{
 }
 
 export async function archivePod(podId: string): Promise<ArchivedPod> {
-  return fetchJSON<ArchivedPod>(`/api/pods/${podId}/archive`, {
+  const res = await apiFetch(`/api/pods/${encodeURIComponent(podId)}/archive`, {
     method: "POST",
   });
+  if (!res.ok) {
+    throw new Error(`API error: ${res.status} ${res.statusText}`);
+  }
+  const body = await res.json() as ArchivedPod | PodArchiveJob;
+  if (!isArchiveJob(body)) return body;
+  return pollArchiveJob(body);
+}
+
+function isArchiveJob(value: ArchivedPod | PodArchiveJob): value is PodArchiveJob {
+  return "job_id" in value && "status" in value && "status_url" in value;
+}
+
+async function pollArchiveJob(initial: PodArchiveJob): Promise<ArchivedPod> {
+  let job = initial;
+  if (job.status === "completed" && job.archived) return job.archived;
+  if (job.status === "failed") throw new Error(job.error ?? "Archive failed");
+
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    job = await fetchJSON<PodArchiveJob>(job.status_url);
+    if (job.status === "completed" && job.archived) return job.archived;
+    if (job.status === "failed") throw new Error(job.error ?? "Archive failed");
+  }
+  throw new Error("Archive did not complete before the polling timeout");
 }
 
 export interface LintFinding {

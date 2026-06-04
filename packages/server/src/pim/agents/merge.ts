@@ -12,6 +12,8 @@ export interface MergeResult {
   note?: string;
   escalate?: boolean;
   conflictIndicators?: string[];
+  degraded?: boolean;
+  error?: string;
 }
 
 interface LLMMergeResponse {
@@ -43,12 +45,23 @@ export function deterministicMerge(
   };
 }
 
+function degradedOverlapMerge(update: ContextUpdate, error: string): MergeResult {
+  const result = deterministicMerge(update, "overlapping");
+  return {
+    ...result,
+    escalate: true,
+    degraded: true,
+    error,
+    conflictIndicators: ["llm_merge_unavailable"],
+  };
+}
+
 // LLM-backed merge analysis
 export async function llmMerge(
   update: ContextUpdate,
 ): Promise<MergeResult> {
   if (!isLLMAvailable()) {
-    return deterministicMerge(update, "overlapping");
+    return degradedOverlapMerge(update, "LLM merge unavailable; overlapping conflict detection was bypassed");
   }
 
   const recentUpdates = db.prepare(
@@ -80,7 +93,7 @@ ${recentUpdates.map(u => `- [${u.timestamp}] ${u.agent_id}: ${u.summary}\n  Deta
     });
 
     if (!response) {
-      return deterministicMerge(update, "overlapping");
+      return degradedOverlapMerge(update, "LLM merge returned no usable decision");
     }
 
     switch (response.decision) {
@@ -96,10 +109,10 @@ ${recentUpdates.map(u => `- [${u.timestamp}] ${u.agent_id}: ${u.summary}\n  Deta
           note: response.reasoning,
         };
       default:
-        return deterministicMerge(update, "overlapping");
+        return degradedOverlapMerge(update, "LLM merge returned an unsupported decision");
     }
   } catch (err) {
     console.error("LLM merge failed, falling back to deterministic:", err);
-    return deterministicMerge(update, "overlapping");
+    return degradedOverlapMerge(update, err instanceof Error ? err.message : "LLM merge failed");
   }
 }

@@ -27,6 +27,21 @@ export interface ArchivedPod {
   final_pressure: number;
   /** Present on archive API response when knowledge extraction ran. */
   learnings_extracted?: number;
+  /** False while archival knowledge extraction still needs to complete or be retried. */
+  extraction_completed?: boolean;
+}
+
+export type PodArchiveJobStatus = "running" | "completed" | "failed";
+
+export interface PodArchiveJob {
+  job_id: string;
+  pod_id: string;
+  status: PodArchiveJobStatus;
+  started_at: string;
+  completed_at?: string;
+  status_url: string;
+  archived?: ArchivedPod;
+  error?: string;
 }
 
 /** Initiative removed from the active list; context updates are deleted at archive time. */
