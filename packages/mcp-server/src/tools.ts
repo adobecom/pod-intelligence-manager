@@ -21,6 +21,11 @@ const json = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
 });
 
+const isKgOrgLintFinding = (finding: unknown): finding is { type: "kg_org_contradiction" } =>
+  typeof finding === "object" &&
+  finding !== null &&
+  (finding as { type?: unknown }).type === "kg_org_contradiction";
+
 /* ------------------------------------------------------------------ */
 /*  Zod schemas (reusable fragments)                                  */
 /* ------------------------------------------------------------------ */
@@ -411,7 +416,7 @@ export function registerTools(server: McpServer) {
         : [];
 
       const open_kg_lint = Array.isArray(lint_findings)
-        ? lint_findings.filter((f: { type?: string }) => f.type === "kg_org_contradiction")
+        ? lint_findings.filter(isKgOrgLintFinding)
         : [];
 
       return json({
