@@ -1,0 +1,57 @@
+{
+  "taskId": "real-emc-declined-rsvp-status",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-05-28T04:37:42.631Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "declined RSVP status field"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "Found 4 results\n\n> Domain: [web-src > config-hooks]\n\n## High relevance\n\n3. web-src/src/hooks/useRsvpConfig.ts (lines 5-104, score: 1.00)\n   5:import { useState, useEffect, useCallback } from 'react'\n   6:import { configService } from '../services/configService'\n   7:import type { RsvpConfigField, AttendeeColumnConfig } from '../types/attendee'\n   8:import { rsvpConfigUiLabel } from '../utils/rsvpConfigLabels'\n   9:/**\n   ...\n   Referenced by 34 files (.tsx: 25, .ts: 9)\n\n   *(also at lines 106-220)*\n## Moderate relevance\n\n1. web-src/src/services/configService.ts (lines 127-155, score: 0.45)\n   method getRsvpConfig\n   Referenced by 1 files (.ts: 1)\n\n2. web-src/src/services/configService.ts (lines 5-13, score: 0.33)\n\n4. web-src/src/components/shared/AutocompleteTextField.tsx (lines 5-24, score: 0.27) [web-src > components]\n\n\n> **Domain coverage**: config-hooks (4), components (1). Results are concentrated in **config-hooks** — consider `domain: \"components\"` to explore under-represented domain `components`\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "rsvpStatus"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 26,
+      "output": "No definition found for symbol: \"rsvpStatus\"\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-declined-rsvp-status\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 declined RSVP status field\n```\nFound 4 results\n\n> Domain: [web-src > config-hooks]\n\n## High relevance\n\n3. web-src/src/hooks/useRsvpConfig.ts (lines 5-104, score: 1.00)\n   5:import { useState, useEffect, useCallback } from 'react'\n   6:import { configService } from '../services/configService'\n   7:import type { RsvpConfigField, AttendeeColumnConfig } from '../types/attendee'\n   8:import { rsvpConfigUiLabel } from '../utils/rsvpConfigLabels'\n   9:/**\n   ...\n   Referenced by 34 files (.tsx: 25, .ts: 9)\n\n   *(also at lines 106-220)*\n## Moderate relevance\n\n1. web-src/src/services/configService.ts (lines 127-155, score: 0.45)\n   method getRsvpConfig\n   Referenced by 1 files (.ts: 1)\n\n2. web-src/src/services/configService.ts (lines 5-13, score: 0.33)\n\n4. web-src/src/components/shared/AutocompleteTextField.tsx (lines 5-24, score: 0.27) [web-src > components]\n\n\n> **Domain coverage**: config-hooks (4), components (1). Results are concentrated in **config-hooks** — consider `domain: \"components\"` to explore under-represented domain `components`\n```\n\n## lic explain-symbol -r rsvpStatus\n```\nNo definition found for symbol: \"rsvpStatus\"\n```\n",
+  "renderedBlockHash": "ab58439c576908e6",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

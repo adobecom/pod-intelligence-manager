@@ -1,0 +1,61 @@
+{
+  "taskId": "real-emc-session-location-time-overlap",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "7c86403cefd0261010f631c2dd4096efc99b9d2a",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-7c86403cefd0"
+  },
+  "generatedAt": "2026-06-04T23:56:45.994Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-7c86403cefd0",
+        "-l",
+        "5",
+        "session location time overlap validation"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-7c86403cefd0",
+      "exitCode": 0,
+      "durationMs": 89,
+      "output": "1. web-src/src/types/sessions.ts (lines 1-46, 0.38)\n   interface SessionTimeInfo\n   Referenced by 2 files (.tsx: 2)\n\n2. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 51-75, 0.26)\n   function getNormalizedSessionTimeFields\n\n3. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 87-97, 0.25)\n   function hasSessionTimeFieldChanges\n\n4. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 5-69, 0.24)\n   Referenced by 1 files (.tsx: 1)\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n\n\n> **Note**: 3 of 4 results are from `pages/EventForm/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-7c86403cefd0",
+        "sessionLocationTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-7c86403cefd0",
+      "exitCode": 0,
+      "durationMs": 22,
+      "output": "No definition found for \"sessionLocationTime\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormData`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItemProps`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormData::sessionTimeModificationTime`\n4. `web-src/src/components/shared/FormWizard.tsx::FormWizardProps::sessionHasOpenForm`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionForm`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-session-location-time-overlap\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 session location time overlap validation\n```\n1. web-src/src/types/sessions.ts (lines 1-46, 0.38)\n   interface SessionTimeInfo\n   Referenced by 2 files (.tsx: 2)\n\n2. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 51-75, 0.26)\n   function getNormalizedSessionTimeFields\n\n3. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 87-97, 0.25)\n   function hasSessionTimeFieldChanges\n\n4. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 5-69, 0.24)\n   Referenced by 1 files (.tsx: 1)\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n\n\n> **Note**: 3 of 4 results are from `pages/EventForm/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r sessionLocationTime\n```\nNo definition found for \"sessionLocationTime\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormData`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItemProps`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormData::sessionTimeModificationTime`\n4. `web-src/src/components/shared/FormWizard.tsx::FormWizardProps::sessionHasOpenForm`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionForm`\n```\n",
+  "renderedBlockHash": "d9f89469c747417c",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: components, shared, changes, SessionItem",
+      "post-merge answer symbol leak: components, SessionItem",
+      "task intent matched"
+    ]
+  }
+}

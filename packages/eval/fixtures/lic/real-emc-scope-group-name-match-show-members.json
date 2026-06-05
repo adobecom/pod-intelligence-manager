@@ -1,0 +1,73 @@
+{
+  "taskId": "real-emc-scope-group-name-match-show-members",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "0d38019",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019"
+  },
+  "generatedAt": "2026-05-28T04:37:43.304Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+        "ScopeGroupMembers"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+      "exitCode": 0,
+      "durationMs": 14,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/types/rbacApi.ts::ScopeType\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps\n  web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement\n  web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+        "--direction",
+        "callers",
+        "ScopeGroupMembers"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+      "exitCode": 0,
+      "durationMs": 12,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/types/rbacApi.ts::ScopeType\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps\n  web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement\n  web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+        "ScopeGroupMembers"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-0d38019",
+      "exitCode": 0,
+      "durationMs": 23,
+      "output": "No definition found for \"ScopeGroupMembers\". Did you mean:\n\n1. `web-src/src/types/rbacApi.ts::ScopeType`\n2. `web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps`\n3. `web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement`\n4. `web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE`\n5. `web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-scope-group-name-match-show-members\n_Stratum: S2._\n\n## lic find-references -r ScopeGroupMembers\n```\nNo exact match. Did you mean (5):\n  web-src/src/types/rbacApi.ts::ScopeType\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps\n  web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement\n  web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES\n```\n\n## lic call-graph -r --direction callers ScopeGroupMembers\n```\nNo exact match. Did you mean (5):\n  web-src/src/types/rbacApi.ts::ScopeType\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps\n  web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement\n  web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE\n  web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES\n```\n\n## lic explain-symbol -r ScopeGroupMembers\n```\nNo definition found for \"ScopeGroupMembers\". Did you mean:\n\n1. `web-src/src/types/rbacApi.ts::ScopeType`\n2. `web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::ScopeGroupManagementProps`\n3. `web-src/src/pages/ScopeGroupManagement/index.ts::ScopeGroupManagement`\n4. `web-src/src/contexts/RBACContext.tsx::EMPTY_SCOPE`\n5. `web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx::SCOPE_TYPES`\n```\n",
+  "renderedBlockHash": "0cadbc568009398c",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: ScopeGroupManagementProps",
+      "post-merge answer symbol leak: ScopeGroupManagementProps",
+      "task intent matched"
+    ]
+  }
+}

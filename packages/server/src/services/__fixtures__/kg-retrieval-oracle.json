@@ -131968,7 +131968,7 @@
           "qa"
         ]
       },
-      "queryText": "Task: synth-event-route-after-create Tags: synthetic, context-stress, scout-needed, event-form, routing Expected signals: /events/edit/, replace, eventId, isEditMode Implement `nextEventRouteAfterSave(result: Record<string, any>, isEditMode: boolean): null | { path: string; replace: boolean }`. The EventForm save handler should decide whether the router needs to move after a successful save. Follow the existing EventForm routing pattern; do not invent a new URL shape. Export the function as a named export `nextEventRouteAfterSave`.",
+      "queryText": "Task: synth-event-route-after-create Tags: synthetic, context-stress, lic-needed, event-form, routing Expected signals: /events/edit/, replace, eventId, isEditMode Implement `nextEventRouteAfterSave(result: Record<string, any>, isEditMode: boolean): null | { path: string; replace: boolean }`. The EventForm save handler should decide whether the router needs to move after a successful save. Follow the existing EventForm routing pattern; do not invent a new URL shape. Export the function as a named export `nextEventRouteAfterSave`.",
       "queryEmbedding": [
         -0.09684288501739502,
         0.03049384243786335,
@@ -132500,7 +132500,7 @@
           "qa"
         ]
       },
-      "queryText": "Task: synth-session-speaker-sync-plan Tags: synthetic, context-stress, scout-needed, sessions, speakers Expected signals: currentSpeakerIds, originalSpeakerIds, add, remove Implement `planSessionSpeakerSync(currentSpeakerIds: string[], originalSpeakerIds: string[]): { add: string[]; remove: string[] }`. This mirrors the existing session speaker sync helper. It should avoid redundant API calls and preserve the ordering behavior callers already rely on. Export the function as a named export `planSessionSpeakerSync`.",
+      "queryText": "Task: synth-session-speaker-sync-plan Tags: synthetic, context-stress, lic-needed, sessions, speakers Expected signals: currentSpeakerIds, originalSpeakerIds, add, remove Implement `planSessionSpeakerSync(currentSpeakerIds: string[], originalSpeakerIds: string[]): { add: string[]; remove: string[] }`. This mirrors the existing session speaker sync helper. It should avoid redundant API calls and preserve the ordering behavior callers already rely on. Export the function as a named export `planSessionSpeakerSync`.",
       "queryEmbedding": [
         -0.08280551433563232,
         0.087527334690094,

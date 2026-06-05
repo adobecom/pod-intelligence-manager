@@ -1,0 +1,44 @@
+{
+  "taskId": "synth-event-speaker-put-contract-context",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-04T23:57:05.218Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "Implement `buildEventSpeakerPutPayload(body: Record<string, any>, dependentData: Record<string, any>): Record<string, an"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 83,
+      "output": "1. web-src/src/services/api.ts (lines 1383-1417, 1.00) [web-src > pages-services]\n1383:async getEventSpeaker(eventId: string, speakerId: string): Promise<any | ErrorResponse> {\n   ...\n\n2. web-src/src/services/api.ts (lines 644-664, 0.98) [web-src > pages-services]\n   method callWithDependency\n   ...\n 644:  /**\n 645:   * Call external API with dependent data (for PUT operations that need existing data)\n 646:   */\n 647:private async callWithDependency<T = any>(\n 648:    service: 'esp' | 'esl',\n   ...\n\n3. web-src/src/services/payloadBuilders.ts (lines 1-68, 0.47) [web-src > hooks-services]\n   Referenced by 1 files (.tsx: 1)\n\n4. web-src/src/utils/dataFilters.ts (lines 489-564, 0.45) [web-src > hooks-services]\n   function getVenuePayload\n   Referenced by 1 files (.tsx: 1)\n\n5. web-src/src/utils/dataFilters.ts (lines 237-274, 0.43) [web-src > hooks-services]\n   function filterSeriesData\n   Referenced by 1 files (.tsx: 1)\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: synth-event-speaker-put-contract-context\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 Implement `buildEventSpeakerPutPayload(body: Record<string, any>, dependentData: Record<string, any>): Record<string, an\n```\n1. web-src/src/services/api.ts (lines 1383-1417, 1.00) [web-src > pages-services]\n1383:async getEventSpeaker(eventId: string, speakerId: string): Promise<any | ErrorResponse> {\n   ...\n\n2. web-src/src/services/api.ts (lines 644-664, 0.98) [web-src > pages-services]\n   method callWithDependency\n   ...\n 644:  /**\n 645:   * Call external API with dependent data (for PUT operations that need existing data)\n 646:   */\n 647:private async callWithDependency<T = any>(\n 648:    service: 'esp' | 'esl',\n   ...\n\n3. web-src/src/services/payloadBuilders.ts (lines 1-68, 0.47) [web-src > hooks-services]\n   Referenced by 1 files (.tsx: 1)\n\n4. web-src/src/utils/dataFilters.ts (lines 489-564, 0.45) [web-src > hooks-services]\n   function getVenuePayload\n   Referenced by 1 files (.tsx: 1)\n\n5. web-src/src/utils/dataFilters.ts (lines 237-274, 0.43) [web-src > hooks-services]\n   function filterSeriesData\n   Referenced by 1 files (.tsx: 1)\n```\n",
+  "renderedBlockHash": "bdbc85a429fcfeb8",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

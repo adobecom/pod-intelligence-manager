@@ -30,16 +30,17 @@ export const bedrockRunner: LLMRunner = {
     const region = process.env.AWS_REGION || "us-west-2";
     const model = config.model || DEFAULT_MODEL;
     const url = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodeURIComponent(model)}/converse`;
+    const supportsPromptCaching = /anthropic|claude/i.test(model);
 
     const system: ConverseSystemBlock[] = [{ text: prompt.system }];
     if (prompt.pimContext && prompt.pimContext.trim().length > 0) {
       system.push({ text: prompt.pimContext });
       // Cache breakpoint after the (stable) PIM context so subsequent calls
       // for the same pod/system reuse the cached prefix.
-      system.push({ cachePoint: { type: "default" } });
+      if (supportsPromptCaching) system.push({ cachePoint: { type: "default" } });
     } else {
       // Cache the system prompt alone in the control arm for fairness on repeat runs.
-      system.push({ cachePoint: { type: "default" } });
+      if (supportsPromptCaching) system.push({ cachePoint: { type: "default" } });
     }
 
     const body = {

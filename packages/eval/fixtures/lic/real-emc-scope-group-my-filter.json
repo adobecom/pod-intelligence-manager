@@ -1,0 +1,71 @@
+{
+  "taskId": "real-emc-scope-group-my-filter",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "c4c8d9bfc2916fa70d9d39ef56dd44b198c2a2bf",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291"
+  },
+  "generatedAt": "2026-06-04T23:51:51.986Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+        "useGroup"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+      "exitCode": 0,
+      "durationMs": 104,
+      "output": "Definition: web-src/src/contexts/GroupContext.tsx (lines 277-283)\n  Name: useGroup (const)\n   277: (): GroupContextValue => {\n   278:   const context = useContext(GroupContext)\n   279:   if (!context) {\n   280:     throw new Error('useGroup must be used within a GroupProvider')\n   281:   }\n   282:   return context\n   283: }\n\nReferences (21 shown, 6 total):\n\n  1. web-src/src/components/RBACGate.tsx:18-22 []\n  2. web-src/src/components/RBACGate.tsx:32-36 []\n  3. web-src/src/components/RBACGate.tsx:119-123 []\n  4. web-src/src/components/layout/TopNav.tsx:13-17 []\n  5. web-src/src/components/layout/TopNav.tsx:21-25 []\n  6. web-src/src/components/shared/GroupSwitcher.tsx:10-17 []\n  7. web-src/src/components/user/UserPanel.tsx:31-35 []\n  8. web-src/src/components/user/UserPanel.tsx:44-48 []\n  9. web-src/src/contexts/index.ts:33-37 []\n  10. web-src/src/hooks/useHasPermission.ts:12-16 []\n  11. web-src/src/hooks/useHasPermission.ts:50-54 []\n  12. web-src/src/hooks/useHasPermission.ts:58-62 []\n  13. web-src/src/hooks/useRBACFilter.ts:9-17 []\n  14. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:25-29 []\n  15. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:105-109 []\n  16. web-src/src/pages/Home.tsx:18-22 []\n  17. web-src/src/pages/Home.tsx:158-162 []\n  18. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:22-26 []\n  19. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:88-92 []\n  20. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:37-41 []\n  21. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:60-64 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/contexts/index.ts::useGroup\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+        "--direction",
+        "callers",
+        "useGroup"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+      "exitCode": 0,
+      "durationMs": 25,
+      "output": "Ambiguous symbol — candidates (1):\n  web-src/src/contexts/index.ts::useGroup\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+        "useGroup"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-c4c8d9bfc291",
+      "exitCode": 0,
+      "durationMs": 28,
+      "output": "## const `useGroup` ★\n\n**Kind:** const | **File:** `web-src/src/contexts/GroupContext.tsx` | **Line:** 277\n\n```\nexport const useGroup = (): GroupContextValue => {\n  const context = useContext(GroupContext)\n  if (!context) {\n    throw new Error('useGroup must be used within a GroupProvider')\n  }\n  return context\n}\n```\n\n**Symbol popularity:** 0.93 (top 1%) ★ | **File CodeRank:** 0.59\n**References:** 6 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `useRBACFilter` ★ (function) — `web-src/src/hooks/useRBACFilter.ts:14` (score 0.65)\n- `useHasPermission` ★ (function) — `web-src/src/hooks/useHasPermission.ts:51` (score 0.63)\n- `handleMenuAction` ★ (function) — `web-src/src/components/user/UserPanel.tsx:66` (score 0.57)\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55` (score 0.21)\n- `Registrations` (const) — `web-src/src/pages/Registrations/Registrations.tsx:29` (score 0.21)\n\n**Domain**: components-pages > src\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-scope-group-my-filter\n_Stratum: S2._\n\n## lic find-references -r useGroup\n```\nDefinition: web-src/src/contexts/GroupContext.tsx (lines 277-283)\n  Name: useGroup (const)\n   277: (): GroupContextValue => {\n   278:   const context = useContext(GroupContext)\n   279:   if (!context) {\n   280:     throw new Error('useGroup must be used within a GroupProvider')\n   281:   }\n   282:   return context\n   283: }\n\nReferences (21 shown, 6 total):\n\n  1. web-src/src/components/RBACGate.tsx:18-22 []\n  2. web-src/src/components/RBACGate.tsx:32-36 []\n  3. web-src/src/components/RBACGate.tsx:119-123 []\n  4. web-src/src/components/layout/TopNav.tsx:13-17 []\n  5. web-src/src/components/layout/TopNav.tsx:21-25 []\n  6. web-src/src/components/shared/GroupSwitcher.tsx:10-17 []\n  7. web-src/src/components/user/UserPanel.tsx:31-35 []\n  8. web-src/src/components/user/UserPanel.tsx:44-48 []\n  9. web-src/src/contexts/index.ts:33-37 []\n  10. web-src/src/hooks/useHasPermission.ts:12-16 []\n  11. web-src/src/hooks/useHasPermission.ts:50-54 []\n  12. web-src/src/hooks/useHasPermission.ts:58-62 []\n  13. web-src/src/hooks/useRBACFilter.ts:9-17 []\n  14. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:25-29 []\n  15. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:105-109 []\n  16. web-src/src/pages/Home.tsx:18-22 []\n  17. web-src/src/pages/Home.tsx:158-162 []\n  18. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:22-26 []\n  19. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:88-92 []\n  20. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:37-41 []\n  21. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:60-64 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/contexts/index.ts::useGroup\n```\n\n## lic call-graph -r --direction callers useGroup\n```\nAmbiguous symbol — candidates (1):\n  web-src/src/contexts/index.ts::useGroup\n```\n\n## lic explain-symbol -r useGroup\n```\n## const `useGroup` ★\n\n**Kind:** const | **File:** `web-src/src/contexts/GroupContext.tsx` | **Line:** 277\n\n```\nexport const useGroup = (): GroupContextValue => {\n  const context = useContext(GroupContext)\n  if (!context) {\n    throw new Error('useGroup must be used within a GroupProvider')\n  }\n  return context\n}\n```\n\n**Symbol popularity:** 0.93 (top 1%) ★ | **File CodeRank:** 0.59\n**References:** 6 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `useRBACFilter` ★ (function) — `web-src/src/hooks/useRBACFilter.ts:14` (score 0.65)\n- `useHasPermission` ★ (function) — `web-src/src/hooks/useHasPermission.ts:51` (score 0.63)\n- `handleMenuAction` ★ (function) — `web-src/src/components/user/UserPanel.tsx:66` (score 0.57)\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55` (score 0.21)\n- `Registrations` (const) — `web-src/src/pages/Registrations/Registrations.tsx:29` (score 0.21)\n\n**Domain**: components-pages > src\n```\n",
+  "renderedBlockHash": "34280ee99a56e909",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": false,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "ground-truth symbol retrieved: contexts, useHasPermission",
+      "post-merge answer symbol leak: useHasPermission",
+      "task intent matched"
+    ]
+  }
+}

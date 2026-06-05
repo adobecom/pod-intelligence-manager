@@ -26,6 +26,35 @@ export interface Rubric {
   criteria: RubricCriterion[];
 }
 
+/** PIM-vs-lic protocol strata. S7 = content-gen, S6 = archaeology (both excluded from the headline). */
+export type Stratum = "S1" | "S2" | "S3" | "S4" | "S5" | "S6" | "S7";
+
+/**
+ * Prompt realism tier (orthogonal to stratum). The headline claim uses only
+ * `realistic-ticket`; the others are reported separately.
+ * - `saturated`: issue + exact implementation checklist / pasted source (sanity check).
+ * - `realistic-ticket`: ticket/issue text + at most one starting-file hint (headline).
+ * - `underspecified`: vague symptom or outcome only.
+ * - `context-required`: deliberately omits an org convention / prior decision.
+ */
+export type PromptTier = "saturated" | "realistic-ticket" | "underspecified" | "context-required";
+
+/** Seed `lic-freeze` uses to retrieve a task's lic fixture: a symbol and/or NL query. */
+export interface LicSeed {
+  symbol?: string;
+  investigateQuery?: string;
+}
+
+/** Provenance of a real-PR-derived task; consumed by the lic freezer and rigor audits. */
+export interface TaskProvenance {
+  /** Merge commit SHA of the source PR. */
+  mergeSha?: string;
+  /** Parent (pre-merge) SHA — S2 worktree-per-asOf indexing needs this. */
+  parentSha?: string;
+  /** URL of the source PR or issue. */
+  sourceUrl?: string;
+}
+
 export interface Task {
   id: string;
   type: TaskType;
@@ -60,4 +89,25 @@ export interface Task {
   };
   /** Tag tasks for filtering: e.g., "smoke", "rbac". */
   tags?: string[];
+  /**
+   * Stratification metadata for the PIM-vs-lic protocol (see tasks/stratification.ts).
+   * Most real-emc tasks get `stratum`/`licSeed` from the assignments map; S5/S6
+   * tasks declare `stratum` inline. `excluded` drops saturated/no-signal tasks.
+   */
+  stratum?: Stratum;
+  excluded?: boolean;
+  /**
+   * Prompt realism tier. When unset, `classifyPromptTier` derives it from the
+   * tier map / tags. The headline claim is restricted to `realistic-ticket`.
+   */
+  promptTier?: PromptTier;
+  /** Seed used by `lic-freeze` to retrieve this task's lic fixture. */
+  licSeed?: LicSeed;
+  /** Provenance of a real-PR-derived task. */
+  provenance?: TaskProvenance;
+  /**
+   * Point-in-time anchor (ISO timestamp). When set, time-aware arms can restrict
+   * PIM context to on/before this instant to avoid temporal leakage.
+   */
+  asOf?: string;
 }

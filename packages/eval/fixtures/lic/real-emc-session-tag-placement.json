@@ -1,0 +1,60 @@
+{
+  "taskId": "real-emc-session-tag-placement",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-05-28T04:37:43.568Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "session tag placement house style"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 28,
+      "output": "Found 4 results\n\n## High relevance\n\n1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 602-661, score: 1.00) [web-src > pages]\n   arrow_function SessionForm\n   ...\n 602:esh={refreshSeriesSpeakers}\n 603:      />\n 604:    </div>\n 605:  );\n   ...\n\n2. web-src/src/components/shared/TagSelector.tsx (lines 1-67, score: 0.77) [web-src > pages-utils]\n   1:import React, { useState, useEffect } from 'react'\n   2:import { Text, SearchField } from '@react-spectrum/s2'\n   3:import { style } from '@react-spectrum/s2/style' with { type: 'macro' }\n   4:import Close from '@react-spectrum/s2/icons/Close'\n   5:import Add from '@react-spectrum/s2/icons/Add'\n   ...\n\n## Moderate relevance\n\n3. web-src/src/components/shared/TagSelector.tsx (lines 220-280, score: 0.69) [web-src > pages-utils]\n   arrow_function TagSelector\n\n4. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 72-121, score: 0.43) [web-src > pages]\n   function SessionTimeRegistrationFields\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "SessionTag"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "No definition found for \"SessionTag\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/Registrations/SessionsTab.tsx::SessionsTabProps`\n3. `web-src/src/pages/Registrations/SessionsTab.tsx::SessionsTab`\n4. `web-src/src/types/domain.ts::ResourceSummary::sessions`\n5. `web-src/src/types/sessions.ts::SessionRow::sessionId`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-session-tag-placement\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 session tag placement house style\n```\nFound 4 results\n\n## High relevance\n\n1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 602-661, score: 1.00) [web-src > pages]\n   arrow_function SessionForm\n   ...\n 602:esh={refreshSeriesSpeakers}\n 603:      />\n 604:    </div>\n 605:  );\n   ...\n\n2. web-src/src/components/shared/TagSelector.tsx (lines 1-67, score: 0.77) [web-src > pages-utils]\n   1:import React, { useState, useEffect } from 'react'\n   2:import { Text, SearchField } from '@react-spectrum/s2'\n   3:import { style } from '@react-spectrum/s2/style' with { type: 'macro' }\n   4:import Close from '@react-spectrum/s2/icons/Close'\n   5:import Add from '@react-spectrum/s2/icons/Add'\n   ...\n\n## Moderate relevance\n\n3. web-src/src/components/shared/TagSelector.tsx (lines 220-280, score: 0.69) [web-src > pages-utils]\n   arrow_function TagSelector\n\n4. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 72-121, score: 0.43) [web-src > pages]\n   function SessionTimeRegistrationFields\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r SessionTag\n```\nNo definition found for \"SessionTag\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/Registrations/SessionsTab.tsx::SessionsTabProps`\n3. `web-src/src/pages/Registrations/SessionsTab.tsx::SessionsTab`\n4. `web-src/src/types/domain.ts::ResourceSummary::sessions`\n5. `web-src/src/types/sessions.ts::SessionRow::sessionId`\n```\n",
+  "renderedBlockHash": "adc40e47223e58f1",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: React, SessionFormProps",
+      "post-merge answer symbol leak: SessionFormProps",
+      "task intent matched"
+    ]
+  }
+}

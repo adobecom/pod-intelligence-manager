@@ -1,16 +1,13 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import ts from "typescript";
 import type { Task, TestCase } from "../tasks/types.js";
 import type { JudgeResult } from "./types.js";
 
 const RESULT_PREFIX = "PIM_EVAL_RESULT::";
 const DEFAULT_TIMEOUT_MS = 30_000;
-const require = createRequire(import.meta.url);
-const TSX_LOADER_IMPORT_SPECIFIER = pathToFileURL(require.resolve("tsx")).href;
 
 interface RunnerResult {
   results: Array<{ name: string; passed: boolean; error?: string }>;
@@ -36,12 +33,12 @@ export async function judgeCode(task: Task, output: string): Promise<JudgeResult
 
   const dir = await mkdtemp(join(tmpdir(), "pim-eval-"));
   try {
-    const candidatePath = join(dir, "candidate.ts");
-    const runnerPath = join(dir, "runner.ts");
-    await writeFile(candidatePath, buildCandidate(code, task.testHarness));
-    await writeFile(runnerPath, buildRunner(task.tests));
+    const candidatePath = join(dir, "candidate.mjs");
+    const runnerPath = join(dir, "runner.mjs");
+    await writeFile(candidatePath, transpileTypeScript(buildCandidate(code, task.testHarness)));
+    await writeFile(runnerPath, transpileTypeScript(buildRunner(task.tests)));
 
-    const exec = await runProcess(process.execPath, ["--import", TSX_LOADER_IMPORT_SPECIFIER, runnerPath], {
+    const exec = await runProcess(process.execPath, [runnerPath], {
       cwd: dir,
       timeoutMs: DEFAULT_TIMEOUT_MS,
     });
@@ -86,7 +83,7 @@ function buildCandidate(code: string, harness?: string): string {
 
 function buildRunner(tests: TestCase[]): string {
   return [
-    `import * as mod from "./candidate.ts";`,
+    `import * as mod from "./candidate.mjs";`,
     `import assert from "node:assert/strict";`,
     `(async () => {`,
     `  const results: Array<{ name: string; passed: boolean; error?: string }> = [];`,
@@ -97,6 +94,17 @@ function buildRunner(tests: TestCase[]): string {
     `  process.exit(2);`,
     `});`,
   ].join("\n");
+}
+
+function transpileTypeScript(source: string): string {
+  return ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ES2022,
+      esModuleInterop: true,
+      sourceMap: false,
+    },
+  }).outputText;
 }
 
 function buildOneTest(t: TestCase): string {

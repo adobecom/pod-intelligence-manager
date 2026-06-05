@@ -1,0 +1,72 @@
+{
+  "taskId": "real-emc-sxsw-ticket-field-config-service",
+  "stratum": "S5",
+  "recipe": [
+    "keyword-search",
+    "find-references",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "cd1892d42c98c523d7c322f7e3a4f86226d2edb6",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98"
+  },
+  "generatedAt": "2026-06-04T23:57:05.111Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+        "-l",
+        "5",
+        "SXSW ticket field configuration service"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+      "exitCode": 0,
+      "durationMs": 79,
+      "output": "1. web-src/src/services/configService.ts (lines 181-230, 0.29)\n   method getSeriesTemplates\n   Referenced by 1 files (.tsx: 1)\n\n   *(also at lines 127-179)*\n3. web-src/src/pages/EventForm/RegistrationFieldsComponent.tsx (lines 13-34, 0.27) ★\n   interface RsvpConfigField\n\n4. web-src/src/hooks/useRsvpConfig.ts (lines 124-219, 0.24)\n   function getColumnWidth\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+        "TicketFieldConfigService"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "No definition found for: TicketFieldConfigService\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+        "TicketFieldConfigService"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-cd1892d42c98",
+      "exitCode": 0,
+      "durationMs": 26,
+      "output": "No definition found for symbol: \"TicketFieldConfigService\"\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-sxsw-ticket-field-config-service\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 SXSW ticket field configuration service\n```\n1. web-src/src/services/configService.ts (lines 181-230, 0.29)\n   method getSeriesTemplates\n   Referenced by 1 files (.tsx: 1)\n\n   *(also at lines 127-179)*\n3. web-src/src/pages/EventForm/RegistrationFieldsComponent.tsx (lines 13-34, 0.27) ★\n   interface RsvpConfigField\n\n4. web-src/src/hooks/useRsvpConfig.ts (lines 124-219, 0.24)\n   function getColumnWidth\n\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic find-references -r TicketFieldConfigService\n```\nNo definition found for: TicketFieldConfigService\n```\n\n## lic explain-symbol -r TicketFieldConfigService\n```\nNo definition found for symbol: \"TicketFieldConfigService\"\n```\n",
+  "renderedBlockHash": "51754bd53e66bb70",
+  "quality": {
+    "signal": "strong",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: services, column",
+      "task intent matched"
+    ]
+  }
+}

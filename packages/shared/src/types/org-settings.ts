@@ -51,7 +51,7 @@ export interface OrgTuning {
     openConflictMinConf: number;
     types: KnowledgeNodeType[];
   };
-  conflictScout: {
+  conflictLic: {
     additiveMinConf: number;      // default 0.65
     overlapForceMinConf: number;  // default 0.65
     suppressMergeMinConf: number; // default 0.65

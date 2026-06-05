@@ -1,0 +1,616 @@
+{
+  "id": "pim-vs-lic-haiku-v2-2026-06-04",
+  "protocol": "protocols/pim-vs-lic-haiku-v2.md",
+  "minimumTaskCount": 30,
+  "createdAt": "2026-06-04T22:30:06.220Z",
+  "headLeakWaived": true,
+  "tasks": [
+    {
+      "id": "real-emc-datatable-horizontal-edge-scroll",
+      "promptHash": "38f5e5ab32b785076e4ad40d090dcbc08fd6bdb8760aa3bf140a5c7950db6b7e",
+      "groundTruthHash": "947b30fd83f6967023405482d36828c59ee402ccd8ec3ff362fe4a1aba6f788b",
+      "rubricHash": "0e28b3067f6b1ec1318de9bab85466e88b01f632c89287c115de6cde67602f80",
+      "asOf": "2026-04-02T12:17:29-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "adf366a860c811c6e1e9d725ec6a214d0576abe8456e14017b767879ad18c43b",
+      "licSeedHash": "f2ba07783c879f30fb459a6c50c4d40bdf48c294342f8b2c4413895efb634c69",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 1059,
+        "groundTruthChars": 8132,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "ui",
+          "datatable",
+          "a11y"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-detail-page-path-put",
+      "promptHash": "eadd40bb157bfff5d388af930c49b0154e6b5dacaecde0b84953479b990a2e87",
+      "groundTruthHash": "fd2293447f2c4ee75fbb12de064980cfcb68a9f835f86903ee1499616ca338a7",
+      "rubricHash": "a62ce008d02745ecd56ddd8f312ed1f20214b4d69dd9d87d1b4b66aff6b3eba0",
+      "asOf": "2026-04-06T18:04:48-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "53a2c2ba988bce1cd64e3865b1e49448e9b78d4ca76ca5a3a403204d62f16680",
+      "licSeedHash": "4af98ce8b78c1d19b10977662941af58e6001b463e976116694201e438dc2edc",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 2873,
+        "groundTruthChars": 1654,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "vague-issue",
+          "api",
+          "dataFilters"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-event-form-route-with-event-id",
+      "promptHash": "fe05291a3f332970d5ccc320a84ff7516387bd3bfb4f18660a4371c13faee996",
+      "groundTruthHash": "04ed4fe44d3cac8989af72faa2849d89ab222946803c380d20ae19f6531e859e",
+      "rubricHash": "bced8c09856207518cb76311fe924ac9408af893ca29de6ba0a283f38194b765",
+      "asOf": "2026-05-12T11:39:29-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "6fd7ec06b1d073064ebe3f9cc136e071d535c7d59d4d37c49a1e24d73ed5b126",
+      "licSeedHash": "585aa68f89cd3cc96cdb77747ed479d2c861385404e46641a8b249e6fbac3208",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 752,
+        "groundTruthChars": 2455,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "event-form",
+          "routing"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-event-mod-time-sync-after-session",
+      "promptHash": "61834064f93f74d858e2640b4513ab62816603a69b6b52daa94a4b631babcb72",
+      "groundTruthHash": "7333a054009dcaf17d465d0f60ef48fc2efad0aad241c96340c80a081a480671",
+      "rubricHash": "bd3415cea5fdfca1e505e081c64eb8cf9fc5565f52ed07d29b8248d3d5fa0edd",
+      "asOf": "2026-03-31T10:56:29-07:00",
+      "stratum": "S2",
+      "licFixtureHash": "3c4041b845e0a2968ea0549bf4d7c0a9efd5ed5ad653097851af8288a4ee7743",
+      "licSeedHash": "a7df40d9576b5ca3ed30a17a20f47c57a4fdd991885518942263aca01c64819c",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 747,
+        "groundTruthChars": 1852,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "api",
+          "esp",
+          "sessions"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-event-put-omit-detail-page-path",
+      "promptHash": "00324db01484fa8e2ed3778f4581b9a2d059ab287bfbea72534d5ebbc12f882c",
+      "groundTruthHash": "338c20090b1d2a22477e1c2a2e35cbd39ca7c661985e2e0405707a09d29428b3",
+      "rubricHash": "31c32742351eb75ff0bd4ed86d2f620e28acc0931a2c343dcd96550fe23a7eab",
+      "asOf": "2026-04-02T10:46:18-07:00",
+      "stratum": "S3",
+      "licFixtureHash": "d1ba94d3b00ea059131b673386d43034b817e566739b3deb3fad7cf2a7aeefdb",
+      "licSeedHash": "3869475618be438332f6ade4f91f20f808611a9be28aecbc2f887ff28e062df4",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 710,
+        "groundTruthChars": 2271,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "esl",
+          "api-contract",
+          "data-filters"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-include-partners-toggle",
+      "promptHash": "43bfc9dea1689b23385c64dcd4fd408736ff2bf6df738616ca078ce519ea4075",
+      "groundTruthHash": "49c2d9b4cfeb3d743231fce11d581ca13fe1ddf9ddfb143a4b0cabc49005ff56",
+      "rubricHash": "c0e87683261ea29ec9804e5e250db9d708891cc0e8e9e50981c668c9e555d3c5",
+      "asOf": "2026-04-06T13:02:27-07:00",
+      "stratum": "S4",
+      "licFixtureHash": "0719cfdd749d7ad981169d2fb73544f7c517eff14c4164ef68fb87923fc81e0a",
+      "licSeedHash": "6b28768e12626b71c8581c735b6f086a153c6fa5602032923b3e986c23dc2a55",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 3875,
+        "groundTruthChars": 3439,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "vague-issue",
+          "form"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-partner-put-sponsor-id-payload",
+      "promptHash": "7022d2e29cb0daab14952b0c25edec343061155f3e5293f540f228e103205d8a",
+      "groundTruthHash": "83f7239865a789fa501b2b4b6d237afe0586b0b09da113086360ee8a688a30c3",
+      "rubricHash": "54084afd0bfd614ea7e7db3192128533234625e808a93f522059c82a18652a36",
+      "asOf": "2026-03-30T21:55:20-07:00",
+      "stratum": "S3",
+      "licFixtureHash": "70b1653481f15b84901d6e949ccdcaa7ca85b643a1a9fe4403633c307ff029aa",
+      "licSeedHash": "5df2a7c701b8197317468f1cedb42e3349250354745c777df1c85d17898bbfbc",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 763,
+        "groundTruthChars": 1433,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "sponsors",
+          "payload-builder",
+          "esp-contract"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-ppn-ack-hydration",
+      "promptHash": "f294439d8aecc6bc5403b36cb6e08ddf89cb13ef562810e3c5d2ec783f36e729",
+      "groundTruthHash": "85a01555acd241fc165845f8d5b56b6b1ee1fc38b7c8422c625a15327c3d1b82",
+      "rubricHash": "91c7d6937bc0958cfa13055d14780c2666e35709da56bb2145d189c7f59e4a4f",
+      "asOf": "2026-05-14T14:26:16+05:30",
+      "stratum": "S2",
+      "licFixtureHash": "43b4a90d17855107f613c0def33362c438cae188824672274ee5317c243696bb",
+      "licSeedHash": "57e8d4c3f3e4a6d26642bb0532aa7d02791668b39390cf0930b5ef519f648b7f",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 960,
+        "groundTruthChars": 10664,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "event-form",
+          "hydration",
+          "race"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-ppn-explicit-select",
+      "promptHash": "6b370d34c832b308850c5a0a0e4012e20d081e489afaddbbe60943df9a8c5069",
+      "groundTruthHash": "6ad757eee3280b96fd2fab335295104591f61697143dd068bae5c705a723ffb8",
+      "rubricHash": "3cdeb7205ad10355252a0be241afcb060b511406e2e74a3e8cf81c3eafd9a826",
+      "asOf": "2026-05-08T09:30:55-07:00",
+      "stratum": "S4",
+      "licFixtureHash": "208bfb342242b579906249150193500b0ae64905975f532797bfd34e888ab446",
+      "licSeedHash": "79bc566a40eb2e72b8973ea9242f04addb8f1ad77c0d8d5bbe9864b490eaafe3",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 830,
+        "groundTruthChars": 3955,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "form",
+          "metadata",
+          "validation"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-prod-publish-confirmation",
+      "promptHash": "22fc6ab0140a006a79d4ffc041da11f9bdd337ff3a7de53e2789c6a7cd5b9fed",
+      "groundTruthHash": "45d3d7dda6657d8b8e2d62e524ec38345d2eb6141623797a39e6a1997594dc57",
+      "rubricHash": "493baace3c2b2d875c7cfad2484b6f9d42756b9d9f0c91a15ee29b2366658117",
+      "asOf": "2026-05-05T09:48:40-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "f9295363b0b0fa257b26b25f9ea2ae66576969e191bf21462e6708146f63f70a",
+      "licSeedHash": "4947d9b33c680848d4fa3355c6dced2816eaba1c919296c1fb4cc5da695d8eb5",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 3874,
+        "groundTruthChars": 4494,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "housestyle",
+          "form"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-rbac-events-dashboard-gating",
+      "promptHash": "4ed08fbe19b44a74ec434b1ba395a48f572f87d6295609dc4d9cda0353040d6c",
+      "groundTruthHash": "8e701b70a10e7140c85d9b65b2464088b40780d75be0267db307a888b88c03ad",
+      "rubricHash": "7d33fb93c043214bf91c8872f6182b34ce53056bbfc6e9c2784d106fceb5a980",
+      "asOf": "2026-03-25T16:02:19-07:00",
+      "stratum": "S3",
+      "licFixtureHash": "788a4ba8baab4c2dc86cf6e1e80a6f6580f93ac71276e91045dd84c92e9fb1ca",
+      "licSeedHash": "4a398d42188f468a6f756235c154f7c1ff695067ac321e83d0ae10580ffff6ef",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 843,
+        "groundTruthChars": 4758,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "rbac",
+          "ui"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-rte-quill-semantic-html",
+      "promptHash": "8951852625d1f82bf4cee2901c587866cae7cac2491bb01fac087f7276bca317",
+      "groundTruthHash": "3f46474757463d8f93c8b4d18f4cab7c87b30a2dea6f9b466d8716547c6835d4",
+      "rubricHash": "91710ce6e70015a3e6ab850b09a23c64f5bd5f40d480a9af712dbd9ae0c9d6ab",
+      "asOf": "2026-04-07T14:55:25-07:00",
+      "stratum": "S5",
+      "licFixtureHash": "1a715ea878f920bd8b21d061d39685aba0f58e46c03fa54a6c0fab308395afba",
+      "licSeedHash": "8524427ed632d52625739c92ddb27aa872b9f0afd50c359aa82b3dfbc758f76c",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 906,
+        "groundTruthChars": 3795,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "off-scope",
+          "rich-text"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-s2-tabs-crash-segmented-control",
+      "promptHash": "e0b10db475314956fa0dfe2af0e936114ec48e12bd00dca8f27c3c5cdfcd9ec3",
+      "groundTruthHash": "08f7045210a9ffcf06707cd400dbb02e5fd2e918feb540d53a1d52d5b9571b87",
+      "rubricHash": "940b8d09aa25bcbb36cdf8f9c5138d305ce67e118fc4bf434c12115fdf427a94",
+      "asOf": "2026-05-05T14:34:21-07:00",
+      "stratum": "S5",
+      "licFixtureHash": "17e38370a19c4ddf538defec8d5c850dc9e7195a55cd499531934bdb22da8b4f",
+      "licSeedHash": "658e8f6c509a1c958025143c0809f5936eea2bac5afce6fd5d575ffb3f3023a8",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 825,
+        "groundTruthChars": 3781,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "off-scope",
+          "ui-lib"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-scope-group-my-filter",
+      "promptHash": "891f3b271b94d06957fca6d3b1be3e550789e21eea0dcb44f5f1e2aacc6e8a2f",
+      "groundTruthHash": "f5f64362ba402ec4f12aba422a73ac401d3a1f2194d47a864e1f49d882db83b0",
+      "rubricHash": "8ec1abd45e07b665513547442e50476b4f49ae470e052fc8b9bac9d3d9605fcc",
+      "asOf": "2026-03-25T16:30:11-07:00",
+      "stratum": "S2",
+      "licFixtureHash": "83603c81993e2a4042a1db5f9a015da6208668b994fca645a442469342ba567e",
+      "licSeedHash": "ba6395c536c07f30b80e586f7fb5ad6182a68eb75a8cd3bc9d31419d71836177",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 1055,
+        "groundTruthChars": 10997,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "rbac",
+          "ui"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-series-form-footer-alignment",
+      "promptHash": "26ec04c3ecdc97e407d6312c7eef5d98edaa73002643b1aee72310649ee071a4",
+      "groundTruthHash": "ab9e7344256a501d0f38d18fa34d7d2257cd32cfe616200e5a2f6569314e534b",
+      "rubricHash": "7f95ce5babc6341fa4f0f0b2db63d247f084944b93e6834056322c0552649766",
+      "asOf": "2026-03-31T12:37:56-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "3453dce7068bf2cdbb730e99dbb4b07a56e11c27ff16eafd3438034b51b4770c",
+      "licSeedHash": "f146e280b4786c7e6097e7efd463b09cc05f6ea9984ed181f940e1e84bae720a",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 813,
+        "groundTruthChars": 3604,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "ui",
+          "layout",
+          "s2"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-series-put-readonly-targetcms",
+      "promptHash": "2912afd1ed1a314b68029429514958f169d801c2c5d5bfd4989f22788eb25baa",
+      "groundTruthHash": "cff0b60356ac42700242f376cfb571e1aa8a5e426b229227d7b0c201940ac9f1",
+      "rubricHash": "8e10a695a1f376d0ac6614bf5331053fd93ac92788c316a9e6b033cb1d016639",
+      "asOf": "2026-05-08T09:31:10-07:00",
+      "stratum": "S3",
+      "licFixtureHash": "f78be4cd592bb85e00e943e045992bad86a573aba9590581964371a84fc33b6d",
+      "licSeedHash": "dbc4b47a6f94e663bf3b0d5891d742750184aa9511eeb20c6d02f465bc6534f5",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 2587,
+        "groundTruthChars": 2791,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "housestyle",
+          "api",
+          "esp",
+          "anti-pattern"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-session-api-batch-optimisation",
+      "promptHash": "8ba5aebb7d082e314673d6e8c6857a613cf130abab4e36485bfaa032469c2be1",
+      "groundTruthHash": "4f29adc4cbcd7abea34cd82ac91954fb0f97a45cb26354ebaa0d2a4e95407010",
+      "rubricHash": "41d421682a84ff5edf90d4baec8e3a3b174aa7680f15fc0d1ce08fba58ecbe77",
+      "asOf": "2026-04-06T08:51:30-07:00",
+      "stratum": "S2",
+      "licFixtureHash": "7cbbe2d2c8097dc772c9bf1a3ff051f46a5296300f1e049873095d8c81fd3b4f",
+      "licSeedHash": "8d303a569500bebdae64124a96051ee1b1469a627509ba17de33f61fba1a30f2",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 833,
+        "groundTruthChars": 1658,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "api",
+          "perf"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-session-api-error-toast",
+      "promptHash": "d56154d485f9567fd6d4ced22e9e0ae452643db17d0767d4fe09aaba7d6d58d8",
+      "groundTruthHash": "b6ddcf94cbcdc5013a30d82ca7a31962ec9927ab5f25c70a0fd65a4dfdeef160",
+      "rubricHash": "f9534e8e0f46d3a36c5fa9a92379643e40e55afad2bf6c5da389ed5bd097359a",
+      "asOf": "2026-04-30T13:31:18-07:00",
+      "stratum": "S4",
+      "licFixtureHash": "794866762b8fa801be0c36e02435216f32300a58940c1d9849281d188be3f2bd",
+      "licSeedHash": "b63d17798c5489895306148e41b57ba96488d38cc8b6e92f99dad85251ee44f0",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 767,
+        "groundTruthChars": 1577,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "ui",
+          "toast",
+          "error-handling"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-session-location-time-overlap",
+      "promptHash": "2c24e38a58c9c8f6222c9469deedaa4d03dcc60d063e6fede2f44cb01c995000",
+      "groundTruthHash": "b041bdf87b0760b535cd928f17c304080eca46e708ea7221d459c6cccc0d2702",
+      "rubricHash": "fe3a95b2281e0a4378ff74f772b595b8c895baddee0966bb80dcb786ce231ddc",
+      "asOf": "2026-05-01T08:47:06-07:00",
+      "stratum": "S3",
+      "licFixtureHash": "6583aec96fbdf8299b225c86a1416a6ad0ec8588dc64a2ce3cc80a18f018a071",
+      "licSeedHash": "97fb82285b6acaad040b5787a1d2defee75861f761852b1871e5be3e28afd2b2",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 5596,
+        "groundTruthChars": 4120,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "housestyle",
+          "session"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-session-time-no-refresh",
+      "promptHash": "a1b6324d367f5eff5f199aa2d8ccba66e9ed3b7382704de860cf94adb9894e4e",
+      "groundTruthHash": "33af9553cd0d4411433d3eca55acb581571e7d423fc3f24dbafdc04c5c7fd93a",
+      "rubricHash": "f52af77590b0c84703d5ec5f459604512375c4a9ef58ed8c26dbe2ecbe60c5ce",
+      "asOf": "2026-04-08T12:51:27-07:00",
+      "stratum": "S1",
+      "licFixtureHash": "54aeaafdfa12f6ea078c0b75e06009e11c1408df1878748f2c4888fdeebf5e20",
+      "licSeedHash": "c55ad39c86f7d7423cb3b8d187ad55561f3c80f98268089167cc57b57b284f30",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 3116,
+        "groundTruthChars": 2742,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "vague-issue",
+          "session"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-speaker-image-cache-invalidate",
+      "promptHash": "2fdbf6e591e01f77375a91f52a0e0005b3f185da2ea871c3b1decc56af92705f",
+      "groundTruthHash": "210902d6367fa0d5e6a90053cbf2b281d256df94ee24c7871ee8a187fc8e2992",
+      "rubricHash": "de067457bf37eda3ef7da36735505ee5da106fca58eac58c8355ea6a3bf5e207",
+      "asOf": "2026-05-20T09:34:03-07:00",
+      "stratum": "S2",
+      "licFixtureHash": "31d345bed71839ec04f96144e2435efa2b40c1945a51a972dfde0f0b2a4e17c8",
+      "licSeedHash": "91bd96af471d0f3407bfe483e23d5bf2551895a196e2166c524fc32e63f2f807",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 806,
+        "groundTruthChars": 2272,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "speakers",
+          "dashboard",
+          "form-state"
+        ]
+      }
+    },
+    {
+      "id": "real-emc-sxsw-ticket-field-config-service",
+      "promptHash": "4dabf56097e1ee35671ad3118bce5c385e5810df119fc14148803ecbcf4d07b8",
+      "groundTruthHash": "80348575b21c08d84232576e6d85c1d56f2a775d90c17dc0a2ff4d02ad926750",
+      "rubricHash": "30b54c70d1d95157eeb5446918492579e12f2fe74c49cdd1d143bdc145c67f4f",
+      "asOf": "2026-05-08T09:31:21-07:00",
+      "stratum": "S5",
+      "licFixtureHash": "64d8d4eaf5426c99a5ffbf9270fa74ebb96f50c336308264e243cd66577035bf",
+      "licSeedHash": "61ae8c9720700ed03d8ba750ecf4c6be3f69684036b87f50d0bdbebf9e61da40",
+      "objectiveClass": {
+        "taskType": "content",
+        "hasGroundTruth": true,
+        "promptChars": 4377,
+        "groundTruthChars": 3736,
+        "sourceTagSnapshot": [
+          "real-emc",
+          "housestyle",
+          "rsvp"
+        ]
+      }
+    },
+    {
+      "id": "synth-event-speaker-put-contract-context",
+      "promptHash": "4f8e6acffb2706c42a81ce1d79f08a0e0d40524d1d68abfdd208846415a2006f",
+      "stratum": "S3",
+      "licFixtureHash": "81f445076d5451dd120a417818cb358720067e339e601cfde3595231ea34bdf3",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 502,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "pim-needed",
+          "api",
+          "esp"
+        ]
+      }
+    },
+    {
+      "id": "synth-session-time-response-state",
+      "promptHash": "abc6b8866180b2335c0e1c3a1c6b5098f755b6031f726f27696478f6e0229508",
+      "stratum": "S4",
+      "licFixtureHash": "79e20c32a2b86a26034bb7cd7c865cbaa020e06ec5c0b449621e50b06b80fc85",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 535,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "pim-needed",
+          "sessions",
+          "state"
+        ]
+      }
+    },
+    {
+      "id": "synth-registration-locale-overlay",
+      "promptHash": "5529c9476bdb9bab695b8492588f899c2e99e0b3d46e755564f5903b0cdcacc6",
+      "stratum": "S4",
+      "licFixtureHash": "d01a3353470833f2d1d7753953de660268065e09ff928330ad0a710ba9eb3e96",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 406,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "pim-needed",
+          "configs",
+          "registration",
+          "localization"
+        ]
+      }
+    },
+    {
+      "id": "synth-event-route-after-create",
+      "promptHash": "a55d18a66318d652d1b13b42be1a08e0d9b8211127a7e7e1b1029944cc4897e2",
+      "stratum": "S2",
+      "licFixtureHash": "1dca6f1f040cc9c02b9d9ce8e9968847aec04cd3db19db047ace0ec0f3aaee32",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 373,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "lic-needed",
+          "event-form",
+          "routing"
+        ]
+      }
+    },
+    {
+      "id": "synth-session-speaker-sync-plan",
+      "promptHash": "d30de3db93e6766f4862febb3a9f1c2ec1778d744134a45bbe6a794838338482",
+      "stratum": "S2",
+      "licFixtureHash": "1b8007a5d0dc3ebcd3b11af57e3b4827af791fb2a4e8e929b66c1312493c0a62",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 348,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "lic-needed",
+          "sessions",
+          "speakers"
+        ]
+      }
+    },
+    {
+      "id": "synth-series-put-update-plan",
+      "promptHash": "58ac07f09ee17877e06786bd387cae196807e6e9774b21ff3868e4e4b48735e1",
+      "stratum": "S2",
+      "licFixtureHash": "7478a1611a9413c99e894f1bb96a3d1dcf99dcb5a32fa33b8061c2b59afbf914",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 407,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "context-stress",
+          "combined-needed",
+          "api",
+          "esp",
+          "series"
+        ]
+      }
+    },
+    {
+      "id": "synth-event-sort-negative-control",
+      "promptHash": "7fa16e0a81c93d7cb0302bd35c1827016cacc90d31431d9dc0edeef22dced821",
+      "stratum": "S1",
+      "licFixtureHash": "3e3d00c9442843183bfdfee7117e9b70854faf5ac926a1b922b4f8f4eaff0a6d",
+      "objectiveClass": {
+        "taskType": "code",
+        "hasGroundTruth": false,
+        "promptChars": 355,
+        "groundTruthChars": 0,
+        "sourceTagSnapshot": [
+          "synthetic",
+          "negative-control",
+          "fully-specified"
+        ]
+      }
+    }
+  ]
+}
