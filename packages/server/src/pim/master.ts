@@ -7,12 +7,12 @@ import { regenerateLivingDoc } from "./agents/summary.js";
 import { detectOverlaps } from "./agents/cross-pod.js";
 import { isLLMAvailable } from "./llm.js";
 import {
-  shouldRunConflictScout,
-  runConflictScout,
-  scoutSaysOpenConflict,
-  scoutSuppressesMergeEscalate,
-  type ScoutRecommendation,
-} from "./agents/conflict-scout.js";
+  shouldRunConflictLic,
+  runConflictLic,
+  licSaysOpenConflict,
+  licSuppressesMergeEscalate,
+  type LicRecommendation,
+} from "./agents/conflict-lic.js";
 import { getOrgTuning } from "../services/org-settings.js";
 
 export interface PimResult {
@@ -21,30 +21,30 @@ export interface PimResult {
   conflictCreated: boolean;
   conflictId?: string;
   note?: string;
-  scout_used?: boolean;
-  scout_recommendation?: ScoutRecommendation | null;
+  lic_used?: boolean;
+  lic_recommendation?: LicRecommendation | null;
   degraded?: boolean;
   error?: string;
 }
 
 export async function processUpdate(update: ContextUpdate, orgId?: string): Promise<PimResult> {
   const tuning = orgId ? getOrgTuning(orgId) : DEFAULT_ORG_TUNING;
-  const scoutTuning = tuning.conflictScout;
+  const licTuning = tuning.conflictLic;
   const classification = classifyUpdate(update, tuning.classifier);
 
-  let scout_used = false;
-  let scout_recommendation: ScoutRecommendation | null = null;
-  let scoutResult = null as Awaited<ReturnType<typeof runConflictScout>>;
+  let lic_used = false;
+  let lic_recommendation: LicRecommendation | null = null;
+  let licResult = null as Awaited<ReturnType<typeof runConflictLic>>;
 
-  if (shouldRunConflictScout(classification, update, scoutTuning)) {
-    scout_used = true;
+  if (shouldRunConflictLic(classification, update, licTuning)) {
+    lic_used = true;
     try {
-      scoutResult = await runConflictScout(update, classification, scoutTuning);
-      if (scoutResult) {
-        scout_recommendation = scoutResult.recommendation;
+      licResult = await runConflictLic(update, classification, licTuning);
+      if (licResult) {
+        lic_recommendation = licResult.recommendation;
       }
     } catch (err) {
-      console.error("[pim-master] Conflict scout failed (non-blocking):", err);
+      console.error("[pim-master] Conflict lic failed (non-blocking):", err);
     }
   }
 
@@ -55,10 +55,10 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
   let degraded = false;
   let error: string | undefined;
 
-  // Scout-forced conflict on overlapping: skip merge LLM when scout is decisive
+  // lic-forced conflict on overlapping: skip merge LLM when lic is decisive
   if (
     classification === "overlapping" &&
-    scoutSaysOpenConflict(scoutResult, scoutTuning.overlapForceMinConf)
+    licSaysOpenConflict(licResult, licTuning.overlapForceMinConf)
   ) {
     const conflict = await tryCreateConflict(update);
     if (conflict) {
@@ -66,19 +66,19 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
       conflictId = conflict.id;
     }
     merged = true;
-    note = scoutResult?.rationale;
+    note = licResult?.rationale;
   } else {
     switch (classification) {
       case "additive": {
         const result = deterministicMerge(update, classification);
         merged = result.merged;
         note = result.note;
-        if (scoutSaysOpenConflict(scoutResult, scoutTuning.additiveMinConf)) {
+        if (licSaysOpenConflict(licResult, licTuning.additiveMinConf)) {
           const conflict = await tryCreateConflict(update);
           if (conflict) {
             conflictCreated = true;
             conflictId = conflict.id;
-            note = scoutResult?.rationale ?? note;
+            note = licResult?.rationale ?? note;
           }
         }
         break;
@@ -93,7 +93,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
           degraded = true;
           error = result.error;
         }
-        if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult, scoutTuning.suppressMergeMinConf)) {
+        if (result.escalate && !licSuppressesMergeEscalate(licResult, licTuning.suppressMergeMinConf)) {
           const conflict = await tryCreateConflict(update);
           if (conflict) {
             conflictCreated = true;
@@ -128,8 +128,8 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
     conflictCreated,
     conflictId,
     note,
-    scout_used,
-    scout_recommendation,
+    lic_used,
+    lic_recommendation,
     ...(degraded ? { degraded } : {}),
     ...(error ? { error } : {}),
   };

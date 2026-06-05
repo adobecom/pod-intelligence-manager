@@ -1,0 +1,70 @@
+{
+  "taskId": "arch-impact-of-removing-detail-page-path",
+  "stratum": "S6",
+  "recipe": [
+    "impact",
+    "find-references",
+    "call-graph"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-05-28T04:13:25.769Z",
+  "calls": [
+    {
+      "tool": "impact",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "detailPagePath"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 20,
+      "output": "## Impact Analysis: web-src/src/types/domain.ts::EventApiResponse::detailPagePath\n\nDirection: upstream (what depends on this)\nDefinition: web-src/src/types/domain.ts:257 (const)\n\n> Ambiguous auto-resolve: chose the most referenced match. For review/change-plan claims, rerun with `file:` or a fully qualified symbol before citing. Alternative: `web-src/src/types/domain.ts::EventDashboardItem::detailPagePath`\n\nNo callers found — this symbol has zero blast radius.\n\n### Risk Summary\n\n|Factor|Value|\n|-|-|\n|Affected symbols|0|\n|Direct callers (d=1)|0|\n|Indirect callers (d=2)|0|\n|Starred symbols (★)|0|\n|Risk level|**LOW**|\n\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "detailPagePath"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 13,
+      "output": "Definition: web-src/src/types/domain.ts (lines 255-291)\n  Name: detailPagePath (const)\n   255:   tags?: string\n   256:   topics?: string[]\n   257:   detailPagePath?: string\n   258:   externalEventId?: string\n   259:   creationTime?: number\n   260:   modificationTime?: number\n   261:   createdBy?: string\n   262:   modifiedBy?: string\n   263:   localizationOverrides?: Record<string, any>\n   264:   localizations?: Record<string, EventLocalization>\n   265:   venue?: Record<string, any>\n   266:   agenda?: AgendaDataItem[] // Localizable array\n   267:   rsvpFormFields?: Record<string, any>\n   268:   rsvpDescription?: string // Localizable\n   269:   video?: VideoData\n   270:   registration?: RegistrationData\n   271:   marketoIntegration?: MarketoIntegrationData\n   272:   liveUpdate?: boolean\n   273:   forceSpWrite?: boolean\n   274:   defaultLocale?: string\n  | ... (17 more lines)\n\nReferences (22 shown, 0 total):\n\n  1. web-src/src/config/detailPageLocalePrefix.ts:1-5 []\n  2. web-src/src/hooks/useCustomDetailPagePath.test.ts:7-11 []\n  3. web-src/src/hooks/useCustomDetailPagePath.test.ts:16-23 []\n  4. web-src/src/hooks/useCustomDetailPagePath.test.ts:26-30 []\n  5. web-src/src/hooks/useEventFormSave.test.ts:17-23 []\n  6. web-src/src/hooks/useEventFormSave.test.ts:37-41 []\n  7. web-src/src/hooks/useEventFormSave.test.ts:43-49 []\n  8. web-src/src/hooks/useEventFormSave.ts:21-25 []\n  9. web-src/src/hooks/useEventFormSave.ts:428-432 []\n  10. web-src/src/hooks/useEventFormSave.ts:457-469 []\n  11. web-src/src/pages/EventForm/EventForm.tsx:505-509 []\n  12. web-src/src/pages/EventForm/EventForm.tsx:679-683 []\n  13. web-src/src/pages/EventForm/EventForm.tsx:777-784 []\n  14. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:126-130 []\n  15. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:408-412 []\n  16. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:421-425 []\n  17. web-src/src/utils/dataFilters.ts:140-144 []\n  18. web-src/src/utils/eventFormMappers.ts:160-164 []\n  19. web-src/src/utils/eventLocaleSwitch.test.ts:122-126 []\n  20. web-src/src/utils/urlPatternResolver.ts:3-7 []\n  21. web-src/src/utils/urlPatternResolver.ts:93-97 []\n  22. web-src/src/utils/urlPatternResolver.ts:162-166 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/types/domain.ts::EventDashboardItem::detailPagePath\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "--direction",
+        "callees",
+        "detailPagePath"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 19,
+      "output": "Ambiguous symbol — candidates (1):\n  web-src/src/types/domain.ts::EventDashboardItem::detailPagePath\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: arch-impact-of-removing-detail-page-path\n_Stratum: S6._\n\n## lic impact -r detailPagePath\n```\n## Impact Analysis: web-src/src/types/domain.ts::EventApiResponse::detailPagePath\n\nDirection: upstream (what depends on this)\nDefinition: web-src/src/types/domain.ts:257 (const)\n\n> Ambiguous auto-resolve: chose the most referenced match. For review/change-plan claims, rerun with `file:` or a fully qualified symbol before citing. Alternative: `web-src/src/types/domain.ts::EventDashboardItem::detailPagePath`\n\nNo callers found — this symbol has zero blast radius.\n\n### Risk Summary\n\n|Factor|Value|\n|-|-|\n|Affected symbols|0|\n|Direct callers (d=1)|0|\n|Indirect callers (d=2)|0|\n|Starred symbols (★)|0|\n|Risk level|**LOW**|\n```\n\n## lic find-references -r detailPagePath\n```\nDefinition: web-src/src/types/domain.ts (lines 255-291)\n  Name: detailPagePath (const)\n   255:   tags?: string\n   256:   topics?: string[]\n   257:   detailPagePath?: string\n   258:   externalEventId?: string\n   259:   creationTime?: number\n   260:   modificationTime?: number\n   261:   createdBy?: string\n   262:   modifiedBy?: string\n   263:   localizationOverrides?: Record<string, any>\n   264:   localizations?: Record<string, EventLocalization>\n   265:   venue?: Record<string, any>\n   266:   agenda?: AgendaDataItem[] // Localizable array\n   267:   rsvpFormFields?: Record<string, any>\n   268:   rsvpDescription?: string // Localizable\n   269:   video?: VideoData\n   270:   registration?: RegistrationData\n   271:   marketoIntegration?: MarketoIntegrationData\n   272:   liveUpdate?: boolean\n   273:   forceSpWrite?: boolean\n   274:   defaultLocale?: string\n  | ... (17 more lines)\n\nReferences (22 shown, 0 total):\n\n  1. web-src/src/config/detailPageLocalePrefix.ts:1-5 []\n  2. web-src/src/hooks/useCustomDetailPagePath.test.ts:7-11 []\n  3. web-src/src/hooks/useCustomDetailPagePath.test.ts:16-23 []\n  4. web-src/src/hooks/useCustomDetailPagePath.test.ts:26-30 []\n  5. web-src/src/hooks/useEventFormSave.test.ts:17-23 []\n  6. web-src/src/hooks/useEventFormSave.test.ts:37-41 []\n  7. web-src/src/hooks/useEventFormSave.test.ts:43-49 []\n  8. web-src/src/hooks/useEventFormSave.ts:21-25 []\n  9. web-src/src/hooks/useEventFormSave.ts:428-432 []\n  10. web-src/src/hooks/useEventFormSave.ts:457-469 []\n  11. web-src/src/pages/EventForm/EventForm.tsx:505-509 []\n  12. web-src/src/pages/EventForm/EventForm.tsx:679-683 []\n  13. web-src/src/pages/EventForm/EventForm.tsx:777-784 []\n  14. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:126-130 []\n  15. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:408-412 []\n  16. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:421-425 []\n  17. web-src/src/utils/dataFilters.ts:140-144 []\n  18. web-src/src/utils/eventFormMappers.ts:160-164 []\n  19.\n```\n\n## lic call-graph -r --direction callees detailPagePath\n```\nAmbiguous symbol — candidates (1):\n  web-src/src/types/domain.ts::EventDashboardItem::detailPagePath\n```\n",
+  "renderedBlockHash": "fd55147dbf573a08",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": false,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "ground-truth symbol retrieved: types, domain, definition, config, detailPageLocalePrefix",
+      "post-merge answer symbol leak: definition, detailPageLocalePrefix, useCustomDetailPagePath, dataFilters, EventForm",
+      "task intent matched"
+    ]
+  }
+}

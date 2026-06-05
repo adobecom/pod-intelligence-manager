@@ -1,0 +1,72 @@
+{
+  "taskId": "real-emc-speaker-image-cache-invalidate",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "84f21c9d968beaaac01eebca2dc1b2cb853a1b68",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b"
+  },
+  "generatedAt": "2026-06-04T23:56:58.890Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+        "speakerImageCache"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+      "exitCode": 0,
+      "durationMs": 29,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+        "--direction",
+        "callers",
+        "speakerImageCache"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+      "exitCode": 0,
+      "durationMs": 26,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+        "speakerImageCache"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
+      "exitCode": 0,
+      "durationMs": 25,
+      "output": "No definition found for \"speakerImageCache\". Did you mean:\n\n1. `web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft`\n2. `web-src/src/utils/eventFormMappers.ts::speakerHasLocalization`\n3. `web-src/src/services/api.ts::ApiService::speakerId`\n4. `web-src/src/services/api.ts::ApiService::speakerType`\n5. `web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-speaker-image-cache-invalidate\n_Stratum: S2._\n\n## lic find-references -r speakerImageCache\n```\nNo exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n```\n\n## lic call-graph -r --direction callers speakerImageCache\n```\nNo exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n```\n\n## lic explain-symbol -r speakerImageCache\n```\nNo definition found for \"speakerImageCache\". Did you mean:\n\n1. `web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft`\n2. `web-src/src/utils/eventFormMappers.ts::speakerHasLocalization`\n3. `web-src/src/services/api.ts::ApiService::speakerId`\n4. `web-src/src/services/api.ts::ApiService::speakerType`\n5. `web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions`\n```\n",
+  "renderedBlockHash": "e976c0589e4c75ad",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: SpeakerDashboardLocalizationDraft",
+      "post-merge answer symbol leak: SpeakerDashboardLocalizationDraft",
+      "task intent matched"
+    ]
+  }
+}

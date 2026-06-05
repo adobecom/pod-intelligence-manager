@@ -206,7 +206,7 @@ export async function ingestContextUpdate(podId: string, input: unknown): Promis
   });
 
   // 8. Run through PIM orchestrator (classify, route, regenerate living doc)
-  //    LLM calls inside processUpdate (ConflictScout + llmMerge) can stack up to
+  //    LLM calls inside processUpdate (ConflictLic + llmMerge) can stack up to
   //    60s of latency, which holds the request open. When async mode is enabled,
   //    fire it off and broadcast the result over WS instead of awaiting.
   let pimResult: PimResult | undefined;

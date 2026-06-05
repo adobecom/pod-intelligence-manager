@@ -1,0 +1,29 @@
+{
+  "taskId": "synth-session-speaker-sync-plan",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-04T23:57:25.051Z",
+  "calls": [],
+  "renderedBlock": "# Lic Context — task: synth-session-speaker-sync-plan\n_Stratum: S2._\n",
+  "renderedBlockHash": "859f2b2f22ed643b",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

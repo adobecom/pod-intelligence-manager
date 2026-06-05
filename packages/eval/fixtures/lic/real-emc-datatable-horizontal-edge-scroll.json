@@ -1,0 +1,59 @@
+{
+  "taskId": "real-emc-datatable-horizontal-edge-scroll",
+  "stratum": "S1",
+  "recipe": [
+    "search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "b2356bd3768cf787026f822578b3c3a6f9110034",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-b2356bd3768c"
+  },
+  "generatedAt": "2026-06-04T23:58:19.129Z",
+  "calls": [
+    {
+      "tool": "search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-b2356bd3768c",
+        "-l",
+        "5",
+        "Issue"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-b2356bd3768c",
+      "exitCode": 0,
+      "durationMs": 9497,
+      "output": "1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 53-105, 0.78)\n  53: { DEFAULT_LOCALE, SUPPORTED_SPEAKER_LOCALES } from '../../config/localeMapping'\n  54:import { buildSpeakerPayloadForDashboard } from '../../services/payloadBuilders'\n  55:import {\n  56:  SpeakerFormDialog,\n  57:  SpeakerFormSaveOptions,\n  58:  SpeakerFormSubmitData,\n  59:} from './SpeakerFormDialog'\n  60:import { CascadeConfirmDialog, CascadeAction } from './CascadeConfirmDialog'\n  61:import { SpeakerEventConnectionsDialog } from './SpeakerEventConnectionsDialog'\n  62:interface SpeakerDashboardItem extends SeriesSpeaker {\n  63:  eventCount?: number\n  64:  events?: EventApiResponse[]\n  65:  seriesName?: string\n  66:}\n  67:\n  68:const SPEAKERS_SEARCH_KEYS = ['firstName', 'lastName', 'title']\n  69:\n  70:const SPEAKERS_DASHBOARD_TABLE_TEST_IDS = {\n  71:  root: 'speakers-dashboard-table',\n  72:  emptyState: 'speakers-dashboard-table-empty-state',\n  73:  pageInput: 'speakers-dashboard-table-page-input',\n  74:(columnKey: string) => `speakers-dashboard-table-header-${columnKey}`\n  75:(itemKey: string) => `speakers-dashboard-table-row-${itemKey}`\n  76:function getSpeakerDisplayTitle(item: SpeakerDashboardItem): string {\n  77:  const row = item as unknown as Record<string, unknown>\n  78:  const primary = getProfileAttr(row, 'title', DEFAULT_LOCALE)\n  79:  if (typeof primary === 'string' && primary.trim()) {\n  80:    return primary.trim()\n  81:  }\n  82:  for (const loc of SUPPORTED_SPEAKER_LOCALES) {\n  83:    const t = item.localizations?.[loc]?.title\n  84:    if (typeof t === 'string' && t.trim()) {\n  85:      return t.trim()\n  86:    }\n  87:  }\n  88:  return (item.title || '').trim()\n  89:}\n  90:function speakerTitleSearchText(item: SpeakerDashboardItem): string {\n  91:  const chunks = [\n  92:    item.title,\n  93:    ...SUPPORTED_SPEAKER_LOCALES.map((loc) => item.localizations?.[loc]?.title),\n  94:  ]\n  95:  return chunks.filter(Boolean).join(' ').toLowerCase()\n  96:}\n  97:interface SpeakersDashboardProps {\n  98:  ims: IMS\n  99:}\n\n4. web-src/src/services/api.ts (lines 1322-1381, 0.75)\n1322:\n1323:  // ============================================================================\n1324:  // SPEAKER APIs\n1325:  // ============================================================================\n1326:async createSpeaker(profile: any, seriesId: string): Promise<any | ErrorResponse> {\n1327:    validateString(seriesId, 'series ID')\n1328:    validateObject(profile, 'speaker profile')\n1329:    return this.callExternalApi('esp', `/v1/series/${seriesId}/speakers`, 'POST', profile,\n1330:      { operationName: 'createSpeaker', shouldReturnF...\n\n5. web-src/src/services/api.ts (lines 435-486, 0.73)\n 435:async deleteSessionTime(id: string): Promise<SuccessResponse | ErrorResponse> {\n 436:    validateString(id, 'session time ID')\n 437:    return this.callExternalApi('esp', `/v1/session-times/${encodeURIComponent(id)}`, 'DELETE', undefined, {\n 438:      operationName: 'deleteSessionTime',\n 439:    })\n 440:  }\n 441:  /** GET /v1/session-times/{timeId}/attendees */\n 442:async getSessionTimeAttendees(timeId: string): Promise<any | ErrorResponse> {\n 443:    validateString(timeId, 'session time ID')\n 444:    return this.callExternalApi('esp', `/v...\n\n\n> **Note**: 2 additional results below relevance threshold (score < 0.55) omitted.\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-b2356bd3768c",
+        "DataTable"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-b2356bd3768c",
+      "exitCode": 0,
+      "durationMs": 78,
+      "output": "## function `DataTable`\n\n**Kind:** function | **File:** `web-src/src/components/shared/DataTable.tsx` | **Line:** 276\n\n```\nreturn (\n  <div data-testid=\"data-table\" className={style({ display: 'flex', flexDirection: 'column', gap: 12, height: '[100%]', width: '[100%]' })}>\n```\n\n**CodeRank:** 0.15 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `(usage)` (usage) — `web-src/src/components/shared/ResourceDashboardLayout.tsx:5`\n- `(usage)` (usage) — `web-src/src/components/shared/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/Registrations/AttendeeTableComponent.tsx:5`\n- `Frontend Development Guide > Shared Components > DataTable (`shared/DataTable.tsx`)` (usage) — `docs/FRONTEND.md:212`\n- `ResourceEmptyStateProps` (usage) — `web-src/src/components/shared/ResourceEmptyState.tsx:21`\n- `SessionRow` (usage) — `web-src/src/types/sessions.ts:25`\n- `CampaignsTab` (usage) — `web-src/src/pages/Registrations/CampaignsTab.tsx:508`\n- `SessionsTab` (usage) — `web-src/src/pages/Registrations/SessionsTab.tsx:396`\n\n### Top Callees (5 total)\n\n- `deduplicateBy` (function) — `web-src/src/utils/deduplication.ts:25` (score 0.52)\n- `onToggleExpand` (const) — `web-src/src/components/shared/DataTable.tsx:58` (score 0.06)\n\n**Domain**: components > src\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-datatable-horizontal-edge-scroll\n_Stratum: S1._\n\n## lic search -r -l 5 Issue\n```\n1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 53-105, 0.78)\n  53: { DEFAULT_LOCALE, SUPPORTED_SPEAKER_LOCALES } from '../../config/localeMapping'\n  54:import { buildSpeakerPayloadForDashboard } from '../../services/payloadBuilders'\n  55:import {\n  56:  SpeakerFormDialog,\n  57:  SpeakerFormSaveOptions,\n  58:  SpeakerFormSubmitData,\n  59:} from './SpeakerFormDialog'\n  60:import { CascadeConfirmDialog, CascadeAction } from './CascadeConfirmDialog'\n  61:import { SpeakerEventConnectionsDialog } from './SpeakerEventConnectionsDialog'\n  62:interface SpeakerDashboardItem extends SeriesSpeaker {\n  63:  eventCount?: number\n  64:  events?: EventApiResponse[]\n  65:  seriesName?: string\n  66:}\n  67:\n  68:const SPEAKERS_SEARCH_KEYS = ['firstName', 'lastName', 'title']\n  69:\n  70:const SPEAKERS_DASHBOARD_TABLE_TEST_IDS = {\n  71:  root: 'speakers-dashboard-table',\n  72:  emptyState: 'speakers-dashboard-table-empty-state',\n  73:  pageInput: 'speakers-dashboard-table-page-input',\n  74:(columnKey: string) => `speakers-dashboard-table-header-${columnKey}`\n  75:(itemKey: string) => `speakers-dashboard-table-row-${itemKey}`\n  76:function getSpeakerDisplayTitle(item: SpeakerDashboardItem): string {\n  77:  const row = item as unknown as Record<string, unknown>\n  78:  const primary = getProfileAttr(row, 'title', DEFAULT_LOCALE)\n  79:  if (typeof primary === 'string' && primary.trim()) {\n  80:    return primary.trim()\n  81:  }\n  82:  for (const loc of SUPPORTED_SPEAKER_LOCALES) {\n  83:    const t = item.localizations?.[loc]?.title\n  84:    if (typeof t === 'string' && t.trim()) {\n  85:      return t.trim()\n  86:    }\n  87:  }\n  88:  return (item.title || '').trim()\n  89:}\n  90:function speakerTitleSearchText(item: SpeakerDashboardItem): string {\n  91:  const chunks = [\n  92:    item.title,\n  93:    ...SUPPORTED_SPEAKER_LOCALES.map((loc) => item.localizations?.[loc]?.title),\n  94:  ]\n  95:  return chunks.filter(Boolean).join(' ').toLowerCase()\n  96:}\n  97:interface Speak\n```\n\n## lic explain-symbol -r DataTable\n```\n## function `DataTable`\n\n**Kind:** function | **File:** `web-src/src/components/shared/DataTable.tsx` | **Line:** 276\n\n```\nreturn (\n  <div data-testid=\"data-table\" className={style({ display: 'flex', flexDirection: 'column', gap: 12, height: '[100%]', width: '[100%]' })}>\n```\n\n**CodeRank:** 0.15 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `(usage)` (usage) — `web-src/src/components/shared/ResourceDashboardLayout.tsx:5`\n- `(usage)` (usage) — `web-src/src/components/shared/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/Registrations/AttendeeTableComponent.tsx:5`\n- `Frontend Development Guide > Shared Components > DataTable (`shared/DataTable.tsx`)` (usage) — `docs/FRONTEND.md:212`\n- `ResourceEmptyStateProps` (usage) — `web-src/src/components/shared/ResourceEmptyState.tsx:21`\n- `SessionRow` (usage) — `web-src/src/types/sessions.ts:25`\n- `CampaignsTab` (usage) — `web-src/src/pages/Registrations/CampaignsTab.tsx:508`\n- `SessionsTab` (usage) — `web-src/src/pages/Registrations/SessionsTab.tsx:396`\n\n### Top Callees (5 total)\n\n- `deduplicateBy` (function) — `web-src/src/utils/deduplication.ts:25` (score 0.52)\n- `onToggleExpand` (const) — `web-src/src/components/shared/DataTable.tsx:58` (score 0.06)\n\n**Domain**: components > src\n```\n",
+  "renderedBlockHash": "b813c4a1a031fa14",
+  "quality": {
+    "signal": "strong",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: header, style, number, class, width",
+      "task intent matched"
+    ]
+  }
+}

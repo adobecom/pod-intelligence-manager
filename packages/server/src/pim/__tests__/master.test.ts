@@ -5,13 +5,13 @@ vi.mock("../classifier.js", () => ({
   classifyUpdate: vi.fn(),
 }));
 
-vi.mock("../agents/conflict-scout.js", () => ({
-  shouldRunConflictScout: vi.fn(),
-  runConflictScout: vi.fn(),
-  scoutSaysOpenConflict: vi.fn(),
-  scoutSuppressesMergeEscalate: vi.fn(),
-  ADDITIVE_SCOUT_CONFLICT_MIN_CONF: 0.65,
-  OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF: 0.65,
+vi.mock("../agents/conflict-lic.js", () => ({
+  shouldRunConflictLic: vi.fn(),
+  runConflictLic: vi.fn(),
+  licSaysOpenConflict: vi.fn(),
+  licSuppressesMergeEscalate: vi.fn(),
+  ADDITIVE_LIC_CONFLICT_MIN_CONF: 0.65,
+  OVERLAP_LIC_FORCE_CONFLICT_MIN_CONF: 0.65,
 }));
 
 vi.mock("../agents/merge.js", () => ({
@@ -37,11 +37,11 @@ vi.mock("../llm.js", () => ({
 
 import { classifyUpdate } from "../classifier.js";
 import {
-  shouldRunConflictScout,
-  runConflictScout,
-  scoutSaysOpenConflict,
-  scoutSuppressesMergeEscalate,
-} from "../agents/conflict-scout.js";
+  shouldRunConflictLic,
+  runConflictLic,
+  licSaysOpenConflict,
+  licSuppressesMergeEscalate,
+} from "../agents/conflict-lic.js";
 import { deterministicMerge, llmMerge } from "../agents/merge.js";
 import { createConflict } from "../agents/conflict.js";
 import { regenerateLivingDoc } from "../agents/summary.js";
@@ -65,13 +65,13 @@ const baseUpdate = (): ContextUpdate => ({
   needs_input_from: [],
 });
 
-describe("processUpdate + conflict scout", () => {
+describe("processUpdate + conflict lic", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(shouldRunConflictScout).mockReturnValue(false);
-    vi.mocked(runConflictScout).mockResolvedValue(null);
-    vi.mocked(scoutSaysOpenConflict).mockReturnValue(false);
-    vi.mocked(scoutSuppressesMergeEscalate).mockReturnValue(false);
+    vi.mocked(shouldRunConflictLic).mockReturnValue(false);
+    vi.mocked(runConflictLic).mockResolvedValue(null);
+    vi.mocked(licSaysOpenConflict).mockReturnValue(false);
+    vi.mocked(licSuppressesMergeEscalate).mockReturnValue(false);
     vi.mocked(deterministicMerge).mockReturnValue({ merged: true });
     vi.mocked(llmMerge).mockResolvedValue({ merged: true });
     vi.mocked(createConflict).mockResolvedValue(null);
@@ -80,15 +80,15 @@ describe("processUpdate + conflict scout", () => {
     vi.mocked(isLLMAvailable).mockReturnValue(true);
   });
 
-  it("overlapping + scout forces conflict skips llmMerge", async () => {
+  it("overlapping + lic forces conflict skips llmMerge", async () => {
     vi.mocked(classifyUpdate).mockReturnValue("overlapping");
-    vi.mocked(shouldRunConflictScout).mockReturnValue(true);
-    vi.mocked(runConflictScout).mockResolvedValue({
+    vi.mocked(shouldRunConflictLic).mockReturnValue(true);
+    vi.mocked(runConflictLic).mockResolvedValue({
       recommendation: "open_conflict",
       confidence: 0.9,
-      rationale: "Scout says conflict",
+      rationale: "lic says conflict",
     });
-    vi.mocked(scoutSaysOpenConflict).mockImplementation((_scout, _min) => true);
+    vi.mocked(licSaysOpenConflict).mockImplementation((_lic, _min) => true);
     vi.mocked(createConflict).mockResolvedValue({
       id: "C-ABC1",
       pod_id: "p1",
@@ -107,21 +107,21 @@ describe("processUpdate + conflict scout", () => {
     const r = await processUpdate(baseUpdate());
     expect(r.conflictCreated).toBe(true);
     expect(r.conflictId).toBe("C-ABC1");
-    expect(r.scout_used).toBe(true);
-    expect(r.scout_recommendation).toBe("open_conflict");
+    expect(r.lic_used).toBe(true);
+    expect(r.lic_recommendation).toBe("open_conflict");
     expect(llmMerge).not.toHaveBeenCalled();
   });
 
-  it("overlapping merge escalate suppressed when scout says none", async () => {
+  it("overlapping merge escalate suppressed when lic says none", async () => {
     vi.mocked(classifyUpdate).mockReturnValue("overlapping");
-    vi.mocked(shouldRunConflictScout).mockReturnValue(true);
-    vi.mocked(runConflictScout).mockResolvedValue({
+    vi.mocked(shouldRunConflictLic).mockReturnValue(true);
+    vi.mocked(runConflictLic).mockResolvedValue({
       recommendation: "none",
       confidence: 0.9,
       rationale: "Fine",
     });
-    vi.mocked(scoutSaysOpenConflict).mockReturnValue(false);
-    vi.mocked(scoutSuppressesMergeEscalate).mockReturnValue(true);
+    vi.mocked(licSaysOpenConflict).mockReturnValue(false);
+    vi.mocked(licSuppressesMergeEscalate).mockReturnValue(true);
     vi.mocked(llmMerge).mockResolvedValue({
       merged: true,
       escalate: true,
@@ -189,16 +189,16 @@ describe("processUpdate + conflict scout", () => {
     expect(regenerateLivingDoc).toHaveBeenCalledWith("p1");
   });
 
-  it("additive + scout open_conflict creates conflict", async () => {
+  it("additive + lic open_conflict creates conflict", async () => {
     vi.mocked(classifyUpdate).mockReturnValue("additive");
-    vi.mocked(shouldRunConflictScout).mockReturnValue(true);
-    vi.mocked(runConflictScout).mockResolvedValue({
+    vi.mocked(shouldRunConflictLic).mockReturnValue(true);
+    vi.mocked(runConflictLic).mockResolvedValue({
       recommendation: "open_conflict",
       confidence: 0.7,
       rationale: "Contradiction",
     });
-    vi.mocked(scoutSaysOpenConflict).mockImplementation((scout) => {
-      return scout?.recommendation === "open_conflict" && (scout.confidence ?? 0) >= 0.65;
+    vi.mocked(licSaysOpenConflict).mockImplementation((lic) => {
+      return lic?.recommendation === "open_conflict" && (lic.confidence ?? 0) >= 0.65;
     });
     vi.mocked(createConflict).mockResolvedValue({
       id: "C-XYZ",

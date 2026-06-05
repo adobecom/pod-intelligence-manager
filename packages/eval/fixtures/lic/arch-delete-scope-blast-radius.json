@@ -1,0 +1,70 @@
+{
+  "taskId": "arch-delete-scope-blast-radius",
+  "stratum": "S6",
+  "recipe": [
+    "impact",
+    "find-references",
+    "call-graph"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-05-28T04:13:25.847Z",
+  "calls": [
+    {
+      "tool": "impact",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "deleteScope"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 13,
+      "output": "## Impact Analysis: web-src/src/services/api.ts::ApiService::deleteScope\n\nDirection: upstream (what depends on this)\nDefinition: web-src/src/services/api.ts:2169 (function)\n\nNo callers found — this symbol has zero blast radius.\n\n### Risk Summary\n\n|Factor|Value|\n|-|-|\n|Affected symbols|0|\n|Direct callers (d=1)|0|\n|Indirect callers (d=2)|0|\n|Starred symbols (★)|0|\n|Risk level|**LOW**|\n\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "deleteScope"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 15,
+      "output": "Definition: web-src/src/services/api.ts (lines 2169-2174)\n  Name: deleteScope (function)\n  2169: async deleteScope(scopeId: string): Promise<SuccessResponse | ErrorResponse> {\n  2170:     validateString(scopeId, 'scope ID')\n  2171:     return this.callExternalApi('esp', `/v1/scopes/${scopeId}`, 'DELETE', undefined, {\n  2172:       operationName: 'deleteScope'\n  2173:     })\n  2174:   }\n\nReferences (2 shown, 0 total):\n\n  1. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:146-150 []\n  2. web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx:504-508 []\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "--direction",
+        "callees",
+        "deleteScope"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 23,
+      "output": "Domains: pages-services, services-pages\n\nCall Graph: deleteScope (direction: callees)\n\n13 nodes\n\n    Function web-src/src/services/api.ts::validateString — web-src/src/services/api.ts:90 [Call] (confidence: 95%)\n    Function web-src/src/services/api.ts::ApiService::callExternalApi — web-src/src/services/api.ts:558 [Call] (confidence: 95%)\n    Interface web-src/src/services/api.ts::SuccessResponse — web-src/src/services/api.ts:55 [TypeReference] (confidence: 95%)\n    Interface web-src/src/services/api.ts::ErrorResponse — web-src/src/services/api.ts:50 [TypeReference] (confidence: 95%)\n      Function web-src/src/services/requestHelpers.ts::safeFetch — web-src/src/services/requestHelpers.ts:99 [Call] (confidence: 90%)\n      Function web-src/src/services/requestHelpers.ts::constructRequestHeaders — web-src/src/services/requestHelpers.ts:51 [Call] (confidence: 90%)\n      Function web-src/src/services/api.ts::ApiService::logDryRunCall — web-src/src/services/api.ts:155 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ErrorResponse::error — web-src/src/services/api.ts:52 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ApiService::onStaleGroup — web-src/src/services/api.ts:110 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ApiService::transformResponse — web-src/src/services/api.ts:565 [Call] (confidence: 95%)\n      Function web-src/src/config/constants.ts::getCurrentEnvironment — web-src/src/config/constants.ts:149 [Call] (confidence: 90%)\n      Function web-src/src/config/constants.ts::getApiHost — web-src/src/config/constants.ts:159 [Call] (confidence: 90%)\n      Function web-src/src/services/api.ts::ApiService::getAuthToken — web-src/src/services/api.ts:530 [Call] (confidence: 95%)\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: arch-delete-scope-blast-radius\n_Stratum: S6._\n\n## lic impact -r deleteScope\n```\n## Impact Analysis: web-src/src/services/api.ts::ApiService::deleteScope\n\nDirection: upstream (what depends on this)\nDefinition: web-src/src/services/api.ts:2169 (function)\n\nNo callers found — this symbol has zero blast radius.\n\n### Risk Summary\n\n|Factor|Value|\n|-|-|\n|Affected symbols|0|\n|Direct callers (d=1)|0|\n|Indirect callers (d=2)|0|\n|Starred symbols (★)|0|\n|Risk level|**LOW**|\n```\n\n## lic find-references -r deleteScope\n```\nDefinition: web-src/src/services/api.ts (lines 2169-2174)\n  Name: deleteScope (function)\n  2169: async deleteScope(scopeId: string): Promise<SuccessResponse | ErrorResponse> {\n  2170:     validateString(scopeId, 'scope ID')\n  2171:     return this.callExternalApi('esp', `/v1/scopes/${scopeId}`, 'DELETE', undefined, {\n  2172:       operationName: 'deleteScope'\n  2173:     })\n  2174:   }\n\nReferences (2 shown, 0 total):\n\n  1. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:146-150 []\n  2. web-src/src/pages/ScopeGroupManagement/ScopeGroupManagement.tsx:504-508 []\n```\n\n## lic call-graph -r --direction callees deleteScope\n```\nDomains: pages-services, services-pages\n\nCall Graph: deleteScope (direction: callees)\n\n13 nodes\n\n    Function web-src/src/services/api.ts::validateString — web-src/src/services/api.ts:90 [Call] (confidence: 95%)\n    Function web-src/src/services/api.ts::ApiService::callExternalApi — web-src/src/services/api.ts:558 [Call] (confidence: 95%)\n    Interface web-src/src/services/api.ts::SuccessResponse — web-src/src/services/api.ts:55 [TypeReference] (confidence: 95%)\n    Interface web-src/src/services/api.ts::ErrorResponse — web-src/src/services/api.ts:50 [TypeReference] (confidence: 95%)\n      Function web-src/src/services/requestHelpers.ts::safeFetch — web-src/src/services/requestHelpers.ts:99 [Call] (confidence: 90%)\n      Function web-src/src/services/requestHelpers.ts::constructRequestHeaders — web-src/src/services/requestHelpers.ts:51 [Call] (confidence: 90%)\n      Function web-src/src/services/api.ts::ApiService::logDryRunCall — web-src/src/services/api.ts:155 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ErrorResponse::error — web-src/src/services/api.ts:52 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ApiService::onStaleGroup — web-src/src/services/api.ts:110 [Call] (confidence: 95%)\n      Const web-src/src/services/api.ts::ApiService::transformResponse — web-src/src/services/api.ts:565 [Call] (confidence: 95%)\n      Function web-src/src/config/constants.ts::getCurrentEnvironment — web-src/src/config/constants.ts:149 [Call] (confidence: 90%)\n      Function web-src/src/config/constants.ts::getApiHost — web-src/src/config/constants.ts:159 [Call] (confidence: 90%)\n      Function web-src/src/services/api.ts::ApiService::getAuthToken — web-src/src/services/api.ts:530 [Call] (confidence: 95%)\n```\n",
+  "renderedBlockHash": "dcd6009a865597ff",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": false,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "ground-truth symbol retrieved: services, DELETE, scopes, pages, ScopeGroupManagement",
+      "post-merge answer symbol leak: ScopeGroupManagement, Management, references, RBAC_PERMISSION_GATING_IMPLEMENTATION",
+      "task intent matched"
+    ]
+  }
+}

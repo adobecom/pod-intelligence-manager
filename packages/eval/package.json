@@ -8,7 +8,17 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "freeze": "tsx src/cli/freeze.ts",
+    "lic-freeze": "tsx src/cli/lic-freeze.ts",
+    "lic-migrate": "tsx src/cli/lic-migrate.ts",
     "freeze-kg-retrieval-oracle": "tsx scripts/freeze-kg-retrieval-oracle.ts",
+    "freeze-kg-recall-oracle": "tsx scripts/freeze-kg-recall-oracle.ts",
+    "make-holdout": "tsx src/cli/make-holdout.ts",
+    "make-haiku-holdout": "tsx src/cli/make-haiku-holdout.ts",
+    "audit-protocol": "tsx src/cli/audit-protocol.ts",
+    "audit-holdout": "tsx src/cli/audit-holdout.ts",
+    "audit-run": "tsx src/cli/audit-run.ts",
+    "analyze-run": "tsx src/cli/audit-run.ts --type=analyze",
+    "judge-patches": "tsx src/cli/judge-patches.ts",
     "run-eval": "tsx src/cli/run.ts"
   },
   "dependencies": {

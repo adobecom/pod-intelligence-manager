@@ -1,0 +1,61 @@
+{
+  "taskId": "real-emc-series-put-readonly-targetcms",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "82f6dacb717f8612a499c412eac0d10e108d7f2c",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-82f6dacb717f"
+  },
+  "generatedAt": "2026-06-04T23:56:00.497Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-82f6dacb717f",
+        "-l",
+        "5",
+        "series PUT readonly targetCms"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-82f6dacb717f",
+      "exitCode": 0,
+      "durationMs": 91,
+      "output": "1. web-src/src/pages/SeriesForm/SeriesDetailsComponent.tsx (lines 52-103, 0.25)\n   arrow_function SeriesDetailsComponent\n\n   *(also at lines 5-56)*\n2. web-src/src/contexts/SeriesFormContext.tsx (lines 5-63, 0.24)\n   Referenced by 13 files (.tsx: 13)\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-82f6dacb717f",
+        "updateSeries"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-82f6dacb717f",
+      "exitCode": 0,
+      "durationMs": 36,
+      "output": "## function `updateSeries` (FQN: `web-src/src/services/api.ts::ApiService::updateSeries`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 286\n\n```\nasync updateSeries(id: string, data: Partial<SeriesFormData>): Promise<ApiResponse<Series>> {\n  return this.callAction<ApiResponse<Series>>('updateSeries', { id, ...data })\n}\n```\n\n**CodeRank:** 1.00 (top 1%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (3 total)\n\n- `updateSeries` (usage) — `web-src/src/services/externalApi.example.ts:177`\n- `Cache and Throttling Implementation Summary > ✅ Implementation Complete > 2. **cachedApi** - Cached API Service` (usage) — `docs/CACHE_IMPLEMENTATION.md:24`\n- `Frontend Development Guide > API Service (`services/api.ts`) > Available Methods` (usage) — `docs/FRONTEND.md:388`\n\n### Top Callees (4 total)\n\n- `callAction` (function) — `web-src/src/services/api.ts:211` (score 0.40)\n- `SeriesFormData` (interface) — `web-src/src/types/domain.ts:43` (score 0.23)\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-series-put-readonly-targetcms\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 series PUT readonly targetCms\n```\n1. web-src/src/pages/SeriesForm/SeriesDetailsComponent.tsx (lines 52-103, 0.25)\n   arrow_function SeriesDetailsComponent\n\n   *(also at lines 5-56)*\n2. web-src/src/contexts/SeriesFormContext.tsx (lines 5-63, 0.24)\n   Referenced by 13 files (.tsx: 13)\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r updateSeries\n```\n## function `updateSeries` (FQN: `web-src/src/services/api.ts::ApiService::updateSeries`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 286\n\n```\nasync updateSeries(id: string, data: Partial<SeriesFormData>): Promise<ApiResponse<Series>> {\n  return this.callAction<ApiResponse<Series>>('updateSeries', { id, ...data })\n}\n```\n\n**CodeRank:** 1.00 (top 1%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (3 total)\n\n- `updateSeries` (usage) — `web-src/src/services/externalApi.example.ts:177`\n- `Cache and Throttling Implementation Summary > ✅ Implementation Complete > 2. **cachedApi** - Cached API Service` (usage) — `docs/CACHE_IMPLEMENTATION.md:24`\n- `Frontend Development Guide > API Service (`services/api.ts`) > Available Methods` (usage) — `docs/FRONTEND.md:388`\n\n### Top Callees (4 total)\n\n- `callAction` (function) — `web-src/src/services/api.ts:211` (score 0.40)\n- `SeriesFormData` (interface) — `web-src/src/types/domain.ts:43` (score 0.23)\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n```\n",
+  "renderedBlockHash": "e00dd894e765962d",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: config, cacheUtils",
+      "post-merge answer symbol leak: cacheUtils",
+      "task intent matched"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "taskId": "real-emc-session-api-batch-optimisation",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "d6078f228013c6cb05cf288356c8a155229d8f72",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013"
+  },
+  "generatedAt": "2026-06-04T23:56:20.612Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+        "sessionBatch"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+      "exitCode": 0,
+      "durationMs": 28,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+        "--direction",
+        "callers",
+        "sessionBatch"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+      "exitCode": 0,
+      "durationMs": 27,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+        "sessionBatch"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
+      "exitCode": 0,
+      "durationMs": 24,
+      "output": "No definition found for \"sessionBatch\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem`\n4. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-session-api-batch-optimisation\n_Stratum: S2._\n\n## lic find-references -r sessionBatch\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n```\n\n## lic call-graph -r --direction callers sessionBatch\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n```\n\n## lic explain-symbol -r sessionBatch\n```\nNo definition found for \"sessionBatch\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem`\n4. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId`\n```\n",
+  "renderedBlockHash": "ecc16993d4d56ab4",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

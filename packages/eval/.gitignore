@@ -1,4 +1,5 @@
 dist/
 .turbo/
-reports/*.md
+runs/
+reports/
 fixtures/judge-cache/

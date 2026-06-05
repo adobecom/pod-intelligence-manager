@@ -1,0 +1,73 @@
+{
+  "taskId": "real-emc-event-mod-time-sync-after-session",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "bba1f6a56f4c35725870afa93dd686a732fcfb9b",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c"
+  },
+  "generatedAt": "2026-06-04T23:45:27.370Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+        "modificationTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+      "exitCode": 0,
+      "durationMs": 131,
+      "output": "Definition: web-src/src/services/api.ts (lines 475-486)\n  Name: modificationTime (const)\n   475:     sessionId: string,\n   476:     speakerId: string,\n   477:     body: { speakerId: string; speakerType: string; ordinal: number; modificationTime: number }\n   478:   ): Promise<any | ErrorResponse> {\n   479:     validateString(sessionId, 'session ID')\n   480:     validateString(speakerId, 'speaker ID')\n   481:     validateObject(body, 'speaker data')\n   482:     return this.callExternalApi('esp', `/v1/sessions/${encodeURIComponent(sessionId)}/speakers/${encodeURIComponent(speakerId)}`, 'PUT', body, {\n   483:       operationName: 'updateSessionSpeaker',\n   484:       shouldReturnFullResponse: true,\n   485:     })\n   486:   }\n\nReferences (40 shown, 0 total):\n\n  1. docs/API_CENTRALIZATION.md:55-59 []\n  2. docs/API_CENTRALIZATION.md:70-74 []\n  3. docs/API_CENTRALIZATION.md:179-183 []\n  4. web-src/src/components/shared/HistoryTimeline.tsx:110-114 []\n  5. web-src/src/contexts/GroupContext.tsx:106-110 []\n  6. web-src/src/hooks/useEventFormSave.ts:76-80 []\n  7. web-src/src/hooks/useEventFormSave.ts:465-472 []\n  8. web-src/src/hooks/useEventFormSave.ts:497-501 []\n  9. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:45-49 []\n  10. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:162-171 []\n  11. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:299-306 []\n  12. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:15-19 []\n  13. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:146-151 []\n  14. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:292-297 []\n  15. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:144-148 []\n  16. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:158-162 []\n  17. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:278-282 []\n  18. web-src/src/pages/EventForm/SponsorsComponent.tsx:660-665 []\n  19. web-src/src/pages/EventForm/SponsorsComponent.tsx:704-708 []\n  20. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:90-94 []\n  21. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:350-354 []\n  22. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:356-360 []\n  23. web-src/src/pages/SeriesForm/SeriesForm.tsx:46-50 []\n  24. web-src/src/pages/SeriesForm/SeriesForm.tsx:60-65 []\n  25. web-src/src/pages/SeriesForm/SeriesForm.tsx:178-183 []\n  26. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:292-296 []\n  27. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:561-571 []\n  28. web-src/src/services/payloadBuilders.ts:161-171 []\n  29. web-src/src/types/campaign.ts:23-27 []\n  30. web-src/src/types/campaign.ts:38-42 []\n  31. web-src/src/types/campaign.ts:46-50 []\n  32. web-src/src/types/domain.ts:73-77 []\n  33. web-src/src/types/domain.ts:142-146 []\n  34. web-src/src/types/domain.ts:172-176 []\n  35. web-src/src/types/rbacApi.ts:38-42 []\n  36. web-src/src/types/rbacApi.ts:49-53 []\n  37. web-src/src/types/rbacApi.ts:57-61 []\n  38. web-src/src/utils/dataFilters.ts:88-92 []\n  39. web-src/src/utils/dataFilters.ts:137-141 []\n  40. web-src/src/utils/dataFilters.ts:160-164 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/services/payloadBuilders.ts::modificationTime, web-src/src/types/attendee.ts::Attendee::modificationTime, web-src/src/types/campaign.ts::Campaign::modificationTime, web-src/src/types/campaign.ts::CampaignUpdatePayload::modificationTime, web-src/src/types/domain.ts::EventApiResponse::modificationTime\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+        "--direction",
+        "callers",
+        "modificationTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+      "exitCode": 0,
+      "durationMs": 25,
+      "output": "Ambiguous symbol — candidates (5):\n  web-src/src/services/payloadBuilders.ts::modificationTime\n  web-src/src/types/attendee.ts::Attendee::modificationTime\n  web-src/src/types/campaign.ts::Campaign::modificationTime\n  web-src/src/types/campaign.ts::CampaignUpdatePayload::modificationTime\n  web-src/src/types/domain.ts::EventApiResponse::modificationTime\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+        "modificationTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-bba1f6a56f4c",
+      "exitCode": 0,
+      "durationMs": 44,
+      "output": "## const `modificationTime` (FQN: `web-src/src/services/api.ts::ApiService::modificationTime`)\n\n**Kind:** const | **File:** `web-src/src/services/api.ts` | **Line:** 477\n\n```\nvalidateString(sessionId, 'session ID')\nvalidateString(speakerId, 'speaker ID')\nreturn this.callExternalApi('esp', `/v1/sessions/${encodeURIComponent(sessionId)}/speakers/${encodeURIComponent(speakerId)}`, 'DELETE', undefined, {\n```\n\n**CodeRank:** 0.39 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `getSponsorPayload` (usage) — `web-src/src/services/payloadBuilders.ts:232`\n- `SeriesFormInner` (usage) — `web-src/src/pages/SeriesForm/SeriesForm.tsx:289`\n- `SponsorsComponent` (usage) — `web-src/src/pages/EventForm/SponsorsComponent.tsx:767`\n- `SpeakersDashboard` (usage) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:632`\n- `Sessions` (usage) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:337`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:155`\n- `SpeakerPickerDialog` (usage) — `web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:115`\n- `API Centralization Guide > Series List API Implementation > New Types (`/web-src/src/types/domain.ts`) > `SeriesApiResponse`` (usage) — `docs/API_CENTRALIZATION.md:42`\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-event-mod-time-sync-after-session\n_Stratum: S2._\n\n## lic find-references -r modificationTime\n```\nDefinition: web-src/src/services/api.ts (lines 475-486)\n  Name: modificationTime (const)\n   475:     sessionId: string,\n   476:     speakerId: string,\n   477:     body: { speakerId: string; speakerType: string; ordinal: number; modificationTime: number }\n   478:   ): Promise<any | ErrorResponse> {\n   479:     validateString(sessionId, 'session ID')\n   480:     validateString(speakerId, 'speaker ID')\n   481:     validateObject(body, 'speaker data')\n   482:     return this.callExternalApi('esp', `/v1/sessions/${encodeURIComponent(sessionId)}/speakers/${encodeURIComponent(speakerId)}`, 'PUT', body, {\n   483:       operationName: 'updateSessionSpeaker',\n   484:       shouldReturnFullResponse: true,\n   485:     })\n   486:   }\n\nReferences (40 shown, 0 total):\n\n  1. docs/API_CENTRALIZATION.md:55-59 []\n  2. docs/API_CENTRALIZATION.md:70-74 []\n  3. docs/API_CENTRALIZATION.md:179-183 []\n  4. web-src/src/components/shared/HistoryTimeline.tsx:110-114 []\n  5. web-src/src/contexts/GroupContext.tsx:106-110 []\n  6. web-src/src/hooks/useEventFormSave.ts:76-80 []\n  7. web-src/src/hooks/useEventFormSave.ts:465-472 []\n  8. web-src/src/hooks/useEventFormSave.ts:497-501 []\n  9. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:45-49 []\n  10. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:162-171 []\n  11. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:299-306 []\n  12. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:15-19 []\n  13. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:146-151 []\n  14. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:292-297 []\n  15. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:144-148 []\n  16. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:158-162 []\n  17. web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:278-282 []\n  18. web-src/src/pages/EventForm/SponsorsComponent.tsx:660-665 []\n  19. web-src/src/pages/EventForm/SponsorsComponent.tsx:704-708 []\n  20. web-src/src/pages/Serie\n```\n\n## lic call-graph -r --direction callers modificationTime\n```\nAmbiguous symbol — candidates (5):\n  web-src/src/services/payloadBuilders.ts::modificationTime\n  web-src/src/types/attendee.ts::Attendee::modificationTime\n  web-src/src/types/campaign.ts::Campaign::modificationTime\n  web-src/src/types/campaign.ts::CampaignUpdatePayload::modificationTime\n  web-src/src/types/domain.ts::EventApiResponse::modificationTime\n```\n\n## lic explain-symbol -r modificationTime\n```\n## const `modificationTime` (FQN: `web-src/src/services/api.ts::ApiService::modificationTime`)\n\n**Kind:** const | **File:** `web-src/src/services/api.ts` | **Line:** 477\n\n```\nvalidateString(sessionId, 'session ID')\nvalidateString(speakerId, 'speaker ID')\nreturn this.callExternalApi('esp', `/v1/sessions/${encodeURIComponent(sessionId)}/speakers/${encodeURIComponent(speakerId)}`, 'DELETE', undefined, {\n```\n\n**CodeRank:** 0.39 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `getSponsorPayload` (usage) — `web-src/src/services/payloadBuilders.ts:232`\n- `SeriesFormInner` (usage) — `web-src/src/pages/SeriesForm/SeriesForm.tsx:289`\n- `SponsorsComponent` (usage) — `web-src/src/pages/EventForm/SponsorsComponent.tsx:767`\n- `SpeakersDashboard` (usage) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:632`\n- `Sessions` (usage) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:337`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:155`\n- `SpeakerPickerDialog` (usage) — `web-src/src/pages/EventForm/SpeakerPickerDialog.tsx:115`\n- `API Centralization Guide > Series List API Implementation > New Types (`/web-src/src/types/domain.ts`) > `SeriesApiResponse`` (usage) — `docs/API_CENTRALIZATION.md:42`\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N\n\n_[truncated to budget]_\n",
+  "renderedBlockHash": "12b529f6e47a0b92",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: validateString, validateObject, callExternalApi, sessions, operationName",
+      "post-merge answer symbol leak: validateString, validateObject, callExternalApi, operationName, shouldReturnFullResponse",
+      "task intent matched"
+    ]
+  }
+}

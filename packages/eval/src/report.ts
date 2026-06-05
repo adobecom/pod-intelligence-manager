@@ -1,6 +1,10 @@
 import type { JudgeResult } from "./judges/types.js";
 import type { RunUsage } from "./runners/types.js";
 import { costFor } from "./pricing.js";
+import type { LicFixtureQuality } from "./rigor/lic-quality.js";
+import type { ProtocolAnalysis } from "./rigor/protocol-analysis.js";
+import { realisticTicketHeadlineRows } from "./rigor/protocol-analysis.js";
+import { renderProtocolReport } from "./rigor/protocol-report.js";
 
 export interface EvalRow {
   taskId: string;
@@ -19,6 +23,14 @@ export interface EvalRow {
   signalsHit: string[];
   /** All tags on the source task. Used for per-category roll-ups. */
   tags?: string[];
+  /** Protocol stratum (S1-S6) assigned by the holdout manifest. */
+  stratum?: string;
+  /** Prompt realism tier (realistic-ticket / saturated / underspecified / context-required). */
+  promptTier?: string;
+  /** Full SHA-256 of the frozen lic fixture JSON for this task, when present. */
+  licFixtureHash?: string;
+  /** Deterministic quality metadata for the frozen lic fixture. */
+  licFixtureQuality?: LicFixtureQuality;
   /** 0-indexed seed number when multi-seed runs are enabled. Defaults to 0. */
   seed?: number;
   /** Run-level error if the call or judge failed. */
@@ -67,6 +79,8 @@ export interface ReportContext {
   judgeModel: string;
   /** Filter applied (for repro). */
   filter: { taskIds?: string[]; tags?: string[]; arms?: string[] };
+  /** Protocol claim analysis, rendered as a top section in protocol-mode runs. */
+  protocol?: ProtocolAnalysis;
 }
 
 export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): string {
@@ -74,16 +88,28 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   lines.push(`# PIM Eval Report`);
   lines.push(`_Generated: ${ctx.generatedAt}_`);
   lines.push("");
+  const comparisonArm = pickComparisonArm(rows);
 
   // Executive summary — auto-derived from rows so leadership-facing copy
   // stays honest as new tasks are added. Shows the headline arm delta plus
   // a one-line readout per category.
-  const exec = computeExecutiveSummary(rows);
+  const executiveRows = ctx.protocol ? realisticTicketHeadlineRows(rows) : rows;
+  const exec = computeExecutiveSummary(executiveRows, comparisonArm);
   if (exec) {
     lines.push("## Executive summary");
     lines.push("");
+    if (ctx.protocol) {
+      lines.push("_Protocol mode: bullets use realistic-ticket S1-S5 tasks only; broader diagnostics are below._");
+      lines.push("");
+    }
     for (const bullet of exec.bullets) lines.push(`- ${bullet}`);
     lines.push("");
+  }
+
+  // Protocol claim analysis — the headline PIM-vs-baseline-vs-LIC result, rendered
+  // here (not only in analysis.json) for protocol-mode runs.
+  if (ctx.protocol) {
+    lines.push(...renderProtocolReport(ctx.protocol));
   }
 
   lines.push("## Summary by arm");
@@ -129,17 +155,18 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   // Per-category breakdown — the single most useful table for leadership.
   // Shows where PIM lifts vs. where it's a wash, separated by why we think it
   // should or shouldn't matter.
-  const categoryRows = computeCategoryBreakdown(rows);
-  if (categoryRows.length > 0) {
-    lines.push("## Pass rate by category (PIM vs. control)");
+  const categoryRows = comparisonArm ? computeCategoryBreakdown(rows, comparisonArm.id) : [];
+  if (comparisonArm && categoryRows.length > 0) {
+    const comparisonName = comparisonDisplayName(comparisonArm);
+    lines.push(`## Pass rate by category (${comparisonName} vs. control)`);
     lines.push("");
-    lines.push("| Category | n | Control pass | PIM pass | Δ pass rate | Control avg score | PIM avg score |");
+    lines.push(`| Category | n tasks | Control pass | ${comparisonName} pass | Δ pass rate | Control avg score | ${comparisonName} avg score |`);
     lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
     for (const r of categoryRows) {
-      const delta = r.pimPassRate - r.controlPassRate;
+      const delta = r.comparisonPassRate - r.controlPassRate;
       const deltaStr = delta === 0 ? "tie" : `${delta > 0 ? "+" : ""}${(delta * 100).toFixed(0)}pp`;
       lines.push(
-        `| ${r.label} | ${r.taskCount} | ${pct(r.controlPassRate)} (${r.controlPasses}/${r.taskCount}) | ${pct(r.pimPassRate)} (${r.pimPasses}/${r.taskCount}) | ${deltaStr} | ${r.controlAvgScore.toFixed(2)} | ${r.pimAvgScore.toFixed(2)} |`,
+        `| ${r.label} | ${r.taskCount} | ${pct(r.controlPassRate)} (${r.controlPasses}/${r.controlTotal}) | ${pct(r.comparisonPassRate)} (${r.comparisonPasses}/${r.comparisonTotal}) | ${deltaStr} | ${r.controlAvgScore.toFixed(2)} | ${r.comparisonAvgScore.toFixed(2)} |`,
       );
     }
     lines.push("");
@@ -191,24 +218,25 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   }
   lines.push("");
 
-  lines.push("## Diagnostic: where PIM made the difference");
+  const comparisonName = comparisonArm ? comparisonDisplayName(comparisonArm) : "PIM";
+  lines.push(`## Diagnostic: where ${comparisonName} made the difference`);
   lines.push("");
-  const diffs = computeArmDiff(rows);
-  if (diffs.pimSaves.length > 0) {
-    lines.push("### Tasks where PIM-arm passed AND control failed (PIM saves)");
-    for (const d of diffs.pimSaves) {
+  const diffs = comparisonArm ? computeArmDiff(rows, comparisonArm.id) : { comparisonSaves: [], comparisonRegressions: [] };
+  if (diffs.comparisonSaves.length > 0) {
+    lines.push(`### Tasks where ${comparisonName} passed AND control failed (${comparisonName} saves)`);
+    for (const d of diffs.comparisonSaves) {
       lines.push(`- **${d.taskId}** — control failure: \`${d.controlFailure}\``);
     }
     lines.push("");
   }
-  if (diffs.pimRegressions.length > 0) {
-    lines.push("### Tasks where control passed AND PIM-arm failed (PIM regressions)");
-    for (const d of diffs.pimRegressions) {
-      lines.push(`- **${d.taskId}** — PIM failure: \`${d.pimFailure}\``);
+  if (diffs.comparisonRegressions.length > 0) {
+    lines.push(`### Tasks where control passed AND ${comparisonName} failed (${comparisonName} regressions)`);
+    for (const d of diffs.comparisonRegressions) {
+      lines.push(`- **${d.taskId}** — ${comparisonName} failure: \`${d.comparisonFailure}\``);
     }
     lines.push("");
   }
-  if (diffs.pimSaves.length === 0 && diffs.pimRegressions.length === 0) {
+  if (diffs.comparisonSaves.length === 0 && diffs.comparisonRegressions.length === 0) {
     lines.push("_No differential outcomes — both arms tied on every task. Consider harder tasks or richer PIM context._");
     lines.push("");
   }
@@ -290,6 +318,32 @@ function pct(x: number): string {
   return `${(x * 100).toFixed(0)}%`;
 }
 
+interface ComparisonArm {
+  id: string;
+  label: string;
+}
+
+function pickComparisonArm(rows: EvalRow[]): ComparisonArm | null {
+  const labels = new Map<string, string>();
+  for (const r of rows) labels.set(r.arm, r.armLabel);
+  if (!labels.has("control")) return null;
+
+  // PIM-full is the canonical treatment. When a decomposition run omits it
+  // (for example control vs kg-only), use the most direct KG/PIM arm present
+  // instead of rendering zeroed diagnostics for a missing arm.
+  const preferred = ["pim-full", "kg-only", "kg-lic", "lic-pim-combined"];
+  for (const id of preferred) {
+    const label = labels.get(id);
+    if (label) return { id, label };
+  }
+  return null;
+}
+
+function comparisonDisplayName(arm: ComparisonArm): string {
+  if (arm.id === "pim-full") return "PIM";
+  return arm.label;
+}
+
 function computeCacheHitRate(rows: EvalRow[]): number {
   const totalCacheable = sum(rows.map((r) => r.usage.cacheReadTokens + r.usage.cacheCreationTokens + r.usage.inputTokens));
   if (totalCacheable === 0) return 0;
@@ -301,14 +355,16 @@ interface CategoryRow {
   label: string;
   taskCount: number;
   controlPasses: number;
+  controlTotal: number;
   controlPassRate: number;
   controlAvgScore: number;
-  pimPasses: number;
-  pimPassRate: number;
-  pimAvgScore: number;
+  comparisonPasses: number;
+  comparisonTotal: number;
+  comparisonPassRate: number;
+  comparisonAvgScore: number;
 }
 
-function computeCategoryBreakdown(rows: EvalRow[]): CategoryRow[] {
+function computeCategoryBreakdown(rows: EvalRow[], comparisonArmId: string): CategoryRow[] {
   // Group unique tasks by category, then compute per-arm pass stats inside.
   const byCategory = new Map<Category, Set<string>>();
   for (const r of rows) {
@@ -326,20 +382,22 @@ function computeCategoryBreakdown(rows: EvalRow[]): CategoryRow[] {
     if (!taskIds || taskIds.size === 0) continue;
     const taskCount = taskIds.size;
     const controlRows = rows.filter((r) => taskIds.has(r.taskId) && r.arm === "control");
-    const pimRows = rows.filter((r) => taskIds.has(r.taskId) && r.arm === "pim-full");
-    if (controlRows.length === 0 && pimRows.length === 0) continue;
+    const comparisonRows = rows.filter((r) => taskIds.has(r.taskId) && r.arm === comparisonArmId);
+    if (controlRows.length === 0 && comparisonRows.length === 0) continue;
     const controlPasses = controlRows.filter((r) => r.judge.passed).length;
-    const pimPasses = pimRows.filter((r) => r.judge.passed).length;
+    const comparisonPasses = comparisonRows.filter((r) => r.judge.passed).length;
     results.push({
       category: c,
       label: CATEGORY_LABEL[c],
       taskCount,
       controlPasses,
+      controlTotal: controlRows.length,
       controlPassRate: controlRows.length > 0 ? controlPasses / controlRows.length : 0,
       controlAvgScore: mean(controlRows.map((r) => r.judge.score)),
-      pimPasses,
-      pimPassRate: pimRows.length > 0 ? pimPasses / pimRows.length : 0,
-      pimAvgScore: mean(pimRows.map((r) => r.judge.score)),
+      comparisonPasses,
+      comparisonTotal: comparisonRows.length,
+      comparisonPassRate: comparisonRows.length > 0 ? comparisonPasses / comparisonRows.length : 0,
+      comparisonAvgScore: mean(comparisonRows.map((r) => r.judge.score)),
     });
   }
   return results;
@@ -349,91 +407,93 @@ interface ExecSummary {
   bullets: string[];
 }
 
-function computeExecutiveSummary(rows: EvalRow[]): ExecSummary | null {
+function computeExecutiveSummary(rows: EvalRow[], comparisonArm: ComparisonArm | null): ExecSummary | null {
   const control = rows.filter((r) => r.arm === "control");
-  const pim = rows.filter((r) => r.arm === "pim-full");
-  if (control.length === 0 || pim.length === 0) return null;
+  if (!comparisonArm) return null;
+  const comparison = rows.filter((r) => r.arm === comparisonArm.id);
+  if (control.length === 0 || comparison.length === 0) return null;
+  const comparisonName = comparisonDisplayName(comparisonArm);
 
   const controlPasses = control.filter((r) => r.judge.passed).length;
-  const pimPasses = pim.filter((r) => r.judge.passed).length;
+  const comparisonPasses = comparison.filter((r) => r.judge.passed).length;
   const controlCost = sum(control.map((r) => r.costUsd));
-  const pimCost = sum(pim.map((r) => r.costUsd));
+  const comparisonCost = sum(comparison.map((r) => r.costUsd));
   const controlCpc = controlPasses > 0 ? controlCost / controlPasses : Infinity;
-  const pimCpc = pimPasses > 0 ? pimCost / pimPasses : Infinity;
-  const diff = computeArmDiff(rows);
+  const comparisonCpc = comparisonPasses > 0 ? comparisonCost / comparisonPasses : Infinity;
+  const diff = computeArmDiff(rows, comparisonArm.id);
 
   // Headline pass-rate delta, in percentage points.
   const controlRate = controlPasses / control.length;
-  const pimRate = pimPasses / pim.length;
-  const deltaPp = Math.round((pimRate - controlRate) * 100);
+  const comparisonRate = comparisonPasses / comparison.length;
+  const deltaPp = Math.round((comparisonRate - controlRate) * 100);
   const passLine =
     deltaPp === 0
-      ? `Pass rate tied at ${pct(pimRate)} across ${control.length} tasks.`
-      : `PIM ${deltaPp > 0 ? "lifts" : "drops"} pass rate by ${Math.abs(deltaPp)}pp ` +
-        `(${pct(controlRate)} → ${pct(pimRate)}, n=${control.length}).`;
+      ? `Pass rate tied at ${pct(comparisonRate)} across ${control.length} samples.`
+      : `${comparisonName} ${deltaPp > 0 ? "lifts" : "drops"} pass rate by ${Math.abs(deltaPp)}pp ` +
+        `(${pct(controlRate)} → ${pct(comparisonRate)}, n=${control.length}).`;
 
   // Cost-per-correct delta. Use signed % vs control.
   const cpcLine = (() => {
-    if (!Number.isFinite(controlCpc) && !Number.isFinite(pimCpc)) {
+    if (!Number.isFinite(controlCpc) && !Number.isFinite(comparisonCpc)) {
       return `Cost-per-correct not computable (no passes in either arm).`;
     }
     if (!Number.isFinite(controlCpc)) {
-      return `Control had no passing tasks; PIM cost-per-correct is $${pimCpc.toFixed(4)}.`;
+      return `Control had no passing tasks; ${comparisonName} cost-per-correct is $${comparisonCpc.toFixed(4)}.`;
     }
-    if (!Number.isFinite(pimCpc)) {
-      return `PIM had no passing tasks; control cost-per-correct was $${controlCpc.toFixed(4)}.`;
+    if (!Number.isFinite(comparisonCpc)) {
+      return `${comparisonName} had no passing tasks; control cost-per-correct was $${controlCpc.toFixed(4)}.`;
     }
-    const deltaPct = Math.round(((pimCpc - controlCpc) / controlCpc) * 100);
+    const deltaPct = Math.round(((comparisonCpc - controlCpc) / controlCpc) * 100);
     const verb = deltaPct < 0 ? "cuts" : deltaPct > 0 ? "raises" : "leaves";
     return (
-      `PIM ${verb} cost-per-correct by ${Math.abs(deltaPct)}% ` +
-      `($${controlCpc.toFixed(4)} → $${pimCpc.toFixed(4)}).`
+      `${comparisonName} ${verb} cost-per-correct by ${Math.abs(deltaPct)}% ` +
+      `($${controlCpc.toFixed(4)} → $${comparisonCpc.toFixed(4)}).`
     );
   })();
 
   // PIM saves / regressions — the differential outcome line.
   const diffLine = (() => {
-    const saves = diff.pimSaves.length;
-    const regs = diff.pimRegressions.length;
+    const saves = diff.comparisonSaves.length;
+    const regs = diff.comparisonRegressions.length;
     if (saves === 0 && regs === 0) {
       return `No differential outcomes (both arms tied on every task).`;
     }
     const parts: string[] = [];
-    if (saves > 0) parts.push(`${saves} task${saves === 1 ? "" : "s"} where PIM passed and control failed`);
-    if (regs > 0) parts.push(`${regs} task${regs === 1 ? "" : "s"} where PIM regressed`);
+    if (saves > 0) parts.push(`${saves} task${saves === 1 ? "" : "s"} where ${comparisonName} passed and control failed`);
+    if (regs > 0) parts.push(`${regs} task${regs === 1 ? "" : "s"} where ${comparisonName} regressed`);
     return `Differential outcomes: ${parts.join("; ")}.`;
   })();
 
   return { bullets: [passLine, cpcLine, diffLine] };
 }
 
-function computeArmDiff(rows: EvalRow[]): {
-  pimSaves: Array<{ taskId: string; controlFailure: string }>;
-  pimRegressions: Array<{ taskId: string; pimFailure: string }>;
+function computeArmDiff(rows: EvalRow[], comparisonArmId: string): {
+  comparisonSaves: Array<{ taskId: string; controlFailure: string }>;
+  comparisonRegressions: Array<{ taskId: string; comparisonFailure: string }>;
 } {
-  // Differential outcomes use majority vote across seeds: PIM "saves" a task
-  // when at least half of the PIM-arm seeds pass AND fewer than half of the
+  // Differential outcomes use majority vote across seeds: the comparison arm
+  // "saves" a task when at least half of that arm's seeds pass AND fewer than half of the
   // control seeds pass. Single-seed reduces to the original strict comparison.
-  const pimSaves: Array<{ taskId: string; controlFailure: string }> = [];
-  const pimRegressions: Array<{ taskId: string; pimFailure: string }> = [];
+  const comparisonSaves: Array<{ taskId: string; controlFailure: string }> = [];
+  const comparisonRegressions: Array<{ taskId: string; comparisonFailure: string }> = [];
   const taskIds = distinct(rows.map((r) => r.taskId));
   for (const id of taskIds) {
     const controlRows = rows.filter((r) => r.taskId === id && r.arm === "control");
-    const pimRows = rows.filter((r) => r.taskId === id && r.arm === "pim-full");
-    if (controlRows.length === 0 || pimRows.length === 0) continue;
+    const comparisonRows = rows.filter((r) => r.taskId === id && r.arm === comparisonArmId);
+    if (controlRows.length === 0 || comparisonRows.length === 0) continue;
     const controlPassFrac = controlRows.filter((r) => r.judge.passed).length / controlRows.length;
-    const pimPassFrac = pimRows.filter((r) => r.judge.passed).length / pimRows.length;
-    if (pimPassFrac >= 0.5 && controlPassFrac < 0.5) {
+    const comparisonPassFrac = comparisonRows.filter((r) => r.judge.passed).length / comparisonRows.length;
+    if (comparisonPassFrac >= 0.5 && controlPassFrac < 0.5) {
       // Surface the first failing control output so the reader sees a concrete reason.
       const firstControlFail = controlRows.find((r) => !r.judge.passed);
-      pimSaves.push({ taskId: id, controlFailure: firstControlFail?.judge.detail ?? "(no failure detail)" });
+      comparisonSaves.push({ taskId: id, controlFailure: firstControlFail?.judge.detail ?? "(no failure detail)" });
     }
-    if (pimPassFrac < 0.5 && controlPassFrac >= 0.5) {
-      const firstPimFail = pimRows.find((r) => !r.judge.passed);
-      pimRegressions.push({ taskId: id, pimFailure: firstPimFail?.judge.detail ?? "(no failure detail)" });
+    if (comparisonPassFrac < 0.5 && controlPassFrac >= 0.5) {
+      const firstComparisonFail = comparisonRows.find((r) => !r.judge.passed);
+      comparisonRegressions.push({ taskId: id, comparisonFailure: firstComparisonFail?.judge.detail ?? "(no failure detail)" });
     }
   }
-  return { pimSaves, pimRegressions };
+  return { comparisonSaves, comparisonRegressions };
 }
 
 export function rowCost(model: string, usage: RunUsage): number {

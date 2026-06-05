@@ -31,8 +31,8 @@ interface Nudge {
 
 type GuardRailEntry = [min: number, max: number];
 const GUARD_RAILS: Record<string, GuardRailEntry> = {
-  "conflictScout.additiveMinConf":     [0.40, 0.92],
-  "conflictScout.overlapForceMinConf": [0.40, 0.92],
+  "conflictLic.additiveMinConf":     [0.40, 0.92],
+  "conflictLic.overlapForceMinConf": [0.40, 0.92],
   "pressure.normalMax":                [0.10, 0.45],
   "pressure.cautiousMax":              [0.30, 0.75],
   "lint.stalenessHours":               [4,    72  ],
@@ -114,11 +114,11 @@ function computeNudges(signals: TuningSignals, current: OrgTuning): Nudge[] {
 
   if (signals.conflictFPRate !== null) {
     if (signals.conflictFPRate > 0.30) {
-      nudges.push({ parameter: "conflictScout.additiveMinConf", delta: +0.05, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
-      nudges.push({ parameter: "conflictScout.overlapForceMinConf", delta: +0.05, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
+      nudges.push({ parameter: "conflictLic.additiveMinConf", delta: +0.05, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
+      nudges.push({ parameter: "conflictLic.overlapForceMinConf", delta: +0.05, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
     } else if (signals.conflictFPRate < 0.05) {
-      nudges.push({ parameter: "conflictScout.additiveMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
-      nudges.push({ parameter: "conflictScout.overlapForceMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
+      nudges.push({ parameter: "conflictLic.additiveMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
+      nudges.push({ parameter: "conflictLic.overlapForceMinConf", delta: -0.03, signal: "conflict_false_positive_rate", value: signals.conflictFPRate });
     }
   }
 

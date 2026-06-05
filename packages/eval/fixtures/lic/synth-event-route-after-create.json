@@ -1,0 +1,26 @@
+{
+  "taskId": "synth-event-route-after-create",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-04T23:57:25.039Z",
+  "calls": [],
+  "renderedBlock": "# Lic Context — task: synth-event-route-after-create\n_Stratum: S2._\n",
+  "renderedBlockHash": "127431561a5dfb1c",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": false,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false
+  }
+}

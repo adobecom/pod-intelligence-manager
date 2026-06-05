@@ -1,0 +1,26 @@
+{
+  "taskId": "synth-series-put-update-plan",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-04T23:57:25.067Z",
+  "calls": [],
+  "renderedBlock": "# Lic Context — task: synth-series-put-update-plan\n_Stratum: S2._\n",
+  "renderedBlockHash": "e913ff984e3f8ddd",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": false,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false
+  }
+}

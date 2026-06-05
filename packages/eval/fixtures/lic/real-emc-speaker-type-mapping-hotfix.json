@@ -1,0 +1,60 @@
+{
+  "taskId": "real-emc-speaker-type-mapping-hotfix",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-05-28T04:37:43.936Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "speaker type mapping ESP contract"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 15,
+      "output": "Found 5 results\n\n## High relevance\n\n1. web-src/src/pages/EventForm/SpeakersComponent.tsx (lines 291-360, score: 0.81) [web-src > pages-hooks]\n   arrow_function SpeakersComponent\n   ...\n 291:reshSeriesSpeakers = useCallback(async () => {\n   ...\n\n3. web-src/src/pages/EventForm/SpeakersComponent.tsx (lines 127-187, score: 1.00) [web-src > pages-hooks]\n   arrow_function SpeakersComponent\n   ...\n 127:   } catch (err) {\n   ...\n\n5. web-src/src/utils/eventFormMappers.ts (lines 37-84, score: 0.82) [web-src > pages-utils]\n   function apiSpeakerTypeToFormSpeakerType\n   ...\n  37:/**\n  38: * Map ESP event speakerType (PascalCase per OpenAPI) to form ProfileData SpeakerType (kebab-case Picker keys).\n  39: * Accepts lowercase legacy values. Unknown values default to 'speaker'.\n  40: */\n  41:function apiSpeakerTypeToFormSpeakerType(apiType: string | undefined | null): SpeakerType {\n   ...\n\n## Moderate relevance\n\n2. web-src/src/services/api.ts (lines 1383-1438, score: 0.72) [web-src > pages-services]\n   method getEventSpeaker\n\n4. web-src/src/utils/eventFormMappers.ts (lines 1-24, score: 0.56) [web-src > pages-utils]\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "speakerTypeMapping"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "No definition found for \"speakerTypeMapping\". Did you mean:\n\n1. `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx::SpeakerDashboardItem`\n2. `web-src/src/pages/EventForm/SpeakerPickerDialog.tsx::SpeakerPickerDialogProps`\n3. `web-src/src/config/localeMapping.ts::SUPPORTED_SPEAKER_LOCALES`\n4. `web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx::SpeakerFormDialogProps::speaker`\n5. `web-src/src/pages/EventForm/index.ts::SpeakersComponent`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-speaker-type-mapping-hotfix\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 speaker type mapping ESP contract\n```\nFound 5 results\n\n## High relevance\n\n1. web-src/src/pages/EventForm/SpeakersComponent.tsx (lines 291-360, score: 0.81) [web-src > pages-hooks]\n   arrow_function SpeakersComponent\n   ...\n 291:reshSeriesSpeakers = useCallback(async () => {\n   ...\n\n3. web-src/src/pages/EventForm/SpeakersComponent.tsx (lines 127-187, score: 1.00) [web-src > pages-hooks]\n   arrow_function SpeakersComponent\n   ...\n 127:   } catch (err) {\n   ...\n\n5. web-src/src/utils/eventFormMappers.ts (lines 37-84, score: 0.82) [web-src > pages-utils]\n   function apiSpeakerTypeToFormSpeakerType\n   ...\n  37:/**\n  38: * Map ESP event speakerType (PascalCase per OpenAPI) to form ProfileData SpeakerType (kebab-case Picker keys).\n  39: * Accepts lowercase legacy values. Unknown values default to 'speaker'.\n  40: */\n  41:function apiSpeakerTypeToFormSpeakerType(apiType: string | undefined | null): SpeakerType {\n   ...\n\n## Moderate relevance\n\n2. web-src/src/services/api.ts (lines 1383-1438, score: 0.72) [web-src > pages-services]\n   method getEventSpeaker\n\n4. web-src/src/utils/eventFormMappers.ts (lines 1-24, score: 0.56) [web-src > pages-utils]\n```\n\n## lic explain-symbol -r speakerTypeMapping\n```\nNo definition found for \"speakerTypeMapping\". Did you mean:\n\n1. `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx::SpeakerDashboardItem`\n2. `web-src/src/pages/EventForm/SpeakerPickerDialog.tsx::SpeakerPickerDialogProps`\n3. `web-src/src/config/localeMapping.ts::SUPPORTED_SPEAKER_LOCALES`\n4. `web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx::SpeakerFormDialogProps::speaker`\n5. `web-src/src/pages/EventForm/index.ts::SpeakersComponent`\n```\n",
+  "renderedBlockHash": "f92bce0587341818",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: apiType",
+      "post-merge answer symbol leak: apiType",
+      "task intent matched"
+    ]
+  }
+}
