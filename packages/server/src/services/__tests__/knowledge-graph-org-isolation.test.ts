@@ -218,6 +218,60 @@ describe("curateNode index consistency", () => {
     expect(getGraph(orgId).nodes[0].embedding_text_hash).toBeUndefined();
   });
 
+  it("edit action: preserves explicit scopes that differ from domains", async () => {
+    const orgId = "org-curate-explicit-scopes";
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [{
+        type: "decision",
+        summary: "Scoped auth decision",
+        details: "This node belongs to frontend and api scopes while its legacy domain is auth.",
+        domains: ["auth"],
+        scopes: ["frontend", "api"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      }],
+      "pod-scopes",
+      "Scopes Pod",
+    );
+
+    const nodeId = getGraph(orgId).nodes[0].id;
+    const edited = await curateNode(orgId, nodeId, "edit", { domains: ["identity"] });
+
+    expect(edited).toBe(true);
+    expect(getGraph(orgId).nodes[0].domains).toEqual(["identity"]);
+    expect(getGraph(orgId).nodes[0].scopes).toEqual(["frontend", "api"]);
+    expect(queryKnowledge(orgId, { filters: { scopes: ["frontend"] }, max_tokens: 2000 }).nodes.map((n) => n.id)).toContain(nodeId);
+    expect(queryKnowledge(orgId, { filters: { domains: ["auth"] }, max_tokens: 2000 }).nodes.map((n) => n.id)).not.toContain(nodeId);
+  });
+
+  it("edit action: treats reordered scopes as a mirror of domains", async () => {
+    const orgId = "org-curate-reordered-scope-mirror";
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [{
+        type: "decision",
+        summary: "Reordered scope mirror decision",
+        details: "Scopes and domains contain the same labels but in a different order.",
+        domains: ["backend", "api"],
+        scopes: ["api", "backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      }],
+      "pod-scope-mirror",
+      "Scope Mirror Pod",
+    );
+
+    const nodeId = getGraph(orgId).nodes[0].id;
+    const edited = await curateNode(orgId, nodeId, "edit", { domains: ["frontend"] });
+
+    expect(edited).toBe(true);
+    expect(getGraph(orgId).nodes[0].domains).toEqual(["frontend"]);
+    expect(getGraph(orgId).nodes[0].scopes).toEqual(["frontend"]);
+  });
+
   it("reject action: node is absent from domain, type, and keyword index queries", async () => {
     // Gap 2: _removeNodeFromIndexes is called on reject; verify all index dimensions
     // are cleaned up, not just graph.nodes.

@@ -12,7 +12,7 @@ vi.mock("../../../ws/index.js", () => ({
 }));
 
 vi.mock("../../../services/knowledge-graph.js", () => ({
-  getRelevantLearnings: vi.fn().mockResolvedValue({
+  getContractedRelevantLearnings: vi.fn().mockResolvedValue({
     nodes: [],
     truncated: false,
     total_matching: 0,
@@ -22,7 +22,7 @@ vi.mock("../../../services/knowledge-graph.js", () => ({
 import { regenerateLivingDoc } from "../summary.js";
 import db from "../../../db/connection.js";
 import { broadcast } from "../../../ws/index.js";
-import { getRelevantLearnings } from "../../../services/knowledge-graph.js";
+import { getContractedRelevantLearnings } from "../../../services/knowledge-graph.js";
 
 const MOCK_POD = {
   pod_id: "pod-1",
@@ -183,7 +183,7 @@ describe("regenerateLivingDoc", () => {
 
   it("includes knowledge context when learnings exist", async () => {
     setupDb({});
-    vi.mocked(getRelevantLearnings).mockResolvedValue({
+    vi.mocked(getContractedRelevantLearnings).mockResolvedValue({
       nodes: [
         { id: "n1", type: "pattern", summary: "Use shared schemas", source_pod_name: "Beta Pod", confidence_score: 0.8, details: "", domain_tags: [], created_at: "", source_pod_id: "" },
       ],
@@ -194,5 +194,11 @@ describe("regenerateLivingDoc", () => {
     const md = await regenerateLivingDoc("pod-1");
     expect(md).toContain("## Knowledge Context");
     expect(md).toContain("Use shared schemas");
+    expect(getContractedRelevantLearnings).toHaveBeenCalledWith("org-test", {
+      scopes: ["frontend", "backend"],
+      maxTokens: 1500,
+      projectId: null,
+      taskQuery: "API contract mismatch",
+    });
   });
 });

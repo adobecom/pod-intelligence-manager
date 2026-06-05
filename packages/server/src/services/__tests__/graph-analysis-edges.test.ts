@@ -63,6 +63,32 @@ describe("buildEdges — embedding-driven scoring", () => {
   });
 });
 
+describe("buildEdges — high-impact inferred edge types", () => {
+  it("preserves inferred contradicts edges instead of downgrading to relates_to", () => {
+    const emb = [1, 0, 0];
+    const pattern = node({ id: "pattern", type: "pattern", summary: "Use token refresh retry", embedding: emb });
+    const antiPattern = node({ id: "anti", type: "anti_pattern", summary: "Use token refresh retry", embedding: emb });
+
+    const edges = buildEdges([antiPattern], [pattern]);
+
+    expect(edges).toHaveLength(1);
+    expect(edges[0].type).toBe("contradicts");
+    expect(edges[0].inferred).toBe(true);
+  });
+
+  it("preserves inferred resolved_by edges instead of downgrading to relates_to", () => {
+    const emb = [1, 0, 0];
+    const pattern = node({ id: "pattern", type: "pattern", summary: "Auth retry limit", embedding: emb });
+    const conflict = node({ id: "conflict", type: "resolved_conflict", summary: "Auth retry limit", embedding: emb });
+
+    const edges = buildEdges([conflict], [pattern]);
+
+    expect(edges).toHaveLength(1);
+    expect(edges[0].type).toBe("resolved_by");
+    expect(edges[0].inferred).toBe(true);
+  });
+});
+
 describe("buildEdges — incremental maintenance (no quadratic rebuild)", () => {
   // Why this test exists: archival ingestion calls buildEdges(newNodes, existingNodes).
   // If a future refactor passes the full graph for both args, the cost regresses from

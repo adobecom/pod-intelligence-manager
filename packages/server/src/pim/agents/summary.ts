@@ -1,7 +1,7 @@
 import db from "../../db/connection.js";
 import { getPressureLabel, getPressureLevel } from "@pim/shared";
 import { broadcast } from "../../ws/index.js";
-import { getRelevantLearnings } from "../../services/knowledge-graph.js";
+import { getContractedRelevantLearnings } from "../../services/knowledge-graph.js";
 import { computeCurrentDay } from "../../services/pod-day.js";
 
 interface PodRow {
@@ -155,13 +155,13 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
     }
     const activeScopes = areas.map(a => a.scope);
     const conflictSummaries = openConflicts.map(c => c.summary);
-    const knowledgeResult = await getRelevantLearnings(
-      pod.org_id,
-      activeScopes,
-      conflictSummaries,
-      1500,
-      pod.project_id ?? null,
-    );
+    const taskQuery = conflictSummaries.join("\n").trim() || undefined;
+    const knowledgeResult = await getContractedRelevantLearnings(pod.org_id, {
+      scopes: activeScopes,
+      maxTokens: 1500,
+      projectId: pod.project_id ?? null,
+      ...(taskQuery ? { taskQuery } : {}),
+    });
     if (knowledgeResult.nodes.length > 0) {
       md += `## Knowledge Context\n\n`;
       md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;

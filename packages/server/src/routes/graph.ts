@@ -22,14 +22,13 @@ import {
   curateNode,
   getGraph,
   getPrecedents,
-  getRelevantLearnings,
+  getContractedRelevantLearnings,
   getStats,
-  queryKnowledge,
+  queryKnowledgeSemantic,
   stripEmbeddingsFromGraph,
 } from "../services/knowledge-graph.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
-import { generateEmbedding } from "../services/embeddings.js";
 
 function isValidTimestamp(value: string | undefined): boolean {
   return !!value && !Number.isNaN(new Date(value).getTime());
@@ -37,6 +36,8 @@ function isValidTimestamp(value: string | undefined): boolean {
 
 const KnowledgeQuerySchema = z.object({
   filters: z.object({
+    scopes: z.array(z.string()).optional(),
+    topics: z.array(z.string()).optional(),
     domains: z.array(z.string()).optional(),
     types: z.array(z.enum(["decision", "pattern", "anti_pattern", "resolved_conflict", "scope_insight"])).optional(),
     source_pod_ids: z.array(z.string()).optional(),
@@ -59,6 +60,8 @@ const KnowledgeQuerySchema = z.object({
   query_mode: z.enum(["current", "history", "as_of", "why_changed"]).optional(),
   as_of: z.string().optional(),
   expand_graph: z.boolean().optional(),
+  include_explanations: z.boolean().optional(),
+  record_retrievals: z.boolean().optional(),
 }).superRefine((body, ctx) => {
   if (body.query_mode === "as_of" && !isValidTimestamp(body.as_of)) {
     ctx.addIssue({
@@ -83,6 +86,7 @@ const AdHocLearningSchema = z.object({
   summary: z.string().min(10).max(500),
   details: z.string().min(30),
   domains: z.array(z.string().min(1)).min(1),
+  scopes: z.array(z.string().min(1)).optional(),
   source_label: z.string().min(1).max(120).optional(),
   confidence_score: z.number().min(0).max(1).optional(),
 });
@@ -120,28 +124,39 @@ export default async function graphRoutes(app: FastifyInstance) {
   // If `query_text` is provided and `query_embedding` is not, we generate the embedding
   // server-side so callers without Bedrock creds can still get semantic scoring.
   app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req) => {
-    const { query_text, query_embedding, max_tokens, ...rest } = req.body;
-    const embedding = query_embedding ?? (query_text ? await generateEmbedding(query_text) : null);
-    return queryKnowledge(req.org!.org_id, {
-      ...rest,
-      query_text,
-      query_embedding: embedding,
-      max_tokens: max_tokens ?? 2000,
+    return queryKnowledgeSemantic(req.org!.org_id, {
+      ...req.body,
+      max_tokens: req.body.max_tokens ?? 2000,
     });
   });
 
   // Convenience: relevant learnings for given scopes.
   // `projectId` scopes results to org-wide + nodes tagged with that project (no cross-project bleed).
   // `query` is free-text used to generate a semantic embedding; without it, scoring falls back to keyword+domain only.
-  app.get<{ Querystring: { scopes?: string; maxTokens?: string; projectId?: string; query?: string } }>(
+  app.get<{
+    Querystring: {
+      scopes?: string;
+      domains?: string;
+      maxTokens?: string;
+      projectId?: string;
+      taskQuery?: string;
+      externalQuery?: string;
+      query?: string;
+    };
+  }>(
     "/api/knowledge/relevant",
     async (req) => {
-      const scopes = req.query.scopes?.split(",").filter(Boolean) ?? [];
+      const scopeParam = req.query.scopes ?? req.query.domains ?? "";
+      const scopes = scopeParam.split(",").map((s) => s.trim()).filter(Boolean);
       const maxTokens = parseInt(req.query.maxTokens ?? "2000", 10);
       const projectId = req.query.projectId?.trim() || null;
-      const queryText = req.query.query?.trim();
-      const conflictSummaries = queryText ? [queryText] : [];
-      return getRelevantLearnings(req.org!.org_id, scopes, conflictSummaries, maxTokens, projectId);
+      const taskQuery = (req.query.taskQuery ?? req.query.externalQuery ?? req.query.query)?.trim();
+      return getContractedRelevantLearnings(req.org!.org_id, {
+        scopes,
+        maxTokens,
+        projectId,
+        ...(taskQuery ? { taskQuery } : {}),
+      });
     },
   );
 
@@ -169,6 +184,7 @@ export default async function graphRoutes(app: FastifyInstance) {
         summary: body.summary,
         details: body.details,
         domains: body.domains,
+        ...(body.scopes?.length ? { scopes: body.scopes } : {}),
         confidence: "extracted" satisfies ConfidenceLevel,
         confidence_score: body.confidence_score ?? AD_HOC_DEFAULT_CONFIDENCE,
       };

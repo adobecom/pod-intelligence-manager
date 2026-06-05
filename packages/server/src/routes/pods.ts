@@ -4,7 +4,7 @@ import db from "../db/connection.js";
 import type { Pod, PodArea, Milestone } from "@pim/shared";
 import { regenerateLivingDoc } from "../pim/agents/summary.js";
 import { runLintPass } from "../pim/agents/lint.js";
-import { getRelevantLearnings } from "../services/knowledge-graph.js";
+import { getContractedRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
 import { getOrgScopeIdsOrdered } from "../services/org-settings.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
@@ -192,10 +192,20 @@ export default async function podRoutes(app: FastifyInstance) {
     // Seed with knowledge from past pods
     try {
       const allScopes = getOrgScopeIdsOrdered(orgId);
-      const learnings = await getRelevantLearnings(orgId, allScopes, [], 3000, project_id ?? null);
+      const learnings = await getContractedRelevantLearnings(orgId, {
+        scopes: allScopes,
+        maxTokens: 3000,
+        projectId: project_id ?? null,
+        taskQuery: `${name} ${milestone_name}`.trim(),
+      });
       if (learnings.nodes.length > 0) {
-        let knowledgeSection = "\n## Historical Knowledge Context\n\n";
-        knowledgeSection += "The following learnings from past pods may be relevant:\n\n";
+        const isTaskRelevant = learnings.context_contract?.returned_mode === "task_relevant";
+        let knowledgeSection = isTaskRelevant
+          ? "\n## Possible Historical Constraints\n\n"
+          : "\n## Historical Knowledge Context\n\n";
+        knowledgeSection += isTaskRelevant
+          ? "Compact task-relevant constraints from organizational memory:\n\n"
+          : "The following learnings from past pods may be relevant:\n\n";
 
         const byType = new Map<string, typeof learnings.nodes>();
         for (const node of learnings.nodes) {

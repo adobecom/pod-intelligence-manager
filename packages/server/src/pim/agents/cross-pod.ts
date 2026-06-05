@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import db from "../../db/connection.js";
-import { getRelevantLearnings } from "../../services/knowledge-graph.js";
+import { getContractedRelevantLearnings } from "../../services/knowledge-graph.js";
 import { generateEmbedding, cosineSimilarity, isEmbeddingAvailable } from "../../services/embeddings.js";
+import { getOrgScopeIdsOrdered } from "../../services/org-settings.js";
 
 interface PodRow {
   pod_id: string;
@@ -126,9 +127,15 @@ export async function detectOverlaps(): Promise<void> {
 
       let advisory = `${podA.name} and ${podB.name} appear to be tackling related concepts. Coordinate to avoid conflicting approaches.`;
       try {
-        const seedDomains = [...new Set([...ctxA.topTerms, ...ctxB.topTerms])].slice(0, 3);
-        if (seedDomains.length > 0 && podA.org_id) {
-          const historicalLearnings = await getRelevantLearnings(podA.org_id, seedDomains, [], 500);
+        const overlapTerms = [...new Set([...ctxA.topTerms, ...ctxB.topTerms])].slice(0, 8);
+        const overlapText = [ctxA.text, ctxB.text, overlapTerms.join(" ")].filter(Boolean).join("\n").trim();
+        const scopes = podA.org_id ? getOrgScopeIdsOrdered(podA.org_id) : [];
+        if (overlapText && scopes.length > 0 && podA.org_id) {
+          const historicalLearnings = await getContractedRelevantLearnings(podA.org_id, {
+            scopes,
+            maxTokens: 500,
+            taskQuery: overlapText,
+          });
           if (historicalLearnings.nodes.length > 0) {
             const relevantNote = historicalLearnings.nodes[0];
             advisory += ` Historical note: "${relevantNote.summary}" (from ${relevantNote.source_pod_name}).`;

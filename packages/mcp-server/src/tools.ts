@@ -21,6 +21,11 @@ const json = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
 });
 
+const isKgOrgLintFinding = (finding: unknown): finding is { type: "kg_org_contradiction" } =>
+  typeof finding === "object" &&
+  finding !== null &&
+  (finding as { type?: unknown }).type === "kg_org_contradiction";
+
 /* ------------------------------------------------------------------ */
 /*  Zod schemas (reusable fragments)                                  */
 /* ------------------------------------------------------------------ */
@@ -366,19 +371,23 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_agent_session_context",
-    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Optionally include external context (Slack, Jira, Confluence, etc.) via external_query; the same task-specific query also sharpens KG learning retrieval. Use before substantive coding. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
+    "REQUIRED at the start of every work session (see docs/POD_AGENT_PROTOCOL.md): pull bundled PIM context in one call — living doc, pod state, conflicts, token-budgeted org learnings for the agent scope, and recent updates. Pass task_query when you know the current task; external_query is a backward-compatible alias. Use query_knowledge for deeper precedent lookup. If conflict pressure is critical (>= 0.8), stop and address conflicts first.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
       learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
       recent_updates_limit: z.number().optional().describe("Max recent context updates to return (default 20)"),
+      task_query: z
+        .string()
+        .optional()
+        .describe("Optional task-specific query to guide compact KG learning retrieval and external context search."),
       external_query: z
         .string()
         .optional()
-        .describe("Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings."),
+        .describe("Backward-compatible alias for task_query."),
     },
-    async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
+    async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, task_query, external_query }) => {
       const maxTok = learnings_max_tokens ?? 2000;
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
@@ -386,8 +395,8 @@ export function registerTools(server: McpServer) {
       // Fetch pod first so we can scope learnings by its project_id (prevents cross-project knowledge bleed).
       const pod = await apiFetch<{ project_id?: string | null; milestone?: { name?: string } }>(`/api/pods/${pod_id}`);
       const projectParam = pod.project_id ? `&projectId=${encodeURIComponent(pod.project_id)}` : "";
-      const taskQuery = external_query?.trim();
-      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
+      const taskQuery = (task_query ?? external_query)?.trim();
+      const queryParam = taskQuery ? `&taskQuery=${encodeURIComponent(taskQuery)}` : "";
 
       const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context, lint_findings, ingestion_queue] =
         await Promise.all([
@@ -395,8 +404,8 @@ export function registerTools(server: McpServer) {
           apiFetch(`/api/pods/${pod_id}/conflicts`),
           apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
           apiFetch(`/api/pods/${pod_id}/context-updates`),
-          external_query
-            ? apiPost("/api/context-search", { query: external_query, pod_id }).catch(() => null)
+          taskQuery
+            ? apiPost("/api/context-search", { query: taskQuery, pod_id }).catch(() => null)
             : Promise.resolve(null),
           apiFetch<unknown[]>(`/api/pods/${pod_id}/lint-findings`).catch(() => []),
           apiFetch<{ queue_size: number }>(`/api/pods/${pod_id}/ingestion-queue`).catch(() => ({ queue_size: 0 })),
@@ -407,7 +416,7 @@ export function registerTools(server: McpServer) {
         : [];
 
       const open_kg_lint = Array.isArray(lint_findings)
-        ? lint_findings.filter((f: { type?: string }) => f.type === "kg_org_contradiction")
+        ? lint_findings.filter(isKgOrgLintFinding)
         : [];
 
       return json({
@@ -467,14 +476,18 @@ export function registerTools(server: McpServer) {
       scope: Scope,
       learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
       recent_updates_limit: z.number().optional().describe("Max recent project context updates to return (default 20)"),
+      task_query: z
+        .string()
+        .optional()
+        .describe("Optional task-specific query to guide compact KG learning retrieval and external context search."),
       external_query: z
         .string()
         .optional()
         .describe(
-          "Optional task-specific query to guide KG learning retrieval and also run through context_search (Slack/Jira/Confluence/GitHub/Fluffyjaws/git). Omit to skip external lookup and use broad scope-ranked KG learnings. The project_id is passed automatically to scope the fan-out to this project's resources.",
+          "Backward-compatible alias for task_query. The project_id is passed automatically to scope external context fan-out.",
         ),
     },
-    async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, external_query }) => {
+    async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, task_query, external_query }) => {
       const maxTok = learnings_max_tokens ?? 2000;
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
@@ -482,16 +495,16 @@ export function registerTools(server: McpServer) {
 
       // Fetch project metadata for the response and project-scoped lookup. The
       // project name is too broad for semantic KG filtering; use only the
-      // task-specific external_query when provided.
+      // task-specific task_query/external_query when provided.
       const project = await apiFetch<{ name?: string }>(`/api/projects/${encodeURIComponent(project_id)}`);
-      const taskQuery = external_query?.trim();
-      const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
+      const taskQuery = (task_query ?? external_query)?.trim();
+      const queryParam = taskQuery ? `&taskQuery=${encodeURIComponent(taskQuery)}` : "";
 
       const [project_updates, relevant_learnings, external_context] = await Promise.all([
         apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),
         apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
-        external_query
-          ? apiPost("/api/context-search", { query: external_query, project_id }).catch(() => null)
+        taskQuery
+          ? apiPost("/api/context-search", { query: taskQuery, project_id }).catch(() => null)
           : Promise.resolve(null),
       ]);
 
@@ -618,8 +631,10 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "query_knowledge",
-    "Search the org knowledge graph with token-budgeted results. Returns relevant learnings filtered by domain, type, confidence, and text search. Use this to find historical decisions, patterns, anti-patterns, and resolved conflicts. Pass include_project_id when you know the caller's project to avoid cross-project knowledge bleed.",
+    "Search the org knowledge graph with token-budgeted results. This explicit KG pull interface is available regardless of the session-context rollout flag. Filter by scopes/domains, topics, type, confidence, and semantic query text. Pass include_project_id when you know the caller's project to avoid cross-project knowledge bleed.",
     {
+      scopes: z.array(z.string()).optional().describe("Filter by org/project scope tags"),
+      topics: z.array(z.string()).optional().describe("Filter by topic tags"),
       domains: z.array(z.string()).optional().describe("Filter by domain tags"),
       types: z
         .array(z.enum(["decision", "pattern", "anti_pattern", "resolved_conflict", "scope_insight"]))

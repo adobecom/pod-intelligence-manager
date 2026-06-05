@@ -222,6 +222,18 @@ describe("PimClient", () => {
         undefined,
       );
     });
+
+    it("sends taskQuery as the first-class relevant-learning query parameter", async () => {
+      mockOk({ nodes: [] });
+      const client = makeClient();
+
+      await client.getRelevantLearnings(1500, { taskQuery: "speaker put contract" });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=1500&taskQuery=speaker%20put%20contract",
+        undefined,
+      );
+    });
   });
 
   describe("getPrecedents", () => {
@@ -315,7 +327,19 @@ describe("PimClient", () => {
       expect(knowledgeUrl).toBe("http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000");
     });
 
-    it("uses externalQuery as the task-specific KG query when supplied", async () => {
+    it("uses taskQuery as the task-specific KG query when supplied", async () => {
+      mockSessionContextResponses();
+
+      const client = makeClient();
+      await client.pullSessionContext({ taskQuery: "speaker put contract" });
+
+      const knowledgeUrl = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes("/knowledge/relevant"));
+      expect(knowledgeUrl).toContain("taskQuery=speaker%20put%20contract");
+    });
+
+    it("keeps externalQuery as a taskQuery alias", async () => {
       mockSessionContextResponses();
 
       const client = makeClient();
@@ -324,7 +348,7 @@ describe("PimClient", () => {
       const knowledgeUrl = mockFetch.mock.calls
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
-      expect(knowledgeUrl).toContain("query=speaker%20put%20contract");
+      expect(knowledgeUrl).toContain("taskQuery=speaker%20put%20contract");
     });
   });
 
@@ -376,7 +400,19 @@ describe("PimClient", () => {
       );
     });
 
-    it("uses externalQuery as the project KG query when supplied", async () => {
+    it("uses taskQuery as the project KG query when supplied", async () => {
+      mockProjectSessionContextResponses();
+
+      const client = makeClient({ podId: undefined, projectId: "project-demo" });
+      await client.pullProjectSessionContext({ taskQuery: "speaker put contract" });
+
+      const knowledgeUrl = mockFetch.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes("/knowledge/relevant"));
+      expect(knowledgeUrl).toContain("taskQuery=speaker%20put%20contract");
+    });
+
+    it("keeps externalQuery as the project taskQuery alias", async () => {
       mockProjectSessionContextResponses();
 
       const client = makeClient({ podId: undefined, projectId: "project-demo" });
@@ -385,7 +421,7 @@ describe("PimClient", () => {
       const knowledgeUrl = mockFetch.mock.calls
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
-      expect(knowledgeUrl).toContain("query=speaker%20put%20contract");
+      expect(knowledgeUrl).toContain("taskQuery=speaker%20put%20contract");
     });
   });
 });

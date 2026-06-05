@@ -78,8 +78,8 @@ type ArchiveFlow =
 
 function formatParamLabel(parameter: string): string {
   const labels: Record<string, string> = {
-    "conflictLic.additiveMinConf":     "Conflict detection sensitivity",
-    "conflictLic.overlapForceMinConf": "Overlap force conflict threshold",
+    "conflictScout.additiveMinConf":     "Conflict detection sensitivity",
+    "conflictScout.overlapForceMinConf": "Overlap force conflict threshold",
     "pressure.normalMax":                "Normal pressure ceiling",
     "pressure.cautiousMax":              "Caution pressure ceiling",
     "pressure.degradedMax":              "Degraded pressure ceiling",
@@ -646,7 +646,7 @@ export function OrgDashboard() {
                 <Text styles={style({ fontWeight: "bold", font: "body-sm", marginBottom: 8 })}>Current effective values</Text>
                 <div className={style({ display: "flex", flexDirection: "column", gap: 4 })}>
                   {([
-                    ["Conflict detection sensitivity", orgTuning.conflictLic.additiveMinConf, DEFAULT_ORG_TUNING.conflictLic.additiveMinConf],
+                    ["Conflict detection sensitivity", orgTuning.conflictScout.additiveMinConf, DEFAULT_ORG_TUNING.conflictScout.additiveMinConf],
                     ["Normal pressure ceiling", orgTuning.pressure.normalMax, DEFAULT_ORG_TUNING.pressure.normalMax],
                     ["Caution pressure ceiling", orgTuning.pressure.cautiousMax, DEFAULT_ORG_TUNING.pressure.cautiousMax],
                     ["Degraded pressure ceiling", orgTuning.pressure.degradedMax, DEFAULT_ORG_TUNING.pressure.degradedMax],

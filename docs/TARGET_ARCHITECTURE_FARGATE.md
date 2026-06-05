@@ -89,6 +89,19 @@ Current SQLite schemas port mostly 1:1 to Postgres. Three subsystems need explic
 
 The graph-storage interface is already abstracted to three functions, so that subsystem's swap is localized to `packages/server/src/services/graph-storage.ts`. The rest of the data layer is not abstracted today.
 
+### Project search migration note
+
+The Aurora migration should include the indexed project-search layer described in `docs/indexed-project-search-plan.md`, not only KG storage. Project artifacts, chunks, entities, and edges should remain project-scoped search data; only durable promoted learnings should enter the org KG.
+
+Target Postgres additions:
+
+- `project_search_documents` for normalized source artifacts.
+- `project_search_chunks` with `vector(EMBEDDING_DIMENSIONS)` plus full-text search.
+- `project_search_entities` and `project_search_edges` for the mind-map navigation layer.
+- GIN full-text indexes, vector ANN indexes, and composite `(org_id, project_id, source, occurred_at)` indexes.
+
+This keeps the KG compact while giving PIM a fast local search surface over current project data.
+
 ## Migration phases
 
 ### Phase -1: Current-stack headroom before migration (1-3 days)
