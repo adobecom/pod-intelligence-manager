@@ -4,6 +4,7 @@ import db from "../db/connection.js";
 import type { Conflict, ConflictSide } from "@pim/shared";
 import { broadcast } from "../ws/index.js";
 import { recalculatePressure } from "../services/pressure.js";
+import { getOrgTuning } from "../services/org-settings.js";
 import { notifyConflictResolved } from "../services/slack.js";
 import { validateBody } from "../middleware/validation.js";
 import { drainQueue } from "../services/ingestion-queue.js";
@@ -89,12 +90,12 @@ export default async function conflictRoutes(app: FastifyInstance) {
     const resolved = rowToConflict(row);
 
     // Recalculate pressure and broadcast
-    const newPressure = recalculatePressure(podId);
+    const orgTuning = getOrgTuning(req.org!.org_id);
+    const newPressure = recalculatePressure(podId, req.org!.org_id);
     broadcast({ type: "conflict_resolved", podId, payload: resolved });
     broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
 
-    // If pressure dropped below critical, replay queued context updates
-    if (newPressure < 0.8) {
+    if (newPressure < orgTuning.pressure.degradedMax) {
       drainQueue(podId).catch((err) => {
         console.error(`[ingestion-queue] drain failed for pod ${podId}:`, err);
       });

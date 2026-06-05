@@ -249,10 +249,15 @@ export function notifyPressureThreshold(
   podId: string,
   pressure: number,
   previousPressure: number,
+  thresholds: { cautiousMax: number; degradedMax: number } = {
+    cautiousMax: 0.6,
+    degradedMax: 0.8,
+  },
 ): void {
-  // Only notify when crossing into degraded (0.6) or critical (0.8)
-  const crossedDegraded = previousPressure < 0.6 && pressure >= 0.6;
-  const crossedCritical = previousPressure < 0.8 && pressure >= 0.8;
+  const crossedDegraded =
+    previousPressure < thresholds.cautiousMax && pressure >= thresholds.cautiousMax;
+  const crossedCritical =
+    previousPressure < thresholds.degradedMax && pressure >= thresholds.degradedMax;
 
   if (!crossedDegraded && !crossedCritical) return;
 

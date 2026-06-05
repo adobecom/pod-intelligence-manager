@@ -78,6 +78,9 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
   const sprintEnd = formatDate(pod.sprint_end);
 
   let md = `# Pod: ${pod.name} — Living Doc\n\n`;
+  if (pod.conflict_pressure >= 0.6) {
+    md += `> **Warning:** Conflict pressure is ${pressureLabel.toLowerCase()} (${pod.conflict_pressure.toFixed(2)}). Review open conflicts before relying on contested merges.\n\n`;
+  }
   md += `## Pod Health\n`;
   const currentDay = computeCurrentDay(pod.sprint_start, pod.total_days);
   md += `**Conflict Pressure:** ${pod.conflict_pressure.toFixed(2)} (${pressureLabel}) | **Day ${currentDay} of ${pod.total_days}** | Sprint: ${sprintStart}–${sprintEnd}\n\n`;
@@ -100,7 +103,12 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
   } else {
     for (const c of openConflicts) {
       const sevLabel = c.severity === "blocking" ? "**BLOCKING**" : "non-blocking";
-      md += `- **${c.id}:** ${c.summary} — ${sevLabel}\n`;
+      const row = db.prepare("SELECT sides_json FROM conflicts WHERE pod_id = ? AND id = ?").get(podId, c.id) as { sides_json: string } | undefined;
+      const orgSide = row
+        ? (JSON.parse(row.sides_json) as Array<{ contributor: string }>).some((s) => s.contributor.startsWith("org:kg:"))
+        : false;
+      const orgTag = orgSide ? " (org precedent)" : "";
+      md += `- **${c.id}:** ${c.summary} — ${sevLabel}${orgTag}\n`;
     }
     md += `\n`;
   }
@@ -124,6 +132,17 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
     for (const t of tunnels) {
       const statusIcon = t.status === "active" ? "" : t.status === "idle" ? " (idle)" : " (disconnected)";
       md += `- ${t.dev_name}: ${t.branch} → ${t.url}${statusIcon}\n`;
+    }
+    md += `\n`;
+  }
+
+  const kgLint = db.prepare(
+    "SELECT summary, area, suggestion FROM lint_findings WHERE pod_id = ? AND type = 'kg_org_contradiction' ORDER BY timestamp DESC LIMIT 5",
+  ).all(podId) as { summary: string; area: string | null; suggestion: string | null }[];
+  if (kgLint.length > 0) {
+    md += `## Org Pattern Advisories\n\n`;
+    for (const f of kgLint) {
+      md += `- **${f.area ?? "pod"}:** ${f.summary}${f.suggestion ? ` — ${f.suggestion}` : ""}\n`;
     }
     md += `\n`;
   }
