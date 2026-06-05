@@ -19,6 +19,9 @@ import type {
 export interface SessionContextOptions {
   learningsMaxTokens?: number;
   recentUpdateLimit?: number;
+  /** Task-specific text used to rank compact KG context and optional external context search. */
+  taskQuery?: string;
+  /** Backward-compatible alias for taskQuery. */
   externalQuery?: string;
 }
 
@@ -236,14 +239,15 @@ export class PimClient {
   // falls back to keyword + domain matching only.
   async getRelevantLearnings(
     maxTokens: number = 2000,
-    opts?: { projectId?: string | null; query?: string },
+    opts?: { projectId?: string | null; taskQuery?: string; query?: string },
   ): Promise<KnowledgeQueryResult> {
     const scopes = encodeURIComponent(this.config.scope);
     const projectParam = opts?.projectId
       ? `&projectId=${encodeURIComponent(opts.projectId)}`
       : "";
-    const queryParam = opts?.query?.trim()
-      ? `&query=${encodeURIComponent(opts.query.trim())}`
+    const taskQuery = (opts?.taskQuery ?? opts?.query)?.trim();
+    const queryParam = taskQuery
+      ? `&taskQuery=${encodeURIComponent(taskQuery)}`
       : "";
     return fetchJSON<KnowledgeQueryResult>(
       this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}${projectParam}${queryParam}`),
@@ -306,10 +310,10 @@ export class PimClient {
     // enough to hard-gate away task-relevant learnings. A caller-supplied
     // externalQuery is task-specific, so it is safe to use for KG ranking.
     const pod = await this.getPod();
-    const taskQuery = opts?.externalQuery?.trim() || undefined;
+    const taskQuery = (opts?.taskQuery ?? opts?.externalQuery)?.trim() || undefined;
     const learningsOpts = {
       projectId: pod.project_id ?? null,
-      query: taskQuery,
+      taskQuery,
     };
 
     const baseFetches = [
@@ -319,8 +323,8 @@ export class PimClient {
       this.getUpdates(),
     ] as const;
 
-    const externalFetch = opts?.externalQuery
-      ? this.searchContext(opts.externalQuery)
+    const externalFetch = taskQuery
+      ? this.searchContext(taskQuery)
       : null;
 
     const results = await Promise.allSettled([...baseFetches, externalFetch]);
@@ -367,10 +371,10 @@ export class PimClient {
     // out task-relevant learnings. Use externalQuery when a task-specific query
     // is available.
     const project = await this.getProject();
-    const taskQuery = opts?.externalQuery?.trim() || undefined;
+    const taskQuery = (opts?.taskQuery ?? opts?.externalQuery)?.trim() || undefined;
     const learningsOpts = {
       projectId: this.config.projectId ?? null,
-      query: taskQuery,
+      taskQuery,
     };
 
     const baseFetches = [
@@ -378,8 +382,8 @@ export class PimClient {
       this.getRelevantLearnings(maxTokens, learningsOpts),
     ] as const;
 
-    const externalFetch = opts?.externalQuery
-      ? this.searchContext(opts.externalQuery, { project_id: this.config.projectId })
+    const externalFetch = taskQuery
+      ? this.searchContext(taskQuery, { project_id: this.config.projectId })
       : null;
 
     const results = await Promise.allSettled([...baseFetches, externalFetch]);

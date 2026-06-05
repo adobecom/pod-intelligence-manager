@@ -97,19 +97,19 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
     console.error("[pim-master] KG pattern scout failed (non-blocking):", err);
   }
 
-  let lic_used = false;
-  let lic_recommendation: LicRecommendation | null = null;
-  let licResult = null as Awaited<ReturnType<typeof runConflictLic>>;
+  let scout_used = false;
+  let scout_recommendation: ScoutRecommendation | null = null;
+  let scoutResult = null as Awaited<ReturnType<typeof runConflictScout>>;
 
-  if (shouldRunConflictLic(classification, update, licTuning)) {
-    lic_used = true;
+  if (shouldRunConflictScout(classification, update, scoutTuning)) {
+    scout_used = true;
     try {
-      licResult = await runConflictLic(update, classification, licTuning);
-      if (licResult) {
-        lic_recommendation = licResult.recommendation;
+      scoutResult = await runConflictScout(update, classification, scoutTuning);
+      if (scoutResult) {
+        scout_recommendation = scoutResult.recommendation;
       }
     } catch (err) {
-      console.error("[pim-master] Conflict lic failed (non-blocking):", err);
+      console.error("[pim-master] Conflict Scout failed (non-blocking):", err);
     }
   }
 
@@ -133,7 +133,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
     held = hold.held ?? true;
   } else if (
     classification === "overlapping" &&
-    licSaysOpenConflict(licResult, licTuning.overlapForceMinConf)
+    scoutSaysOpenConflict(scoutResult, scoutTuning.overlapForceMinConf)
   ) {
     const conflict = await tryCreateConflict(update);
     if (conflict) {
@@ -141,7 +141,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
       conflictId = conflict.id;
     }
     merged = true;
-    note = licResult?.rationale;
+    note = scoutResult?.rationale;
   } else {
     switch (classification) {
       case "additive": {
@@ -162,7 +162,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
           if (conflict) {
             conflictCreated = true;
             conflictId = conflict.id;
-            note = licResult?.rationale ?? note;
+            note = scoutResult?.rationale ?? note;
           }
         }
         break;
@@ -183,7 +183,7 @@ export async function processUpdate(update: ContextUpdate, orgId?: string): Prom
           degraded = true;
           error = result.error;
         }
-        if (result.escalate && !licSuppressesMergeEscalate(licResult, licTuning.suppressMergeMinConf)) {
+        if (result.escalate && !scoutSuppressesMergeEscalate(scoutResult, scoutTuning.suppressMergeMinConf)) {
           const conflict = await tryCreateConflict(update);
           if (conflict) {
             conflictCreated = true;

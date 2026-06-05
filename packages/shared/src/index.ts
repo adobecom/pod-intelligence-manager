@@ -33,6 +33,7 @@ export { EMPTY_PROJECT_ANATOMY } from "./types/project.js";
 export type {
   OrgConfig,
   OrgScopeDefinition,
+  KgContextContractMode,
   OrgTuning,
 } from "./types/org-settings.js";
 
@@ -88,6 +89,8 @@ export type {
   KnowledgeQueryFilters,
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
+  KnowledgeRetrievalExplanation,
+  KnowledgeContextContractInfo,
   KnowledgeStats,
   EnhancedPodLearning,
   CurationAction,

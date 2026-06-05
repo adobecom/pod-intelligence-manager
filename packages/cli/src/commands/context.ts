@@ -152,6 +152,8 @@ export function registerContextCommand(program: Command): void {
     .option("-w, --write <file>", "Also write markdown bundle to a file (e.g. .pim/last-context.md)")
     .option("--learnings-tokens <n>", "Token budget for relevant learnings", "2000")
     .option("--recent <n>", "Max recent context updates to include", "20")
+    .option("--task-query <query>", "Task-specific query for compact KG context and external context search")
+    .option("--external-query <query>", "Alias for --task-query")
     .action(async (opts) => {
       const base = getBaseUrl(program);
       let orgConfig;
@@ -181,6 +183,7 @@ export function registerContextCommand(program: Command): void {
       const ctx = await client.pullSessionContext({
         learningsMaxTokens: Number.isFinite(learningsMaxTokens) ? learningsMaxTokens : 2000,
         recentUpdateLimit: Number.isFinite(recentLimit) ? recentLimit : 20,
+        taskQuery: opts.taskQuery ?? opts.externalQuery,
       });
 
       const md = formatMarkdownBundle(ctx);

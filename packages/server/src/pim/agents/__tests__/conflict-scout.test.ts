@@ -17,13 +17,13 @@ vi.mock("../../llm.js", () => ({
 import db from "../../../db/connection.js";
 import { isLLMAvailable, callLLMJSON } from "../../llm.js";
 import {
-  hasCrossAgentPeerInLicWindow,
-  shouldRunConflictLic,
-  runConflictLic,
-  licSaysOpenConflict,
-  licSuppressesMergeEscalate,
-  ADDITIVE_LIC_CONFLICT_MIN_CONF,
-} from "../conflict-lic.js";
+  hasCrossAgentPeerInScoutWindow,
+  shouldRunConflictScout,
+  runConflictScout,
+  scoutSaysOpenConflict,
+  scoutSuppressesMergeEscalate,
+  ADDITIVE_SCOUT_CONFLICT_MIN_CONF,
+} from "../conflict-scout.js";
 
 function makeUpdate(over: Partial<ContextUpdate> = {}): ContextUpdate {
   return {
@@ -44,43 +44,43 @@ function makeUpdate(over: Partial<ContextUpdate> = {}): ContextUpdate {
   };
 }
 
-describe("conflict-lic gates", () => {
+describe("conflict-scout gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isLLMAvailable).mockReturnValue(true);
   });
 
-  it("shouldRunConflictLic is false for contradictory", () => {
-    expect(shouldRunConflictLic("contradictory", makeUpdate())).toBe(false);
+  it("shouldRunConflictScout is false for contradictory", () => {
+    expect(shouldRunConflictScout("contradictory", makeUpdate())).toBe(false);
   });
 
-  it("shouldRunConflictLic is true for overlapping when Bedrock on", () => {
-    expect(shouldRunConflictLic("overlapping", makeUpdate())).toBe(true);
+  it("shouldRunConflictScout is true for overlapping when Bedrock on", () => {
+    expect(shouldRunConflictScout("overlapping", makeUpdate())).toBe(true);
   });
 
-  it("shouldRunConflictLic is false for additive when Bedrock off", () => {
+  it("shouldRunConflictScout is false for additive when Bedrock off", () => {
     vi.mocked(isLLMAvailable).mockReturnValue(false);
-    expect(shouldRunConflictLic("additive", makeUpdate())).toBe(false);
+    expect(shouldRunConflictScout("additive", makeUpdate())).toBe(false);
   });
 
-  it("hasCrossAgentPeerInLicWindow detects other agent in window", () => {
+  it("hasCrossAgentPeerInScoutWindow detects other agent in window", () => {
     const rows = [{ agent_id: "agent-a" }, { agent_id: "agent-b" }];
     (db.prepare as Mock).mockReturnValue({
       all: vi.fn().mockReturnValue(rows),
     });
-    expect(hasCrossAgentPeerInLicWindow(makeUpdate())).toBe(true);
+    expect(hasCrossAgentPeerInScoutWindow(makeUpdate())).toBe(true);
   });
 
-  it("hasCrossAgentPeerInLicWindow is false when only self in window", () => {
+  it("hasCrossAgentPeerInScoutWindow is false when only self in window", () => {
     const rows = [{ agent_id: "agent-a" }, { agent_id: "agent-a" }];
     (db.prepare as Mock).mockReturnValue({
       all: vi.fn().mockReturnValue(rows),
     });
-    expect(hasCrossAgentPeerInLicWindow(makeUpdate())).toBe(false);
+    expect(hasCrossAgentPeerInScoutWindow(makeUpdate())).toBe(false);
   });
 });
 
-describe("runConflictLic", () => {
+describe("runConflictScout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(isLLMAvailable).mockReturnValue(true);
@@ -112,7 +112,7 @@ describe("runConflictLic", () => {
       rationale: "Overlapping area.",
     });
 
-    const out = await runConflictLic(makeUpdate(), "additive");
+    const out = await runConflictScout(makeUpdate(), "additive");
     expect(out?.recommendation).toBe("coordination");
     expect(out?.confidence).toBe(0.8);
   });
@@ -123,30 +123,30 @@ describe("runConflictLic", () => {
       get: vi.fn().mockReturnValue({ name: "P", conflict_pressure: 0 }),
     }));
     vi.mocked(callLLMJSON).mockRejectedValue(new Error("timeout"));
-    const out = await runConflictLic(makeUpdate(), "overlapping");
+    const out = await runConflictScout(makeUpdate(), "overlapping");
     expect(out).toBeNull();
   });
 });
 
-describe("licSaysOpenConflict / licSuppressesMergeEscalate", () => {
-  it("licSaysOpenConflict respects threshold", () => {
+describe("scoutSaysOpenConflict / scoutSuppressesMergeEscalate", () => {
+  it("scoutSaysOpenConflict respects threshold", () => {
     expect(
-      licSaysOpenConflict(
+      scoutSaysOpenConflict(
         { recommendation: "open_conflict", confidence: 0.64, rationale: "" },
-        ADDITIVE_LIC_CONFLICT_MIN_CONF,
+        ADDITIVE_SCOUT_CONFLICT_MIN_CONF,
       ),
     ).toBe(false);
     expect(
-      licSaysOpenConflict(
+      scoutSaysOpenConflict(
         { recommendation: "open_conflict", confidence: 0.66, rationale: "" },
-        ADDITIVE_LIC_CONFLICT_MIN_CONF,
+        ADDITIVE_SCOUT_CONFLICT_MIN_CONF,
       ),
     ).toBe(true);
   });
 
-  it("licSuppressesMergeEscalate when none + high confidence", () => {
+  it("scoutSuppressesMergeEscalate when none + high confidence", () => {
     expect(
-      licSuppressesMergeEscalate({
+      scoutSuppressesMergeEscalate({
         recommendation: "none",
         confidence: 0.7,
         rationale: "",

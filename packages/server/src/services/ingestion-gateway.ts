@@ -112,10 +112,10 @@ export function sanitizeText(s: string): string {
  * Currently, domains that don't exist in `known` are still accepted — new
  * knowledge can introduce new domains. The primary normalization is case + whitespace.
  */
-export function normalizeDomains(domains: string[], known: Set<string>): string[] {
+export function normalizeDomains(domains: readonly string[] | undefined, known: Set<string>): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const d of domains) {
+  for (const d of domains ?? []) {
     const norm = d.toLowerCase().trim();
     if (!norm || seen.has(norm)) continue;
     seen.add(norm);
@@ -218,7 +218,12 @@ export function prepareLearnings(
   } else {
     try {
       const nodes = getGraph(orgId).nodes;
-      known = new Set(nodes.flatMap((n) => n.domains).map((d) => d.toLowerCase().trim()).filter(Boolean));
+      known = new Set(
+        nodes
+          .flatMap((n) => [...n.domains, ...(n.scopes ?? [])])
+          .map((d) => d.toLowerCase().trim())
+          .filter(Boolean),
+      );
     } catch {
       // Graph not initialised yet (e.g. first seed run on a fresh org) — fine.
       known = new Set();
@@ -242,7 +247,8 @@ export function prepareLearnings(
       continue;
     }
 
-    const domains = normalizeDomains(learning.domains, known);
+    const scopes = normalizeDomains(learning.scopes?.length ? learning.scopes : learning.domains, known);
+    const domains = normalizeDomains(learning.domains?.length ? learning.domains : scopes, known);
     if (domains.length === 0) {
       // A mis-tagged node is worse than a dropped one (poisons cross-domain queries).
       droppedCount++;
@@ -261,6 +267,8 @@ export function prepareLearnings(
       // embedding input and stored text).
       details: [...details].slice(0, DETAILS_MAX).join(""),
       domains,
+      scopes,
+      topics: normalizeDomains(learning.topics ?? [], new Set()),
       confidence_score: clampConfidence(learning.confidence_score, source),
     });
   }

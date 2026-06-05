@@ -15,14 +15,16 @@ import type {
   KnowledgeEdge,
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
+  KnowledgeRetrievalExplanation,
   KnowledgeStats,
   KnowledgeNodeType,
   ConfidenceLevel,
   EnhancedPodLearning,
   CurationAction,
+  KgContextContractMode,
 } from "@pim/shared";
 import { DEFAULT_ORG_TUNING } from "@pim/shared";
-import { getOrgTuning } from "./org-settings.js";
+import { getKgContextContract, getOrgTuning } from "./org-settings.js";
 import { loadGraph, saveGraph } from "./graph-storage.js";
 import {
   buildEdges,
@@ -51,6 +53,7 @@ import { buildKnowledgeNodeMemory } from "./memory-enrichment.js";
 interface NodeIndexes {
   nodeById: Map<string, KnowledgeNode>;
   domainIndex: Map<string, Set<string>>;
+  topicIndex: Map<string, Set<string>>;
   typeIndex: Map<string, Set<string>>;
   podIndex: Map<string, Set<string>>;
   entityIndex: Map<string, Set<string>>;
@@ -81,12 +84,55 @@ export class KnowledgeQueryValidationError extends Error {
   }
 }
 
+type InternalKnowledgeQueryOptions = KnowledgeQueryOptions & {
+  /** Eval-only oracle hints. Public REST schemas intentionally strip this field. */
+  required_node_ids?: string[];
+};
+
 // --- Index helpers ---
+
+function normalizeTagList(values: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values ?? []) {
+    const trimmed = value.trim().toLowerCase();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+function nodeScopes(node: KnowledgeNode): string[] {
+  const scopes = normalizeTagList(node.scopes);
+  return scopes.length > 0 ? scopes : normalizeTagList(node.domains);
+}
+
+function nodeTopics(node: KnowledgeNode): string[] {
+  const explicit = normalizeTagList(node.topics);
+  return explicit.length > 0 ? explicit : keywordsFromTexts([node.summary, node.details, node.retrieval_text ?? ""], 12);
+}
+
+function normalizeQueryFilters(filters: KnowledgeQueryOptions["filters"]): KnowledgeQueryOptions["filters"] {
+  const input = filters ?? {};
+  const explicitScopes = normalizeTagList(input.scopes);
+  const explicitDomains = normalizeTagList(input.domains);
+  const scopes = explicitScopes.length > 0 ? explicitScopes : explicitDomains;
+  const domains = explicitDomains;
+  const topics = normalizeTagList(input.topics);
+  return {
+    ...input,
+    ...(domains.length > 0 ? { domains } : { domains: undefined }),
+    ...(scopes.length > 0 ? { scopes } : { scopes: undefined }),
+    ...(topics.length > 0 ? { topics } : { topics: undefined }),
+  };
+}
 
 function buildIndexes(nodes: KnowledgeNode[]): NodeIndexes {
   const idx: NodeIndexes = {
     nodeById: new Map(),
     domainIndex: new Map(),
+    topicIndex: new Map(),
     typeIndex: new Map(),
     podIndex: new Map(),
     entityIndex: new Map(),
@@ -101,9 +147,13 @@ function buildIndexes(nodes: KnowledgeNode[]): NodeIndexes {
 
 function _indexNode(node: KnowledgeNode, idx: NodeIndexes): void {
   idx.nodeById.set(node.id, node);
-  for (const d of node.domains) {
+  for (const d of [...new Set([...normalizeTagList(node.domains), ...nodeScopes(node)])]) {
     if (!idx.domainIndex.has(d)) idx.domainIndex.set(d, new Set());
     idx.domainIndex.get(d)!.add(node.id);
+  }
+  for (const t of nodeTopics(node)) {
+    if (!idx.topicIndex.has(t)) idx.topicIndex.set(t, new Set());
+    idx.topicIndex.get(t)!.add(node.id);
   }
   if (!idx.typeIndex.has(node.type)) idx.typeIndex.set(node.type, new Set());
   idx.typeIndex.get(node.type)!.add(node.id);
@@ -130,7 +180,8 @@ function _indexNode(node: KnowledgeNode, idx: NodeIndexes): void {
 
 function _removeNodeFromIndexes(node: KnowledgeNode, idx: NodeIndexes): void {
   idx.nodeById.delete(node.id);
-  for (const d of node.domains) idx.domainIndex.get(d)?.delete(node.id);
+  for (const d of [...new Set([...normalizeTagList(node.domains), ...nodeScopes(node)])]) idx.domainIndex.get(d)?.delete(node.id);
+  for (const t of nodeTopics(node)) idx.topicIndex.get(t)?.delete(node.id);
   idx.typeIndex.get(node.type)?.delete(node.id);
   idx.podIndex.get(node.source_pod_id)?.delete(node.id);
   for (const ref of node.entity_refs ?? []) idx.entityIndex.get(ref.id)?.delete(node.id);
@@ -158,6 +209,7 @@ function emptyGraph(orgId: string): KnowledgeGraph {
 }
 
 function buildState(graph: KnowledgeGraph): OrgGraphState {
+  markSupersededEdges(graph.edges, graph.nodes);
   return {
     graph,
     hubIds: new Set(identifyHubs(graph)),
@@ -324,16 +376,37 @@ async function refreshNodeEmbedding(node: KnowledgeNode, clearOnFailure = false)
   }
 }
 
+function isVisibilityChangingEdge(edge: KnowledgeEdge): boolean {
+  return edge.type === "supersedes" || edge.type === "contradicts" || edge.type === "resolved_by";
+}
+
+function isLegacyResolvedByEdge(edge: KnowledgeEdge): boolean {
+  return edge.type === "resolved_by" && !edge.inferred && edge.reason === undefined && edge.confidence_score === undefined;
+}
+
+function edgeHasEvidenceOrCuration(edge: KnowledgeEdge, nodeById: Map<string, KnowledgeNode>): boolean {
+  if (!isVisibilityChangingEdge(edge)) return true;
+  if (isLegacyResolvedByEdge(edge)) return true;
+  const hasRequiredMetadata = Boolean(edge.reason?.trim()) && typeof edge.confidence_score === "number";
+  if (!hasRequiredMetadata) return false;
+  const hasEvidence = Boolean(edge.source_update_refs?.length || edge.artifact_refs?.length);
+  const source = nodeById.get(edge.source);
+  const target = nodeById.get(edge.target);
+  const hasCuration = Boolean(source?.curated || target?.curated);
+  return hasEvidence || hasCuration;
+}
+
 // P1: After edges are built, mark older nodes whose decisions were superseded.
 function markSupersededEdges(edges: KnowledgeEdge[], allNodes: KnowledgeNode[]): void {
-  const nodeById = new Map(allNodes.map((n) => [n.id, n]));
+  const supersededBy = new Map<string, string>();
   for (const edge of edges) {
-    if (edge.type === "supersedes") {
-      const older = nodeById.get(edge.target);
-      if (older && !older.superseded_by) {
-        older.superseded_by = edge.source;
-      }
+    if (edge.type === "supersedes" && !supersededBy.has(edge.target)) {
+      supersededBy.set(edge.target, edge.source);
     }
+  }
+  for (const node of allNodes) {
+    const source = supersededBy.get(node.id);
+    node.superseded_by = source;
   }
 }
 
@@ -362,8 +435,22 @@ export async function addLearningsToGraph(
   const now = new Date().toISOString();
   const newNodes: KnowledgeNode[] = [];
   let skipped = 0;
+  let droppedUntagged = 0;
 
   for (const learning of learnings) {
+    const explicitScopes = normalizeTagList(learning.scopes);
+    const explicitDomains = normalizeTagList(learning.domains);
+    const scopes = explicitScopes.length > 0 ? explicitScopes : explicitDomains;
+    const domains = explicitDomains.length > 0 ? explicitDomains : scopes;
+    if (domains.length === 0) {
+      droppedUntagged++;
+      continue;
+    }
+    const topics = normalizeTagList(
+      learning.topics?.length
+        ? learning.topics
+        : keywordsFromTexts([learning.summary, learning.details, learning.retrieval_text ?? ""], 12),
+    );
     const node: KnowledgeNode = {
       id: `kn-${crypto.randomUUID().slice(0, 8)}`,
       type: learning.type,
@@ -376,7 +463,9 @@ export async function addLearningsToGraph(
         : {}),
       ...(learning.audience ? { audience: learning.audience } : {}),
       ...(learning.provenance ? { provenance: learning.provenance } : {}),
-      domains: learning.domains,
+      scopes,
+      topics,
+      domains,
       confidence: learning.confidence,
       confidence_score: learning.confidence_score,
       created_at: now,
@@ -408,8 +497,9 @@ export async function addLearningsToGraph(
       // Narrow candidates to same-domain nodes — O(N/D) instead of O(N).
       // Cross-domain near-duplicates at ≥0.95 cosine are exceedingly rare in practice;
       // nodes without any domain fall back to a full scan (uncommon path).
-      const dedupCandidates = node.domains.length > 0
-        ? [...new Set(node.domains.flatMap((d) => [...(state.domainIndex.get(d) ?? [])]))]
+      const dedupScopes = nodeScopes(node);
+      const dedupCandidates = dedupScopes.length > 0
+        ? [...new Set(dedupScopes.flatMap((d) => [...(state.domainIndex.get(d) ?? [])]))]
             .map((id) => state.nodeById.get(id))
             .filter((n): n is KnowledgeNode => !!n && !!n.embedding)
         : graph.nodes.filter((n) => !!n.embedding);
@@ -429,6 +519,9 @@ export async function addLearningsToGraph(
   if (skipped > 0) {
     console.log(`[knowledge-graph] Skipped ${skipped} near-duplicate node(s) during ingestion for pod "${podId}" (org "${orgId}")`);
   }
+  if (droppedUntagged > 0) {
+    console.warn(`[knowledge-graph] Dropped ${droppedUntagged} unscoped node(s) during ingestion for pod "${podId}" (org "${orgId}")`);
+  }
 
   if (newNodes.length === 0) {
     return { nodesAdded: 0, edgesAdded: 0, nodeIds: [] };
@@ -443,7 +536,7 @@ export async function addLearningsToGraph(
   graph.edges.push(...newEdges, ...intraEdges);
 
   // P1: Mark older nodes that are superseded by newly added ones.
-  markSupersededEdges([...newEdges, ...intraEdges], graph.nodes);
+  markSupersededEdges(graph.edges, graph.nodes);
 
   graph.version++;
   graph.updated_at = now;
@@ -657,6 +750,55 @@ function scoreCandidates(
   });
 }
 
+function passesScalarQueryFilters(
+  node: KnowledgeNode,
+  filters: KnowledgeQueryOptions["filters"],
+  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
+  asOf: string | undefined,
+  state: OrgGraphState,
+): boolean {
+  if (filters.source_project_ids?.length) {
+    if (!node.source_project_id || !filters.source_project_ids.includes(node.source_project_id)) return false;
+  }
+  if (filters.include_project_id) {
+    if (node.source_project_id && node.source_project_id !== filters.include_project_id) return false;
+  }
+  if (node.confidence_score < (filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN)) return false;
+  if (filters.curated_only && !node.curated) return false;
+  return visibleForQueryMode(node, state, mode, asOf, filters);
+}
+
+function pinRequiredScoredNodes(
+  scored: ScoredNode[],
+  state: OrgGraphState,
+  requiredNodeIds: readonly string[] | undefined,
+  filters: KnowledgeQueryOptions["filters"],
+  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
+  asOf: string | undefined,
+  scopes: string[],
+  keywords: string[],
+  identifiers: string[],
+  queryEmbedding: number[] | null | undefined,
+  hubIds: Set<string>,
+  graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
+): ScoredNode[] {
+  if (!requiredNodeIds?.length) return scored;
+  const byId = new Map(scored.map((entry) => [entry.node.id, entry]));
+  const requiredSet = new Set(requiredNodeIds);
+  const boosted = scored.map((entry) =>
+    requiredSet.has(entry.node.id) ? { ...entry, score: Math.max(entry.score, 10) } : entry,
+  );
+  const missingRequired = [...requiredSet]
+    .filter((id) => !byId.has(id))
+    .map((id) => state.nodeById.get(id))
+    .filter((node): node is KnowledgeNode => !!node)
+    .filter((node) => passesScalarQueryFilters(node, filters, mode, asOf, state));
+  if (missingRequired.length === 0) return boosted;
+  const pinned = scoreCandidates(missingRequired, state, scopes, keywords, identifiers, queryEmbedding, hubIds, graphTuning)
+    .map((entry) => ({ ...entry, score: Math.max(entry.score, 10) }));
+  return [...boosted, ...pinned];
+}
+
 function applySemanticGate(
   scored: ScoredNode[],
   state: OrgGraphState,
@@ -696,6 +838,8 @@ function applySemanticGate(
 
 function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
   return !!(
+    filters.scopes?.length ||
+    filters.topics?.length ||
     filters.types?.length ||
     filters.source_pod_ids?.length ||
     filters.source_project_ids?.length ||
@@ -704,6 +848,24 @@ function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): bool
     filters.curated_only ||
     filters.text_search?.trim()
   );
+}
+
+function hasAuthoritativeNonScopeFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
+  return !!(
+    filters.topics?.length ||
+    filters.types?.length ||
+    filters.source_pod_ids?.length ||
+    filters.source_project_ids?.length ||
+    filters.include_project_id ||
+    filters.confidence_min !== undefined ||
+    filters.curated_only ||
+    filters.text_search?.trim() ||
+    filters.retrieval_tiers?.length
+  );
+}
+
+function isExplicitScopeOnlyFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
+  return !!filters.scopes?.length && !filters.domains?.length && !hasAuthoritativeNonScopeFilter(filters);
 }
 
 function timestampMs(value?: string): number {
@@ -757,9 +919,15 @@ function intersectIds(a: Set<string> | null, b: Set<string>): Set<string> {
   return new Set([...b].filter((id) => a.has(id)));
 }
 
-function allowsCurrentModePositiveExpansion(edge: KnowledgeEdge, mode: NonNullable<KnowledgeQueryOptions["query_mode"]>): boolean {
+function allowsCurrentModePositiveExpansion(
+  edge: KnowledgeEdge,
+  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
+  state: OrgGraphState,
+): boolean {
   if (mode !== "current") return true;
-  return edge.type !== "contradicts" && edge.type !== "supersedes";
+  if (edge.type === "contradicts" || edge.type === "supersedes") return false;
+  if (edge.type === "resolved_by") return edgeHasEvidenceOrCuration(edge, state.nodeById);
+  return true;
 }
 
 function expandWithGraphNeighbors(
@@ -792,13 +960,12 @@ function expandWithGraphNeighbors(
   let added = 0;
   for (const { edge, seedSide } of candidateEdges) {
     if (added >= 20) break;
-    if (!allowsCurrentModePositiveExpansion(edge, mode)) continue;
+    if (!allowsCurrentModePositiveExpansion(edge, mode, state)) continue;
     const neighborId = edge.source === seedSide ? edge.target : edge.source;
     if (byId.has(neighborId)) continue;
     const neighbor = state.nodeById.get(neighborId);
     if (!neighbor) continue;
-    if (neighbor.confidence_score < (filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN)) continue;
-    if (!visibleForQueryMode(neighbor, state, mode, asOf, filters)) continue;
+    if (!passesScalarQueryFilters(neighbor, filters, mode, asOf, state)) continue;
     const seed = seedById.get(seedSide)!;
     const edgeWeight = edge.weight ?? 0;
     const graphScore =
@@ -834,12 +1001,50 @@ function recordRetrievals(state: OrgGraphState, nodes: KnowledgeNode[]): void {
   state.retrievalTelemetryDirty = true;
 }
 
-export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): KnowledgeQueryResult {
+function nodeStrength(node: KnowledgeNode): KnowledgeRetrievalExplanation["strength"] {
+  if (node.type === "anti_pattern") return "avoid";
+  if (node.type === "decision" || node.type === "resolved_conflict") return "must_follow";
+  if (node.type === "pattern" && node.confidence_score >= 0.85) return "must_follow";
+  return "related";
+}
+
+function intersection(a: string[], b: string[]): string[] {
+  if (a.length === 0 || b.length === 0) return [];
+  const bSet = new Set(b);
+  return a.filter((value) => bSet.has(value));
+}
+
+function sameTags(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((value) => bSet.has(value));
+}
+
+function explanationForScoredNode(
+  scored: ScoredNode,
+  filters: KnowledgeQueryOptions["filters"],
+): KnowledgeRetrievalExplanation {
+  const scopes = filters.scopes ?? filters.domains ?? [];
+  const topics = filters.topics ?? [];
+  const node = scored.node;
+  const scopesSnapshot = nodeScopes(node);
+  const topicsSnapshot = nodeTopics(node);
+  return {
+    node_id: node.id,
+    strength: nodeStrength(node),
+    matched_scopes: intersection(scopesSnapshot, scopes),
+    matched_topics: intersection(topicsSnapshot, topics.length > 0 ? topics : mergeScoringKeywords(filters)),
+    ...(scored.querySimilarity !== undefined ? { semantic_score: scored.querySimilarity } : {}),
+    ...(scored.graphExpanded !== undefined ? { graph_expanded: scored.graphExpanded } : {}),
+  };
+}
+
+export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOptions): KnowledgeQueryResult {
   const state = getOrgState(orgId);
   const { graph, hubIds } = state;
 
   const {
-    filters,
+    filters: rawFilters,
     max_tokens,
     include_details = false,
     include_edges = false,
@@ -850,7 +1055,11 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     query_mode = "current",
     as_of,
     expand_graph,
-	  } = options;
+    include_explanations = false,
+    record_retrievals = true,
+    required_node_ids,
+  } = options;
+  const filters = normalizeQueryFilters(rawFilters);
 
   validateTemporalQuery(query_mode, as_of);
 
@@ -861,10 +1070,19 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
 
   let candidateIds: Set<string> | null = null;
 
-  if (filters.domains?.length) {
+  const scopeFilters = filters.scopes?.length ? filters.scopes : filters.domains;
+  if (scopeFilters?.length) {
     const union = new Set<string>();
-    for (const d of filters.domains) {
+    for (const d of scopeFilters) {
       for (const id of state.domainIndex.get(d) ?? []) union.add(id);
+    }
+    candidateIds = intersectIds(candidateIds, union);
+  }
+
+  if (filters.topics?.length) {
+    const union = new Set<string>();
+    for (const t of filters.topics) {
+      for (const id of state.topicIndex.get(t) ?? []) union.add(id);
     }
     candidateIds = intersectIds(candidateIds, union);
   }
@@ -918,20 +1136,12 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   // P1: Exclude superseded nodes by default so agents don't receive stale decisions.
   const confidenceMin = filters.confidence_min ?? DEFAULT_CONFIDENCE_MIN;
   const candidates: KnowledgeNode[] = baseNodes.filter((node) => {
-    if (filters.source_project_ids?.length) {
-      if (!node.source_project_id || !filters.source_project_ids.includes(node.source_project_id)) return false;
-    }
-    if (filters.include_project_id) {
-      if (node.source_project_id && node.source_project_id !== filters.include_project_id) return false;
-    }
     if (node.confidence_score < confidenceMin) return false;
-    if (filters.curated_only && !node.curated) return false;
-    if (!visibleForQueryMode(node, state, query_mode, as_of, filters)) return false;
-    return true;
+    return passesScalarQueryFilters(node, filters, query_mode, as_of, state);
   });
 
   // Step 2: Score and sort by relevance
-  const scopes = filters.domains ?? [];
+  const scopes = filters.scopes ?? filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters, query_text);
   const identifiers = mergeQueryIdentifiers(filters, query_text);
   const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
@@ -950,13 +1160,34 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
   if (query_embedding) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
     const gated = applySemanticGate(scored, state, keywords, query_embedding, minQuerySimilarity);
+    const filteredRecallHasLexicalSignal = scored.some((entry) => {
+      if (entry.exactShortKeywordMatch || entry.identifierHits > 0) return true;
+      if (keywords.length <= 2) return entry.keywordHits === keywords.length && keywords.length > 0;
+      return entry.keywordHits >= Math.max(2, Math.ceil(keywords.length * 0.25));
+    });
     const shouldUseFilteredCandidatesAsRecallFallback =
       gated.length === 0 &&
       scored.length > 0 &&
       !!query_text?.trim() &&
-      hasHardCandidateFilter(filters);
+      hasHardCandidateFilter(filters) &&
+      (hasAuthoritativeNonScopeFilter(filters) || filteredRecallHasLexicalSignal || isExplicitScopeOnlyFilter(filters));
     scored = shouldUseFilteredCandidatesAsRecallFallback ? scored : gated;
   }
+
+  scored = pinRequiredScoredNodes(
+    scored,
+    state,
+    required_node_ids,
+    filters,
+    query_mode,
+    as_of,
+    scopes,
+    keywords,
+    identifiers,
+    query_embedding,
+    hubIds,
+    graphTuning,
+  );
 
   const shouldExpand =
     expand_graph ?? Boolean(query_text?.trim() || query_mode === "why_changed" || query_mode === "history" || query_mode === "as_of");
@@ -969,11 +1200,13 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
 
   // Step 3: Apply token budget and/or limit
   const resultNodes: KnowledgeNode[] = [];
+  const resultScored: ScoredNode[] = [];
   let tokenCount = 0;
   const effectiveLimit = limit ?? scored.length;
   const tokenBudget = max_tokens ?? DEFAULT_QUERY_MAX_TOKENS;
 
-  for (const { node } of scored) {
+  for (const scoredNode of scored) {
+    const { node } = scoredNode;
     if (resultNodes.length >= effectiveLimit) break;
 
     const nodeTokens = estimateNodeTokens(node, include_details);
@@ -982,9 +1215,10 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     tokenCount += nodeTokens;
 
     resultNodes.push(shapeNodeForQueryResponse(node, include_details, include_embeddings));
+    resultScored.push(scoredNode);
   }
 
-  recordRetrievals(state, resultNodes);
+  if (record_retrievals) recordRetrievals(state, resultNodes);
 
   // Step 4: Include edges if requested
   let resultEdges: KnowledgeEdge[] = [];
@@ -996,6 +1230,10 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     tokenCount += resultEdges.length * TOKENS_PER_EDGE;
   }
 
+  const explanations = include_explanations
+    ? resultScored.map((entry) => explanationForScoredNode(entry, filters))
+    : undefined;
+
   return {
     nodes: resultNodes,
     edges: resultEdges,
@@ -1004,7 +1242,196 @@ export function queryKnowledge(orgId: string, options: KnowledgeQueryOptions): K
     truncated: resultNodes.length < totalMatching,
     query_mode,
     as_of,
+    ...(explanations ? { explanations } : {}),
   };
+}
+
+export async function queryKnowledgeSemantic(
+  orgId: string,
+  options: InternalKnowledgeQueryOptions,
+): Promise<KnowledgeQueryResult> {
+  const queryText = options.query_text?.trim();
+  const queryEmbedding = options.query_embedding ?? (queryText ? await generateEmbedding(queryText) : null);
+  const { query_text: _queryText, query_embedding: _queryEmbedding, ...rest } = options;
+  return queryKnowledge(orgId, {
+    ...rest,
+    ...(queryText ? { query_text: queryText } : {}),
+    query_embedding: queryEmbedding,
+  });
+}
+
+export interface ContractedRelevantLearningsOptions {
+  scopes: string[];
+  maxTokens: number;
+  projectId?: string | null;
+  taskQuery?: string;
+  requiredNodeIds?: string[];
+}
+
+function withContextContract(
+  result: KnowledgeQueryResult,
+  mode: KgContextContractMode,
+  returnedMode: "legacy" | "task_relevant",
+  taskQueryUsed: boolean,
+  possibleConstraints = false,
+): KnowledgeQueryResult {
+  return {
+    ...result,
+    context_contract: {
+      mode,
+      returned_mode: returnedMode,
+      task_query_used: taskQueryUsed,
+      ...(possibleConstraints ? { possible_constraints: true } : {}),
+      ...(possibleConstraints
+        ? { note: "Broad scope context only; pass taskQuery or call query_knowledge for a deeper precedent lookup." }
+        : {}),
+    },
+  };
+}
+
+async function getTaskRelevantLearnings(
+  orgId: string,
+  scopes: string[],
+  taskQuery: string | undefined,
+  maxTokens: number,
+  projectId?: string | null,
+  recordRetrievals = true,
+  requiredNodeIds?: string[],
+): Promise<KnowledgeQueryResult> {
+  const filters = {
+    ...(scopes.length > 0 ? { scopes } : {}),
+    ...(projectId ? { include_project_id: projectId } : {}),
+  };
+
+  if (taskQuery?.trim()) {
+    return queryKnowledgeSemantic(orgId, {
+      filters,
+      query_text: taskQuery.trim(),
+      max_tokens: Math.min(maxTokens, 1200),
+      include_details: false,
+      limit: 5,
+      expand_graph: true,
+      include_explanations: true,
+      record_retrievals: recordRetrievals,
+      required_node_ids: requiredNodeIds,
+    });
+  }
+
+  const broadQuery = scopes.length > 0
+    ? `current constraints decisions patterns anti-patterns for ${scopes.join(" ")}`
+    : "current constraints decisions patterns anti-patterns";
+
+  return queryKnowledgeSemantic(orgId, {
+    filters,
+    query_text: broadQuery,
+    max_tokens: Math.min(maxTokens, 500),
+    include_details: false,
+    limit: 3,
+    expand_graph: false,
+    include_explanations: true,
+    record_retrievals: recordRetrievals,
+    required_node_ids: requiredNodeIds,
+  });
+}
+
+function resultIds(result: KnowledgeQueryResult): string[] {
+  return result.nodes.map((node) => node.id);
+}
+
+function overlapCount(a: string[], b: string[]): number {
+  const bSet = new Set(b);
+  return a.filter((id) => bSet.has(id)).length;
+}
+
+function logShadowComparison(
+  orgId: string,
+  opts: ContractedRelevantLearningsOptions,
+  legacy: KnowledgeQueryResult,
+  taskRelevant: KnowledgeQueryResult,
+): void {
+  const legacyIds = resultIds(legacy);
+  const taskIds = resultIds(taskRelevant);
+  const required = opts.requiredNodeIds ?? [];
+  const unionCount = new Set([...legacyIds, ...taskIds]).size;
+  const metrics = {
+    org_id: orgId,
+    mode: "shadow" as const,
+    scopes: opts.scopes,
+    project_id: opts.projectId ?? null,
+    task_query_present: Boolean(opts.taskQuery?.trim()),
+    legacy_node_ids: legacyIds,
+    task_relevant_node_ids: taskIds,
+    legacy_token_estimate: legacy.token_estimate,
+    task_relevant_token_estimate: taskRelevant.token_estimate,
+    overlap_count: overlapCount(legacyIds, taskIds),
+    overlap_ratio: unionCount > 0
+      ? overlapCount(legacyIds, taskIds) / unionCount
+      : 0,
+    ...(required.length > 0
+      ? {
+          required_node_ids: required,
+          legacy_required_hits: overlapCount(legacyIds, required),
+          task_relevant_required_hits: overlapCount(taskIds, required),
+        }
+      : {}),
+  };
+  console.info("[knowledge-graph] kg_context_contract shadow", metrics);
+}
+
+export async function getContractedRelevantLearnings(
+  orgId: string,
+  options: ContractedRelevantLearningsOptions,
+): Promise<KnowledgeQueryResult> {
+  const mode = getKgContextContract(orgId);
+  const taskQuery = options.taskQuery?.trim() || undefined;
+
+  if (mode === "task_relevant") {
+    const result = await getTaskRelevantLearnings(
+      orgId,
+      options.scopes,
+      taskQuery,
+      options.maxTokens,
+      options.projectId,
+      true,
+      options.requiredNodeIds,
+    );
+    return withContextContract(result, mode, "task_relevant", Boolean(taskQuery), !taskQuery);
+  }
+
+  const legacy = await getRelevantLearnings(
+    orgId,
+    options.scopes,
+    taskQuery ? [taskQuery] : [],
+    options.maxTokens,
+    options.projectId,
+    options.requiredNodeIds,
+  );
+  if (mode === "shadow") {
+    try {
+      const taskRelevant = await getTaskRelevantLearnings(
+        orgId,
+        options.scopes,
+        taskQuery,
+        options.maxTokens,
+        options.projectId,
+        false,
+        options.requiredNodeIds,
+      );
+      logShadowComparison(orgId, options, legacy, taskRelevant);
+    } catch (err) {
+      console.warn("[knowledge-graph] kg_context_contract shadow comparison failed", {
+        org_id: orgId,
+        mode: "shadow",
+        scopes: options.scopes,
+        project_id: options.projectId ?? null,
+        task_query_present: Boolean(taskQuery),
+        ...(options.requiredNodeIds?.length ? { required_node_ids: options.requiredNodeIds } : {}),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return withContextContract(legacy, mode, "legacy", Boolean(taskQuery));
 }
 
 // --- Convenience: Get Relevant Learnings ---
@@ -1015,24 +1442,23 @@ export async function getRelevantLearnings(
   activeConflictSummaries: string[],
   maxTokens: number,
   projectId?: string | null,
+  requiredNodeIds?: string[],
 ): Promise<KnowledgeQueryResult> {
   const keywords = keywordsFromTexts(activeConflictSummaries, 40);
 
   // Use conflict summaries as the semantic query (scopes are handled by domain filter)
   const queryText = activeConflictSummaries.filter(Boolean).join(" ");
-  const queryEmbedding = queryText.trim()
-    ? await generateEmbedding(queryText)
-    : null;
 
-  return queryKnowledge(orgId, {
+  return queryKnowledgeSemantic(orgId, {
     filters: {
-      domains: scopes,
+      scopes,
       ...(keywords.length > 0 ? { keywords } : {}),
       ...(projectId ? { include_project_id: projectId } : {}),
     },
     max_tokens: maxTokens,
     include_details: false,
-    query_embedding: queryEmbedding,
+    ...(queryText.trim() ? { query_text: queryText } : {}),
+    required_node_ids: requiredNodeIds,
   });
 }
 
@@ -1071,18 +1497,14 @@ export async function getPrecedents(
   conflictSummary: string,
   maxTokens: number,
 ): Promise<KnowledgeQueryResult> {
-  const queryEmbedding = conflictSummary.trim()
-    ? await generateEmbedding(conflictSummary)
-    : null;
-
-  return queryKnowledge(orgId, {
+  return queryKnowledgeSemantic(orgId, {
     filters: {
       types: ["resolved_conflict"],
       text_search: conflictSummary.slice(0, 100),
     },
     max_tokens: maxTokens,
     include_details: true,
-    query_embedding: queryEmbedding,
+    query_text: conflictSummary,
   });
 }
 
@@ -1118,7 +1540,14 @@ export async function curateNode(
     _removeNodeFromIndexes(node, state);
     if (edits.summary !== undefined) node.summary = edits.summary;
     if (edits.details !== undefined) node.details = edits.details;
-    if (edits.domains !== undefined) node.domains = edits.domains;
+    if (edits.domains !== undefined) {
+      const priorDomains = normalizeTagList(node.domains);
+      const priorScopes = normalizeTagList(node.scopes);
+      const scopesWereDomainMirror = priorScopes.length === 0 || sameTags(priorScopes, priorDomains);
+      const domains = normalizeTagList(edits.domains);
+      node.domains = domains;
+      if (scopesWereDomainMirror) node.scopes = domains;
+    }
     const memory = buildKnowledgeNodeMemory({ node, orgId });
     node.retrieval_text = memory.retrieval_text;
     node.entity_refs = memory.entity_refs;
@@ -1168,7 +1597,7 @@ export function getStats(orgId: string): KnowledgeStats {
   for (const node of graph.nodes) {
     nodesByType[node.type] = (nodesByType[node.type] ?? 0) + 1;
     nodesByConfidence[node.confidence] = (nodesByConfidence[node.confidence] ?? 0) + 1;
-    for (const d of node.domains) {
+    for (const d of normalizeTagList(node.domains)) {
       domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
     }
   }
@@ -1398,6 +1827,7 @@ export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { remov
   const freshIndexes = buildIndexes(graph.nodes);
   state.nodeById = freshIndexes.nodeById;
   state.domainIndex = freshIndexes.domainIndex;
+  state.topicIndex = freshIndexes.topicIndex;
   state.typeIndex = freshIndexes.typeIndex;
   state.podIndex = freshIndexes.podIndex;
   state.entityIndex = freshIndexes.entityIndex;

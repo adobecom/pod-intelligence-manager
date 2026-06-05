@@ -1,5 +1,6 @@
 import type { Artifact } from "./context-update.js";
 import type { MemoryEntityRef, RetrievalTier, TemporalQueryMode } from "./memory.js";
+import type { KgContextContractMode } from "./org-settings.js";
 import type { Scope } from "./pod.js";
 
 // --- Node Types ---
@@ -54,6 +55,11 @@ export interface KnowledgeNode {
   source_project_name?: string;
   audience?: KnowledgeAudience;
   provenance?: KnowledgeProvenance[];
+  /** Canonical org/project scope tags used for retrieval. `domains` remains a legacy alias during migration. */
+  scopes?: string[];
+  /** Topic tags used as a lightweight retrieval/explanation dimension. */
+  topics?: string[];
+  /** Legacy compatibility output. Prefer `scopes` for new callers. */
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number; // 0.0–1.0
@@ -94,6 +100,7 @@ export interface KnowledgeEdge {
   artifact_refs?: Artifact[];
   reason?: string;
   confidence_score?: number;
+  inferred?: boolean;
 }
 
 // --- Community / Cluster ---
@@ -120,6 +127,11 @@ export interface KnowledgeGraph {
 // --- Query Types ---
 
 export interface KnowledgeQueryFilters {
+  /** Canonical retrieval scope tags. */
+  scopes?: string[];
+  /** Topic tags to filter or explain retrieval matches. */
+  topics?: string[];
+  /** Legacy alias for `scopes`; still accepted and returned during migration. */
   domains?: string[];
   types?: KnowledgeNodeType[];
   source_pod_ids?: string[];
@@ -169,6 +181,27 @@ export interface KnowledgeQueryOptions {
   as_of?: string;
   /** Defaults true for text/temporal queries; false disables one-hop graph expansion. */
   expand_graph?: boolean;
+  /** Include compact retrieval explanations for each returned node. */
+  include_explanations?: boolean;
+  /** Internal/shadow-mode switch: false avoids counting candidate-only retrievals as delivered context. */
+  record_retrievals?: boolean;
+}
+
+export interface KnowledgeRetrievalExplanation {
+  node_id: string;
+  strength: "must_follow" | "avoid" | "related";
+  matched_scopes: string[];
+  matched_topics: string[];
+  semantic_score?: number;
+  graph_expanded?: boolean;
+}
+
+export interface KnowledgeContextContractInfo {
+  mode: KgContextContractMode;
+  returned_mode: "legacy" | "task_relevant";
+  task_query_used: boolean;
+  possible_constraints?: boolean;
+  note?: string;
 }
 
 export interface KnowledgeQueryResult {
@@ -179,6 +212,8 @@ export interface KnowledgeQueryResult {
   truncated: boolean;
   query_mode?: TemporalQueryMode;
   as_of?: string;
+  explanations?: KnowledgeRetrievalExplanation[];
+  context_contract?: KnowledgeContextContractInfo;
 }
 
 // --- Stats ---
@@ -201,6 +236,9 @@ export interface EnhancedPodLearning {
   details: string;
   retrieval_text?: string;
   entity_refs?: MemoryEntityRef[];
+  scopes?: string[];
+  topics?: string[];
+  /** Legacy alias for `scopes`; still required by older callers during migration. */
   domains: string[];
   confidence: ConfidenceLevel;
   confidence_score: number;
@@ -231,6 +269,7 @@ export interface AdHocLearningInput {
   summary: string;
   details: string;
   domains: string[];
+  scopes?: string[];
   /** Free-text label that becomes `source_pod_name` for traceability (e.g., chatbot/session id). */
   source_label?: string;
   /** Defaults to 0.7 server-side. */

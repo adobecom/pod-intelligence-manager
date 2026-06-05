@@ -10,23 +10,23 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /** Last K context rows in this scope (any agent), for peer-presence and prompt context. */
-export const LIC_PEER_WINDOW = DEFAULT_ORG_TUNING.conflictLic.peerWindow;
+export const SCOUT_PEER_WINDOW = DEFAULT_ORG_TUNING.conflictScout.peerWindow;
 
-/** Min lic confidence to auto-open a conflict when heuristics said `additive`. */
-export const ADDITIVE_LIC_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictLic.additiveMinConf;
+/** Min scout confidence to auto-open a conflict when heuristics said `additive`. */
+export const ADDITIVE_SCOUT_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.additiveMinConf;
 
-/** Min lic confidence to force conflict on `overlapping` without waiting for merge LLM. */
-export const OVERLAP_LIC_FORCE_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictLic.overlapForceMinConf;
+/** Min scout confidence to force conflict on `overlapping` without waiting for merge LLM. */
+export const OVERLAP_SCOUT_FORCE_CONFLICT_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.overlapForceMinConf;
 
-/** If merge LLM escalates but lic says `none` with at least this confidence, skip creating a conflict. */
-export const SUPPRESS_MERGE_ESCALATE_MIN_CONF = DEFAULT_ORG_TUNING.conflictLic.suppressMergeMinConf;
+/** If merge LLM escalates but scout says `none` with at least this confidence, skip creating a conflict. */
+export const SUPPRESS_MERGE_ESCALATE_MIN_CONF = DEFAULT_ORG_TUNING.conflictScout.suppressMergeMinConf;
 
-const DETAILS_CAP = DEFAULT_ORG_TUNING.conflictLic.detailsCap;
+const DETAILS_CAP = DEFAULT_ORG_TUNING.conflictScout.detailsCap;
 
-export type LicRecommendation = "none" | "coordination" | "open_conflict";
+export type ScoutRecommendation = "none" | "coordination" | "open_conflict";
 
-export interface ConflictLicResult {
-  recommendation: LicRecommendation;
+export interface ConflictScoutResult {
+  recommendation: ScoutRecommendation;
   confidence: number;
   rationale: string;
 }
@@ -40,7 +40,7 @@ interface PeerRow {
   timestamp: string;
 }
 
-interface LLMLicResponse {
+interface LLMScoutResponse {
   recommendation?: string;
   confidence?: number;
   rationale?: string;
@@ -50,7 +50,7 @@ let _systemPrompt: string | null = null;
 function getSystemPrompt(): string {
   if (!_systemPrompt) {
     _systemPrompt = fs.readFileSync(
-      path.resolve(__dirname, "../../../../../prompts/conflict-lic-agent.md"),
+      path.resolve(__dirname, "../../../../../prompts/conflict-scout-agent.md"),
       "utf-8",
     );
   }
@@ -63,7 +63,7 @@ function truncateDetails(s: string, cap: number): string {
 }
 
 /** True if any row in the last K scope updates is from another agent (cross-agent activity). */
-export function hasCrossAgentPeerInLicWindow(update: ContextUpdate, peerWindow = LIC_PEER_WINDOW): boolean {
+export function hasCrossAgentPeerInScoutWindow(update: ContextUpdate, peerWindow = SCOUT_PEER_WINDOW): boolean {
   const rows = db
     .prepare(
       `SELECT agent_id FROM context_updates
@@ -76,16 +76,16 @@ export function hasCrossAgentPeerInLicWindow(update: ContextUpdate, peerWindow =
   return rows.some((r) => r.agent_id !== update.agent_id);
 }
 
-export function shouldRunConflictLic(
+export function shouldRunConflictScout(
   classification: Classification,
   update: ContextUpdate,
-  tuning?: OrgTuning["conflictLic"],
+  tuning?: OrgTuning["conflictScout"],
 ): boolean {
   if (!isLLMAvailable()) return false;
   if (classification === "contradictory") return false;
   if (classification === "overlapping") return true;
   // additive
-  return hasCrossAgentPeerInLicWindow(update, tuning?.peerWindow ?? LIC_PEER_WINDOW);
+  return hasCrossAgentPeerInScoutWindow(update, tuning?.peerWindow ?? SCOUT_PEER_WINDOW);
 }
 
 function loadPeerBundle(update: ContextUpdate, peerWindow: number): PeerRow[] {
@@ -106,7 +106,7 @@ function loadPeerBundle(update: ContextUpdate, peerWindow: number): PeerRow[] {
     ) as unknown as PeerRow[];
 }
 
-function normalizeLicResponse(raw: LLMLicResponse | null): ConflictLicResult | null {
+function normalizeScoutResponse(raw: LLMScoutResponse | null): ConflictScoutResult | null {
   if (!raw?.recommendation) return null;
   const rec = raw.recommendation as string;
   if (rec !== "none" && rec !== "coordination" && rec !== "open_conflict") return null;
@@ -122,14 +122,14 @@ function normalizeLicResponse(raw: LLMLicResponse | null): ConflictLicResult | n
   };
 }
 
-export async function runConflictLic(
+export async function runConflictScout(
   update: ContextUpdate,
   heuristicClassification: Classification,
-  tuning?: OrgTuning["conflictLic"],
-): Promise<ConflictLicResult | null> {
+  tuning?: OrgTuning["conflictScout"],
+): Promise<ConflictScoutResult | null> {
   if (!isLLMAvailable()) return null;
 
-  const peerWindow = tuning?.peerWindow ?? LIC_PEER_WINDOW;
+  const peerWindow = tuning?.peerWindow ?? SCOUT_PEER_WINDOW;
   const detailsCap = tuning?.detailsCap ?? DETAILS_CAP;
   const peers = loadPeerBundle(update, peerWindow);
   if (peers.length === 0 && heuristicClassification === "additive") {
@@ -171,28 +171,28 @@ ${peerBlock}
 Return JSON only: {"recommendation":"none"|"coordination"|"open_conflict","confidence":0.0-1.0,"rationale":"..."}`;
 
   try {
-    const raw = await callLLMJSON<LLMLicResponse>({
+    const raw = await callLLMJSON<LLMScoutResponse>({
       model: MODELS.fast,
       system: getSystemPrompt(),
       prompt,
       maxTokens: 600,
     });
-    return normalizeLicResponse(raw);
+    return normalizeScoutResponse(raw);
   } catch (err) {
-    console.error("[conflict-lic] LLM call failed:", err);
+    console.error("[conflict-scout] LLM call failed:", err);
     return null;
   }
 }
 
-export function licSaysOpenConflict(
-  lic: ConflictLicResult | null,
+export function scoutSaysOpenConflict(
+  scout: ConflictScoutResult | null,
   minConfidence: number,
 ): boolean {
-  if (!lic) return false;
-  return lic.recommendation === "open_conflict" && lic.confidence >= minConfidence;
+  if (!scout) return false;
+  return scout.recommendation === "open_conflict" && scout.confidence >= minConfidence;
 }
 
-export function licSuppressesMergeEscalate(lic: ConflictLicResult | null, minConf = SUPPRESS_MERGE_ESCALATE_MIN_CONF): boolean {
-  if (!lic) return false;
-  return lic.recommendation === "none" && lic.confidence >= minConf;
+export function scoutSuppressesMergeEscalate(scout: ConflictScoutResult | null, minConf = SUPPRESS_MERGE_ESCALATE_MIN_CONF): boolean {
+  if (!scout) return false;
+  return scout.recommendation === "none" && scout.confidence >= minConf;
 }

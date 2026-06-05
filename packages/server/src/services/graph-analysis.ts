@@ -105,6 +105,10 @@ function domainOverlap(a: string[], b: string[]): number {
   return overlap / Math.min(a.length, b.length);
 }
 
+function nodeScopes(node: KnowledgeNode): string[] {
+  return node.scopes && node.scopes.length > 0 ? node.scopes : (node.domains ?? []);
+}
+
 // --- Edge Building ---
 
 // P3: Accept existing edges to prevent duplicate edges between the same node pair.
@@ -131,7 +135,7 @@ export function buildEdges(
       const reverseKey = `${existing.id}:${newNode.id}`;
       if (seenPairs.has(pairKey) || seenPairs.has(reverseKey)) continue;
 
-      const domOverlap = domainOverlap(newNode.domains, existing.domains);
+      const domOverlap = domainOverlap(nodeScopes(newNode), nodeScopes(existing));
       const keyword = keywordOverlap(newNode.summary, existing.summary);
 
       // Fast-path: skip cosine similarity when keyword and domain signals are both
@@ -154,13 +158,12 @@ export function buildEdges(
 
       if (combinedScore < 0.35) continue;
 
-      const edgeType = inferEdgeType(newNode, existing);
-
       edges.push({
         source: newNode.id,
         target: existing.id,
-        type: edgeType,
+        type: inferEdgeType(newNode, existing),
         weight: Math.min(1, combinedScore),
+        inferred: true,
       });
 
       // Track this pair so intra-batch calls don't add the reverse edge too.
@@ -417,10 +420,11 @@ export function scoreRelevance(
   // Domain overlap
   const scopeSet = new Set(context.scopes);
   let domainMatch = 0;
-  for (const d of node.domains) {
+  const scopes = nodeScopes(node);
+  for (const d of scopes) {
     if (scopeSet.has(d)) domainMatch++;
   }
-  const domainScore = node.domains.length > 0 ? domainMatch / node.domains.length : 0;
+  const domainScore = scopes.length > 0 ? domainMatch / scopes.length : 0;
 
   // Keyword match
   const nodeKw = context.precomputedKeywords ?? extractKeywords(`${node.summary} ${node.details}`);

@@ -171,6 +171,7 @@ const OrgConfigBodySchema = z.object({
       label: z.string().min(1),
     }),
   ),
+  kg_context_contract: z.enum(["legacy", "shadow", "task_relevant"]).optional(),
 });
 
 export default async function orgRoutes(app: FastifyInstance) {

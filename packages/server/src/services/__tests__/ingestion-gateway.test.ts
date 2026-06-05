@@ -253,6 +253,17 @@ describe("prepareLearnings", () => {
     expect(prepared).toHaveLength(0);
   });
 
+  it("uses scopes when domains is missing at runtime", () => {
+    const l = makeLearning({ scopes: ["Backend"] }) as Partial<EnhancedPodLearning> as EnhancedPodLearning;
+    delete (l as Partial<EnhancedPodLearning>).domains;
+
+    const { prepared, droppedCount } = prepareLearnings(ORG, [l], "pod_archival");
+
+    expect(droppedCount).toBe(0);
+    expect(prepared[0].domains).toEqual(["backend"]);
+    expect(prepared[0].scopes).toEqual(["backend"]);
+  });
+
   it("normalizes domains against the existing graph taxonomy (via mockGetGraph)", () => {
     mockGetGraph.mockReturnValue({
       nodes: [{ domains: ["frontend", "backend"] }],

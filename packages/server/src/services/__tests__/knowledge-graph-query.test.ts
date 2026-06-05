@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const orgSettingsState = vi.hoisted(() => ({
+  kgContextContract: "legacy" as "legacy" | "shadow" | "task_relevant",
+}));
+
 vi.mock("../graph-storage.js", () => ({
   loadGraph: vi.fn(() => null),
   saveGraph: vi.fn(),
@@ -9,12 +13,14 @@ vi.mock("../org-settings.js", async () => {
   const { DEFAULT_ORG_TUNING } = await import("@pim/shared");
   return {
     getOrgTuning: vi.fn(() => DEFAULT_ORG_TUNING),
+    getKgContextContract: vi.fn(() => orgSettingsState.kgContextContract),
   };
 });
 
 import {
   initializeKnowledgeGraph,
   queryKnowledge,
+  getContractedRelevantLearnings,
   getRelevantLearnings,
   addLearningsToGraph,
   getGraph,
@@ -25,8 +31,9 @@ import {
   _resetForTests,
 } from "../knowledge-graph.js";
 import { saveGraph } from "../graph-storage.js";
+import { getOrgTuning } from "../org-settings.js";
 import { extractIdentifiers, extractRetrievalIdentifiers } from "../graph-analysis.js";
-import type { EnhancedPodLearning, KnowledgeGraph, KnowledgeNode } from "@pim/shared";
+import { DEFAULT_ORG_TUNING, type EnhancedPodLearning, type KnowledgeGraph, type KnowledgeNode } from "@pim/shared";
 
 // Push a node directly into the graph (bypasses embedding/dedup so tests stay fast).
 // The index is NOT updated here — caller must use addLearningsToGraph for index-aware
@@ -51,6 +58,21 @@ function rawPushNode(
   return node;
 }
 
+function testNode(overrides: Partial<KnowledgeNode> & Pick<KnowledgeNode, "id" | "summary">): KnowledgeNode {
+  return {
+    type: "pattern",
+    details: overrides.summary,
+    source_pod_id: "pod-test",
+    source_pod_name: "Test Pod",
+    domains: ["backend"],
+    confidence: "extracted",
+    confidence_score: 0.9,
+    created_at: "2026-01-01T00:00:00.000Z",
+    curated: false,
+    ...overrides,
+  };
+}
+
 let orgSeq = 0;
 
 function nextOrgId(prefix: string): string {
@@ -68,6 +90,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
+    orgSettingsState.kgContextContract = "legacy";
   });
 
   it("ranks nodes matching conflict-derived keywords ahead of same-domain peers", async () => {
@@ -137,6 +160,26 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       include_embeddings: true,
     });
     expect(withEmb.nodes[0]?.embedding).toEqual([1, 2, 3]);
+  });
+
+  it("treats missing query filters as an empty filter object", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Missing filters defensive query",
+        details: "Runtime callers that omit filters should not crash query normalization.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const result = queryKnowledge(orgId, {
+      filters: undefined,
+      max_tokens: 500,
+    } as any);
+
+    expect(result.nodes.map((n) => n.summary)).toEqual(["Missing filters defensive query"]);
   });
 
   it("text_search composed entirely of stop words is treated as no filter (returns all candidates)", async () => {
@@ -306,6 +349,262 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.total_matching).toBe(1);
   });
 
+  it("maps legacy domains to canonical scopes during ingestion and query filtering", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Backend webhook scope compatibility pattern",
+        details: "Legacy domains should be queryable through canonical scopes.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const byScope = queryKnowledge(orgId, {
+      filters: { scopes: ["backend"] },
+      max_tokens: 2000,
+    });
+    const byDomain = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      max_tokens: 2000,
+    });
+
+    expect(byScope.nodes.map((n) => n.summary)).toEqual(["Backend webhook scope compatibility pattern"]);
+    expect(byDomain.nodes.map((n) => n.summary)).toEqual(["Backend webhook scope compatibility pattern"]);
+    expect(byScope.nodes[0].domains).toEqual(["backend"]);
+    expect(byScope.nodes[0].scopes).toEqual(["backend"]);
+  });
+
+  it("drops learnings with neither scopes nor domains in core graph ingestion", async () => {
+    const orgId = nextOrgId("kg-test");
+    initializeKnowledgeGraph(orgId);
+    const learning = {
+      type: "pattern" as const,
+      summary: "Untagged learning should be dropped",
+      details: "Direct callers can bypass the gateway, so the core graph must reject unscoped nodes too.",
+      confidence: "extracted" as const,
+      confidence_score: 0.9,
+    } as EnhancedPodLearning;
+
+    const result = await addLearningsToGraph(orgId, [learning], "pod-untagged", "Untagged Pod");
+
+    expect(result).toEqual({ nodesAdded: 0, edgesAdded: 0, nodeIds: [] });
+    expect(getGraph(orgId).nodes).toHaveLength(0);
+  });
+
+  it("returns legacy broad context in legacy contract mode even when taskQuery is supplied", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "CDN cache pattern",
+        details: "Cache immutable assets at the edge.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Webhook authentication pattern",
+        details: "Prefer signature verification for payment webhooks.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    orgSettingsState.kgContextContract = "legacy";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "webhook authentication",
+      maxTokens: 2000,
+    });
+
+    expect(result.context_contract).toEqual({
+      mode: "legacy",
+      returned_mode: "legacy",
+      task_query_used: true,
+    });
+    expect(result.nodes).toHaveLength(2);
+    expect(result.nodes[0]?.summary).toBe("Webhook authentication pattern");
+    expect(result.explanations).toBeUndefined();
+  });
+
+  it("returns compact task-relevant constraints with explanations in task_relevant mode", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use webhook signatures for payment callbacks",
+        details: "Payment callbacks must validate webhook signatures before processing.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+      {
+        type: "anti_pattern",
+        summary: "Avoid unsigned payment callback handling",
+        details: "Unsigned callbacks can be spoofed and should be rejected.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Cache static assets at the CDN edge",
+        details: "This frontend pattern is unrelated to payment callback handling.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "payment webhook callback signature verification",
+      maxTokens: 2000,
+    });
+
+    expect(result.context_contract?.returned_mode).toBe("task_relevant");
+    expect(result.context_contract?.task_query_used).toBe(true);
+    expect(result.nodes.length).toBeGreaterThan(0);
+    expect(result.nodes.length).toBeLessThanOrEqual(5);
+    expect(result.nodes.map((n) => n.summary)).not.toContain("Cache static assets at the CDN edge");
+    expect(result.explanations?.length).toBe(result.nodes.length);
+    expect(result.explanations?.[0].node_id).toBe(result.nodes[0].id);
+    expect(result.explanations?.some((e) => e.strength === "avoid")).toBe(true);
+  });
+
+  it("returns a tiny possible_constraints block without taskQuery in task_relevant mode", async () => {
+    const orgId = await seedGraph(Array.from({ length: 5 }, (_, i) => ({
+      type: "pattern" as const,
+      summary: `Backend broad constraint ${i}`,
+      details: "Broad scope context should be compact when no task query is present.",
+      domains: ["backend"],
+      confidence: "extracted" as const,
+      confidence_score: 0.9,
+    })));
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      maxTokens: 2000,
+    });
+
+    expect(result.context_contract?.possible_constraints).toBe(true);
+    expect(result.context_contract?.note).toContain("query_knowledge");
+    expect(result.nodes).toHaveLength(3);
+    expect(result.explanations).toHaveLength(3);
+  });
+
+  it("pins required nodes into compact task-relevant results", async () => {
+    const orgId = await seedGraph(Array.from({ length: 5 }, (_, i) => ({
+      type: "pattern" as const,
+      summary: `Backend compact constraint ${i}`,
+      details: "Compact context should still honor explicit oracle-required nodes.",
+      domains: ["backend"],
+      confidence: "extracted" as const,
+      confidence_score: 0.9,
+    })));
+    const requiredId = getGraph(orgId).nodes[4].id;
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      maxTokens: 2000,
+      requiredNodeIds: [requiredId],
+    });
+
+    expect(result.nodes.map((n) => n.id)).toContain(requiredId);
+    expect(result.nodes).toHaveLength(3);
+  });
+
+  it("returns legacy context in shadow mode while logging comparison metrics", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Webhook authentication pattern",
+        details: "Prefer signature verification for payment webhooks.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "CDN cache pattern",
+        details: "Cache immutable assets at the edge.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const requiredId = getGraph(orgId).nodes[0].id;
+    orgSettingsState.kgContextContract = "shadow";
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "webhook authentication",
+      maxTokens: 2000,
+      requiredNodeIds: [requiredId],
+    });
+
+    expect(result.context_contract?.mode).toBe("shadow");
+    expect(result.context_contract?.returned_mode).toBe("legacy");
+    expect(result.nodes).toHaveLength(2);
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[knowledge-graph] kg_context_contract shadow",
+      expect.objectContaining({
+        mode: "shadow",
+        legacy_required_hits: expect.any(Number),
+        task_relevant_required_hits: expect.any(Number),
+      }),
+    );
+    infoSpy.mockRestore();
+  });
+
+  it("logs structured shadow failure fields when task-relevant comparison throws", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Webhook authentication pattern",
+        details: "Prefer signature verification for payment webhooks.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    orgSettingsState.kgContextContract = "shadow";
+    vi.mocked(getOrgTuning)
+      .mockReturnValueOnce(DEFAULT_ORG_TUNING)
+      .mockImplementationOnce(() => {
+        throw new Error("tuning unavailable");
+      });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "webhook authentication",
+      maxTokens: 2000,
+      requiredNodeIds: [getGraph(orgId).nodes[0].id],
+    });
+
+    expect(result.context_contract?.returned_mode).toBe("legacy");
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[knowledge-graph] kg_context_contract shadow comparison failed",
+      expect.objectContaining({
+        org_id: orgId,
+        mode: "shadow",
+        scopes: ["backend"],
+        task_query_present: true,
+        required_node_ids: [getGraph(orgId).nodes[0].id],
+        error: "tuning unavailable",
+      }),
+    );
+    warnSpy.mockRestore();
+    vi.mocked(getOrgTuning).mockReturnValue(DEFAULT_ORG_TUNING);
+  });
+
   it("respects confidence_min when filtered query_text semantic scoring is weak", async () => {
     const orgId = await seedGraph([
       {
@@ -410,6 +709,30 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(q.nodes).toHaveLength(0);
     expect(q.total_matching).toBe(0);
+  });
+
+  it("uses scope-only filtered candidates as semantic recall fallback", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Backend queue retry policy",
+        details: "Retry queue delivery with exponential backoff.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { scopes: ["backend"] },
+      max_tokens: 20_000,
+      query_text: "mobile checkout animation storyboard",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes.map((n) => n.summary)).toEqual(["Backend queue retry policy"]);
+    expect(q.total_matching).toBe(1);
   });
 
   it("keeps exact short keyword matches even when semantic similarity is weak", async () => {
@@ -661,6 +984,7 @@ describe("retention scoring", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
+    orgSettingsState.kgContextContract = "legacy";
   });
 
   it("moves stale, low-retention nodes to cold without deleting historical memory", async () => {
@@ -786,6 +1110,7 @@ describe("text_search index behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
+    orgSettingsState.kgContextContract = "legacy";
   });
 
   it("text_search returns matching nodes and excludes non-matching ones", async () => {
@@ -872,6 +1197,7 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
+    orgSettingsState.kgContextContract = "legacy";
   });
 
   it("indexes retrieval_text and uses identifiers to bypass weak semantic similarity", async () => {
@@ -925,7 +1251,15 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
     newDecision.created_at = "2026-02-01T00:00:00.000Z";
     oldDecision.superseded_by = newDecision.id;
     newDecision.superseded_by = undefined;
-    graph.edges.push({ source: newDecision.id, target: oldDecision.id, type: "supersedes", weight: 0.95 });
+    graph.edges.push({
+      source: newDecision.id,
+      target: oldDecision.id,
+      type: "supersedes",
+      weight: 0.95,
+      reason: "Curated config inheritance decision replaced the older decision.",
+      confidence_score: 0.95,
+      source_update_refs: ["ctx-config-inheritance-decision"],
+    });
 
     const current = queryKnowledge(orgId, {
       filters: { domains: ["backend"], types: ["decision"] },
@@ -951,6 +1285,106 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
 	      "Use full replace for config inheritance",
 	    ]);
 	  });
+
+  it("keeps legacy superseded nodes hidden when supersedes edges lack new evidence metadata", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use full replace for feature config",
+        details: "Older feature config decision.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "decision",
+        summary: "Use deep merge for feature config",
+        details: "Newer feature config decision.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const oldDecision = graph.nodes.find((n) => n.summary.includes("full replace"))!;
+    const newDecision = graph.nodes.find((n) => n.summary.includes("deep merge"))!;
+    oldDecision.superseded_by = newDecision.id;
+    graph.edges.push({ source: newDecision.id, target: oldDecision.id, type: "supersedes", weight: 0.95 });
+
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      max_tokens: 2000,
+    });
+
+    expect(current.nodes.map((n) => n.summary)).toEqual(["Use deep merge for feature config"]);
+  });
+
+  it("marks legacy supersedes edges on graph load even when superseded_by was not persisted", () => {
+    const orgId = nextOrgId("kg-legacy-eval");
+    const oldDecision = testNode({
+      id: "kn-old-decision",
+      type: "decision",
+      summary: "Use full replace for loaded config",
+      details: "Older loaded config decision.",
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+    const newDecision = testNode({
+      id: "kn-new-decision",
+      type: "decision",
+      summary: "Use deep merge for loaded config",
+      details: "Newer loaded config decision.",
+      created_at: "2026-02-01T00:00:00.000Z",
+    });
+
+    loadGraphForOfflineEvaluation({
+      version: 1,
+      org_id: orgId,
+      updated_at: "2026-02-01T00:00:00.000Z",
+      nodes: [oldDecision, newDecision],
+      edges: [{ source: newDecision.id, target: oldDecision.id, type: "supersedes", weight: 0.95 }],
+      communities: [],
+    });
+
+    expect(getGraph(orgId).nodes.find((n) => n.id === oldDecision.id)?.superseded_by).toBe(newDecision.id);
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      max_tokens: 2000,
+    });
+    expect(current.nodes.map((n) => n.id)).toEqual([newDecision.id]);
+  });
+
+  it("clears persisted superseded_by when no supersedes edge backs it", () => {
+    const orgId = nextOrgId("kg-stale-superseded-eval");
+    const oldDecision = testNode({
+      id: "kn-stale-old-decision",
+      type: "decision",
+      summary: "Use stale flag for loaded config",
+      details: "Older loaded config decision with a stale superseded marker.",
+      superseded_by: "kn-stale-new-decision",
+    });
+    const newDecision = testNode({
+      id: "kn-stale-new-decision",
+      type: "decision",
+      summary: "Use active flag for loaded config",
+      details: "Newer loaded config decision that no edge currently supports.",
+    });
+
+    loadGraphForOfflineEvaluation({
+      version: 1,
+      org_id: orgId,
+      updated_at: "2026-02-01T00:00:00.000Z",
+      nodes: [oldDecision, newDecision],
+      edges: [],
+      communities: [],
+    });
+
+    expect(getGraph(orgId).nodes.find((n) => n.id === oldDecision.id)?.superseded_by).toBeUndefined();
+    const current = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], types: ["decision"] },
+      max_tokens: 2000,
+    });
+    expect(current.nodes.map((n) => n.id).sort()).toEqual([newDecision.id, oldDecision.id].sort());
+  });
 
   it("does not auto-supersede unrelated same-project decisions", async () => {
     const orgId = nextOrgId("kg-decision-supersedes");
@@ -1039,7 +1473,15 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
     const conflict = graph.nodes.find((n) => n.summary.includes("fallback conflict"))!;
     pattern.embedding = [0, 1, 0];
     conflict.embedding = [1, 0, 0];
-    graph.edges.push({ source: pattern.id, target: conflict.id, type: "resolved_by", weight: 0.9 });
+    graph.edges.push({
+      source: pattern.id,
+      target: conflict.id,
+      type: "resolved_by",
+      weight: 0.9,
+      reason: "Conflict resolution explicitly cites the retry limit pattern.",
+      confidence_score: 0.9,
+      source_update_refs: ["ctx-auth-retry-resolution"],
+    });
 
     const q = queryKnowledge(orgId, {
       filters: { domains: ["backend"] },
@@ -1051,6 +1493,136 @@ describe("retrieval text, temporal modes, and graph expansion", () => {
 
     expect(q.nodes.map((n) => n.summary)).toContain("OAuth token refresh retry strategy");
     expect(q.nodes.map((n) => n.summary)).toContain("Auth fallback conflict resolved by retry limit");
+  });
+
+  it("does not graph-expand neighbors excluded by project or curation filters", async () => {
+    const orgId = nextOrgId("kg-expansion-scalar-filters");
+    initializeKnowledgeGraph(orgId);
+    const base: EnhancedPodLearning = {
+      type: "pattern",
+      details: "Graph expansion scalar filter regression fixture.",
+      domains: ["backend"],
+      confidence: "extracted",
+      confidence_score: 0.9,
+      summary: "",
+    };
+    await addLearningsToGraph(
+      orgId,
+      [{ ...base, summary: "SeedAPI direct project hit" }],
+      "pod-alpha",
+      "Alpha Pod",
+      { project_id: "proj-alpha", project_name: "Alpha" },
+    );
+    await addLearningsToGraph(
+      orgId,
+      [{ ...base, summary: "Other project graph neighbor" }],
+      "pod-beta",
+      "Beta Pod",
+      { project_id: "proj-beta", project_name: "Beta" },
+    );
+
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary === "SeedAPI direct project hit")!;
+    const neighbor = graph.nodes.find((n) => n.summary === "Other project graph neighbor")!;
+    seed.embedding = [1, 0, 0];
+    seed.curated = true;
+    neighbor.embedding = [0, 1, 0];
+    neighbor.curated = false;
+    graph.edges = [{ source: seed.id, target: neighbor.id, type: "relates_to", weight: 1 }];
+
+    const projectScoped = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], include_project_id: "proj-alpha" },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+    expect(projectScoped.nodes.map((n) => n.id)).toContain(seed.id);
+    expect(projectScoped.nodes.map((n) => n.id)).not.toContain(neighbor.id);
+
+    const curatedOnly = queryKnowledge(orgId, {
+      filters: { domains: ["backend"], curated_only: true },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+    expect(curatedOnly.nodes.map((n) => n.id)).toContain(seed.id);
+    expect(curatedOnly.nodes.map((n) => n.id)).not.toContain(neighbor.id);
+  });
+
+  it("expands legacy resolved_by graph neighbors that predate edge evidence metadata", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "SeedAPI primary recall source",
+        details: "Direct semantic hit for the query.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "resolved_conflict",
+        summary: "Conflict resolution precedent",
+        details: "The previous disagreement was settled and remains relevant as a precedent.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary === "SeedAPI primary recall source")!;
+    const precedent = graph.nodes.find((n) => n.summary === "Conflict resolution precedent")!;
+    seed.embedding = [1, 0, 0];
+    precedent.embedding = [0, 1, 0];
+    graph.edges = [{ source: seed.id, target: precedent.id, type: "resolved_by", weight: 0.9 }];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.map((n) => n.id)).toEqual(expect.arrayContaining([seed.id, precedent.id]));
+  });
+
+  it("does not expand freshly inferred resolved_by edges without evidence", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "SeedAPI primary inferred source",
+        details: "Direct semantic hit for the query.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "resolved_conflict",
+        summary: "Inferred conflict resolution precedent",
+        details: "This inferred neighbor has no supporting evidence metadata.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const graph = getGraph(orgId);
+    const seed = graph.nodes.find((n) => n.summary === "SeedAPI primary inferred source")!;
+    const precedent = graph.nodes.find((n) => n.summary === "Inferred conflict resolution precedent")!;
+    seed.embedding = [1, 0, 0];
+    precedent.embedding = [0, 1, 0];
+    graph.edges = [{ source: seed.id, target: precedent.id, type: "resolved_by", weight: 0.9, inferred: true }];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["backend"] },
+      query_text: "SeedAPI",
+      query_embedding: [1, 0, 0],
+      expand_graph: true,
+      max_tokens: 2000,
+    });
+
+    expect(q.nodes.map((n) => n.id)).toEqual([seed.id]);
   });
 
   it("does not expand contradicting nodes as current supporting context but preserves them in why_changed mode", async () => {
@@ -1244,6 +1816,7 @@ describe("empty filter set intersection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForTests();
+    orgSettingsState.kgContextContract = "legacy";
   });
 
   it("filters.domains pointing to an unknown domain returns empty, not a full-scan fallback", async () => {

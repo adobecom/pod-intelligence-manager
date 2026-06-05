@@ -7,8 +7,15 @@ export interface OrgScopeDefinition {
 }
 
 /** Persisted org-level configuration (single-tenant: one row per deployment). */
+export type KgContextContractMode = "legacy" | "shadow" | "task_relevant";
+
 export interface OrgConfig {
   scopes: OrgScopeDefinition[];
+  /**
+   * Controls whether bundled agent context uses broad legacy KG retrieval,
+   * shadow comparison, or compact task-query retrieval.
+   */
+  kg_context_contract?: KgContextContractMode;
 }
 
 const LEGACY_SCOPES: OrgScopeDefinition[] = [
@@ -51,7 +58,7 @@ export interface OrgTuning {
     openConflictMinConf: number;
     types: KnowledgeNodeType[];
   };
-  conflictLic: {
+  conflictScout: {
     additiveMinConf: number;      // default 0.65
     overlapForceMinConf: number;  // default 0.65
     suppressMergeMinConf: number; // default 0.65
