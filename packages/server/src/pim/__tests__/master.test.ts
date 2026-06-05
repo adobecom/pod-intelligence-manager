@@ -1,5 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import type { ContextUpdate } from "@pim/shared";
+
+const { testDb } = vi.hoisted(() => {
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON");
+  return { testDb: db };
+});
+
+vi.mock("../../db/connection.js", () => ({
+  default: testDb,
+}));
 
 vi.mock("../classifier.js", () => ({
   classifyUpdate: vi.fn(),
@@ -47,6 +58,7 @@ import { createConflict } from "../agents/conflict.js";
 import { regenerateLivingDoc } from "../agents/summary.js";
 import { detectOverlaps } from "../agents/cross-pod.js";
 import { isLLMAvailable } from "../llm.js";
+import { createTables } from "../../db/schema.js";
 import { processUpdate } from "../master.js";
 
 const baseUpdate = (): ContextUpdate => ({
@@ -66,7 +78,23 @@ const baseUpdate = (): ContextUpdate => ({
 });
 
 describe("processUpdate + conflict scout", () => {
+  beforeAll(() => {
+    createTables();
+  });
+
+  afterAll(() => {
+    testDb.close();
+  });
+
   beforeEach(() => {
+    testDb.prepare("DELETE FROM conflicts").run();
+    testDb.prepare("DELETE FROM pods WHERE pod_id = ?").run("p1");
+    testDb
+      .prepare(
+        `INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json)
+         VALUES (?, 'Test Pod', '2026-01-01', '2026-01-05', 1, 5, 0.0, ?)`,
+      )
+      .run("p1", JSON.stringify({ name: "Test Milestone" }));
     vi.clearAllMocks();
     vi.mocked(shouldRunConflictScout).mockReturnValue(false);
     vi.mocked(runConflictScout).mockResolvedValue(null);
