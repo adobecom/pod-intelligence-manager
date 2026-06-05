@@ -131,27 +131,39 @@ export function ConflictDetail() {
       {/* Position Comparison */}
       <Heading level={3}>Positions</Heading>
       <div className={row}>
-        {conflict.sides.map((side, i) => (
-          <div key={side.contributor} className={positionCard}>
+        {conflict.sides.map((side, i) => {
+          const isOrgPrecedent = side.contributor.startsWith("org:kg:");
+          const displayName = isOrgPrecedent
+            ? `Org precedent (${side.context_update_id})`
+            : side.contributor;
+          return (
+          <div key={`${side.contributor}-${i}`} className={positionCard}>
             <div className={positionContent}>
               <div className={positionMeta}>
-                <Badge variant={i === 0 ? "seafoam" : "purple"}>
-                  Position {String.fromCharCode(65 + i)}
+                <Badge variant={i === 0 ? "seafoam" : isOrgPrecedent ? "yellow" : "purple"}>
+                  {isOrgPrecedent ? "Org memory" : `Position ${String.fromCharCode(65 + i)}`}
                 </Badge>
                 <Text styles={style({ fontWeight: "bold" })}>
-                  {side.contributor}
+                  {displayName}
                 </Text>
               </div>
               <div style={{ fontSize: 14 }}>
                 <Markdown remarkPlugins={[remarkGfm]}>{side.position}</Markdown>
               </div>
               <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
-                Submitted <RelativeTime timestamp={side.timestamp} />
-                {" · "}Ref: {side.context_update_id}
+                {isOrgPrecedent ? (
+                  <>KG node <Text styles={style({ fontFamily: "code" })}>{side.context_update_id}</Text></>
+                ) : (
+                  <>
+                    Submitted <RelativeTime timestamp={side.timestamp} />
+                    {" · "}Ref: {side.context_update_id}
+                  </>
+                )}
               </Text>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Master Analysis */}

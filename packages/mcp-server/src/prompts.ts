@@ -171,7 +171,7 @@ Provide:
 
 ## Overview
 - Day ${pod.day_number} of ${pod.total_days} (${Math.round((pod.day_number / pod.total_days) * 100)}% through sprint)
-- Conflict pressure: ${pod.conflict_pressure} ${pod.conflict_pressure >= 0.8 ? "** CRITICAL — ingestion halted **" : pod.conflict_pressure >= 0.6 ? "** HIGH — contested areas held **" : ""}
+- Conflict pressure: ${pod.conflict_pressure} ${pod.conflict_pressure >= 0.8 ? "** CRITICAL — orchestration queued (intake still accepted as 202) **" : pod.conflict_pressure >= 0.6 ? "** HIGH — contested scopes held **" : ""}
 - Milestone: ${pod.milestone.name} at ${pod.milestone.percent_complete}%
 
 ## Areas
@@ -263,9 +263,9 @@ Synthesize these learnings into actionable guidance. Highlight:
 
       const pressureWarning =
         pod.conflict_pressure >= 0.8
-          ? "\n\n**CRITICAL: Conflict pressure >= 0.8 — ingestion is HALTED. Resolve conflicts before submitting updates.**"
+          ? "\n\n**CRITICAL: Conflict pressure >= 0.8 — PIM orchestration is deferred (submit returns 202 queued). Resolve conflicts before relying on living-doc merges.**"
           : pod.conflict_pressure >= 0.6
-            ? "\n\n**WARNING: Conflict pressure >= 0.6 — contested areas are held. Review open conflicts before proceeding.**"
+            ? "\n\n**WARNING: Conflict pressure >= 0.6 — updates in scopes with open conflicts are held with merge notes. Review open conflicts before proceeding.**"
             : "";
 
       return userMsg(`You are starting a work session on pod "${pod.name}". Review this context before doing any work.

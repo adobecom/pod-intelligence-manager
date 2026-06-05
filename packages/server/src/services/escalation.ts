@@ -1,6 +1,8 @@
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { recalculatePressure, setPodPressure } from "./pressure.js";
+import { getOrgTuning } from "./org-settings.js";
 import { notifyConflictEscalated, notifyPressureThreshold, notifyQueueBacklog } from "./slack.js";
 import { QUEUE_BACKLOG_THRESHOLD, notifiedBacklogPods } from "./ingestion-queue.js";
 
@@ -38,8 +40,15 @@ export function checkEscalations(): void {
           conflict.id,
         );
 
-        // Snapshot previous pressure before recalculation
-        const previousPressure = (db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(conflict.pod_id) as { conflict_pressure: number } | undefined)?.conflict_pressure ?? 0;
+        const podMeta = db.prepare("SELECT conflict_pressure, org_id FROM pods WHERE pod_id = ?").get(conflict.pod_id) as {
+          conflict_pressure: number;
+          org_id: string | null;
+        } | undefined;
+        const previousPressure = podMeta?.conflict_pressure ?? 0;
+        const orgId = podMeta?.org_id ?? undefined;
+        const pressureThresholds = orgId
+          ? getOrgTuning(orgId).pressure
+          : DEFAULT_ORG_TUNING.pressure;
 
         // At level 4 (24h), force pressure to 1.0 (pods + org_pod_summaries)
         if (threshold.level === 4) {
@@ -49,16 +58,15 @@ export function checkEscalations(): void {
             podId: conflict.pod_id,
             payload: { pressure: 1.0 },
           });
-          notifyPressureThreshold(conflict.pod_id, 1.0, previousPressure);
+          notifyPressureThreshold(conflict.pod_id, 1.0, previousPressure, pressureThresholds);
         } else {
-          // Recalculate pressure normally
-          const newPressure = recalculatePressure(conflict.pod_id);
+          const newPressure = recalculatePressure(conflict.pod_id, orgId);
           broadcast({
             type: "pressure_changed",
             podId: conflict.pod_id,
             payload: { pressure: newPressure },
           });
-          notifyPressureThreshold(conflict.pod_id, newPressure, previousPressure);
+          notifyPressureThreshold(conflict.pod_id, newPressure, previousPressure, pressureThresholds);
         }
 
         // Broadcast escalation event

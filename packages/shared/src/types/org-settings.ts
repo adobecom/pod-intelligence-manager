@@ -1,3 +1,5 @@
+import type { KnowledgeNodeType } from "./graph.js";
+
 /** Single workstream / context-update scope (id is stable; label is UI). Also used for project anatomy internal slots. */
 export interface OrgScopeDefinition {
   id: string;
@@ -39,6 +41,15 @@ export interface OrgTuning {
     nonBlockingBase: number; // default 0.08
     ageFactorCap: number;    // default 0.1
     ageWindowHours: number;  // default 48
+    dependencyBonus: number; // default 0.05
+  };
+  kgPatternScout: {
+    enabled: boolean;
+    maxTokens: number;
+    minQuerySimilarity: number;
+    advisoryMinConf: number;
+    openConflictMinConf: number;
+    types: KnowledgeNodeType[];
   };
   conflictLic: {
     additiveMinConf: number;      // default 0.65
@@ -68,8 +79,16 @@ export interface OrgTuning {
 
 export const DEFAULT_ORG_TUNING: OrgTuning = {
   pressure:        { normalMax: 0.3, cautiousMax: 0.6, degradedMax: 0.8 },
-  pressureWeights: { blockingBase: 0.15, nonBlockingBase: 0.08, ageFactorCap: 0.1, ageWindowHours: 48 },
-  conflictLic:   { additiveMinConf: 0.65, overlapForceMinConf: 0.65, suppressMergeMinConf: 0.65, peerWindow: 15, detailsCap: 900 },
+  pressureWeights: { blockingBase: 0.15, nonBlockingBase: 0.08, ageFactorCap: 0.1, ageWindowHours: 48, dependencyBonus: 0.05 },
+  kgPatternScout: {
+    enabled: true,
+    maxTokens: 1500,
+    minQuerySimilarity: 0.75,
+    advisoryMinConf: 0.55,
+    openConflictMinConf: 0.72,
+    types: ["decision", "pattern", "anti_pattern", "resolved_conflict"],
+  },
+  conflictScout:   { additiveMinConf: 0.65, overlapForceMinConf: 0.65, suppressMergeMinConf: 0.65, peerWindow: 15, detailsCap: 900 },
   graphScoring:    { recencyDecayDays: 90, samePodDedupThreshold: 0.85, crossPodDedupThreshold: 0.95, minQuerySimilarity: 0.75 },
   lint:            { stalenessHours: 8, maxLlmFindings: 8, livingDocMaxChars: 10_000, updateDetailsMaxChars: 800 },
   classifier:      { peerWindow: 5, overlapKeywordMin: 3, highPressureOverride: 0.6 },

@@ -17,9 +17,14 @@ interface RecentUpdateRow {
 }
 
 // Classify whether a new context update is additive, overlapping, or contradictory
-export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classifier"]): Classification {
+export function classifyUpdate(
+  update: ContextUpdate,
+  tuning?: OrgTuning["classifier"],
+  pressureCautiousMax?: number,
+): Classification {
   const podId = update.pod_id;
   const t = tuning ?? DEFAULT_ORG_TUNING.classifier;
+  const pressureOverride = pressureCautiousMax ?? t.highPressureOverride;
 
   // 1. Check if this update's scope overlaps with any open conflict
   const openConflicts = db.prepare(
@@ -57,7 +62,7 @@ export function classifyUpdate(update: ContextUpdate, tuning?: OrgTuning["classi
 
   // 3. Check conflict pressure
   const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ?").get(podId) as { conflict_pressure: number } | undefined;
-  if (pod && pod.conflict_pressure > t.highPressureOverride) {
+  if (pod && pod.conflict_pressure > pressureOverride) {
     return "overlapping";
   }
 

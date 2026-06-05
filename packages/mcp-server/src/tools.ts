@@ -389,7 +389,7 @@ export function registerTools(server: McpServer) {
       const taskQuery = external_query?.trim();
       const queryParam = taskQuery ? `&query=${encodeURIComponent(taskQuery)}` : "";
 
-      const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context] =
+      const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context, lint_findings, ingestion_queue] =
         await Promise.all([
           apiFetchText(`/api/pods/${pod_id}/living-doc`),
           apiFetch(`/api/pods/${pod_id}/conflicts`),
@@ -398,10 +398,16 @@ export function registerTools(server: McpServer) {
           external_query
             ? apiPost("/api/context-search", { query: external_query, pod_id }).catch(() => null)
             : Promise.resolve(null),
+          apiFetch<unknown[]>(`/api/pods/${pod_id}/lint-findings`).catch(() => []),
+          apiFetch<{ queue_size: number }>(`/api/pods/${pod_id}/ingestion-queue`).catch(() => ({ queue_size: 0 })),
         ]);
 
       const recent_updates = Array.isArray(context_updates)
         ? (context_updates as unknown[]).slice(0, recentLimit)
+        : [];
+
+      const open_kg_lint = Array.isArray(lint_findings)
+        ? lint_findings.filter((f: { type?: string }) => f.type === "kg_org_contradiction")
         : [];
 
       return json({
@@ -413,6 +419,8 @@ export function registerTools(server: McpServer) {
         conflicts,
         relevant_learnings,
         recent_updates,
+        ingestion_queue_size: ingestion_queue?.queue_size ?? 0,
+        kg_org_lint_findings: open_kg_lint,
         ...(external_context ? { external_context } : {}),
       });
     },
@@ -420,7 +428,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "submit_context_update",
-    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and PIM analysis. Will be rejected (423) if the pod is in critical conflict state (pressure >= 0.8).",
+    "REQUIRED after meaningful lock-in work (commits, reverts, spec changes, decisions) per docs/POD_AGENT_PROTOCOL.md — submit progress, blockers, spec changes, questions, or decisions. Also use for manual reports when not using git hooks. Returns the created update and PIM analysis. At critical pressure (>= 0.8), returns 202 with queued: true — intake accepted, orchestration deferred until conflicts resolve.",
     {
       pod_id: PodId,
       agent_id: z.string().describe("ID of the submitting agent or human"),

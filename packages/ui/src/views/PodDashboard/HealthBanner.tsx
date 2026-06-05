@@ -21,8 +21,8 @@ export function HealthBanner({ pressure, openConflicts, thresholds }: HealthBann
       </Heading>
       <Content>
         {isCritical
-          ? `${openConflicts} open conflict(s). Ingestion is paused for contested areas. Resolve blocking conflicts immediately.`
-          : `${openConflicts} open conflict(s). Contested updates are being held in a pending queue.`}
+          ? `${openConflicts} open conflict(s). New updates are queued (202) until pressure drops — orchestration is deferred. Resolve blocking conflicts immediately.`
+          : `${openConflicts} open conflict(s). Updates in scopes tied to open conflicts are held with merge notes until resolved.`}
       </Content>
     </InlineAlert>
   );

@@ -138,6 +138,18 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
     };
   });
 
+  app.get<{ Params: { podId: string } }>("/api/pods/:podId/ingestion-queue", async (req, reply) => {
+    const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(
+      req.params.podId,
+      req.org!.org_id,
+    );
+    if (!pod) {
+      reply.code(404);
+      return { error: "Pod not found" };
+    }
+    return { queue_size: getQueueSize(req.params.podId) };
+  });
+
   app.delete<{ Params: { podId: string; updateId: string } }>("/api/pods/:podId/context-updates/:updateId", async (req, reply) => {
     const { podId, updateId } = req.params;
 
