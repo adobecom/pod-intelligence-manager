@@ -1038,6 +1038,34 @@ export async function getRelevantLearnings(
 
 // --- Convenience: Get Precedents ---
 
+/** Candidates for KG pattern scout — org decisions/patterns that may contradict a pod update. */
+export async function getOrgPatternCandidates(
+  orgId: string,
+  queryText: string,
+  scope: string,
+  options: {
+    maxTokens: number;
+    types: KnowledgeNodeType[];
+    confidenceMin?: number;
+  },
+): Promise<KnowledgeQueryResult> {
+  const trimmed = queryText.trim();
+  const queryEmbedding = trimmed ? await generateEmbedding(trimmed) : null;
+
+  return queryKnowledge(orgId, {
+    filters: {
+      domains: [scope],
+      types: options.types,
+      confidence_min: options.confidenceMin ?? 0.65,
+    },
+    max_tokens: options.maxTokens,
+    include_details: true,
+    query_embedding: queryEmbedding,
+    query_text: trimmed.slice(0, 500),
+    query_mode: "current",
+  });
+}
+
 export async function getPrecedents(
   orgId: string,
   conflictSummary: string,

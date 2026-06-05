@@ -19,15 +19,22 @@ function hoursAgo(h: number): string {
 
 /** Mocks list query + COUNT for setPodPressure. */
 function mockPrepareForConflicts(
-  rows: { id: string; severity: string; created_at: string }[],
+  rows: { id: string; severity: string; created_at: string; impact_json?: string }[],
   runMock: ReturnType<typeof vi.fn>,
 ): void {
   (db.prepare as Mock).mockImplementation((sql: string) => {
     if (sql.includes("COUNT(*)")) {
       return { get: vi.fn().mockReturnValue({ count: rows.length }) };
     }
-    if (sql.includes("id, severity, created_at")) {
-      return { all: vi.fn().mockReturnValue(rows) };
+    if (sql.includes("impact_json")) {
+      return {
+        all: vi.fn().mockReturnValue(
+          rows.map((r) => ({
+            ...r,
+            impact_json: r.impact_json ?? "[]",
+          })),
+        ),
+      };
     }
     return { run: runMock };
   });

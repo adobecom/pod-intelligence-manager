@@ -1,7 +1,9 @@
 import db, { withTransaction } from "../../db/connection.js";
 import { randomUUID } from "crypto";
 import { isLLMAvailable, callLLMJSON, MODELS } from "../llm.js";
-import type { ContextUpdate, Conflict } from "@pim/shared";
+import type { ContextUpdate, Conflict, KnowledgeNode } from "@pim/shared";
+import { DEFAULT_ORG_TUNING } from "@pim/shared";
+import { getOrgTuning } from "../../services/org-settings.js";
 import { broadcast } from "../../ws/index.js";
 import { recalculatePressure } from "../../services/pressure.js";
 import { getPrecedents } from "../../services/knowledge-graph.js";
@@ -164,14 +166,134 @@ export async function createConflict(
         orgId,
       );
 
-      return recalculatePressure(podId);
+      return recalculatePressure(podId, orgId ?? undefined);
     });
   } catch (err) {
     console.error(`[conflict] failed to persist conflict ${conflict.id}:`, err);
     throw err;
   }
 
-  // Broadcast and notify (outside transaction — side effects should not roll back)
+  notifyConflictSideEffects(podId, conflict, newPressure, previousPressure, orgId);
+
+  return conflict;
+}
+
+function hasOpenOrgPatternConflict(podId: string, nodeId: string): boolean {
+  const rows = db.prepare(
+    "SELECT sides_json FROM conflicts WHERE pod_id = ? AND status != 'resolved'",
+  ).all(podId) as { sides_json: string }[];
+  for (const row of rows) {
+    const sides = JSON.parse(row.sides_json) as Array<{ contributor: string; context_update_id: string }>;
+    if (sides.some((s) => s.context_update_id === nodeId || s.contributor === `org:kg:${nodeId}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export interface OrgPatternConflictAnalysis {
+  contradictionSummary: string;
+  rationale: string;
+  confidence: number;
+}
+
+/** Conflict between a pod update and an org KG precedent (Side B = org memory). */
+export async function createOrgPatternConflict(
+  update: ContextUpdate,
+  kgNode: KnowledgeNode,
+  analysis: OrgPatternConflictAnalysis,
+): Promise<Conflict | null> {
+  const podId = update.pod_id;
+  if (hasOpenOrgPatternConflict(podId, kgNode.id)) return null;
+
+  const conflictId = `C-${randomUUID().slice(0, 4).toUpperCase()}`;
+  const now = new Date().toISOString();
+  const orgContributor = `org:kg:${kgNode.id}`;
+  const severity: Conflict["severity"] =
+    kgNode.type === "anti_pattern" || (kgNode.type === "decision" && kgNode.curated)
+      ? "blocking"
+      : "non_blocking";
+
+  const masterAnalysis =
+    `Org precedent conflict: KG node ${kgNode.id} (${kgNode.type}, ` +
+    `source: ${kgNode.source_pod_name ?? kgNode.source_pod_id}, confidence ${kgNode.confidence_score.toFixed(2)}). ` +
+    `${analysis.rationale}`;
+
+  const impact = [
+    `Contradicts org ${kgNode.type} in ${update.scope} scope`,
+    `KG node: ${kgNode.summary}`,
+  ];
+
+  const conflict: Conflict = {
+    id: conflictId,
+    pod_id: podId,
+    created_at: now,
+    status: "open",
+    severity,
+    summary: analysis.contradictionSummary,
+    sides: [
+      {
+        contributor: update.agent_id,
+        position: update.summary,
+        context_update_id: update.id,
+        timestamp: update.timestamp,
+      },
+      {
+        contributor: orgContributor,
+        position: `${kgNode.summary}${kgNode.details ? ` — ${kgNode.details.slice(0, 300)}` : ""}`,
+        context_update_id: kgNode.id,
+        timestamp: kgNode.created_at ?? now,
+      },
+    ],
+    master_analysis: masterAnalysis,
+    impact,
+    resolved_by: null,
+    resolution: null,
+    resolution_date: null,
+  };
+
+  const podRow = db.prepare("SELECT conflict_pressure, org_id FROM pods WHERE pod_id = ?").get(podId) as {
+    conflict_pressure: number;
+    org_id: string | null;
+  } | undefined;
+  const previousPressure = podRow?.conflict_pressure ?? 0;
+  const orgId = podRow?.org_id ?? null;
+
+  let newPressure = previousPressure;
+  try {
+    newPressure = withTransaction(() => {
+      db.prepare(
+        `INSERT INTO conflicts (id, pod_id, created_at, status, severity, summary, sides_json, master_analysis, impact_json, resolved_by, resolution, resolution_date, org_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        conflict.id, conflict.pod_id, conflict.created_at, conflict.status,
+        conflict.severity, conflict.summary, JSON.stringify(conflict.sides),
+        conflict.master_analysis, JSON.stringify(conflict.impact),
+        conflict.resolved_by, conflict.resolution, conflict.resolution_date,
+        orgId,
+      );
+      return recalculatePressure(podId, orgId ?? undefined);
+    });
+  } catch (err) {
+    console.error(`[conflict] failed to persist org-pattern conflict ${conflict.id}:`, err);
+    throw err;
+  }
+
+  notifyConflictSideEffects(podId, conflict, newPressure, previousPressure, orgId);
+  return conflict;
+}
+
+function notifyConflictSideEffects(
+  podId: string,
+  conflict: Conflict,
+  newPressure: number,
+  previousPressure: number,
+  orgId: string | null,
+): void {
+  const thresholds = orgId
+    ? getOrgTuning(orgId).pressure
+    : DEFAULT_ORG_TUNING.pressure;
+
   try {
     broadcast({ type: "conflict_created", podId, payload: conflict });
     broadcast({ type: "pressure_changed", podId, payload: { pressure: newPressure } });
@@ -179,9 +301,6 @@ export async function createConflict(
     console.error(`[conflict] broadcast failed for ${conflict.id}:`, err);
   }
 
-  // Slack notifications — capture the posted message ts so later escalations/
-  // resolutions can thread under it instead of posting new top-level messages.
-  // Fire-and-forget: we don't block conflict creation on Slack round-trip.
   try {
     notifyConflictCreated(conflict)
       .then((ts) => {
@@ -195,12 +314,10 @@ export async function createConflict(
       .catch((err) => {
         console.error(`[conflict] Slack conflict notification failed for ${conflict.id}:`, err);
       });
-    notifyPressureThreshold(podId, newPressure, previousPressure);
+    notifyPressureThreshold(podId, newPressure, previousPressure, thresholds);
   } catch (err) {
     console.error(`[conflict] notification failed for ${conflict.id}:`, err);
   }
-
-  return conflict;
 }
 
 function safeMilestoneName(raw: string): string {

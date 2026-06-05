@@ -30,7 +30,8 @@ export interface LintFinding {
     | "unresolved_conflict"
     | "doc_not_read"
     | "implicit_assumption"
-    | "spec_drift";
+    | "spec_drift"
+    | "kg_org_contradiction";
   severity: "info" | "warning" | "critical";
   summary: string;
   area: string | null;
@@ -361,6 +362,26 @@ Rules:
   });
 
   return normalizeLLMFindings(podId, timestamp, parsed?.findings, maxFindings);
+}
+
+/** Append a single lint finding without clearing existing pod findings. */
+export function appendLintFinding(podId: string, finding: LintFinding): void {
+  const podRow = db.prepare("SELECT org_id FROM pods WHERE pod_id = ?").get(podId) as { org_id: string | null } | undefined;
+  const orgId = podRow?.org_id ?? null;
+  db.prepare(
+    `INSERT INTO lint_findings (id, pod_id, timestamp, type, severity, summary, area, suggestion, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    finding.id,
+    finding.pod_id,
+    finding.timestamp,
+    finding.type,
+    finding.severity,
+    finding.summary,
+    finding.area,
+    finding.suggestion,
+    orgId,
+  );
 }
 
 function persistLintFindings(podId: string, findings: LintFinding[]): void {
