@@ -1,0 +1,70 @@
+{
+  "taskId": "real-emc-s2-tabs-crash-segmented-control",
+  "stratum": "S5",
+  "recipe": [
+    "keyword-search",
+    "find-references",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "04eccca90b7f18df03afe27c17a6d94c5fc7d8b7",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f"
+  },
+  "generatedAt": "2026-06-04T23:51:51.757Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+        "-l",
+        "5",
+        "Spectrum 2 Tabs SegmentedControl crash"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+      "exitCode": 0,
+      "durationMs": 102,
+      "output": "1. web-src/src/pages/UserManagement/UserManagement.tsx (lines 302-368, 0.16)\n   arrow_function UserManagement\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 766-812, 0.15)\n   arrow_function SessionForm\n\n\n> **Note**: 3 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+        "SegmentedControl"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+      "exitCode": 0,
+      "durationMs": 36,
+      "output": "No definition found for: SegmentedControl\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+        "SegmentedControl"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
+      "exitCode": 0,
+      "durationMs": 15,
+      "output": "No definition found for symbol: \"SegmentedControl\"\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-s2-tabs-crash-segmented-control\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 Spectrum 2 Tabs SegmentedControl crash\n```\n1. web-src/src/pages/UserManagement/UserManagement.tsx (lines 302-368, 0.16)\n   arrow_function UserManagement\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 766-812, 0.15)\n   arrow_function SessionForm\n\n\n> **Note**: 3 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic find-references -r SegmentedControl\n```\nNo definition found for: SegmentedControl\n```\n\n## lic explain-symbol -r SegmentedControl\n```\nNo definition found for symbol: \"SegmentedControl\"\n```\n",
+  "renderedBlockHash": "eb416ba34fbb93fe",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

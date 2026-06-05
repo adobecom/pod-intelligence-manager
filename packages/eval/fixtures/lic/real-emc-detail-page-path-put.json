@@ -1,0 +1,59 @@
+{
+  "taskId": "real-emc-detail-page-path-put",
+  "stratum": "S1",
+  "recipe": [
+    "search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "aed893da260263a630f554eeb9c31560f84f46b2",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-aed893da2602"
+  },
+  "generatedAt": "2026-06-04T23:45:16.274Z",
+  "calls": [
+    {
+      "tool": "search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-aed893da2602",
+        "-l",
+        "5",
+        "Issue"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-aed893da2602",
+      "exitCode": 0,
+      "durationMs": 10016,
+      "output": "1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 56-111, 0.77)\n   interface SpeakerDashboardItem\n   ...\n  56:// Extended speaker type for dashboard display\n  57:interface SpeakerDashboardItem extends SeriesSpeaker {\n  58:  eventCount?: number\n  59:  events?: EventApiResponse[]\n  60:  seriesName?: string\n  61:}\n  62:function speakerImageAltText(payload: Record<string, unknown>): string {\n  63:  const fn = typeof payload.firstName === 'string' ? payload.firstName.trim() : ''\n  64:  const ln = typeof payload.lastName === 'string' ? payload.lastName.trim() : ''\n  65:  return `${fn} ${ln}`.trim() || 'Speaker'\n  66:}\n  67:interface SpeakersDashboardProps {\n  68:  ims: IMS\n  69:}\n  70:() => {\n  71:  const toast = useToast()\n  72:  const { groupVersion } = useGroup()\n  73:  const { filterSeries } = useRBACFilter()\n  74:  const canWriteEvent = useHasPermission('event', 'write')\n  75:  const canDeleteEvent = useHasPermission('event', 'delete')\n  76:  \n  77:  // ============================================================================\n  78:  // STATE\n  79:  // ============================================================================\n  80:  \n  81:  // Series selection\n  82:  const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n  83:  const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n  84:  const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n  85:  \n  86:  // Speakers data\n  87:  const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n  88:  const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n  89:  const [error, setError] = useSafeState<string | null>(null)\n  90:  \n  91:  // Event connections loading\n  92:  const [loadingEventCounts, setLoadingEventCounts] = useSafeState<Se\n  93:  const [eventConnections, setEventConnections] = useSafeState<Map<string, EventApiResponse[]>>(new Map())\n  94:  \n  95:  // Ref to track which speaker IDs we've already loaded (prevents infinite loop)\n  96:  const loadedSpeakerIdsRef = useRef<Set<string>>(new Set())\n  97:  \n  98:  // Action states\n  99:  const [actionInProgress, setActionInProgress] = useSafeState<string | null>(null)\n 100:  \n 101:  // Dialog states\n 102:  const [isFormDialogOpen, setIsFormDialogOpen] = useSafeState(false)\n 103:  const [editingSpeaker, setEditingSpeaker] = useSafeState<SpeakerDashboardItem | null>(null)\n 104:  const [speakerToDelete, setSpeakerToDelete] = useSafeState<SpeakerDashboardItem | null>(null)\n 105:  const [speakerForCascade, setSpeakerForCascade] = useSafeState<SpeakerDashboardItem | null>(null)\n 106:  const [cascadeAction, setCascadeAct\n\n4. web-src/src/services/api.ts (lines 1311-1370, 0.74)\n1311:\n1312:  // ============================================================================\n1313:  // SPEAKER APIs\n1314:  // ============================================================================\n1315:async createSpeaker(profile: any, seriesId: string): Promise<any | ErrorResponse> {\n1316:    validateString(seriesId, 'series ID')\n1317:    validateObject(profile, 'speaker profile')\n1318:    return this.callExternalApi('esp', `/v1/series/${seriesId}/speakers`, 'POST', profile,\n1319:      { operationName: 'createSpeaker', shouldReturnF...\n\n5. web-src/src/types/domain.ts (lines 60-84, 0.63) ★\n  60:interface SeriesApiResponse {\n  61:  seriesId: string\n  62:  seriesName: string\n  63:  seriesDescription?: string\n  64:  seriesStatus: 'published' | 'draft' | 'archived'\n  65:  cloudType: string\n  66:  targetCms: TargetCms\n  67:  templateId: string\n  68:  externalThemeId?: string\n  69:  susiContextId?: string // SSO context ID\n  70:  relatedDomain?: string // Related domain for the series\n  71:  contentRoot?: string // Content root path\n  72:  createdBy?: string\n  73:  modifiedBy?: string\n  74:  creationTime: number\n  75:  modificationTime: number\n  76:}\n  77:// Series template ...\n\n\n> **Note**: 2 additional results below relevance threshold (score < 0.55) omitted.\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-aed893da2602",
+        "detailPagePath"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-aed893da2602",
+      "exitCode": 0,
+      "durationMs": 116,
+      "output": "## const `detailPagePath` (FQN: `web-src/src/types/domain.ts::EventApiResponse::detailPagePath`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 257\n\n```\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.05 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `(usage)` (usage) — `web-src/src/config/detailPageLocalePrefix.ts:1`\n\n**Domain**: pages-utils > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-detail-page-path-put\n_Stratum: S1._\n\n## lic search -r -l 5 Issue\n```\n1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 56-111, 0.77)\n   interface SpeakerDashboardItem\n   ...\n  56:// Extended speaker type for dashboard display\n  57:interface SpeakerDashboardItem extends SeriesSpeaker {\n  58:  eventCount?: number\n  59:  events?: EventApiResponse[]\n  60:  seriesName?: string\n  61:}\n  62:function speakerImageAltText(payload: Record<string, unknown>): string {\n  63:  const fn = typeof payload.firstName === 'string' ? payload.firstName.trim() : ''\n  64:  const ln = typeof payload.lastName === 'string' ? payload.lastName.trim() : ''\n  65:  return `${fn} ${ln}`.trim() || 'Speaker'\n  66:}\n  67:interface SpeakersDashboardProps {\n  68:  ims: IMS\n  69:}\n  70:() => {\n  71:  const toast = useToast()\n  72:  const { groupVersion } = useGroup()\n  73:  const { filterSeries } = useRBACFilter()\n  74:  const canWriteEvent = useHasPermission('event', 'write')\n  75:  const canDeleteEvent = useHasPermission('event', 'delete')\n  76:  \n  77:  // ============================================================================\n  78:  // STATE\n  79:  // ============================================================================\n  80:  \n  81:  // Series selection\n  82:  const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n  83:  const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n  84:  const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n  85:  \n  86:  // Speakers data\n  87:  const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n  88:  const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n  89:  const [error, setError] = useSafeState<string | null>(null)\n  90:  \n  91:  // Event connections loading\n  92:  const [loadingEventCounts, setLoadingEventCounts] = useSafeState<Se\n  93:  const [eventConnections, setEventConnections] = useSafeState<Map<string, EventApiResponse[]>>(new Map())\n  94:  \n  95:  // Ref to track which speaker IDs we've already loaded (\n```\n\n## lic explain-symbol -r detailPagePath\n```\n## const `detailPagePath` (FQN: `web-src/src/types/domain.ts::EventApiResponse::detailPagePath`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 257\n\n```\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.05 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `(usage)` (usage) — `web-src/src/config/detailPageLocalePrefix.ts:1`\n\n**Domain**: pages-utils > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n```\n",
+  "renderedBlockHash": "e3faaec2fa77d1cc",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": true,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: modificationTime, video, registration",
+      "post-merge answer symbol leak: modificationTime, registration",
+      "task intent matched"
+    ]
+  }
+}

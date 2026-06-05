@@ -1,0 +1,58 @@
+{
+  "taskId": "real-emc-event-put-omit-detail-page-path",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "fa650788f2e6dc01794fe98157dec3f98aa30563",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-fa650788f2e6"
+  },
+  "generatedAt": "2026-06-04T23:45:57.611Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-fa650788f2e6",
+        "-l",
+        "5",
+        "event PUT omit read-only fields"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-fa650788f2e6",
+      "exitCode": 0,
+      "durationMs": 82,
+      "output": "1. web-src/src/types/campaign.ts (lines 37-49, 0.16)\n   interface CampaignUpdatePayload\n   Referenced by 1 files (.tsx: 1)\n\n\n> **Note**: 4 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-fa650788f2e6",
+        "updateEvent"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-fa650788f2e6",
+      "exitCode": 0,
+      "durationMs": 32,
+      "output": "## function `updateEvent` (FQN: `web-src/src/services/api.ts::ApiService::updateEvent`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 307\n\n```\nasync updateEvent(id: string, data: Partial<EventFormData>): Promise<ApiResponse<Event>> {\n  return this.callAction<ApiResponse<Event>>('updateEvent', { id, ...data })\n}\n```\n\n**CodeRank:** 0.35 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (4 total)\n\n- `createEvent` (usage) — `web-src/src/services/externalApi.example.ts:112`\n- `(usage)` (usage) — `web-src/src/services/cacheUtils.ts:69`\n- `Cache and Throttling Implementation Summary > 🎯 Usage Examples > Example 3: Cache Invalidation on Mutation` (usage) — `docs/CACHE_IMPLEMENTATION.md:171`\n- `Frontend Development Guide > API Service (`services/api.ts`) > Available Methods` (usage) — `docs/FRONTEND.md:388`\n\n### Top Callees (4 total)\n\n- `ApiResponse` (interface) — `web-src/src/types/domain.ts:696` (score 0.23)\n- `callAction` (function) — `web-src/src/services/api.ts:211` (score 0.14)\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-event-put-omit-detail-page-path\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 event PUT omit read-only fields\n```\n1. web-src/src/types/campaign.ts (lines 37-49, 0.16)\n   interface CampaignUpdatePayload\n   Referenced by 1 files (.tsx: 1)\n\n\n> **Note**: 4 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r updateEvent\n```\n## function `updateEvent` (FQN: `web-src/src/services/api.ts::ApiService::updateEvent`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 307\n\n```\nasync updateEvent(id: string, data: Partial<EventFormData>): Promise<ApiResponse<Event>> {\n  return this.callAction<ApiResponse<Event>>('updateEvent', { id, ...data })\n}\n```\n\n**CodeRank:** 0.35 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (4 total)\n\n- `createEvent` (usage) — `web-src/src/services/externalApi.example.ts:112`\n- `(usage)` (usage) — `web-src/src/services/cacheUtils.ts:69`\n- `Cache and Throttling Implementation Summary > 🎯 Usage Examples > Example 3: Cache Invalidation on Mutation` (usage) — `docs/CACHE_IMPLEMENTATION.md:171`\n- `Frontend Development Guide > API Service (`services/api.ts`) > Available Methods` (usage) — `docs/FRONTEND.md:388`\n\n### Top Callees (4 total)\n\n- `ApiResponse` (interface) — `web-src/src/types/domain.ts:696` (score 0.23)\n- `callAction` (function) — `web-src/src/services/api.ts:211` (score 0.14)\n\n**Domain**: pages-services > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n```\n",
+  "renderedBlockHash": "77b929432990a975",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { judgeCode } from "../judges/code.js";
-import { configDeepMerge } from "../tasks/code-gen/config-deep-merge.js";
-import { sessionCreateTimezone } from "../tasks/code-gen/session-create-timezone.js";
+import { configDeepMerge } from "../tasks/diagnostics/code-gen/config-deep-merge.js";
+import { sessionCreateTimezone } from "../tasks/diagnostics/code-gen/session-create-timezone.js";
 
 const goodConfigDeepMerge = `
 \`\`\`typescript

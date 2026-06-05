@@ -1,0 +1,70 @@
+{
+  "taskId": "real-emc-series-mod-time-resilience",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.91-1457-30428843",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "925a96cc360d8228917ec85b0ec068c2200c338b",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d"
+  },
+  "generatedAt": "2026-05-28T04:37:44.504Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+        "seriesModTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+      "exitCode": 0,
+      "durationMs": 22,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps\n  web-src/src/types/domain.ts::EventApiResponse::seriesId\n  web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus\n  web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm\n  web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+        "--direction",
+        "callers",
+        "seriesModTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+      "exitCode": 0,
+      "durationMs": 18,
+      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps\n  web-src/src/types/domain.ts::EventApiResponse::seriesId\n  web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus\n  web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm\n  web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+        "seriesModTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-925a96cc360d",
+      "exitCode": 0,
+      "durationMs": 32,
+      "output": "No definition found for \"seriesModTime\". Did you mean:\n\n1. `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps`\n2. `web-src/src/types/domain.ts::EventApiResponse::seriesId`\n3. `web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus`\n4. `web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm`\n5. `web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-series-mod-time-resilience\n_Stratum: S2._\n\n## lic find-references -r seriesModTime\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps\n  web-src/src/types/domain.ts::EventApiResponse::seriesId\n  web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus\n  web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm\n  web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors\n```\n\n## lic call-graph -r --direction callers seriesModTime\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps\n  web-src/src/types/domain.ts::EventApiResponse::seriesId\n  web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus\n  web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm\n  web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors\n```\n\n## lic explain-symbol -r seriesModTime\n```\nNo definition found for \"seriesModTime\". Did you mean:\n\n1. `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx::SeriesDashboardProps`\n2. `web-src/src/types/domain.ts::EventApiResponse::seriesId`\n3. `web-src/src/types/domain.ts::SeriesDashboardItem::seriesStatus`\n4. `web-src/src/pages/SeriesForm/SeriesForm.tsx::SeriesForm`\n5. `web-src/src/pages/EventForm/PartnerPickerDialog.tsx::PartnerPickerDialogProps::seriesSponsors`\n```\n",
+  "renderedBlockHash": "b922bf1f7ae3ac05",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

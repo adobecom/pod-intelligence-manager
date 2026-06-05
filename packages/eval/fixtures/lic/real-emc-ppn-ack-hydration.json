@@ -1,0 +1,69 @@
+{
+  "taskId": "real-emc-ppn-ack-hydration",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "ccc9e49b399c7592cdf5ec78125ccfcf3397e974",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c"
+  },
+  "generatedAt": "2026-06-04T23:50:29.267Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+        "ppnAck"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+      "exitCode": 0,
+      "durationMs": 20,
+      "output": "No definition found for: ppnAck\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+        "--direction",
+        "callers",
+        "ppnAck"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+      "exitCode": 0,
+      "durationMs": 23,
+      "output": "Call Graph: ppnAck (direction: callers)\n\n  (no callers found)\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+        "ppnAck"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-ccc9e49b399c",
+      "exitCode": 0,
+      "durationMs": 31,
+      "output": "No definition found for symbol: \"ppnAck\"\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-ppn-ack-hydration\n_Stratum: S2._\n\n## lic find-references -r ppnAck\n```\nNo definition found for: ppnAck\n```\n\n## lic call-graph -r --direction callers ppnAck\n```\nCall Graph: ppnAck (direction: callers)\n\n  (no callers found)\n```\n\n## lic explain-symbol -r ppnAck\n```\nNo definition found for symbol: \"ppnAck\"\n```\n",
+  "renderedBlockHash": "ae2994854f5aee4e",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": false,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results"
+    ]
+  }
+}

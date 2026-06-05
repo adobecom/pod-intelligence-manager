@@ -1,0 +1,58 @@
+{
+  "taskId": "real-emc-partner-put-sponsor-id-payload",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "f5db523f36ba8c1bf9807b7bc8dce132073a9e6a",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba"
+  },
+  "generatedAt": "2026-06-04T23:50:28.112Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+        "-l",
+        "5",
+        "partner PUT sponsor id payload"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+      "exitCode": 0,
+      "durationMs": 107,
+      "output": "1. web-src/src/pages/EventForm/PartnerPickerDialog.tsx (lines 147-217, 0.25)\n   arrow_function PartnerPickerDialog\n\n   *(also at lines 99-151)*\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 634-688, 0.23)\n   arrow_function SponsorsComponent\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+        "updatePartner"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+      "exitCode": 0,
+      "durationMs": 29,
+      "output": "No definition found for \"updatePartner\". Did you mean:\n\n1. `web-src/src/services/api.ts::ApiService::updateRole`\n2. `web-src/src/services/api.ts::updateSpeaker`\n3. `web-src/src/services/api.ts::updateEvent`\n4. `web-src/src/services/api.ts::ApiService::updateScope`\n5. `web-src/src/types/domain.ts::Session::updatedAt`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-partner-put-sponsor-id-payload\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 partner PUT sponsor id payload\n```\n1. web-src/src/pages/EventForm/PartnerPickerDialog.tsx (lines 147-217, 0.25)\n   arrow_function PartnerPickerDialog\n\n   *(also at lines 99-151)*\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 634-688, 0.23)\n   arrow_function SponsorsComponent\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r updatePartner\n```\nNo definition found for \"updatePartner\". Did you mean:\n\n1. `web-src/src/services/api.ts::ApiService::updateRole`\n2. `web-src/src/services/api.ts::updateSpeaker`\n3. `web-src/src/services/api.ts::updateEvent`\n4. `web-src/src/services/api.ts::ApiService::updateScope`\n5. `web-src/src/types/domain.ts::Session::updatedAt`\n```\n",
+  "renderedBlockHash": "7d133e3812a5f59d",
+  "quality": {
+    "signal": "none",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

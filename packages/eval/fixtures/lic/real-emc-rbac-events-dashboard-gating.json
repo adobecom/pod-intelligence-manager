@@ -1,0 +1,60 @@
+{
+  "taskId": "real-emc-rbac-events-dashboard-gating",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "c44fe3dc7eaa32eb1c7e0bdb87aee5208e7a328c",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-c44fe3dc7eaa"
+  },
+  "generatedAt": "2026-06-04T23:51:41.173Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-c44fe3dc7eaa",
+        "-l",
+        "5",
+        "RBAC events dashboard permission gating"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-c44fe3dc7eaa",
+      "exitCode": 0,
+      "durationMs": 85,
+      "output": "1. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 5-70, 0.36)\n\n2. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 926-960, 0.25)\n   arrow_function EventsDashboard\n\n3. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md (lines 53-108, 0.25)\n   section RBAC Permission Gating — Implementation Plan > 3. Components Changed\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2-lic-worktrees/emc-c44fe3dc7eaa",
+        "useHasPermission"
+      ],
+      "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-c44fe3dc7eaa",
+      "exitCode": 0,
+      "durationMs": 28,
+      "output": "## function `useHasPermission` ★\n\n**Kind:** function | **File:** `web-src/src/hooks/useHasPermission.ts` | **Line:** 51\n\n**Doc:** Hook: returns true if the active role has the specified permission.\n\n```\nexport function useHasPermission(resource: string, access: string): boolean {\n  const { permissions } = useGroup()\n  return checkPermission(permissions, resource, access)\n}\n```\n\n**Symbol popularity:** 0.98 (top 1%) ★ | **File CodeRank:** 0.11\n**References:** 1 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `SpeakerDashboardItem` (interface) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:64` (score 0.63)\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55` (score 0.20)\n- `RegistrationsTab` (const) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:42` (score 0.20)\n- `TopNav` (const) — `web-src/src/components/layout/TopNav.tsx:21` (score 0.20)\n- `SeriesDashboard` (const) — `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:47` (score 0.20)\n\n### Top Callees (2 total)\n\n- `useGroup` ★ (const) — `web-src/src/contexts/GroupContext.tsx:277` (score 0.79)\n- `checkPermission` (function) — `web-src/src/hooks/useHasPermission.ts:21` (score 0.49)\n\n**Domain**: hooks-components > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/hooks/<NAME>.ts` — 16 siblings (conf 1.00)\n  siblings: useHasPermission (this), index, useCustomDetailPagePath.test, useCustomDetailPagePath, useDevToken, useEventFormComponent, useEventFormSave.test, useEventFormSave, useEventTypeFeatures, …+7 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:7abd3c18f46eea3e\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: real-emc-rbac-events-dashboard-gating\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 RBAC events dashboard permission gating\n```\n1. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 5-70, 0.36)\n\n2. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 926-960, 0.25)\n   arrow_function EventsDashboard\n\n3. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md (lines 53-108, 0.25)\n   section RBAC Permission Gating — Implementation Plan > 3. Components Changed\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r useHasPermission\n```\n## function `useHasPermission` ★\n\n**Kind:** function | **File:** `web-src/src/hooks/useHasPermission.ts` | **Line:** 51\n\n**Doc:** Hook: returns true if the active role has the specified permission.\n\n```\nexport function useHasPermission(resource: string, access: string): boolean {\n  const { permissions } = useGroup()\n  return checkPermission(permissions, resource, access)\n}\n```\n\n**Symbol popularity:** 0.98 (top 1%) ★ | **File CodeRank:** 0.11\n**References:** 1 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `SpeakerDashboardItem` (interface) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:64` (score 0.63)\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55` (score 0.20)\n- `RegistrationsTab` (const) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:42` (score 0.20)\n- `TopNav` (const) — `web-src/src/components/layout/TopNav.tsx:21` (score 0.20)\n- `SeriesDashboard` (const) — `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:47` (score 0.20)\n\n### Top Callees (2 total)\n\n- `useGroup` ★ (const) — `web-src/src/contexts/GroupContext.tsx:277` (score 0.79)\n- `checkPermission` (function) — `web-src/src/hooks/useHasPermission.ts:21` (score 0.49)\n\n**Domain**: hooks-components > src\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/hooks/<NAME>.ts` — 16 siblings (conf 1.00)\n  siblings: useHasPermission (this), index, useCustomDetailPagePath.test, useCustomDetailPagePath, useDevToken, useEventFormComponent, useEventFormSave.test, useEventFormSave, useEventTypeFeatures, …+7 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:7abd3c18f46eea3e\"])`\n```\n",
+  "renderedBlockHash": "a00442683ca2f578",
+  "quality": {
+    "signal": "leak",
+    "noDefinitionResult": false,
+    "answerLeak": true,
+    "intentMatch": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
+    "notes": [
+      "primary file retrieved",
+      "ground-truth symbol retrieved: useGroup, contexts, hooks, eventType, Custom",
+      "post-merge answer symbol leak: useGroup, eventType",
+      "task intent matched"
+    ]
+  }
+}

@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { controlArm, pimFullArm } from "../arms/index.js";
+import { controlArm, kgOnlyArm, pimFullArm } from "../arms/index.js";
 import type { SessionContextFixture } from "../arms/types.js";
-import { rbacPermissionResolution } from "../tasks/code-gen/rbac-permission-resolution.js";
-import { rbacDecisionRationale } from "../tasks/content-gen/rbac-decision-rationale.js";
+import { rbacPermissionResolution } from "../tasks/diagnostics/code-gen/rbac-permission-resolution.js";
+import { rbacDecisionRationale } from "../tasks/diagnostics/content-gen/rbac-decision-rationale.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const FIXTURE_PATH = join(dirname(__filename), "..", "..", "fixtures", "session-contexts", "pod-emc-rbac.json");
@@ -48,6 +48,51 @@ describe("arms", () => {
 
   it("pim-full arm throws when called with null fixture", () => {
     expect(() => pimFullArm.build(rbacPermissionResolution, null)).toThrow(/requires a fixture/);
+  });
+
+  it("kg-only prefers task-scoped learnings when the fixture has them", async () => {
+    const fixture = await loadRbac();
+    const taskScopedSummary = "Task-specific KG fact for this exact eval task";
+    const podFallbackSummary = "Pod-level fallback KG fact";
+    const scopedFixture: SessionContextFixture = {
+      ...fixture,
+      payload: {
+        ...fixture.payload,
+        relevantLearnings: {
+          nodes: [
+            {
+              type: "pattern",
+              summary: podFallbackSummary,
+              details: "",
+              domains: ["frontend"],
+              confidence_score: 0.9,
+            },
+          ],
+          total_matching: 1,
+          truncated: false,
+        },
+        taskRelevantLearnings: {
+          [rbacPermissionResolution.id]: {
+            nodes: [
+              {
+                type: "pattern",
+                summary: taskScopedSummary,
+                details: "",
+                domains: ["frontend"],
+                confidence_score: 0.9,
+              },
+            ],
+            total_matching: 1,
+            truncated: false,
+          },
+        },
+      },
+    };
+
+    const segments = kgOnlyArm.build(rbacPermissionResolution, scopedFixture);
+    expect(segments.pimContext).toContain(taskScopedSummary);
+    expect(segments.pimContext).not.toContain(podFallbackSummary);
+    expect(segments.pimContext).toContain("KG retrieval scope: task");
   });
 
   it("control system prompt for code tasks asks for a fenced TS block", () => {

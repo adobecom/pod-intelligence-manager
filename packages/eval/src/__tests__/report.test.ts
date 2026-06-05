@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderMarkdownReport, type EvalRow } from "../report.js";
+import { computeProtocolAnalysis } from "../rigor/protocol-analysis.js";
 
 function row(overrides: Partial<EvalRow>): EvalRow {
   return {
@@ -62,6 +63,57 @@ describe("renderMarkdownReport", () => {
     expect(md).toContain("wrong endpoint");
   });
 
+  it("uses kg-only for comparison diagnostics when pim-full is absent", () => {
+    const rows = [
+      row({
+        taskId: "t1",
+        tags: ["housestyle"],
+        arm: "control",
+        armLabel: "Control (no PIM)",
+        judge: { passed: true, score: 1, detail: "ok" },
+      }),
+      row({
+        taskId: "t1",
+        tags: ["housestyle"],
+        arm: "kg-only",
+        armLabel: "KG-only",
+        judge: { passed: false, score: 0.2, detail: "missed convention" },
+      }),
+    ];
+    const md = renderMarkdownReport(rows, {
+      generatedAt: "2026-05-08T00:00:00Z",
+      runner: "anthropic",
+      model: "claude-sonnet-4-6",
+      judgeModel: "claude-opus-4-7",
+      filter: {},
+    });
+    expect(md).toContain("Pass rate by category (KG-only vs. control)");
+    expect(md).toContain("KG-only pass");
+    expect(md).toContain("(0/1)");
+    expect(md).toContain("KG-only regressions");
+    expect(md).toContain("missed convention");
+    expect(md).not.toContain("PIM pass");
+  });
+
+  it("uses sample totals instead of task count in multi-seed category rows", () => {
+    const rows = [
+      row({ taskId: "t1", tags: ["housestyle"], arm: "control", armLabel: "Control (no PIM)", seed: 0, judge: { passed: true, score: 1, detail: "ok" } }),
+      row({ taskId: "t1", tags: ["housestyle"], arm: "control", armLabel: "Control (no PIM)", seed: 1, judge: { passed: false, score: 0, detail: "miss" } }),
+      row({ taskId: "t1", tags: ["housestyle"], arm: "kg-only", armLabel: "KG-only", seed: 0, judge: { passed: true, score: 1, detail: "ok" } }),
+      row({ taskId: "t1", tags: ["housestyle"], arm: "kg-only", armLabel: "KG-only", seed: 1, judge: { passed: true, score: 1, detail: "ok" } }),
+    ];
+    const md = renderMarkdownReport(rows, {
+      generatedAt: "2026-05-08T00:00:00Z",
+      runner: "anthropic",
+      model: "claude-sonnet-4-6",
+      judgeModel: "claude-opus-4-7",
+      filter: {},
+    });
+    expect(md).toContain("50% (1/2)");
+    expect(md).toContain("100% (2/2)");
+    expect(md).not.toContain("100% (2/1)");
+  });
+
   it("computes a non-zero cache hit rate when cacheReadTokens are present", () => {
     const rows = [
       row({ arm: "pim-full", armLabel: "PIM-full", usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 4000, cacheCreationTokens: 0 } }),
@@ -76,5 +128,25 @@ describe("renderMarkdownReport", () => {
     });
     // Two rows, each 4000 cache reads against 100 input tokens, hit rate 4000/4100 = 97-98%.
     expect(md).toMatch(/97%|98%|95%|96%|99%/);
+  });
+
+  it("uses realistic-ticket headline rows for protocol executive bullets", () => {
+    const rows = [
+      row({ taskId: "realistic", stratum: "S1", promptTier: "realistic-ticket", arm: "control", armLabel: "Control", judge: { passed: false, score: 0, detail: "miss" } }),
+      row({ taskId: "realistic", stratum: "S1", promptTier: "realistic-ticket", arm: "pim-full", armLabel: "PIM-full", judge: { passed: true, score: 1, detail: "ok" } }),
+      row({ taskId: "saturated", stratum: "S1", promptTier: "saturated", arm: "control", armLabel: "Control", judge: { passed: true, score: 1, detail: "ok" } }),
+      row({ taskId: "saturated", stratum: "S1", promptTier: "saturated", arm: "pim-full", armLabel: "PIM-full", judge: { passed: false, score: 0, detail: "miss" } }),
+    ];
+    const md = renderMarkdownReport(rows, {
+      generatedAt: "2026-05-08T00:00:00Z",
+      runner: "anthropic",
+      model: "claude-sonnet-4-6",
+      judgeModel: "claude-opus-4-7",
+      filter: {},
+      protocol: computeProtocolAnalysis(rows, { bootstrapIterations: 100, primaryArms: ["pim-full"] }),
+    });
+    expect(md).toContain("bullets use realistic-ticket S1-S5 tasks only");
+    expect(md).toContain("PIM lifts pass rate by 100pp");
+    expect(md).not.toContain("Pass rate tied at 50%");
   });
 });

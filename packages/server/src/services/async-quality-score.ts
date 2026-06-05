@@ -27,7 +27,7 @@ let _systemPrompt: string | null = null;
 function getSystemPrompt(): string {
   if (!_systemPrompt) {
     _systemPrompt = fs.readFileSync(
-      path.resolve(__dirname, "../../../../prompts/quality-scout-agent.md"),
+      path.resolve(__dirname, "../../../../prompts/quality-lic-agent.md"),
       "utf-8",
     );
   }
