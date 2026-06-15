@@ -1,0 +1,57 @@
+{
+  "taskId": "future-emc-detail-page-path-filter-toggle",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:31.851Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "event PUT detailPagePath dataFilters submittable"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 25,
+      "output": "1. web-src/src/utils/dataFilters.ts (lines 108-158, 1.00)\n 108:able: true },\n 109:  seriesId: { type: 'string', localizable: false, cloneable: true, submittable: true },\n 110:  communityTopicUrl: { type: 'string', localizable: false, cloneable: true, submittable: true },\n 111:  cta: { type: 'array', localizable: true, cloneable: true, submittable: true },\n 112:  title: { type: 'string', localizable: true, cloneable: true, submittable: true },\n   ...\n\n2. web-src/src/hooks/useCustomDetailPagePath.ts (lines 1-52, 0.71)\n   Referenced by 1 files (.ts: 1)\n\n3. web-src/src/hooks/useEventFormSave.ts (lines 420-484, 0.71)\n   function useEventFormSave\n   Referenced by 1 files (.tsx: 1)\n\n4. web-src/src/hooks/useEventFormSave.ts (lines 5-29, 0.46)\n   Referenced by 34 files (.tsx: 25, .ts: 9)\n\n5. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 381-453, 0.69)\n   arrow_function EventsDashboard\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "detailPagePath"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 29,
+      "output": "## const `detailPagePath` (FQN: `web-src/src/types/domain.ts::EventApiResponse::detailPagePath`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 257\n\n```\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `EventsDashboard` (usage) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:399`\n- `(usage)` (usage) — `web-src/src/hooks/useCustomDetailPagePath.test.ts:1`\n- `constructDetailPagePath` (usage) — `web-src/src/utils/urlPatternResolver.ts:92`\n- `useEventFormSave` (usage) — `web-src/src/hooks/useEventFormSave.ts:420`\n- `EventFormInner` (usage) — `web-src/src/pages/EventForm/EventForm.tsx:832`\n- `(usage)` (usage) — `web-src/src/config/detailPageLocalePrefix.ts:1`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:134`\n- `(usage)` (usage) — `web-src/src/hooks/useEventFormSave.test.ts:18`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-detail-page-path-filter-toggle\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 event PUT detailPagePath dataFilters submittable\n```\n1. web-src/src/utils/dataFilters.ts (lines 108-158, 1.00)\n 108:able: true },\n 109:  seriesId: { type: 'string', localizable: false, cloneable: true, submittable: true },\n 110:  communityTopicUrl: { type: 'string', localizable: false, cloneable: true, submittable: true },\n 111:  cta: { type: 'array', localizable: true, cloneable: true, submittable: true },\n 112:  title: { type: 'string', localizable: true, cloneable: true, submittable: true },\n   ...\n\n2. web-src/src/hooks/useCustomDetailPagePath.ts (lines 1-52, 0.71)\n   Referenced by 1 files (.ts: 1)\n\n3. web-src/src/hooks/useEventFormSave.ts (lines 420-484, 0.71)\n   function useEventFormSave\n   Referenced by 1 files (.tsx: 1)\n\n4. web-src/src/hooks/useEventFormSave.ts (lines 5-29, 0.46)\n   Referenced by 34 files (.tsx: 25, .ts: 9)\n\n5. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 381-453, 0.69)\n   arrow_function EventsDashboard\n```\n\n## lic explain-symbol -r detailPagePath\n```\n## const `detailPagePath` (FQN: `web-src/src/types/domain.ts::EventApiResponse::detailPagePath`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 257\n\n```\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `EventsDashboard` (usage) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:399`\n- `(usage)` (usage) — `web-src/src/hooks/useCustomDetailPagePath.test.ts:1`\n- `constructDetailPagePath` (usage) — `web-src/src/utils/urlPatternResolver.ts:92`\n- `useEventFormSave` (usage) — `web-src/src/hooks/useEventFormSave.ts:420`\n- `EventFormInner` (usage) — `web-src/src/pages/EventForm/EventForm.tsx:832`\n- `(usage)` (usage) — `web-src/src/config/detailPageLocalePrefix.ts:1`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:134`\n- `(usage)` (usage) — `web-src/src/hooks/useEventFormSave.test.ts:18`\n\n### Pa\n```\n",
+  "renderedBlockHash": "c0940d7a0b51c8cb",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

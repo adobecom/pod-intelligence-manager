@@ -1,0 +1,69 @@
+{
+  "taskId": "future-emc-agenda-switcher-segmented-control",
+  "stratum": "S5",
+  "recipe": [
+    "keyword-search",
+    "find-references",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:19:45.354Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "Spectrum 2 Tabs crash SegmentedControl conditional rendering"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 14,
+      "output": "1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 748-812, 1.00)\n   arrow_function SessionForm\n   ...\n 748:       UNSAFE_style={{ width: \"100%\" }}\n 749:              value={endTime ?? undefined}\n 750:              onChange={(v) => setEndTime(v ?? null)}\n 751:              isInvalid={isEndTimeInvalid || isEndTimeAfterEventEnd}\n 752:            />\n   ...\n\n2. web-src/src/pages/Registrations/Registrations.tsx (lines 298-347, 0.87)\n   arrow_function Registrations\n   ...\n 298:         events={events}\n 299:            selectedEventId={selectedEventId}\n 300:            onChange={handleEventChange}\n 301:            isLoading={isLoadingEvents}\n 302:            label=\"Search other events\"\n   ...\n\n3. web-src/src/pages/EventForm/LocationDialog.tsx (lines 5-24, 0.81)\n   5:import React, { useState, useCallback } from 'react'\n   6:import {\n   ...\n\n4. docs/FRONTEND.md (lines 743-759, 0.33)\n   section Frontend Development Guide > Common Patterns > Conditional Rendering\n\n5. docs/AUTOMATION_MIGRATION_SPEC.md (lines 40-62, 0.20)\n   section EMC V2 Automation Migration Specification > 2. S2 Component → DOM Rendering Reference\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "LocationDialog"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 47,
+      "output": "Definition: web-src/src/pages/EventForm/LocationDialog.tsx (lines 62-93)\n  Name: LocationDialog (const)\n    62: ({\n    63:   isOpen,\n    64:   onClose,\n    65:   onSelect,\n    66:   venueId,\n    67: }) => {\n    68:   const [createForm, setCreateForm] = useState<CreateFormState>(initialFormState)\n    69:   const [isCreating, setIsCreating] = useState(false)\n    70:   const [createError, setCreateError] = useState<string | null>(null)\n    71: \n    72:   const resetForm = useCallback(() => {\n    73:     setCreateForm(initialFormState)\n    74:     setIsCreating(false)\n    75:     setCreateError(null)\n    76:   }, [])\n    77: \n    78:   const updateField = useCallback(<K extends keyof CreateFormState>(field: K, value: CreateFormState[K]) => {\n    79:     setCreateForm(prev => ({ ...prev, [field]: value }))\n    80:   }, [])\n    81: \n  | ... (12 more lines)\n\nReferences (4 shown, 0 total):\n\n  1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:36-40 []\n  2. web-src/src/pages/EventForm/SessionManagement/SessionList.tsx:14-18 []\n  3. web-src/src/pages/EventForm/VenueComponent.tsx:19-23 []\n  4. web-src/src/pages/EventForm/VenueComponent.tsx:878-882 []\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "LocationDialog"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 18,
+      "output": "## const `LocationDialog`\n\n**Kind:** const | **File:** `web-src/src/pages/EventForm/LocationDialog.tsx` | **Line:** 62\n\n```\nexport const LocationDialog: React.FC<LocationDialogProps> = ({\n  isOpen,\n  onClose,\n  onSelect,\n  venueId,\n}) => {\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (3 total)\n\n- `VenueComponent` (usage) — `web-src/src/pages/EventForm/VenueComponent.tsx:867`\n- `(usage)` (usage) — `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx:1`\n- `(usage)` (usage) — `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:5`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-agenda-switcher-segmented-control\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 Spectrum 2 Tabs crash SegmentedControl conditional rendering\n```\n1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 748-812, 1.00)\n   arrow_function SessionForm\n   ...\n 748:       UNSAFE_style={{ width: \"100%\" }}\n 749:              value={endTime ?? undefined}\n 750:              onChange={(v) => setEndTime(v ?? null)}\n 751:              isInvalid={isEndTimeInvalid || isEndTimeAfterEventEnd}\n 752:            />\n   ...\n\n2. web-src/src/pages/Registrations/Registrations.tsx (lines 298-347, 0.87)\n   arrow_function Registrations\n   ...\n 298:         events={events}\n 299:            selectedEventId={selectedEventId}\n 300:            onChange={handleEventChange}\n 301:            isLoading={isLoadingEvents}\n 302:            label=\"Search other events\"\n   ...\n\n3. web-src/src/pages/EventForm/LocationDialog.tsx (lines 5-24, 0.81)\n   5:import React, { useState, useCallback } from 'react'\n   6:import {\n   ...\n\n4. docs/FRONTEND.md (lines 743-759, 0.33)\n   section Frontend Development Guide > Common Patterns > Conditional Rendering\n\n5. docs/AUTOMATION_MIGRATION_SPEC.md (lines 40-62, 0.20)\n   section EMC V2 Automation Migration Specification > 2. S2 Component → DOM Rendering Reference\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic find-references -r LocationDialog\n```\nDefinition: web-src/src/pages/EventForm/LocationDialog.tsx (lines 62-93)\n  Name: LocationDialog (const)\n    62: ({\n    63:   isOpen,\n    64:   onClose,\n    65:   onSelect,\n    66:   venueId,\n    67: }) => {\n    68:   const [createForm, setCreateForm] = useState<CreateFormState>(initialFormState)\n    69:   const [isCreating, setIsCreating] = useState(false)\n    70:   const [createError, setCreateError] = useState<string | null>(null)\n    71: \n    72:   const resetForm = useCallback(() => {\n    73:     setCreateForm(initialFormState)\n    74:     setIsCreating(false)\n    75:     setCreateError(null)\n    76:   }, [])\n    77: \n    78:   const updateField = useCallback(<K extends keyof CreateFormState>(field: K, value: CreateFormState[K]) => {\n    79:     setCreateForm(prev => ({ ...prev, [field]: value }))\n    80:   }, [])\n    81: \n  | ... (12 more lines)\n\nReferences (4 shown, 0 total):\n\n  1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:36-40 []\n  2. web-src/src/pages/EventForm/SessionManagement/SessionList.tsx:14-18 []\n  3. web-src/src/pages/EventForm/VenueComponent.tsx:19-23 []\n  4. web-src/src/pages/EventForm/VenueComponent.tsx:878-882 []\n```\n\n## lic explain-symbol -r LocationDialog\n```\n## const `LocationDialog`\n\n**Kind:** const | **File:** `web-src/src/pages/EventForm/LocationDialog.tsx` | **Line:** 62\n\n```\nexport const LocationDialog: React.FC<LocationDialogProps> = ({\n  isOpen,\n  onClose,\n  onSelect,\n  venueId,\n}) => {\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (3 total)\n\n- `VenueComponent` (usage) — `web-src/src/pages/EventForm/VenueComponent.tsx:867`\n- `(usage)` (usage) — `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx:1`\n- `(usage)` (usage) — `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:5`\n```\n",
+  "renderedBlockHash": "f91d85b8b835529a",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

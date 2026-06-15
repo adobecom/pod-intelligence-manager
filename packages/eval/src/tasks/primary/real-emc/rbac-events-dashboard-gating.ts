@@ -249,6 +249,14 @@ export const rbacEventsDashboardGating: Task = {
     "event:write",
     "event:delete",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "gates UI elements via useHasPermission hooks",
+      "resource:access format",
+    ],
+    requiredSymbols: ["useHasPermission", "event", "write", "delete"],
+    forbiddenFacts: ["single combined check"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #79, merge SHA b25effb. Parent file at c44fe3d. (Other files in this PR (SeriesDashboard, SpeakersDashboard, CampaignsTab, App.tsx) are intentionally out of scope here.)",

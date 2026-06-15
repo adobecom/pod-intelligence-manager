@@ -18,6 +18,9 @@ interface Assignment {
   stratum?: Stratum;
   excluded?: boolean;
   licSeed?: Task["licSeed"];
+  /** Reviewed symbol-first seed for `serena-freeze` (see SerenaSeedSpec). Used when
+   * the licSeed symbol is not a resolvable Serena symbol name (e.g. a method call). */
+  serenaSeed?: Task["serenaSeed"];
   /** S2 worktree-per-asOf needs parentSha. Most existing tasks have it only in
    * a JSDoc comment; this field lifts it onto structured data for the freezer. */
   parentSha?: string;
@@ -59,14 +62,14 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "d262850fb9ef0bf6503fe0a1c5c24c667803a65e",
     mergeSha: "ccc9e49b399c7592cdf5ec78125ccfcf3397e974",
     sourceUrl: prUrl(152),
-    licSeed: { symbol: "eventFormRoute" },
+    licSeed: { symbol: "EventFormInner", investigateQuery: "EventFormInner checkUrlPatternBeforeSave publishEvent saveDraft" },
   },
   "real-emc-series-form-footer-alignment": {
     stratum: "S1",
     parentSha: "58f01640e65b4f88bd1ddc9add862c59e7285a75",
     mergeSha: "c7ee5152a87723da289b82c66ef1222d59090d81",
     sourceUrl: prUrl(94),
-    licSeed: { symbol: "SeriesFormFooter" },
+    licSeed: { symbol: "SingleStepFormLayout", investigateQuery: "SingleStepFormLayout actionBarRowStyle CSSProperties minWidth boxSizing footer alignment" },
   },
   "real-emc-datatable-horizontal-edge-scroll": {
     stratum: "S1",
@@ -119,7 +122,7 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "bba1f6a56f4c35725870afa93dd686a732fcfb9b",
     mergeSha: "58f01640e65b4f88bd1ddc9add862c59e7285a75",
     sourceUrl: prUrl(93),
-    licSeed: { symbol: "modificationTime", investigateQuery: "event modification time sync after session" },
+    licSeed: { symbol: "createSession", investigateQuery: "createSession updateSession tags data.tags session body" },
   },
   "real-emc-series-mod-time-resilience": {
     stratum: "S2",
@@ -135,28 +138,28 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "ccc9e49b399c7592cdf5ec78125ccfcf3397e974",
     mergeSha: "84f21c9d968beaaac01eebca2dc1b2cb853a1b68",
     sourceUrl: prUrl(156),
-    licSeed: { symbol: "ppnAck", investigateQuery: "PPN acknowledgement hydration" },
+    licSeed: { symbol: "PageMetadataComponent", investigateQuery: "PageMetadataComponent EventFormContext profileHydrationTick metadataFieldAcknowledged publishingProfile" },
   },
   "real-emc-speaker-image-cache-invalidate": {
     stratum: "S2",
     parentSha: "84f21c9d968beaaac01eebca2dc1b2cb853a1b68",
     mergeSha: "0d38019eddcb4e0f63af0a1af69c3891f8460d99",
     sourceUrl: prUrl(158),
-    licSeed: { symbol: "speakerImageCache", investigateQuery: "speaker image cache invalidation" },
+    licSeed: { symbol: "SpeakerFormDialog", investigateQuery: "SpeakerFormDialog handleFileRemove imageId pendingFile SpeakerFormSubmitData" },
   },
   "real-emc-session-api-batch-optimisation": {
     stratum: "S2",
     parentSha: "d6078f228013c6cb05cf288356c8a155229d8f72",
     mergeSha: "925a96cc360d8228917ec85b0ec068c2200c338b",
     sourceUrl: prUrl(101),
-    licSeed: { symbol: "sessionBatch", investigateQuery: "session API batch optimisation" },
+    licSeed: { symbol: "syncSessionSpeakers", investigateQuery: "Sessions selectedSpeakers addSessionSpeaker deleteSessionSpeaker speakerIds" },
   },
   "real-emc-scope-group-my-filter": {
     stratum: "S2",
     parentSha: "c4c8d9bfc2916fa70d9d39ef56dd44b198c2a2bf",
     mergeSha: "985daa838839219e2b5a94ec839ac5e0ac4edfb8",
     sourceUrl: prUrl(80),
-    licSeed: { symbol: "useGroup", investigateQuery: "scope group My filter and refreshGroups" },
+    licSeed: { symbol: "ScopeGroupManagement", investigateQuery: "ScopeGroupManagement useGroup groups refreshGroups selectedScopeId groups table" },
   },
 
   // ─── real-emc S3 (housestyle / convention, PIM-favorable) ─────────────────
@@ -172,7 +175,7 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "fa650788f2e6dc01794fe98157dec3f98aa30563",
     mergeSha: "367aef166ae0ca97eb8f051632d799565d9598b9",
     sourceUrl: prUrl(107),
-    licSeed: { symbol: "updateEvent", investigateQuery: "event PUT omit read-only fields" },
+    licSeed: { symbol: "prepareEslEventPutPayload", investigateQuery: "EVENT_DATA_ESL_EVENT_PUT_EXCLUDE_KEYS detailPagePath dataFilters submittable" },
   },
   "real-emc-declined-rsvp-status": {
     stratum: "S3",
@@ -186,7 +189,7 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "f5db523f36ba8c1bf9807b7bc8dce132073a9e6a",
     mergeSha: "bba1f6a56f4c35725870afa93dd686a732fcfb9b",
     sourceUrl: prUrl(92),
-    licSeed: { symbol: "updatePartner", investigateQuery: "partner PUT sponsor id payload" },
+    licSeed: { symbol: "getSponsorPayload", investigateQuery: "getSponsorPayload sponsorData modificationTime localizations" },
   },
   "real-emc-event-speaker-put-contract-vague": {
     stratum: "S3",
@@ -234,6 +237,11 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     mergeSha: "82f6dacb717f8612a499c412eac0d10e108d7f2c",
     sourceUrl: prUrl(138),
     licSeed: { investigateQuery: "PPN explicit select dropdown user confusion" },
+    serenaSeed: {
+      symbols: ["PageMetadataComponent"],
+      files: ["web-src/src/pages/EventForm/PageMetadataComponent.tsx"],
+      note: "Ticket names the page-metadata (PPN) Pickers; PageMetadataComponent is the pre-merge component that renders them.",
+    },
   },
   "real-emc-event-type-config-hide-marketo-webinar": {
     stratum: "S4",
@@ -247,7 +255,12 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     parentSha: "e477b7473075e74b40ce13e1bb573843b39b73f9",
     mergeSha: "7c86403cefd0261010f631c2dd4096efc99b9d2a",
     sourceUrl: prUrl(135),
-    licSeed: { investigateQuery: "session API error toast user-facing message" },
+    licSeed: { investigateQuery: "SessionForm handleSave setSaveError onCancel useEventFormContext" },
+    serenaSeed: {
+      symbols: ["SessionForm"],
+      files: ["web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx"],
+      note: "Ticket is 'toast for session API errors'; SessionForm.handleSave is the pre-merge save path where errors surface.",
+    },
   },
   "real-emc-include-partners-toggle": {
     stratum: "S4",
@@ -264,13 +277,18 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     mergeSha: "704fb110ac867350e26a3207148b590ad5c6b2a7",
     sourceUrl: prUrl(122),
     licSeed: { symbol: "QuillEditor", investigateQuery: "Quill rich-text editor semantic HTML" },
+    serenaSeed: {
+      symbols: ["RichTextEditor"],
+      files: ["web-src/src/components/shared/RichTextEditor.tsx"],
+      note: "Real pre-merge symbol is RichTextEditor (the Quill wrapper); licSeed 'QuillEditor' is not an actual symbol name.",
+    },
   },
   "real-emc-s2-tabs-crash-segmented-control": {
     stratum: "S5",
     parentSha: "04eccca90b7f18df03afe27c17a6d94c5fc7d8b7",
     mergeSha: "eff22c27e0d3b3389d5f1b2de56edee2c0a26bb2",
     sourceUrl: prUrl(146),
-    licSeed: { symbol: "SegmentedControl", investigateQuery: "Spectrum 2 Tabs SegmentedControl crash" },
+    licSeed: { symbol: "Registrations", investigateQuery: "Registrations Tabs TabPanel selectedTab CampaignsTab SessionsTab" },
   },
   "real-emc-sxsw-ticket-field-config-service": {
     stratum: "S5",
@@ -278,6 +296,11 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     mergeSha: "dd81c423ce1e4d2326d36bdc4900f57613f3a8e2",
     sourceUrl: prUrl(150),
     licSeed: { symbol: "TicketFieldConfigService", investigateQuery: "SXSW ticket field configuration service" },
+    serenaSeed: {
+      symbols: ["configService", "RegistrationFieldsComponent"],
+      files: ["web-src/src/services/configService.ts", "web-src/src/pages/EventForm/RegistrationFieldsComponent.tsx"],
+      note: "Real pre-merge sites are configService (config source) + RegistrationFieldsComponent (renders ticket fields); licSeed 'TicketFieldConfigService' is not an actual symbol.",
+    },
   },
 
   // ─── real-emc remaining (rbac / utility tasks) ────────────────────────────
@@ -294,6 +317,11 @@ const ASSIGNMENTS: Record<string, Assignment> = {
     mergeSha: "b25effb1a4a0b28f3be13789cf03506884dea513",
     sourceUrl: prUrl(79),
     licSeed: { symbol: "useHasPermission", investigateQuery: "RBAC events dashboard permission gating" },
+    serenaSeed: {
+      symbols: ["EventsDashboard", "useHasPermission"],
+      files: ["web-src/src/pages/EventsDashboard/EventsDashboard.tsx"],
+      note: "EventsDashboard is the page being permission-gated; useHasPermission is the gate hook. Both pre-merge.",
+    },
   },
   "real-emc-dashboard-publish-omit-invite-only": {
     excluded: true,
@@ -322,6 +350,7 @@ export function applyAssignment(task: Task): Task {
     ...task,
     stratum: task.stratum ?? assignment.stratum,
     licSeed: task.licSeed ?? assignment.licSeed,
+    serenaSeed: task.serenaSeed ?? assignment.serenaSeed,
     excluded: task.excluded ?? assignment.excluded,
     provenance: mergedProvenance,
   };

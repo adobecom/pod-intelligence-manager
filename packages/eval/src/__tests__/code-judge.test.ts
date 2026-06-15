@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { judgeCode } from "../judges/code.js";
 import { configDeepMerge } from "../tasks/diagnostics/code-gen/config-deep-merge.js";
 import { sessionCreateTimezone } from "../tasks/diagnostics/code-gen/session-create-timezone.js";
+import type { Task } from "../tasks/types.js";
 
 const goodConfigDeepMerge = `
 \`\`\`typescript
@@ -95,6 +96,37 @@ function offsetMs(utcMillis: number, tz: string): number {
 \`\`\`
 `;
     const result = await judgeCode(sessionCreateTimezone, correctTimezone);
+    expect(result.passed, `detail=${result.detail}, failures=${JSON.stringify(result.failures)}`).toBe(true);
+  }, 60_000);
+
+  it("stubs relative repo imports instead of crashing the pure-module harness", async () => {
+    const task: Task = {
+      id: "import-stub",
+      type: "code",
+      podId: "pod-x",
+      prompt: "return a plan",
+      tests: [{
+        name: "runs candidate despite relative import",
+        body: [
+          "const out = mod.buildPlan({ title: 'New' }, { id: 'track-1', modificationTime: 3 });",
+          "assert.deepEqual(out, { helper: 'prepareEspSessionTrackPutPayload', payload: { id: 'track-1', modificationTime: 3, title: 'New' } });",
+        ].join("\n"),
+      }],
+    };
+    const output = `
+\`\`\`typescript
+import { prepareEspSessionTrackPutPayload } from "./utils/dataFilters";
+
+export function buildPlan(draft: Record<string, any>, current: Record<string, any>) {
+  return {
+    helper: prepareEspSessionTrackPutPayload.name,
+    payload: { id: current.id, modificationTime: current.modificationTime, title: draft.title },
+  };
+}
+\`\`\`
+`;
+
+    const result = await judgeCode(task, output);
     expect(result.passed, `detail=${result.detail}, failures=${JSON.stringify(result.failures)}`).toBe(true);
   }, 60_000);
 });

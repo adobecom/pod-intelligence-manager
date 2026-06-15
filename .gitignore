@@ -25,5 +25,9 @@ packages/eval/reports/
 fiestaHarness.md
 fiestaHarness-review.md
 
+# Local scratch + analysis docs (kept on disk for review, not part of the PR)
+docs/PIM_ON_SCOUT_STYLE_BENCHMARK_PLAN.md
+docs/SCOUT_BENCHMARKING_REPORT.md
+
 # Scout local index (ML models + embeddings — generated, not source)
 .scout/

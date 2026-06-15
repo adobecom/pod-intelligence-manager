@@ -147,6 +147,14 @@ export const sessionApiBatchOptimisation: Task = {
     "originalSpeakerIds",
     "getSessionSpeakers",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "redundant",
+      "already-known speaker IDs",
+      "save path",
+    ],
+    requiredSymbols: ["syncSessionSpeakers", "originalSpeakerIds"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #101, merge SHA 925a96c. Parent file at d6078f2. (Other files in this PR (utils/dateTime, SessionForm.tsx, LocationDialog.tsx, VenueComponent.tsx) are intentionally out of scope here. The original spec pointed at services/api.ts, but PR #101 does not touch that file; the redundant-API-call fix lives in Sessions.tsx.)",

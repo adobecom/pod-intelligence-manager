@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { pickTasks } from "../tasks/index.js";
+import { parseTaskSetName, pickTasks, taskSetTasks } from "../tasks/index.js";
 import { makeHoldoutEntry, type HoldoutManifest } from "../rigor/holdout.js";
 
 function argValue(name: string): string | undefined {
@@ -13,7 +13,11 @@ async function main(): Promise<void> {
   const out = argValue("out") ?? "holdouts/holdout-haiku-v2.json";
   const tags = argValue("tags")?.split(",").filter(Boolean);
   const ids = argValue("tasks")?.split(",").filter(Boolean);
-  const tasks = pickTasks({ ids, tags });
+  const taskSet = argValue("task-set");
+  if (taskSet && (ids?.length || tags?.length)) {
+    throw new Error("--task-set cannot be combined with --tasks or --tags");
+  }
+  const tasks = taskSet ? taskSetTasks(parseTaskSetName(taskSet)) : pickTasks({ ids, tags });
   const manifest: HoldoutManifest = {
     id: argValue("id") ?? `pim-vs-lic-haiku-v2-${new Date().toISOString().slice(0, 10)}`,
     protocol: argValue("protocol") ?? "protocols/pim-vs-lic-haiku-v2.md",

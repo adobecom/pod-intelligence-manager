@@ -3,9 +3,9 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
-import { ALL_TASKS, pickTasks } from "../tasks/index.js";
+import { ALL_TASKS, parseTaskSetName, pickTasks, taskSetTasks, type NamedTaskSet } from "../tasks/index.js";
 import type { Task } from "../tasks/types.js";
-import { applyAssignment } from "../tasks/stratification.js";
+import { applyAssignment, applyAssignmentsToAll } from "../tasks/stratification.js";
 import { classifyPromptTier } from "../tasks/prompt-tiers.js";
 import { ARMS, getArm } from "../arms/index.js";
 import { filterFixtureByAsOf } from "../arms/pim-full.js";
@@ -26,7 +26,19 @@ import {
   type HoldoutTaskEntry,
 } from "../rigor/holdout.js";
 import { sha256File, sha256Text, stableJson } from "../rigor/hash.js";
-import { deriveLicFixtureQuality, type LicFixtureQuality } from "../rigor/lic-quality.js";
+import {
+  deriveLicFixtureQuality,
+  describeLicFixtureQualityGate,
+  isLicFixtureQualityReady,
+  type LicFixtureQuality,
+} from "../rigor/lic-quality.js";
+import {
+  deriveSerenaFixtureQuality,
+  describeSerenaFixtureQualityGate,
+  isSerenaFixtureQualityReady,
+} from "../rigor/serena-quality.js";
+import type { SerenaContextFixture, SerenaFixtureQuality } from "../serena/types.js";
+import { evaluateKgMateriality, type KgMaterialityRow } from "../rigor/kg-materiality.js";
 import { computeProtocolAnalysis, DEFAULT_PROTOCOL_ARMS } from "../rigor/protocol-analysis.js";
 import {
   writeJson,
@@ -41,6 +53,7 @@ const __filename = fileURLToPath(import.meta.url);
 const PKG_ROOT = join(dirname(__filename), "..", "..");
 const FIXTURES_DIR = join(PKG_ROOT, "fixtures", "session-contexts");
 const LIC_FIXTURES_DIR = join(PKG_ROOT, "fixtures", "lic");
+const SERENA_FIXTURES_DIR = join(PKG_ROOT, "fixtures", "serena");
 const REPORTS_DIR = join(PKG_ROOT, "reports");
 const LLAMA_JUDGE_MODEL = "us.meta.llama3-3-70b-instruct-v1:0";
 const PROTOCOL_CANDIDATE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
@@ -48,6 +61,7 @@ const PROTOCOL_CANDIDATE_MODEL = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
 interface CliArgs {
   taskIds?: string[];
   tags?: string[];
+  taskSet?: string;
   armIds?: string[];
   runnerName?: "bedrock" | "anthropic";
   model?: string;
@@ -65,6 +79,10 @@ interface CliArgs {
   holdoutPath?: string;
   protocolPath?: string;
   runDir?: string;
+  /** Diagnostics-only override. Protocol mode still rejects weak/none/leaky LIC fixtures. */
+  allowWeakLic?: boolean;
+  /** Diagnostics-only override for Serena fixtures (ad-hoc only). */
+  allowWeakSerena?: boolean;
   unknownFlags: string[];
 }
 
@@ -78,6 +96,11 @@ interface LoadedLicFixture {
   hash: string;
 }
 
+interface LoadedSerenaFixture {
+  fixture: SerenaContextFixture;
+  hash: string;
+}
+
 interface RunOneResult {
   row: EvalRow;
   prompt: PromptArtifact;
@@ -88,10 +111,12 @@ interface RunOneResult {
 function parseArgs(argv: string[]): CliArgs {
   const out: CliArgs = { unknownFlags: [] };
   for (const arg of argv) {
+    if (arg === "--") continue;
     const [key, val = "true"] = arg.replace(/^-+/, "").split("=");
     switch (key) {
       case "tasks": out.taskIds = val.split(",").filter(Boolean); break;
       case "tags": out.tags = val.split(",").filter(Boolean); break;
+      case "task-set": out.taskSet = val; break;
       case "arms": out.armIds = val.split(",").filter(Boolean); break;
       case "runner": out.runnerName = val as "bedrock" | "anthropic"; break;
       case "model": out.model = val; break;
@@ -114,6 +139,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "holdout": out.holdoutPath = val; break;
       case "protocol": out.protocolPath = val; break;
       case "run-dir": out.runDir = val; break;
+      case "allow-weak-lic": out.allowWeakLic = true; break;
+      case "allow-weak-serena": out.allowWeakSerena = true; break;
+      case "allow-weak": out.allowWeakLic = true; out.allowWeakSerena = true; break;
       default:
         out.unknownFlags.push(arg);
         break;
@@ -139,11 +167,41 @@ async function loadLicFixture(task: Task): Promise<LoadedLicFixture | null> {
   try {
     const raw = await readFile(path, "utf8");
     const fixture = JSON.parse(raw) as LicContextFixture;
-    if (!fixture.quality) fixture.quality = deriveLicFixtureQuality(task, fixture);
+    fixture.quality = deriveLicFixtureQuality(task, fixture);
     return { fixture, hash: sha256Text(raw) };
   } catch {
     return null;
   }
+}
+
+async function loadSerenaFixture(task: Task): Promise<LoadedSerenaFixture | null> {
+  const path = join(SERENA_FIXTURES_DIR, `${task.id}.json`);
+  try {
+    const raw = await readFile(path, "utf8");
+    const fixture = JSON.parse(raw) as SerenaContextFixture;
+    fixture.quality = deriveSerenaFixtureQuality(task, fixture);
+    return { fixture, hash: sha256Text(raw) };
+  } catch {
+    return null;
+  }
+}
+
+function buildSerenaManifest(serenaFixtures: Map<string, SerenaContextFixture>): RunManifest["serena"] {
+  const first = serenaFixtures.values().next().value as SerenaContextFixture | undefined;
+  if (!first) return undefined;
+  const indexSources: Record<string, SerenaContextFixture["indexSource"]> = {};
+  for (const [id, fx] of serenaFixtures) indexSources[id] = fx.indexSource;
+  return {
+    enabled: true,
+    version: first.serenaVersion,
+    backend: first.backend,
+    command: first.mcpCommand,
+    configHash: first.configHash,
+    toolAllowlist: first.toolAllowlist,
+    toolDenylist: first.toolDenylist,
+    toolInventory: first.toolInventory,
+    indexSources,
+  };
 }
 
 function gitSha(): string | undefined {
@@ -171,7 +229,7 @@ function manifestPath(path: string): string {
 }
 
 function protocolMode(args: CliArgs): boolean {
-  return Boolean(args.holdoutPath || args.protocolPath || args.runDir);
+  return Boolean(args.holdoutPath || args.protocolPath);
 }
 
 function requireProtocolArgs(args: CliArgs): asserts args is CliArgs & { holdoutPath: string; protocolPath: string; runDir: string } {
@@ -189,6 +247,23 @@ function taskMap(): Map<string, Task> {
   return new Map(ALL_TASKS.map((task) => [task.id, applyAssignment(task)]));
 }
 
+function isKgMaterialityTaskSet(name: NamedTaskSet | undefined): boolean {
+  return (
+    name === "kg-decisive" ||
+    name === "kg-decisive-eligible" ||
+    name === "kg-future-20" ||
+    name === "kg-future-20-eligible"
+  );
+}
+
+function isStrictKgMaterialityTaskSet(name: NamedTaskSet | undefined): boolean {
+  return name === "kg-decisive" || name === "kg-future-20";
+}
+
+function isEligibleKgMaterialityTaskSet(name: NamedTaskSet | undefined): boolean {
+  return name === "kg-decisive-eligible" || name === "kg-future-20-eligible";
+}
+
 async function loadProtocolTasks(args: CliArgs & { holdoutPath: string; protocolPath: string; runDir: string }): Promise<{
   holdout: HoldoutManifest;
   holdoutPath: string;
@@ -202,8 +277,14 @@ async function loadProtocolTasks(args: CliArgs & { holdoutPath: string; protocol
   if (args.taskIds?.length || args.tags?.length) {
     throw new Error("protocol mode loads tasks only from the holdout manifest; omit --tasks and --tags");
   }
+  if (args.taskSet) {
+    throw new Error("protocol mode loads tasks only from the holdout manifest; omit --task-set");
+  }
   if (args.armModels) {
     throw new Error("protocol mode requires one fixed candidate model across arms; omit --arm-models");
+  }
+  if (args.allowWeakLic) {
+    throw new Error("protocol mode does not allow --allow-weak-lic; re-freeze LIC fixtures until they are medium/strong");
   }
 
   const holdoutPath = resolvePkgPath(args.holdoutPath);
@@ -259,9 +340,15 @@ function validateTaskDrift(tasks: Task[], entries: Map<string, HoldoutTaskEntry>
   if (errors.length > 0) throw new Error(`holdout task drift:\n${errors.join("\n")}`);
 }
 
-function buildPrompt(arm: Arm, task: Task, fixture: SessionContextFixture | null, lic: LicContextFixture | null): PromptSegments {
+function buildPrompt(
+  arm: Arm,
+  task: Task,
+  fixture: SessionContextFixture | null,
+  lic: LicContextFixture | null,
+  serena: SerenaContextFixture | null,
+): PromptSegments {
   return arm.buildWithInputs
-    ? arm.buildWithInputs(task, { pim: fixture, lic })
+    ? arm.buildWithInputs(task, { pim: fixture, lic, serena })
     : arm.build(task, fixture);
 }
 
@@ -271,8 +358,11 @@ async function runOne(params: {
   arm: Arm;
   fixture: SessionContextFixture | null;
   lic: LicContextFixture | null;
+  serena: SerenaContextFixture | null;
   licFixtureHash?: string;
   licFixtureQuality?: LicFixtureQuality;
+  serenaFixtureHash?: string;
+  serenaFixtureQuality?: SerenaFixtureQuality;
   runner: LLMRunner;
   model: string;
   judgeRunner: LLMRunner;
@@ -288,8 +378,11 @@ async function runOne(params: {
     arm,
     fixture,
     lic,
+    serena,
     licFixtureHash,
     licFixtureQuality,
+    serenaFixtureHash,
+    serenaFixtureQuality,
     runner,
     model,
     judgeRunner,
@@ -311,12 +404,14 @@ async function runOne(params: {
     promptTier: classifyPromptTier(task),
     licFixtureHash,
     licFixtureQuality,
+    serenaFixtureHash,
+    serenaFixtureQuality,
     seed,
   };
 
   let segments: PromptSegments;
   try {
-    segments = buildPrompt(arm, task, fixture, lic);
+    segments = buildPrompt(arm, task, fixture, lic, serena);
   } catch (err) {
     const message = `prompt: ${(err as Error).message}`;
     const row = failedRow(baseRow, runner.name, model, message);
@@ -330,6 +425,7 @@ async function runOne(params: {
   }
 
   const prompt: PromptArtifact = { runId, taskId: task.id, arm: arm.id, seed, prompt: segments };
+  enforceArmIsolation(arm, prompt);
 
   let runnerResult;
   try {
@@ -392,8 +488,18 @@ async function runOne(params: {
   };
 }
 
+function enforceArmIsolation(arm: Arm, prompt: PromptArtifact): void {
+  const context = prompt.prompt.pimContext ?? "";
+  if (!arm.usesPim && context && /PIM Knowledge-Graph|Relevant Org Learnings|Living Doc|Open Conflicts|Recent Updates/i.test(context)) {
+    throw new Error(`arm isolation failed: ${arm.id} received PIM/KG context for ${prompt.taskId}`);
+  }
+  if (arm.usesPim && !arm.mayOmitContext && !context.trim()) {
+    throw new Error(`arm isolation failed: ${arm.id} did not record an injected context bundle for ${prompt.taskId}`);
+  }
+}
+
 function failedRow(
-  baseRow: Pick<EvalRow, "taskId" | "taskType" | "podId" | "arm" | "armLabel" | "tags" | "stratum" | "promptTier" | "licFixtureHash" | "licFixtureQuality" | "seed">,
+  baseRow: Pick<EvalRow, "taskId" | "taskType" | "podId" | "arm" | "armLabel" | "tags" | "stratum" | "promptTier" | "licFixtureHash" | "licFixtureQuality" | "serenaFixtureHash" | "serenaFixtureQuality" | "seed">,
   runner: "bedrock" | "anthropic",
   model: string,
   error: string,
@@ -451,13 +557,26 @@ async function main(): Promise<void> {
   const isProtocolMode = protocolMode(args);
   let protocol: Awaited<ReturnType<typeof loadProtocolTasks>> | undefined;
   let tasks: Task[];
+  let requestedTaskCount: number;
+  let taskSetName: NamedTaskSet | undefined;
+  let kgMaterialityRows: KgMaterialityRow[] | undefined;
+  let exclusions: unknown[] = [];
 
   if (isProtocolMode) {
     requireProtocolArgs(args);
     protocol = await loadProtocolTasks(args);
     tasks = protocol.tasks;
+    requestedTaskCount = protocol.holdout.tasks.length;
   } else {
-    tasks = pickTasks({ ids: args.taskIds, tags: args.tags });
+    if (args.taskSet && (args.taskIds?.length || args.tags?.length)) {
+      throw new Error("--task-set cannot be combined with --tasks or --tags");
+    }
+    taskSetName = args.taskSet ? parseTaskSetName(args.taskSet) : undefined;
+    tasks = taskSetName
+      ? taskSetTasks(taskSetName)
+      : pickTasks({ ids: args.taskIds, tags: args.tags });
+    tasks = applyAssignmentsToAll(tasks);
+    requestedTaskCount = args.taskIds?.length ?? tasks.length;
   }
 
   if (tasks.length === 0) {
@@ -476,6 +595,34 @@ async function main(): Promise<void> {
   for (const id of podIds) loadedFixtures.set(id, await loadFixture(id));
   const fixtures = new Map(Array.from(loadedFixtures, ([id, loaded]) => [id, loaded.fixture]));
   const fixtureHashes = Object.fromEntries(Array.from(loadedFixtures, ([id, loaded]) => [id, loaded.hash]));
+
+  if (!isProtocolMode && isKgMaterialityTaskSet(taskSetName)) {
+    kgMaterialityRows = tasks.map((task) => evaluateKgMateriality(task, fixtures.get(task.podId) ?? null));
+    const failed = kgMaterialityRows.filter((row) => !row.eligible);
+    if (failed.length > 0 && isStrictKgMaterialityTaskSet(taskSetName)) {
+      const detail = failed.map((row) => `- ${row.taskId}: ${row.reason}`).join("\n");
+      throw new Error(
+        `${taskSetName} task set failed KG materiality gate after point-in-time scoping.\n` +
+        `${detail}\n` +
+        `Use --task-set=${taskSetName}-eligible to run only eligible tasks, or refresh/re-scope KG fixtures.`,
+      );
+    }
+    if (isEligibleKgMaterialityTaskSet(taskSetName)) {
+      const eligibleIds = new Set(kgMaterialityRows.filter((row) => row.eligible).map((row) => row.taskId));
+      exclusions = failed.map((row) => ({
+        taskId: row.taskId,
+        reason: "kg-materiality",
+        detail: row.reason,
+        kgMateriality: row,
+      }));
+      tasks = tasks.filter((task) => eligibleIds.has(task.id));
+      if (tasks.length === 0) {
+        const detail = failed.map((row) => `- ${row.taskId}: ${row.reason}`).join("\n");
+        throw new Error(`${taskSetName} selected zero tasks after KG materiality filtering.\n${detail}`);
+      }
+      console.log(`[run] ${taskSetName} kept ${tasks.length}/${kgMaterialityRows.length} task(s) after KG materiality filtering`);
+    }
+  }
 
   const shouldLoadLicFixtures = isProtocolMode || arms.some((a) => a.usesLic);
   const loadedLicFixtures = new Map<string, LoadedLicFixture>();
@@ -504,12 +651,63 @@ async function main(): Promise<void> {
   const licFixtureQuality = Object.fromEntries(
     Array.from(loadedLicFixtures, ([id, loaded]) => [id, loaded.fixture.quality ?? deriveLicFixtureQuality(taskMap().get(id)!, loaded.fixture)]),
   );
+  if (shouldLoadLicFixtures) {
+    const weak = tasks
+      .map((task) => [task.id, licFixtureQuality[task.id]] as const)
+      .filter(([, quality]) => !isLicFixtureQualityReady(quality));
+    if (weak.length > 0 && (isProtocolMode || !args.allowWeakLic)) {
+      const detail = weak.map(([taskId, quality]) => `- ${describeLicFixtureQualityGate(taskId, quality)}`).join("\n");
+      throw new Error(
+        `LIC fixture quality gate failed:\n${detail}\n` +
+          `Re-freeze LIC fixtures with better seeds/indexing, or pass --allow-weak-lic for ad-hoc diagnostics only.`,
+      );
+    }
+    if (weak.length > 0) {
+      console.warn(`[run] WARNING: running with ${weak.length} weak/none/leaky LIC fixture(s) because --allow-weak-lic was passed`);
+    }
+  }
+  const shouldLoadSerenaFixtures = arms.some((a) => a.usesSerena);
+  const loadedSerenaFixtures = new Map<string, LoadedSerenaFixture>();
+  if (shouldLoadSerenaFixtures) {
+    const missing: string[] = [];
+    for (const task of tasks) {
+      const sc = await loadSerenaFixture(task);
+      if (sc) loadedSerenaFixtures.set(task.id, sc);
+      else missing.push(task.id);
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `missing serena fixture(s): ${missing.join(", ")}. Run \`pnpm --filter @pim/eval serena-freeze\` first.`,
+      );
+    }
+  }
+  const serenaFixtures = new Map(Array.from(loadedSerenaFixtures, ([id, loaded]) => [id, loaded.fixture]));
+  const serenaFixtureHashes = Object.fromEntries(Array.from(loadedSerenaFixtures, ([id, loaded]) => [id, loaded.hash]));
+  const serenaFixtureQuality = Object.fromEntries(
+    Array.from(loadedSerenaFixtures, ([id, loaded]) => [id, loaded.fixture.quality ?? deriveSerenaFixtureQuality(taskMap().get(id)!, loaded.fixture)]),
+  );
+  if (shouldLoadSerenaFixtures) {
+    const weak = tasks
+      .map((task) => [task.id, serenaFixtureQuality[task.id]] as const)
+      .filter(([, quality]) => !isSerenaFixtureQualityReady(quality));
+    if (weak.length > 0 && !args.allowWeakSerena) {
+      const detail = weak.map(([taskId, quality]) => `- ${describeSerenaFixtureQualityGate(taskId, quality)}`).join("\n");
+      throw new Error(
+        `Serena fixture quality gate failed:\n${detail}\n` +
+          `Re-freeze with better serenaSeeds, or pass --allow-weak-serena for ad-hoc diagnostics only.`,
+      );
+    }
+    if (weak.length > 0) {
+      console.warn(`[run] WARNING: running with ${weak.length} weak/none/leaky Serena fixture(s) because --allow-weak-serena was passed`);
+    }
+  }
+
   const taskStrata = Object.fromEntries(tasks.map((task) => [task.id, task.stratum ?? ""]));
 
   const runner = args.runnerName ? getRunner(args.runnerName) : pickDefaultRunner();
-  const judgeRunner = args.judgeRunnerName ? getRunner(args.judgeRunnerName) : isProtocolMode ? getRunner("bedrock") : runner;
+  const judgeRunner = args.judgeRunnerName ? getRunner(args.judgeRunnerName) : getRunner("bedrock");
   const model = args.model ?? (isProtocolMode ? PROTOCOL_CANDIDATE_MODEL : defaultModelFor(runner.name));
-  const judgeModel = args.judgeModel ?? (isProtocolMode ? LLAMA_JUDGE_MODEL : defaultJudgeModelFor(judgeRunner.name));
+  const judgeModel = args.judgeModel ?? defaultJudgeModelFor(judgeRunner.name);
   const maxOutputTokens = args.maxOutputTokens ?? 4096;
   const seeds = args.seeds && args.seeds > 0 ? args.seeds : isProtocolMode ? 3 : 1;
   const temperature =
@@ -528,11 +726,13 @@ async function main(): Promise<void> {
       if (m !== model) console.log(`[run]   arm=${arm.id} -> model=${m}`);
     }
   }
-  console.log(`[run] tasks=${tasks.length} arms=[${arms.map((a) => a.id).join(",")}] seeds=${seeds}${temperature !== undefined ? ` temp=${temperature}` : ""}`);
+  console.log(`[run] requestedTasks=${requestedTaskCount} selectedTasks=${tasks.length} arms=[${arms.map((a) => a.id).join(",")}] seeds=${seeds}${temperature !== undefined ? ` temp=${temperature}` : ""}`);
+  console.log(`[run] selected task ids: ${tasks.map((t) => t.id).join(", ")}`);
 
   const ordered = isProtocolMode
     ? tasks
     : [...tasks].sort((a, b) => (a.podId === b.podId ? 0 : a.podId.localeCompare(b.podId)));
+  const selectedTaskIds = ordered.map((t) => t.id);
   const runId = args.runDir ? basename(resolvePkgPath(args.runDir)) : new Date().toISOString().replace(/[:.]/g, "-");
   const generatedAt = new Date().toISOString();
 
@@ -545,6 +745,7 @@ async function main(): Promise<void> {
       for (const task of ordered) {
         const fixture = fixtures.get(task.podId) ?? null;
         const lic = licFixtures.get(task.id) ?? null;
+        const serena = serenaFixtures.get(task.id) ?? null;
         const t0 = Date.now();
         const result = await runOne({
           runId,
@@ -552,8 +753,11 @@ async function main(): Promise<void> {
           arm,
           fixture,
           lic,
+          serena,
           licFixtureHash: licFixtureHashes[task.id],
           licFixtureQuality: licFixtureQuality[task.id],
+          serenaFixtureHash: serenaFixtureHashes[task.id],
+          serenaFixtureQuality: serenaFixtureQuality[task.id],
           runner,
           model: armModelFor(arm.id),
           judgeRunner,
@@ -601,11 +805,16 @@ async function main(): Promise<void> {
     model,
     judgeModel,
     filter: { taskIds: args.taskIds, tags: args.tags, arms: args.armIds },
+    requestedTaskCount,
+    selectedTaskIds,
+    armModels: args.armModels,
+    mode: isProtocolMode ? "protocol" : "pilot-ad-hoc",
     protocol: protocolAnalysis,
+    kgMaterialityRows,
   });
   await writeFile(reportPath, md);
 
-  if (args.runDir && protocol) {
+  if (args.runDir) {
     const runDir = resolvePkgPath(args.runDir);
 
     // Per-task point-in-time PIM snapshots: exactly what the PIM arms scoped the
@@ -614,7 +823,7 @@ async function main(): Promise<void> {
     const scopedFixtures = new Map<string, SessionContextFixture>();
     const taskAsOf: Record<string, string> = {};
     for (const task of tasks) {
-      const asOf = task.asOf ?? protocol.entries.get(task.id)?.asOf;
+      const asOf = task.asOf ?? protocol?.entries.get(task.id)?.asOf;
       if (!asOf) continue;
       taskAsOf[task.id] = asOf;
       const pod = fixtures.get(task.podId);
@@ -625,11 +834,16 @@ async function main(): Promise<void> {
       runId,
       generatedAt,
       gitSha: gitSha(),
-      holdoutId: protocol.holdout.id,
-      protocolPath: manifestPath(args.protocolPath!),
-      protocolHash: protocol.protocolHash,
-      holdoutPath: manifestPath(args.holdoutPath!),
-      holdoutHash: protocol.holdoutHash,
+      mode: isProtocolMode ? "protocol" : "pilot-ad-hoc",
+      ...(protocol
+        ? {
+            holdoutId: protocol.holdout.id,
+            protocolPath: manifestPath(args.protocolPath!),
+            protocolHash: protocol.protocolHash,
+            holdoutPath: manifestPath(args.holdoutPath!),
+            holdoutHash: protocol.holdoutHash,
+          }
+        : {}),
       runner: runner.name,
       model,
       judgeRunner: judgeRunner.name,
@@ -637,13 +851,25 @@ async function main(): Promise<void> {
       seeds,
       ...(temperature !== undefined ? { temperature } : {}),
       arms: arms.map((a) => a.id),
-      tasks: tasks.map((t) => t.id),
+      tasks: selectedTaskIds,
+      requestedTaskCount,
+      selectedTaskCount: tasks.length,
+      taskHashes: Object.fromEntries(tasks.map((t) => [t.id, {
+        prompt: hashTaskPrompt(t),
+        rubric: hashTaskRubric(t),
+        groundTruth: hashTaskGroundTruth(t),
+      }])),
+      taskParentShas: Object.fromEntries(tasks.flatMap((t) => t.provenance?.parentSha ? [[t.id, t.provenance.parentSha]] : [])),
       taskStrata,
       taskAsOf,
+      ...(kgMaterialityRows ? { kgMateriality: kgMaterialityRows } : {}),
       fixtureHashes,
       licFixtureHashes,
       licFixtureQuality,
-      filter: { arms: args.armIds },
+      ...(shouldLoadSerenaFixtures
+        ? { serenaFixtureHashes, serenaFixtureQuality, serena: buildSerenaManifest(serenaFixtures) }
+        : {}),
+      filter: { taskIds: args.taskIds, tags: args.tags, arms: args.armIds },
     };
     await writeRunArtifacts({
       runDir,
@@ -654,12 +880,16 @@ async function main(): Promise<void> {
       rows,
       fixtures,
       licFixtures,
+      serenaFixtures,
       scopedFixtures,
+      exclusions,
     });
-    await writeJson(
-      join(runDir, "analysis.json"),
-      protocolAnalysis ?? computeProtocolAnalysis(rows, { generatedAt, primaryArms: analysisArms }),
-    );
+    if (protocol) {
+      await writeJson(
+        join(runDir, "analysis.json"),
+        protocolAnalysis ?? computeProtocolAnalysis(rows, { generatedAt, primaryArms: analysisArms }),
+      );
+    }
   }
 
   console.log(`[run] report written to ${reportPath}`);
@@ -676,8 +906,7 @@ function defaultJudgeModelFor(runner: "bedrock" | "anthropic"): string {
   return (
     process.env.PIM_EVAL_JUDGE_MODEL ??
     process.env.BEDROCK_JUDGE_MODEL ??
-    process.env.BEDROCK_MODEL_SMART ??
-    "us.anthropic.claude-sonnet-4-6"
+    LLAMA_JUDGE_MODEL
   );
 }
 

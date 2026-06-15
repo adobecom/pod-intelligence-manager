@@ -2,10 +2,18 @@ import type { Task } from "./types.js";
 import {
   DIAGNOSTIC_TASK_IDS,
   EXCLUDED_TASK_IDS,
+  KG_CONTROL_SOLVABLE_TASK_IDS,
+  KG_DECISIVE_TASK_IDS,
+  KG_DECISIVE_TASK_REASONS,
+  KG_FUTURE_20_TASK_IDS,
+  KG_FUTURE_20_TASK_REASONS,
+  KG_LIC_FAVORABLE_TASK_IDS,
+  KG_NEGATIVE_CONTROL_TASK_IDS,
   PRIMARY_15_TASK_IDS,
 } from "./task-sets.js";
 
 // Primary designated eval set.
+import { KG_FUTURE_20_TASKS } from "./primary/kg-future/index.js";
 import { datatableHorizontalEdgeScroll } from "./primary/real-emc/datatable-horizontal-edge-scroll.js";
 import { eventFormRouteWithEventId } from "./primary/real-emc/event-form-route-with-event-id.js";
 import { eventModTimeSyncAfterSession } from "./primary/real-emc/event-mod-time-sync-after-session.js";
@@ -34,6 +42,8 @@ import { sessionRenderTime } from "./diagnostics/code-gen/session-render-time.js
 
 // Diagnostics: content/PIM.
 import { configDecisionWriteup } from "./diagnostics/content-gen/config-decision-writeup.js";
+import { memoryCurrentVsStale } from "./diagnostics/content-gen/memory-current-vs-stale.js";
+import { memoryWhyChanged } from "./diagnostics/content-gen/memory-why-changed.js";
 import { progressUpdatePermissions } from "./diagnostics/content-gen/progress-update-permissions.js";
 import { rbacDecisionRationale } from "./diagnostics/content-gen/rbac-decision-rationale.js";
 import { sessionBlockerSummary } from "./diagnostics/content-gen/session-blocker-summary.js";
@@ -83,6 +93,8 @@ import { speakerTypeMappingHotfix } from "./excluded/real-emc/speaker-type-mappi
 import { venueImageSeparation } from "./excluded/real-emc/venue-image-separation.js";
 
 export const ALL_TASKS: Task[] = [
+  ...KG_FUTURE_20_TASKS,
+
   datatableHorizontalEdgeScroll,
   eventFormRouteWithEventId,
   eventModTimeSyncAfterSession,
@@ -108,6 +120,8 @@ export const ALL_TASKS: Task[] = [
   sessionCreateTimezone,
   sessionRenderTime,
   configDecisionWriteup,
+  memoryCurrentVsStale,
+  memoryWhyChanged,
   progressUpdatePermissions,
   rbacDecisionRationale,
   sessionBlockerSummary,
@@ -155,12 +169,77 @@ const TASKS_BY_ID = new Map(ALL_TASKS.map((task) => [task.id, task]));
 export const PRIMARY_TASKS = tasksFromIds(PRIMARY_15_TASK_IDS, "PRIMARY_15_TASK_IDS");
 export const DIAGNOSTIC_TASKS = tasksFromIds(DIAGNOSTIC_TASK_IDS, "DIAGNOSTIC_TASK_IDS");
 export const EXCLUDED_TASKS = tasksFromIds(EXCLUDED_TASK_IDS, "EXCLUDED_TASK_IDS");
+export const KG_FUTURE_20_TASKS_REGISTERED = tasksFromIds(KG_FUTURE_20_TASK_IDS, "KG_FUTURE_20_TASK_IDS");
+export const KG_DECISIVE_TASKS = tasksFromIds(KG_DECISIVE_TASK_IDS, "KG_DECISIVE_TASK_IDS");
+export const KG_NEGATIVE_CONTROL_TASKS = tasksFromIds(KG_NEGATIVE_CONTROL_TASK_IDS, "KG_NEGATIVE_CONTROL_TASK_IDS");
+export const KG_LIC_FAVORABLE_TASKS = tasksFromIds(KG_LIC_FAVORABLE_TASK_IDS, "KG_LIC_FAVORABLE_TASK_IDS");
+export const KG_CONTROL_SOLVABLE_TASKS = tasksFromIds(KG_CONTROL_SOLVABLE_TASK_IDS, "KG_CONTROL_SOLVABLE_TASK_IDS");
 export const DEFAULT_TASKS = PRIMARY_TASKS;
 
 assertUniqueTaskIds(ALL_TASKS);
 
+export type NamedTaskSet =
+  | "primary-15"
+  | "kg-future-20"
+  | "kg-future-20-eligible"
+  | "diagnostic"
+  | "excluded"
+  | "kg-decisive"
+  | "kg-decisive-eligible"
+  | "kg-negative-control"
+  | "kg-lic-favorable"
+  | "kg-control-solvable";
+
+export function taskSetTasks(name: NamedTaskSet): Task[] {
+  switch (name) {
+    case "primary-15":
+      return PRIMARY_TASKS;
+    case "kg-future-20":
+    case "kg-future-20-eligible":
+      return KG_FUTURE_20_TASKS_REGISTERED;
+    case "diagnostic":
+      return DIAGNOSTIC_TASKS;
+    case "excluded":
+      return EXCLUDED_TASKS;
+    case "kg-decisive":
+    case "kg-decisive-eligible":
+      return KG_DECISIVE_TASKS;
+    case "kg-negative-control":
+      return KG_NEGATIVE_CONTROL_TASKS;
+    case "kg-lic-favorable":
+      return KG_LIC_FAVORABLE_TASKS;
+    case "kg-control-solvable":
+      return KG_CONTROL_SOLVABLE_TASKS;
+  }
+}
+
+export function parseTaskSetName(name: string): NamedTaskSet {
+  if (
+    name === "primary-15" ||
+    name === "kg-future-20" ||
+    name === "kg-future-20-eligible" ||
+    name === "diagnostic" ||
+    name === "excluded" ||
+    name === "kg-decisive" ||
+    name === "kg-decisive-eligible" ||
+    name === "kg-negative-control" ||
+    name === "kg-lic-favorable" ||
+    name === "kg-control-solvable"
+  ) return name;
+  throw new Error(
+    "Unknown task set: " + name +
+    ". Known task sets: primary-15, kg-future-20, kg-future-20-eligible, diagnostic, excluded, kg-decisive, kg-decisive-eligible, kg-negative-control, kg-lic-favorable, kg-control-solvable",
+  );
+}
+
 export function pickTasks(filter?: { ids?: string[]; tags?: string[] }): Task[] {
   if (!filter || (!filter.ids && !filter.tags)) return DEFAULT_TASKS;
+  if (filter.ids && filter.ids.length > 0) {
+    const unknown = filter.ids.filter((id) => !TASKS_BY_ID.has(id));
+    if (unknown.length > 0) {
+      throw new Error(`Unknown task id(s): ${unknown.join(", ")}. Known task ids: ${ALL_TASKS.map((t) => t.id).join(", ")}`);
+    }
+  }
   return ALL_TASKS.filter((t) => {
     if (filter.ids && filter.ids.length > 0 && !filter.ids.includes(t.id)) return false;
     if (filter.tags && filter.tags.length > 0) {
@@ -195,6 +274,10 @@ export type { Task } from "./types.js";
 export {
   DIAGNOSTIC_TASK_IDS,
   EXCLUDED_TASK_IDS,
+  KG_CONTROL_SOLVABLE_TASK_IDS,
+  KG_DECISIVE_TASK_IDS,
+  KG_DECISIVE_TASK_REASONS,
+  KG_LIC_FAVORABLE_TASK_IDS,
+  KG_NEGATIVE_CONTROL_TASK_IDS,
   PRIMARY_15_TASK_IDS,
 } from "./task-sets.js";
-

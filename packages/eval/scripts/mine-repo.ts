@@ -28,6 +28,7 @@
  *   --host <hostname>            Default github.com. Use git.corp.adobe.com for internal.
  *   --out <path>                 Default scripts/candidates/<host>-<owner>-<name>.json.
  *   --since <ISO date>           Only consider PRs merged on/after this date. Default: 2 years ago.
+ *   --until <ISO date>           Only consider PRs merged on/before this date. Default: no upper cutoff.
  *   --max-prs <n>                Cap the number of PRs fetched. Default: 500.
  *   --min-body-chars <n>         Skip PRs whose description is shorter than this. Default: 200.
  *   --include-docs               (default on) Mine *.md files. Pass --no-include-docs to skip.
@@ -35,14 +36,21 @@
  */
 
 import "../src/load-env.js";
+import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import {
+  deniedKgSourcePathReason,
+  hasKgLeakageErrors,
+  validateKgCandidatePayload,
+} from "../src/rigor/kg-source-leakage.js";
 
 interface Args {
   repo: string;
   host: string;
   out: string;
   since: string;
+  until: string | null;
   maxPrs: number;
   minBodyChars: number;
   includeDocs: boolean;
@@ -78,6 +86,7 @@ function parseArgs(argv: string[]): Args {
   const args: Partial<Args> = {
     host: "github.com",
     since: new Date(Date.now() - 2 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 10),
+    until: null,
     maxPrs: 500,
     minBodyChars: 200,
     includeDocs: true,
@@ -91,6 +100,7 @@ function parseArgs(argv: string[]): Args {
       case "--host": args.host = next; i++; break;
       case "--out": args.out = next; i++; break;
       case "--since": args.since = next; i++; break;
+      case "--until": args.until = next; i++; break;
       case "--max-prs": args.maxPrs = Number(next); i++; break;
       case "--min-body-chars": args.minBodyChars = Number(next); i++; break;
       case "--include-docs": args.includeDocs = true; break;
@@ -115,28 +125,90 @@ function apiBase(host: string): string {
   return host === "github.com" ? "https://api.github.com" : `https://${host}/api/v3`;
 }
 
-function token(host: string): string {
+interface AuthToken {
+  value: string;
+  source: string;
+}
+
+const AUTH_CACHE = new Map<string, AuthToken>();
+
+function token(host: string): AuthToken {
+  const cached = AUTH_CACHE.get(host);
+  if (cached) return cached;
+
   const envName = host === "github.com" ? "GITHUB_TOKEN" : "GITCORP_TOKEN";
   const t = process.env[envName];
-  if (!t) {
-    throw new Error(
-      `Missing $${envName} for host ${host}. Set it in your shell or in packages/eval/.env (not committed).`,
-    );
+  if (t) return { value: t, source: envName };
+
+  const gh = ghAuthToken(host);
+  if (gh) {
+    const auth = { value: gh, source: "gh" };
+    AUTH_CACHE.set(host, auth);
+    return auth;
   }
-  return t;
+
+  throw new Error(
+    `Missing $${envName} for host ${host}, and gh auth token --hostname ${host} was unavailable. Set it in your shell or in packages/eval/.env (not committed).`,
+  );
+}
+
+function ghAuthToken(host: string): string | null {
+  try {
+    const env = { ...process.env };
+    delete env.GITHUB_TOKEN;
+    delete env.GH_TOKEN;
+    delete env.GITCORP_TOKEN;
+    const out = execFileSync("gh", ["auth", "token", "--hostname", host], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      env,
+    }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+function authHeader(auth: AuthToken): string {
+  return `Bearer ${auth.value}`;
 }
 
 async function ghFetch(url: string, host: string, init?: RequestInit): Promise<Response> {
+  const primary = token(host);
+  const res = await fetchWithToken(url, primary, init);
+  if (res.status !== 401 || primary.source === "gh") return res;
+
+  const fallback = ghAuthToken(host);
+  if (!fallback || fallback === primary.value) return res;
+  const fallbackAuth = { value: fallback, source: "gh" };
+  const retry = await fetchWithToken(url, fallbackAuth, init);
+  if (retry.ok) {
+    AUTH_CACHE.set(host, fallbackAuth);
+    console.log(`[mine] ${host}: env token returned 401; retried with gh auth token`);
+  }
+  return retry;
+}
+
+async function fetchWithToken(url: string, auth: AuthToken, init?: RequestInit): Promise<Response> {
   return fetch(url, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token(host)}`,
+      Authorization: authHeader(auth),
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "pim-eval-mine-repo",
       ...(init?.headers ?? {}),
     },
   });
+}
+
+function assertTokenConfigured(host: string): void {
+  const envName = host === "github.com" ? "GITHUB_TOKEN" : "GITCORP_TOKEN";
+  if (!process.env[envName] && !ghAuthToken(host)) {
+    throw new Error(
+      `Missing $${envName} for host ${host}, and gh auth token --hostname ${host} was unavailable.`,
+    );
+  }
 }
 
 async function ghJson<T>(url: string, host: string): Promise<T> {
@@ -161,6 +233,7 @@ interface PrListItem {
 async function fetchMergedPrs(args: Args): Promise<PrCandidate[]> {
   const out: PrCandidate[] = [];
   const sinceTs = new Date(args.since).getTime();
+  const untilTs = args.until ? new Date(args.until).getTime() : Number.POSITIVE_INFINITY;
   let page = 1;
   const perPage = 100;
   while (out.length < args.maxPrs) {
@@ -173,9 +246,20 @@ async function fetchMergedPrs(args: Args): Promise<PrCandidate[]> {
       const ts = new Date(pr.merged_at).getTime();
       if (ts < sinceTs) continue;
       pageHadFresh = true;
+      if (ts > untilTs) continue;
       const body = (pr.body ?? "").trim();
       if (body.length < args.minBodyChars) continue;
       const files = await fetchPrFiles(args, pr.number);
+      const leakage = validateKgCandidatePayload({
+        title: pr.title,
+        body,
+        source_url: pr.html_url,
+        changed_files: files,
+      });
+      if (hasKgLeakageErrors(leakage)) {
+        console.log(`[mine] skip PR #${pr.number}: leakage guard rejected changed files or text`);
+        continue;
+      }
       out.push({
         kind: "pr",
         repo: args.repo,
@@ -226,6 +310,7 @@ async function fetchMarkdownDocs(args: Args): Promise<DocCandidate[]> {
   for (const node of tree.tree) {
     if (node.type !== "blob") continue;
     if (!/\.(md|mdx)$/i.test(node.path)) continue;
+    if (deniedKgSourcePathReason(node.path)) continue;
     if (node.path.startsWith("node_modules/")) continue;
     // Vendored AI agent references (Spectrum 2 component docs copied into repos
     // for Claude Code), and per-repo Claude Code agent/command definitions, are
@@ -235,6 +320,15 @@ async function fetchMarkdownDocs(args: Args): Promise<DocCandidate[]> {
     if (/CHANGELOG/i.test(node.path)) continue;
     const raw = await fetchRawFile(args, repoInfo.default_branch, node.path);
     if (!raw || raw.trim().length < 200) continue;
+    const leakage = validateKgCandidatePayload({
+      path: node.path,
+      content: raw,
+      source_url: `https://${args.host}/${args.repo}/blob/${repoInfo.default_branch}/${node.path}`,
+    });
+    if (hasKgLeakageErrors(leakage)) {
+      console.log(`[mine] skip doc ${node.path}: leakage guard rejected path or content`);
+      continue;
+    }
     docs.push({
       kind: "doc",
       repo: args.repo,
@@ -256,8 +350,9 @@ async function fetchRawFile(args: Args, ref: string, path: string): Promise<stri
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  assertTokenConfigured(args.host);
   console.log(
-    `[mine] repo=${args.repo} host=${args.host} since=${args.since} maxPrs=${args.maxPrs} minBody=${args.minBodyChars} prs=${args.includePrs} docs=${args.includeDocs}`,
+    `[mine] repo=${args.repo} host=${args.host} since=${args.since} until=${args.until ?? "(none)"} maxPrs=${args.maxPrs} minBody=${args.minBodyChars} prs=${args.includePrs} docs=${args.includeDocs}`,
   );
   const candidates: Candidate[] = [];
   if (args.includePrs) {
@@ -273,7 +368,17 @@ async function main(): Promise<void> {
   await mkdir(dirname(args.out), { recursive: true });
   await writeFile(
     args.out,
-    JSON.stringify({ repo: args.repo, host: args.host, mined_at: new Date().toISOString(), candidates }, null, 2),
+    JSON.stringify(
+      {
+        repo: args.repo,
+        host: args.host,
+        mined_at: new Date().toISOString(),
+        sourceWindow: { since: args.since, until: args.until },
+        candidates,
+      },
+      null,
+      2,
+    ),
   );
   console.log(`[mine] wrote ${args.out} (${candidates.length} candidates)`);
 }

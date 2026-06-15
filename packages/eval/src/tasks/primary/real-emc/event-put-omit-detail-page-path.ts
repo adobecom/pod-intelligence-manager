@@ -151,6 +151,15 @@ export const eventPutOmitDetailPagePath: Task = {
     "prepareEslEventPutPayload",
     "filterEventData",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "detailPagePath",
+      "POST",
+      "PUT",
+      "exclude",
+    ],
+    requiredSymbols: ["prepareEslEventPutPayload", "detailPagePath"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #107, merge SHA 367aef1. Parent file at fa65078.",

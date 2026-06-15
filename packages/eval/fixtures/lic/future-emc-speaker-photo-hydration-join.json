@@ -1,0 +1,68 @@
+{
+  "taskId": "future-emc-speaker-photo-hydration-join",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:19:45.452Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "getEventFull"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 48,
+      "output": "Definition: web-src/src/services/api.ts (lines 1028-1049)\n  Name: getEventFull (function)\n  1028:    * Speakers and sponsors are hydrated from the series level for complete data\n  1029:    */\n  1030: async getEventFull(eventId: string): Promise<any | ErrorResponse> {\n  1031:     validateString(eventId, 'eventId')\n  1032: \n  1033:     const token = this.getAuthToken()\n  1034:     if (!token) {\n  1035:       return { status: 'No Token', error: 'No valid authentication token' }\n  1036:     }\n  1037: \n  1038:     try {\n  1039:       const env = getCurrentEnvironment()\n  1040:       const headers = constructRequestHeaders(token, 'GET')\n  1041:       if (this.activeGroupId) {\n  1042:         (headers as any)['x-adobe-esp-group-id'] = this.activeGroupId\n  1043:       }\n  1044:       const host = getApiHost('esp', env)\n  1045:       const url = `${host}/v1/events/${encodeURIComponent(eventId)}`\n  1046: \n  1047:       // First, get the event and event-level speakers/sponsors/venues/images\n  | ... (2 more lines)\n\nReferences (5 shown, 3 total):\n\n  1. web-src/src/hooks/useEventFormSave.ts:517-521 []\n  2. web-src/src/pages/EventForm/EventForm.tsx:539-543 []\n  3. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:377-381 []\n  4. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:459-463 []\n  5. web-src/src/services/api.ts:2413-2417 []\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "--direction",
+        "callers",
+        "getEventFull"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 17,
+      "output": "Call Graph: getEventFull (direction: callers)\n\n18 nodes (showing 18/30)\n\n    Function web-src/src/hooks/useEventFormSave.ts::useEventFormSave — web-src/src/hooks/useEventFormSave.ts:68 [Call] (confidence: 50%)\n    Function web-src/src/pages/EventsDashboard/EventsDashboard.tsx::fetchHistory — web-src/src/pages/EventsDashboard/EventsDashboard.tsx:292 [Call] (confidence: 50%)\n    Function web-src/src/services/api.ts::ApiService::getPermissionsList — web-src/src/services/api.ts:2337 [Call] (confidence: 95%)\n      Function web-src/src/components/shared/HistoryTimeline.tsx::setIsOpen — web-src/src/components/shared/HistoryTimeline.tsx:230 [Call] (confidence: 30%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::loadData — web-src/src/pages/EventForm/EventForm.tsx:124 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::mapEventTypeToApiFormat — web-src/src/pages/EventForm/EventForm.tsx:167 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::templateSupportsEventType — web-src/src/pages/EventForm/EventForm.tsx:179 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleCloudChange — web-src/src/pages/EventForm/EventForm.tsx:232 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleSeriesChange — web-src/src/pages/EventForm/EventForm.tsx:237 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleConfirm — web-src/src/pages/EventForm/EventForm.tsx:245 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::EventFormInner — web-src/src/pages/EventForm/EventForm.tsx:453 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::renderHeaderActions — web-src/src/pages/EventForm/EventForm.tsx:1035 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::EventForm — web-src/src/pages/EventForm/EventForm.tsx:1214 [Import] (confidence: 90%)\n      Interface web-src/src/pages/EventForm/EventForm.tsx::CloudOption — web-src/src/pages/EventForm/EventForm.tsx:62 [Import] (confidence: 90%)\n      Interface web-src/src/pages/EventForm/EventForm.tsx::SeriesOption — web-src/src/pages/EventForm/EventForm.tsx:67 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::EVENT_FORM_WIZARD_TEST_IDS — web-src/src/pages/EventForm/EventForm.tsx:73 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::FormatSelectionOverlay — web-src/src/pages/EventForm/EventForm.tsx:95 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::eventType — web-src/src/pages/EventForm/EventForm.tsx:96 [Import] (confidence: 90%)\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "getEventFull"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "## function `getEventFull` (FQN: `web-src/src/services/api.ts::ApiService::getEventFull`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 1030\n\n**Doc:** Get full event details with hydrated speakers, sponsors, and venues Speakers and sponsors are hydrated from the series level for complete data\n\n```\nasync getEventFull(eventId: string): Promise<any | ErrorResponse> {\n  validateString(eventId, 'eventId')\n\n  const token = this.getAuthToken()\n  if (!token) {\n    return { status: 'No Token', error: 'No valid authentication token' }\n  }\n\n  try {\n    const env = getCurrentEnvironment()\n    const headers = constructRequestHeaders(token, 'GET')\n    if (this.activeGroupId) {\n      (headers as any)['x-adobe-esp-group-id'] = this.activeGroupId\n    }\n    const host = getApiHost('esp', env)\n    const url = `${host}/v1/events/${encodeURIComponent(eventId)}`\n  // ... (truncated)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 3 chunks reference this symbol\n\n### Top Callers (3 total)\n\n- `useEventFormSave` (function) — `web-src/src/hooks/useEventFormSave.ts:68`\n- `fetchHistory` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:292`\n- `getPermissionsList` (function) — `web-src/src/services/api.ts:2337`\n\n### Top Callees (8 total)\n\n- `validateString` (function) — `web-src/src/services/api.ts:90`\n- `getCurrentEnvironment` (function) — `web-src/src/config/constants.ts:149`\n- `constructRequestHeaders` (function) — `web-src/src/services/requestHelpers.ts:51`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/services/<NAME>.ts` — 14 siblings (conf 1.00)\n  siblings: api (this), cacheUtils, configService, dataEnrichment, eventEnrichment, externalApi.example, githubService, imsAuth, payloadBuilders, …+5 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:dbd35784df13b64c\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-speaker-photo-hydration-join\n_Stratum: S2._\n\n## lic find-references -r getEventFull\n```\nDefinition: web-src/src/services/api.ts (lines 1028-1049)\n  Name: getEventFull (function)\n  1028:    * Speakers and sponsors are hydrated from the series level for complete data\n  1029:    */\n  1030: async getEventFull(eventId: string): Promise<any | ErrorResponse> {\n  1031:     validateString(eventId, 'eventId')\n  1032: \n  1033:     const token = this.getAuthToken()\n  1034:     if (!token) {\n  1035:       return { status: 'No Token', error: 'No valid authentication token' }\n  1036:     }\n  1037: \n  1038:     try {\n  1039:       const env = getCurrentEnvironment()\n  1040:       const headers = constructRequestHeaders(token, 'GET')\n  1041:       if (this.activeGroupId) {\n  1042:         (headers as any)['x-adobe-esp-group-id'] = this.activeGroupId\n  1043:       }\n  1044:       const host = getApiHost('esp', env)\n  1045:       const url = `${host}/v1/events/${encodeURIComponent(eventId)}`\n  1046: \n  1047:       // First, get the event and event-level speakers/sponsors/venues/images\n  | ... (2 more lines)\n\nReferences (5 shown, 3 total):\n\n  1. web-src/src/hooks/useEventFormSave.ts:517-521 []\n  2. web-src/src/pages/EventForm/EventForm.tsx:539-543 []\n  3. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:377-381 []\n  4. web-src/src/pages/EventsDashboard/EventsDashboard.tsx:459-463 []\n  5. web-src/src/services/api.ts:2413-2417 []\n```\n\n## lic call-graph -r --direction callers getEventFull\n```\nCall Graph: getEventFull (direction: callers)\n\n18 nodes (showing 18/30)\n\n    Function web-src/src/hooks/useEventFormSave.ts::useEventFormSave — web-src/src/hooks/useEventFormSave.ts:68 [Call] (confidence: 50%)\n    Function web-src/src/pages/EventsDashboard/EventsDashboard.tsx::fetchHistory — web-src/src/pages/EventsDashboard/EventsDashboard.tsx:292 [Call] (confidence: 50%)\n    Function web-src/src/services/api.ts::ApiService::getPermissionsList — web-src/src/services/api.ts:2337 [Call] (confidence: 95%)\n      Function web-src/src/components/shared/HistoryTimeline.tsx::setIsOpen — web-src/src/components/shared/HistoryTimeline.tsx:230 [Call] (confidence: 30%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::loadData — web-src/src/pages/EventForm/EventForm.tsx:124 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::mapEventTypeToApiFormat — web-src/src/pages/EventForm/EventForm.tsx:167 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::templateSupportsEventType — web-src/src/pages/EventForm/EventForm.tsx:179 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleCloudChange — web-src/src/pages/EventForm/EventForm.tsx:232 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleSeriesChange — web-src/src/pages/EventForm/EventForm.tsx:237 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::handleConfirm — web-src/src/pages/EventForm/EventForm.tsx:245 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::EventFormInner — web-src/src/pages/EventForm/EventForm.tsx:453 [Import] (confidence: 90%)\n      Function web-src/src/pages/EventForm/EventForm.tsx::renderHeaderActions — web-src/src/pages/EventForm/EventForm.tsx:1035 [Import] (confidence: 90%)\n      Const web-src/src/pages/EventForm/EventForm.tsx::EventForm — web-src/src/pages/EventForm/EventForm.tsx:1214 [Import] (con\n```\n\n## lic explain-symbol -r getEventFull\n```\n## function `getEventFull` (FQN: `web-src/src/services/api.ts::ApiService::getEventFull`)\n\n**Kind:** function | **File:** `web-src/src/services/api.ts` | **Line:** 1030\n\n**Doc:** Get full event details with hydrated speakers, sponsors, and venues Speakers and sponsors are hydrated from the series level for complete data\n\n```\nasync getEventFull(eventId: string): Promi\n\n_[truncated to budget]_\n",
+  "renderedBlockHash": "1156af87ab1bdc1b",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

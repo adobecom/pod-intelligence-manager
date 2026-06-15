@@ -1,0 +1,113 @@
+{
+  "taskId": "future-emc-sessions-hub-search-scope",
+  "stratum": "S3",
+  "generatedAt": "2026-06-12T19:13:41.873Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2/EMC",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2/EMC",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "b95264fe0ae46e29",
+  "recipe": [
+    "find_symbol"
+  ],
+  "seed": {
+    "symbols": [
+      "SessionsTab"
+    ],
+    "naturalLanguageQuery": "sessions hub search title speaker tag labels description opt in",
+    "source": "lic-seed"
+  },
+  "calls": [
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "SessionsTab",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:13:41.677Z",
+      "durationMs": 196,
+      "ok": true,
+      "output": "[{\"name_path\": \"EMC/web-src/src/pages/Registrations/SessionsTab\", \"kind\": \"File\", \"relative_path\": \"web-src/src/pages/Registrations/SessionsTab.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 446}, \"body\": null}, {\"name_path\": \"SessionsTab\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/pages/Registrations/SessionsTab.tsx\", \"body_location\": {\"start_line\": 35, \"end_line\": 419}, \"body\": \"SessionsTab: React.FC<SessionsTabProps> = ({\\n  eventId,\\n  attendees,\\n}) => {\\n  const [sessions, setSessions] = useState<SessionRow[]>([])\\n  const [isLoadingSessions, setIsLoadingSessions] = useState(false)\\n  const [expandedSessionIds, setExpandedSessionIds] = useState<Set<string>>(new Set())\\n  const [sessionAttendeeMap, setSessionAttendeeMap] = useState<Record<string, EnrichedSessionAttendee[]>>({})\\n  const [loadingSessionIds, setLoadingSessionIds] = useState<Set<string>>(new Set())\\n  const [searchQuery, setSearchQuery] = useState('')\\n  const [tablePageSize, setTablePageSize] = useState(DEFAULT_PAGE_SIZE)\\n\\n  // Build a lookup map from attendeeId → Attendee for fast cross-reference\\n  const attendeeMap = useMemo(() => {\\n    const map = new Map<string, Attendee>()\\n    for (const a of attendees) {\\n      map.set(a.attendeeId, a)\\n    }\\n    return map\\n  }, [attendees])\\n\\n  // ---- Data loading ----\\n\\n  const loadSessions = useCallback(async () => {\\n    if (!eventId) {\\n      setSessions([])\\n      return\\n    }\\n\\n    setIsLoadingSessions(true)\\n    try {\\n      const response = await apiService.getAllEventSessions(eventId)\\n      if (response && 'error' in response) {\\n        setSessions([])\\n        return\\n      }\\n\\n      const raw = response?.sessions ?? response?.data ?? []\\n      const list = Array.isArray(raw) ? raw : []\\n\\n      // Hydrate each session with its session-time data (attendeeCount, etc.)\\n      const rows: SessionRow[] = await Promise.all(\\n        list.map(async (item: Record<string, unknown>) => {\\n          const sessionId = String(item.id ?? item.sessionId ?? '')\\n          const name = String(item.name ?? item.enTitle ?? item.title ?? '')\\n\\n          let sessionTimeId = ''\\n          let attendeeCount = 0\\n          let waitlistAttendeeCount = 0\\n          let attendeeLimit: number | undefined\\n\\n          try {\\n            const timesRes = await apiService.getSessionTimes(sessionId)\\n            if (timesRes && !('error' in timesRes)) {\\n              const times: SessionTimeInfo[] = Array.isArray(timesRes?.sessionTimes)\\n                ? timesRes.sessionTimes\\n                : []\\n              const sessionTime = times[0]\\n              if (sessionTime) {\\n                sessionTimeId = sessionTime.sessionTimeId ?? ''\\n                attendeeCount = sessionTime.attendeeCount ?? 0\\n                waitlistAttendeeCount = sessionTime.waitlistAttendeeCount ?? 0\\n                attendeeLimit = sessionTime.attendeeLimit\\n              }\\n            }\\n          } catch {\\n            // If session-time fetch fails, show 0 counts\\n          }\\n\\n          return {\\n            sessionId,\\n            sessionTimeId,\\n            name,\\n            attendeeCount,\\n            waitlistAttendeeCount,\\n            attendeeLimit,\\n          }\\n        })\\n      )\\n\\n      setSessions(rows)\\n    } catch (err) {\\n      console.error('Failed to load sessions:', err)\\n      setSessions([])\\n    } finally {\\n      setIsLoadingSessions(false)\\n    }\\n  }, [eventId])\\n\\n  useEffect(() => {\\n    loadSessions()\\n  }, [loadSessions])\\n\\n  // Reset all state when event changes\\n  useEffect(() => {\\n    setSessions([])\\n    setExpandedSessionIds(new Set())\\n    setSessionAttendeeMap({})\\n    setLoadingSessionIds(new Set())\\n    setSearchQuery('')\\n    setTablePageSize(DEFAULT_PAGE_SIZE)\\n  }, [eventId])\\n\\n  // ---- Expand / collapse ----\\n\\n  const loadSessionAttendees = useCallback(async (sessionId: string) => {\\n    const session = sessions.find(s => s.sessionId === sessionId)\\n    if (!session?.sessionTimeId) return\\n\\n    setLoadingSessionIds(prev => new Set(prev).add(sessionId))\\n    try {\\n      const result = await apiService.getSessionTimeAttendees(session.sessionTimeId)\\n      if (result && !('error' in result)) {\\n        const raw: SessionTimeAttendee[] = Array.isArray(result?.attendees) ? result.attendees : []\\n        const enriched: EnrichedSessionAttendee[] = raw.map(sta => {\\n          const match = attendeeMap.get(sta.attendeeId)\\n          return {\\n            attendeeId: sta.attendeeId,\\n            registrationStatus: sta.registrationStatus,\\n            firstName: match?.firstName,\\n            lastName: match?.lastName,\\n            email: match?.email,\\n          }\\n        })\\n        setSessionAttendeeMap(prev => ({ ...prev, [sessionId]: enriched }))\\n      }\\n    } catch {\\n      // Silently fail\\n    } finally {\\n      setLoadingSessionIds(prev => {\\n        const next = new Set(prev)\\n        next.delete(sessionId)\\n        return next\\n      })\\n    }\\n  }, [sessions, attendeeMap])\\n\\n  const handleToggleSessionExpand = useCallback((sessionId: string) => {\\n    setExpandedSessionIds(prev => {\\n      const next = new Set(prev)\\n      if (next.has(sessionId)) {\\n        next.delete(sessionId)\\n      } else {\\n        next.add(sessionId)\\n        // Lazy load on first expand\\n        if (!sessionAttendeeMap[sessionId]) {\\n          loadSessionAttendees(sessionId)\\n        }\\n      }\\n      return next\\n    })\\n  }, [sessionAttendeeMap, loadSessionAttendees])\\n\\n  // ---- Expanded content renderer ----\\n\\n  const renderExpandedContent = useCallback((session: SessionRow) => {\\n    const attendeeList = sessionAttendeeMap[session.sessionId] || []\\n    const isLoading = loadingSessionIds.has(session.sessionId)\\n\\n    if (!session.sessionTimeId) {\\n      return (\\n        <div style={{ padding: 24 }}>\\n          <Text UNSAFE_style={{ color: 'var(--spectrum-global-color-gray-600)' }}>\\n            No session time configured\\n          </Text>\\n        </div>\\n      )\\n    }\\n\\n    if (isLoading) {\\n      return (\\n        <div style={{ padding: 24 }}>\\n          <Text>Loading registrants...</Text>\\n        </div>\\n      )\\n    }\\n\\n    if (attendeeList.length === 0) {\\n      return (\\n        <div style={{ padding: 24 }}>\\n          <Text UNSAFE_style={{ color: 'var(--spectrum-global-color-gray-600)' }}>\\n            No registrants for this session\\n          </Text>\\n        </div>\\n      )\\n    }\\n\\n    return (\\n      <div className={style({display: 'flex', flexDirection: 'column', gap: 16})}>\\n        <div className=\\\"user-card-list\\\">\\n          {attendeeList.map(attendee => {\\n            const displayName = [attendee.firstName, attendee.lastName].filter(Boolean).join(' ')\\n              || attendee.email\\n              || attendee.attendeeId\\n\\n            return (\\n              <div className=\\\"user-card\\\" key={attendee.attendeeId}>\\n                <div className={style({display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'start'})}>\\n                  <Text UNSAFE_style={{ fontWeight: 600 }}>\\n                    {displayName}\\n                  </Text>\\n                  {attendee.email && (\\n                    <Text UNSAFE_style={{ fontSize: '12px', color: 'var(--spectrum-global-color-gray-600)' }}>\\n                      {attendee.email}\\n                    </Text>\\n                  )}\\n                </div>\\n                <Badge variant={attendee.registrationStatus === 'registered' ? 'positive' : 'neutral'}>\\n                  {attendee.registrationStatus === 'registered' ? 'Registered' : 'Waitlisted'}\\n                </Badge>\\n              </div>\\n            )\\n          })}\\n        </div>\\n      </div>\\n    )\\n  }, [sessionAttendeeMap, loadingSessionIds])\\n\\n  // ---- Search / filter ----\\n\\n  const filteredSessions = useMemo(() => {\\n    const q = searchQuery.trim().toLowerCase()\\n    if (!q) return sessions\\n    return sessions.filter(s => s.name.toLowerCase().includes(q))\\n  }, [sessions, searchQuery])\\n\\n  // ---- Table columns ----\\n\\n  const columns: TableColumn<SessionRow>[] = useMemo(() => [\\n    {\\n      key: 'name',\\n      name: 'SESSION',\\n      width: 300,\\n      sortable: true,\\n      render: (session) => (\\n        <Text UNSAFE_style={{ fontWeight: 600 }}>{session.name}</Text>\\n      )\\n    },\\n    {\\n      key: 'attendeeCount',\\n      name: 'REGISTRATIONS',\\n      width: 150,\\n      sortable: true,\\n      render: (session) => (\\n        <Text>\\n          {session.attendeeCount}\\n          {session.attendeeLimit != null && (\\n            <Text UNSAFE_style={{ color: COLORS.GRAY_600 }}>\\n              {' / '}{session.attendeeLimit}\\n            </Text>\\n          )}\\n        </Text>\\n      )\\n    },\\n    {\\n      key: 'waitlistAttendeeCount',\\n      name: 'WAITLISTED',\\n      width: 120,\\n      sortable: true,\\n      render: (session) => (\\n        <Text>{session.waitlistAttendeeCount}</Text>\\n      )\\n    },\\n  ], [])\\n\\n  // ---- Empty states ----\\n\\n  const emptyState = useMemo(() => {\\n    if (!eventId) {\\n      return (\\n        <ResourceEmptyState\\n          fillContainer\\n          illustration={<CalendarIllustration aria-hidden />}\\n          title=\\\"Select an event\\\"\\n          description=\\\"Choose an event to view session registrations.\\\"\\n        />\\n      )\\n    }\\n    if (isLoadingSessions) return undefined\\n    if (sessions.length === 0) {\\n      return (\\n        <ResourceEmptyState\\n          fillContainer\\n          illustration={<CalendarIllustration aria-hidden />}\\n          title=\\\"No sessions\\\"\\n          description=\\\"This event has no sessions configured yet.\\\"\\n        />\\n      )\\n    }\\n    if (filteredSessions.length === 0) {\\n      return (\\n        <ResourceEmptyState\\n          fillContainer\\n          illustration={<NoSearchResults aria-hidden />}\\n          title=\\\"No matching sessions\\\"\\n          description=\\\"Try adjusting your search to find sessions.\\\"\\n        />\\n      )\\n    }\\n    return undefined\\n  }, [eventId, isLoadingSessions, sessions.length, filteredSessions.length])\\n\\n  if (!eventId) {\\n    return (\\n      <div style={{ padding: '32px' }}>\\n        <Text UNSAFE_style={{ color: COLORS.GRAY_600 }}>\\n          Select an event to view session registrations\\n        </Text>\\n      </div>\\n    )\\n  }\\n\\n  return (\\n    <div>\\n      {/* Stats Bar */}\\n      <div style={{ backgroundColor: 'var(--spectrum-global-color-gray-100)', padding: '24px', borderRadius: '8px', marginBottom: '24px' }}>\\n        <div className={style({display: 'flex', gap: 48, flexWrap: 'wrap'})}>\\n          <StatItem label=\\\"Total Sessions\\\" value={sessions.length} />\\n          <StatItem\\n            label=\\\"Total Registrations\\\"\\n            value={sessions.reduce((sum, s) => sum + s.attendeeCount, 0)}\\n          />\\n          <StatItem\\n            label=\\\"Total Waitlisted\\\"\\n            value={sessions.reduce((sum, s) => sum + s.waitlistAttendeeCount, 0)}\\n          />\\n        </div>\\n      </div>\\n\\n      {/* Table tools */}\\n      {sessions.length > 0 && (\\n        <div\\n          className={style({\\n            display: 'flex',\\n            justifyContent: 'end',\\n            alignItems: 'end',\\n            flexWrap: 'wrap',\\n            gap: 12,\\n            marginBottom: 16,\\n          })}\\n        >\\n          <Picker\\n            label=\\\"Rows per page\\\"\\n            selectedKey={String(tablePageSize)}\\n            onSelectionChange={(key) => {\\n              const n = Number(key)\\n              if (isPageSize(n)) setTablePageSize(n)\\n            }}\\n            styles={style({ width: 120 })}\\n          >\\n            {PAGE_SIZE_OPTIONS.map((n) => (\\n              <PickerItem key={n} id={String(n)}>\\n                {String(n)}\\n              </PickerItem>\\n            ))}\\n          </Picker>\\n          <div className={style({ width: 240 })}>\\n            <SearchField\\n              label=\\\"Search sessions\\\"\\n              placeholder=\\\"Search by session name\\\"\\n              value={searchQuery}\\n              onChange={setSearchQuery}\\n              onClear={() => setSearchQuery('')}\\n              styles={style({ width: '[100%]' })}\\n            />\\n          </div>\\n        </div>\\n      )}\\n\\n      {/* Sessions Table */}\\n      <div style={{ minHeight: 480, display: 'flex', flexDirection: 'column' }}>\\n        <DataTable\\n          columns={columns}\\n          data={filteredSessions}\\n          getItemKey={(item) => item.sessionId}\\n          pageSize={tablePageSize}\\n          emptyState={emptyState}\\n          renderExpandedContent={renderExpandedContent}\\n          expandedKeys={expandedSessionIds}\\n          onToggleExpand={handleToggleSessionExpand}\\n        />\\n      </div>\\n    </div>\\n  )\\n}\"}]",
+      "outputHash": "5a74dc8f9e0a53a1"
+    }
+  ],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:13:41.873Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2/EMC._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: future-emc-sessions-hub-search-scope (S3)._\n\n## Seed\n- Symbols: SessionsTab\n- Seed source: lic-seed\n\n## Symbol Evidence\n### find_symbol {\"name_path_pattern\":\"SessionsTab\",\"include_body\":true}\n```\n[{\"name_path\": \"EMC/web-src/src/pages/Registrations/SessionsTab\", \"kind\": \"File\", \"relative_path\": \"web-src/src/pages/Registrations/SessionsTab.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 446}, \"body\": null}, {\"name_path\": \"SessionsTab\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/pages/Registrations/SessionsTab.tsx\", \"body_location\": {\"start_line\": 35, \"end_line\": 419}, \"body\": \"SessionsTab: React.FC<SessionsTabProps> = ({\\n  eventId,\\n  attendees,\\n}) => {\\n  const [sessions, setSessions] = useState<SessionRow[]>([])\\n  const [isLoadingSessions, setIsLoadingSessions] = useState(false)\\n  const [expandedSessionIds, setExpandedSessionIds] = useState<Set<string>>(new Set())\\n  const [sessionAttendeeMap, setSessionAttendeeMap] = useState<Record<string, EnrichedSessionAttendee[]>>({})\\n  const [loadingSessionIds, setLoadingSessionIds] = useState<Set<string>>(new Set())\\n  const [searchQuery, setSearchQuery] = useState('')\\n  const [tablePageSize, setTablePageSize] = useState(DEFAULT_PAGE_SIZE)\\n\\n  // Build a lookup map from attendeeId → Attendee for fast cross-reference\\n  const attendeeMap = useMemo(() => {\\n    const map = new Map<string, Attendee>()\\n    for (const a of attendees) {\\n      map.set(a.attendeeId, a)\\n    }\\n    return map\\n  }, [attendees])\\n\\n  // ---- Data loading ----\\n\\n  const loadSessions = useCallback(async () => {\\n    if (!eventId) {\\n      setSessions([])\\n      return\\n    }\\n\\n    setIsLoadingSessions(true)\\n    try {\\n      const re\n… [call output truncated]\n```\n",
+  "renderedBlockHash": "7794fdd7d43ecd5b",
+  "quality": {
+    "signal": "medium",
+    "answerLeak": false,
+    "primaryFileRetrieved": false,
+    "symbolEvidenceRetrieved": true,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": false,
+    "intentMatch": true,
+    "notes": [
+      "symbol evidence retrieved",
+      "task intent matched"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "taskId": "future-emc-events-dashboard-permission-filter",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:37.469Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "RBAC events dashboard permission gating filterEvents"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 31,
+      "output": "1. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md (lines 53-108, 1.00)\n   section RBAC Permission Gating — Implementation Plan > 3. Components Changed\n   ...\n  53:## 3. Components Changed\n  54:### 3.1 GroupContext (`web-src/src/contexts/GroupContext.tsx`) — NEW\n  55:\n  56:Central RBAC state manager. On app mount:\n   ...\n\n   *(also at lines 108-186)*\n2. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 68-130, 0.66)\n   arrow_function EventsDashboardProps\n\n   *(also at lines 125-202)*\n4. web-src/src/hooks/useRBACFilter.ts (lines 1-34, 0.55)\n   Referenced by 5 files (.tsx: 5)\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "useHasPermission"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 20,
+      "output": "## function `useHasPermission`\n\n**Kind:** function | **File:** `web-src/src/hooks/useHasPermission.ts` | **Line:** 51\n\n**Doc:** Hook: returns true if the active role has the specified permission.\n\n```\nexport function useHasPermission(resource: string, access: string): boolean {\n  const { permissions } = useGroup()\n  return checkPermission(permissions, resource, access)\n}\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 12 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55`\n- `RequirePermission` (const) — `web-src/src/components/shared/RequirePermission.tsx:23`\n- `RegistrationsTab` (const) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:42`\n- `TopNav` (const) — `web-src/src/components/layout/TopNav.tsx:21`\n- `SeriesDashboard` (const) — `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:47`\n\n### Top Callees (2 total)\n\n- `useGroup` (const) — `web-src/src/contexts/GroupContext.tsx:277`\n- `checkPermission` (function) — `web-src/src/hooks/useHasPermission.ts:21`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/hooks/<NAME>.ts` — 16 siblings (conf 1.00)\n  siblings: useHasPermission (this), index, useCustomDetailPagePath.test, useCustomDetailPagePath, useDevToken, useEventFormComponent, useEventFormSave.test, useEventFormSave, useEventTypeFeatures, …+7 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:7abd3c18f46eea3e\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-events-dashboard-permission-filter\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 RBAC events dashboard permission gating filterEvents\n```\n1. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md (lines 53-108, 1.00)\n   section RBAC Permission Gating — Implementation Plan > 3. Components Changed\n   ...\n  53:## 3. Components Changed\n  54:### 3.1 GroupContext (`web-src/src/contexts/GroupContext.tsx`) — NEW\n  55:\n  56:Central RBAC state manager. On app mount:\n   ...\n\n   *(also at lines 108-186)*\n2. web-src/src/pages/EventsDashboard/EventsDashboard.tsx (lines 68-130, 0.66)\n   arrow_function EventsDashboardProps\n\n   *(also at lines 125-202)*\n4. web-src/src/hooks/useRBACFilter.ts (lines 1-34, 0.55)\n   Referenced by 5 files (.tsx: 5)\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r useHasPermission\n```\n## function `useHasPermission`\n\n**Kind:** function | **File:** `web-src/src/hooks/useHasPermission.ts` | **Line:** 51\n\n**Doc:** Hook: returns true if the active role has the specified permission.\n\n```\nexport function useHasPermission(resource: string, access: string): boolean {\n  const { permissions } = useGroup()\n  return checkPermission(permissions, resource, access)\n}\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 12 chunks reference this symbol\n\n### Top Callers (100 total)\n\n- `getEventCreatorForFilter` (function) — `web-src/src/pages/EventsDashboard/EventsDashboard.tsx:55`\n- `RequirePermission` (const) — `web-src/src/components/shared/RequirePermission.tsx:23`\n- `RegistrationsTab` (const) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:42`\n- `TopNav` (const) — `web-src/src/components/layout/TopNav.tsx:21`\n- `SeriesDashboard` (const) — `web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx:47`\n\n### Top Callees (2 total)\n\n- `useGroup` (const) — `web-src/src/contexts/GroupContext.tsx:277`\n- `checkPermission` (function) — `web-src/src/hooks/useHasPermission.ts:21`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/hooks/<NAME>.ts` — 16 siblings (conf 1.00)\n  siblings: useHasPermission (this), index, useCustomDetailPagePath.test, useCustomDetailPagePath, useDevToken, useEventFormComponent, useEventFormSave.test, useEventFormSave, useEventTypeFeatures, …+7 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:7abd3c18f46eea3e\"])`\n```\n",
+  "renderedBlockHash": "845e046d3cdb65fa",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

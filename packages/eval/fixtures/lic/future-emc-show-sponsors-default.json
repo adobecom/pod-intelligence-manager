@@ -1,0 +1,57 @@
+{
+  "taskId": "future-emc-show-sponsors-default",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:37.407Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "event form showSponsors default true fallback"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 36,
+      "output": "1. web-src/src/contexts/EventFormContext.tsx (lines 167-233, 1.00)\n 167:// Component registration\n 168:  registerComponent: (id: string, callbacks: ComponentCallbacks) => void\n 169:  unregisterComponent: (id: string) => void\n 170:  getRegisteredComponents: () => RegisteredComponent[]\n 171:  \n   ...\n   Referenced by 13 files (.tsx: 13)\n\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 842-894, 0.65)\n   arrow_function SponsorsComponent\n\n3. web-src/src/pages/EventForm/EventForm.tsx (lines 634-705, 0.61)\n   arrow_function EventFormInner\n\n4. docs/EVENT_FORM.md (lines 654-710, 0.52)\n   section Event Form - Complete Guide > Routing Integration\n\n5. web-src/src/pages/EventForm/EventForm.tsx (lines 973-1034, 0.51)\n   arrow_function EventFormInner\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "showSponsors"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 29,
+      "output": "## const `showSponsors` (FQN: `web-src/src/types/domain.ts::EventApiResponse::showSponsors`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 275\n\n```\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n  speakers?: any[]\n  sponsors?: any[]\n  // Add any other fields as optional\n  [key: string]: any\n}\n\n// Event localization data\nexport interface EventLocalization {\n  title?: string\n  description?: string\n  eventDetails?: string\n  rsvpDescription?: string\n  agenda?: AgendaDataItem[]\n  cta?: CtaItem[]\n  promotionalItems?: PromotionalItem[]\n  [key: string]: any\n}\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (4 total)\n\n- `SponsorsComponent` (usage) — `web-src/src/pages/EventForm/SponsorsComponent.tsx:842`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:117`\n- `createDefaultFormData` (usage) — `web-src/src/contexts/EventFormContext.tsx:190`\n- `mapApiResponseToFormData` (usage) — `web-src/src/utils/eventFormMappers.ts:181`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-show-sponsors-default\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 event form showSponsors default true fallback\n```\n1. web-src/src/contexts/EventFormContext.tsx (lines 167-233, 1.00)\n 167:// Component registration\n 168:  registerComponent: (id: string, callbacks: ComponentCallbacks) => void\n 169:  unregisterComponent: (id: string) => void\n 170:  getRegisteredComponents: () => RegisteredComponent[]\n 171:  \n   ...\n   Referenced by 13 files (.tsx: 13)\n\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 842-894, 0.65)\n   arrow_function SponsorsComponent\n\n3. web-src/src/pages/EventForm/EventForm.tsx (lines 634-705, 0.61)\n   arrow_function EventFormInner\n\n4. docs/EVENT_FORM.md (lines 654-710, 0.52)\n   section Event Form - Complete Guide > Routing Integration\n\n5. web-src/src/pages/EventForm/EventForm.tsx (lines 973-1034, 0.51)\n   arrow_function EventFormInner\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r showSponsors\n```\n## const `showSponsors` (FQN: `web-src/src/types/domain.ts::EventApiResponse::showSponsors`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 275\n\n```\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n  promotionalItems?: PromotionalItem[] // Localizable promotional content\n  gmtOffset?: number\n  localStartTimeMillis?: number\n  localEndTimeMillis?: number\n  images?: EventImage[]\n  speakers?: any[]\n  sponsors?: any[]\n  // Add any other fields as optional\n  [key: string]: any\n}\n\n// Event localization data\nexport interface EventLocalization {\n  title?: string\n  description?: string\n  eventDetails?: string\n  rsvpDescription?: string\n  agenda?: AgendaDataItem[]\n  cta?: CtaItem[]\n  promotionalItems?: PromotionalItem[]\n  [key: string]: any\n}\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (4 total)\n\n- `SponsorsComponent` (usage) — `web-src/src/pages/EventForm/SponsorsComponent.tsx:842`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:117`\n- `createDefaultFormData` (usage) — `web-src/src/contexts/EventFormContext.tsx:190`\n- `mapApiResponseToFormData` (usage) — `web-src/src/utils/eventFormMappers.ts:181`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n```\n",
+  "renderedBlockHash": "d193d5af9671a427",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

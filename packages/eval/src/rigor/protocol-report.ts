@@ -43,7 +43,7 @@ export function renderProtocolReport(a: ProtocolAnalysis): string[] {
     `_Headline strata S1–S5: ${a.headlineTaskCount} tasks, ${a.headlineRowCount} rows ` +
       `(${a.realisticTicketTaskCount} realistic-ticket). ` +
       `Secondary (S6, exploratory only): ${a.secondaryTaskCount} tasks. ` +
-      `Primary causal baseline: **length-matched-neutral**; **control** is operational._`,
+      `Operational baseline: **control**. The length-matched placebo arm is available only for ad-hoc regression checks._`,
   );
   lines.push("");
 

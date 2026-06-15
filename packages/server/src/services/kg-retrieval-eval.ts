@@ -1,12 +1,18 @@
 import type {
+  KgContextContractMode,
   KnowledgeEdgeType,
   KnowledgeGraph,
   KnowledgeNode,
   KnowledgeQueryFilters,
+  KnowledgeQueryResult,
 } from "@pim/shared";
 import { cosineSimilarity } from "./embeddings.js";
 import { extractKeywords, extractRetrievalIdentifiers } from "./graph-analysis.js";
-import { loadGraphForOfflineEvaluation, queryKnowledge } from "./knowledge-graph.js";
+import {
+  getRelevantLearningsForContractMode,
+  loadGraphForOfflineEvaluation,
+  queryKnowledge,
+} from "./knowledge-graph.js";
 
 export const RETRIEVAL_EVAL_BUDGETS = [1000, 4000, 8000, 1_000_000] as const;
 export const DEFAULT_MAX_REQUIRED_RANK = 10;
@@ -119,6 +125,7 @@ export interface RetrievalEvalFailure {
 export interface AggregateBudgetMetrics extends BudgetMetrics {
   casesWithRequired: number;
   meanReturnedCount: number;
+  meanTokenEstimate: number;
   negativeControlViolations: number;
 }
 
@@ -131,6 +138,37 @@ export interface RetrievalEvalReport {
   failures: RetrievalEvalFailure[];
   aggregateByBudget: Record<string, AggregateBudgetMetrics>;
   cases: CaseEvaluation[];
+}
+
+export type ContractRetrievalMode = Extract<KgContextContractMode, "legacy" | "task_relevant">;
+
+export interface ContractModeEvaluation {
+  mode: ContractRetrievalMode;
+  failures: RetrievalEvalFailure[];
+  aggregateByBudget: Record<string, AggregateBudgetMetrics>;
+  cases: CaseEvaluation[];
+}
+
+export interface ContractComparisonBudget {
+  budget: number;
+  winner: ContractRetrievalMode | "tie";
+  recallAtBudgetDelta: number | null;
+  mrrDelta: number | null;
+  precisionAt5Delta: number | null;
+  meanReturnedDelta: number;
+  meanTokenEstimateDelta: number;
+  legacyFailureCount: number;
+  taskRelevantFailureCount: number;
+}
+
+export interface ContractComparisonReport {
+  generatedAt: string;
+  oracleGeneratedAt: string;
+  orgId: string;
+  budgets: number[];
+  caseCount: number;
+  modes: Record<ContractRetrievalMode, ContractModeEvaluation>;
+  comparisonByBudget: Record<string, ContractComparisonBudget>;
 }
 
 function nodeText(node: KnowledgeNode): string {
@@ -250,19 +288,12 @@ function diagnosticsForNodes(
   return diagnostics;
 }
 
-function evaluateCaseAtBudget(
+function evaluateQueryResultAtBudget(
   oracle: RetrievalOracleFixture,
   testCase: RetrievalOracleCase,
   budget: number,
+  result: KnowledgeQueryResult,
 ): BudgetEvaluation {
-  loadGraphForOfflineEvaluation(oracle.graph, { allowUnsafeOrgId: true, allowReplacingLoadedOrg: true });
-  const result = queryKnowledge(oracle.orgId, {
-    filters: testCase.filters,
-    max_tokens: budget,
-    include_details: true,
-    query_text: testCase.queryText,
-    query_embedding: testCase.queryEmbedding,
-  });
   const returnedIds = result.nodes.map((node) => node.id);
   const ranks = rankMap(returnedIds);
   const shouldIncludeNodeIds = testCase.shouldIncludeNodeIds ?? [];
@@ -287,6 +318,22 @@ function evaluateCaseAtBudget(
   };
 }
 
+function evaluateCaseAtBudget(
+  oracle: RetrievalOracleFixture,
+  testCase: RetrievalOracleCase,
+  budget: number,
+): BudgetEvaluation {
+  loadGraphForOfflineEvaluation(oracle.graph, { allowUnsafeOrgId: true, allowReplacingLoadedOrg: true });
+  const result = queryKnowledge(oracle.orgId, {
+    filters: testCase.filters,
+    max_tokens: budget,
+    include_details: true,
+    query_text: testCase.queryText,
+    query_embedding: testCase.queryEmbedding,
+  });
+  return evaluateQueryResultAtBudget(oracle, testCase, budget, result);
+}
+
 function mean(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -303,6 +350,7 @@ function aggregateBudget(cases: CaseEvaluation[], budget: number): AggregateBudg
   return {
     casesWithRequired: withRequired.length,
     meanReturnedCount: mean(budgetRows.map((row) => row.returnedCount)) ?? 0,
+    meanTokenEstimate: mean(budgetRows.map((row) => row.tokenEstimate)) ?? 0,
     negativeControlViolations: cases.filter((testCase) => {
       if (!testCase.negativeControl || testCase.expectedMaxReturned === undefined) return false;
       const row = testCase.budgets.find((entry) => entry.budget === budget);
@@ -508,9 +556,149 @@ export function evaluateRetrievalOracle(
   };
 }
 
+function scopesForContractCase(testCase: RetrievalOracleCase): string[] {
+  return testCase.filters.scopes?.length
+    ? testCase.filters.scopes
+    : testCase.filters.domains ?? [];
+}
+
+async function evaluateContractModeCaseAtBudget(
+  oracle: RetrievalOracleFixture,
+  testCase: RetrievalOracleCase,
+  mode: ContractRetrievalMode,
+  budget: number,
+): Promise<BudgetEvaluation> {
+  loadGraphForOfflineEvaluation(oracle.graph, { allowUnsafeOrgId: true, allowReplacingLoadedOrg: true });
+  const result = await getRelevantLearningsForContractMode(oracle.orgId, mode, {
+    scopes: scopesForContractCase(testCase),
+    projectId: testCase.filters.include_project_id,
+    taskQuery: testCase.queryText,
+    taskQueryEmbedding: testCase.queryEmbedding,
+    maxTokens: budget,
+  });
+  return evaluateQueryResultAtBudget(oracle, testCase, budget, result);
+}
+
+async function evaluateContractModeCase(
+  oracle: RetrievalOracleFixture,
+  testCase: RetrievalOracleCase,
+  mode: ContractRetrievalMode,
+  budgets: readonly number[],
+): Promise<CaseEvaluation> {
+  const caseBudgets: BudgetEvaluation[] = [];
+  for (const budget of budgets) {
+    caseBudgets.push(await evaluateContractModeCaseAtBudget(oracle, testCase, mode, budget));
+  }
+  return {
+    taskId: testCase.taskId,
+    podId: testCase.podId,
+    negativeControl: testCase.negativeControl ?? false,
+    ...(testCase.expectedMaxReturned !== undefined ? { expectedMaxReturned: testCase.expectedMaxReturned } : {}),
+    maxRequiredRank: testCase.maxRequiredRank ?? DEFAULT_MAX_REQUIRED_RANK,
+    mustIncludeNodeIds: testCase.mustIncludeNodeIds,
+    shouldIncludeNodeIds: testCase.shouldIncludeNodeIds ?? [],
+    mustNotIncludeNodeIds: testCase.mustNotIncludeNodeIds ?? [],
+    budgets: caseBudgets,
+  };
+}
+
+async function evaluateContractMode(
+  oracle: RetrievalOracleFixture,
+  mode: ContractRetrievalMode,
+  budgets: readonly number[],
+): Promise<ContractModeEvaluation> {
+  const cases: CaseEvaluation[] = [];
+  for (const testCase of oracle.cases) {
+    cases.push(await evaluateContractModeCase(oracle, testCase, mode, budgets));
+  }
+  const failures = cases.flatMap((caseEval) => {
+    const sourceCase = oracle.cases.find((testCase) => testCase.taskId === caseEval.taskId)!;
+    return caseEval.budgets.flatMap((row) => gateFailures(sourceCase, row));
+  });
+
+  return {
+    mode,
+    failures,
+    aggregateByBudget: Object.fromEntries(budgets.map((budget) => [String(budget), aggregateBudget(cases, budget)])),
+    cases,
+  };
+}
+
+function nullableDelta(a: number | null, b: number | null): number | null {
+  if (a === null || b === null) return null;
+  return a - b;
+}
+
+function failureCountForBudget(evaluation: ContractModeEvaluation, budget: number): number {
+  return evaluation.failures.filter((failure) => failure.budget === budget).length;
+}
+
+function chooseContractWinner(
+  legacy: AggregateBudgetMetrics,
+  taskRelevant: AggregateBudgetMetrics,
+): ContractRetrievalMode | "tie" {
+  const comparisons: Array<[number | null, ContractRetrievalMode]> = [
+    [nullableDelta(taskRelevant.recallAtBudget, legacy.recallAtBudget), "task_relevant"],
+    [nullableDelta(taskRelevant.mrr, legacy.mrr), "task_relevant"],
+    [nullableDelta(taskRelevant.precisionAt5, legacy.precisionAt5), "task_relevant"],
+  ];
+  const epsilon = 0.0005;
+  for (const [delta, positiveWinner] of comparisons) {
+    if (delta === null || Math.abs(delta) <= epsilon) continue;
+    return delta > 0 ? positiveWinner : "legacy";
+  }
+
+  const tokenDelta = taskRelevant.meanTokenEstimate - legacy.meanTokenEstimate;
+  if (Math.abs(tokenDelta) > 1) return tokenDelta < 0 ? "task_relevant" : "legacy";
+  return "tie";
+}
+
+export async function evaluateContractRetrievalOracle(
+  oracle: RetrievalOracleFixture,
+  budgets: readonly number[] = RETRIEVAL_EVAL_BUDGETS,
+): Promise<ContractComparisonReport> {
+  const legacy = await evaluateContractMode(oracle, "legacy", budgets);
+  const taskRelevant = await evaluateContractMode(oracle, "task_relevant", budgets);
+  const modes: Record<ContractRetrievalMode, ContractModeEvaluation> = {
+    legacy,
+    task_relevant: taskRelevant,
+  };
+
+  return {
+    generatedAt: new Date().toISOString(),
+    oracleGeneratedAt: oracle.generatedAt,
+    orgId: oracle.orgId,
+    budgets: [...budgets],
+    caseCount: oracle.cases.length,
+    modes,
+    comparisonByBudget: Object.fromEntries(budgets.map((budget) => {
+      const legacyAgg = legacy.aggregateByBudget[String(budget)];
+      const taskAgg = taskRelevant.aggregateByBudget[String(budget)];
+      const comparison: ContractComparisonBudget = {
+        budget,
+        winner: chooseContractWinner(legacyAgg, taskAgg),
+        recallAtBudgetDelta: nullableDelta(taskAgg.recallAtBudget, legacyAgg.recallAtBudget),
+        mrrDelta: nullableDelta(taskAgg.mrr, legacyAgg.mrr),
+        precisionAt5Delta: nullableDelta(taskAgg.precisionAt5, legacyAgg.precisionAt5),
+        meanReturnedDelta: taskAgg.meanReturnedCount - legacyAgg.meanReturnedCount,
+        meanTokenEstimateDelta: taskAgg.meanTokenEstimate - legacyAgg.meanTokenEstimate,
+        legacyFailureCount: failureCountForBudget(legacy, budget),
+        taskRelevantFailureCount: failureCountForBudget(taskRelevant, budget),
+      };
+      return [String(budget), comparison];
+    })),
+  };
+}
+
 function fmt(value: number | null | undefined): string {
   if (value === null || value === undefined) return "n/a";
   return value.toFixed(3);
+}
+
+function fmtSigned(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "n/a";
+  if (Math.abs(value) < 0.0005) return "0.000";
+  return `${value > 0 ? "+" : ""}${value.toFixed(3)}`;
 }
 
 function mdCell(value: string): string {
@@ -529,12 +717,12 @@ export function renderRetrievalEvalMarkdown(report: RetrievalEvalReport): string
   lines.push("");
   lines.push("## Aggregate Metrics");
   lines.push("");
-  lines.push("| budget | Recall@1 | Recall@3 | Recall@5 | Recall@10 | Recall@budget | MRR | Precision@3 | Precision@5 | Precision@10 | mean returned |");
-  lines.push("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push("| budget | Recall@1 | Recall@3 | Recall@5 | Recall@10 | Recall@budget | MRR | Precision@3 | Precision@5 | Precision@10 | mean returned | mean tokens |");
+  lines.push("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
   for (const budget of report.budgets) {
     const agg = report.aggregateByBudget[String(budget)];
     lines.push(
-      `| ${budget} | ${fmt(agg.recallAt1)} | ${fmt(agg.recallAt3)} | ${fmt(agg.recallAt5)} | ${fmt(agg.recallAt10)} | ${fmt(agg.recallAtBudget)} | ${fmt(agg.mrr)} | ${fmt(agg.precisionAt3)} | ${fmt(agg.precisionAt5)} | ${fmt(agg.precisionAt10)} | ${agg.meanReturnedCount.toFixed(1)} |`,
+      `| ${budget} | ${fmt(agg.recallAt1)} | ${fmt(agg.recallAt3)} | ${fmt(agg.recallAt5)} | ${fmt(agg.recallAt10)} | ${fmt(agg.recallAtBudget)} | ${fmt(agg.mrr)} | ${fmt(agg.precisionAt3)} | ${fmt(agg.precisionAt5)} | ${fmt(agg.precisionAt10)} | ${agg.meanReturnedCount.toFixed(1)} | ${agg.meanTokenEstimate.toFixed(1)} |`,
     );
   }
   lines.push("");
@@ -558,6 +746,51 @@ export function renderRetrievalEvalMarkdown(report: RetrievalEvalReport): string
     const edgeTypes = Object.entries(row.edgeTypeCounts).map(([type, count]) => `${type}:${count}`).join(", ");
     lines.push(
       `| ${mdCell(testCase.taskId)} | ${row.returnedCount} | ${row.tokenEstimate} | ${fmt(row.metrics.recallAt5)} | ${fmt(row.metrics.recallAtBudget)} | ${fmt(row.metrics.mrr)} | ${fmt(row.metrics.precisionAt5)} | ${mdCell(ranks || "n/a")} | ${mdCell(edgeTypes || "n/a")} |`,
+    );
+  }
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+export function renderContractComparisonMarkdown(report: ContractComparisonReport): string {
+  const lines: string[] = [];
+  lines.push("# KG Context Contract Comparison");
+  lines.push("");
+  lines.push(`Generated: ${report.generatedAt}`);
+  lines.push(`Oracle generated: ${report.oracleGeneratedAt}`);
+  lines.push(`Org: \`${report.orgId}\``);
+  lines.push(`Cases: ${report.caseCount}`);
+  lines.push("");
+  lines.push("Deltas are `task_relevant - legacy`; positive quality deltas favor `task_relevant`, negative token/returned deltas mean it is more compact.");
+  lines.push("");
+  lines.push("## Budget Comparison");
+  lines.push("");
+  lines.push("| budget | winner | legacy Recall@budget | task Recall@budget | Recall delta | legacy MRR | task MRR | MRR delta | legacy P@5 | task P@5 | P@5 delta | legacy mean returned | task mean returned | returned delta | legacy mean tokens | task mean tokens | token delta | failures legacy/task |");
+  lines.push("| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const budget of report.budgets) {
+    const legacy = report.modes.legacy.aggregateByBudget[String(budget)];
+    const task = report.modes.task_relevant.aggregateByBudget[String(budget)];
+    const comparison = report.comparisonByBudget[String(budget)];
+    lines.push(
+      `| ${budget} | ${comparison.winner} | ${fmt(legacy.recallAtBudget)} | ${fmt(task.recallAtBudget)} | ${fmtSigned(comparison.recallAtBudgetDelta)} | ${fmt(legacy.mrr)} | ${fmt(task.mrr)} | ${fmtSigned(comparison.mrrDelta)} | ${fmt(legacy.precisionAt5)} | ${fmt(task.precisionAt5)} | ${fmtSigned(comparison.precisionAt5Delta)} | ${legacy.meanReturnedCount.toFixed(1)} | ${task.meanReturnedCount.toFixed(1)} | ${comparison.meanReturnedDelta.toFixed(1)} | ${legacy.meanTokenEstimate.toFixed(1)} | ${task.meanTokenEstimate.toFixed(1)} | ${comparison.meanTokenEstimateDelta.toFixed(1)} | ${comparison.legacyFailureCount}/${comparison.taskRelevantFailureCount} |`,
+    );
+  }
+  lines.push("");
+
+  lines.push("## Strict Budget Case Metrics");
+  lines.push("");
+  lines.push("| task | legacy returned | task returned | legacy tokens | task tokens | legacy Recall@budget | task Recall@budget | legacy MRR | task MRR | required ranks legacy | required ranks task |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |");
+  const legacyCases = new Map(report.modes.legacy.cases.map((testCase) => [testCase.taskId, testCase]));
+  for (const taskCase of report.modes.task_relevant.cases) {
+    const legacyCase = legacyCases.get(taskCase.taskId);
+    if (!legacyCase) continue;
+    const legacyRow = legacyCase.budgets.find((entry) => entry.budget === STRICT_GATE_BUDGET) ?? legacyCase.budgets[0];
+    const taskRow = taskCase.budgets.find((entry) => entry.budget === STRICT_GATE_BUDGET) ?? taskCase.budgets[0];
+    const legacyRanks = Object.entries(legacyRow.requiredRanks).map(([id, rank]) => `${id}:${rank ?? "miss"}`).join(", ");
+    const taskRanks = Object.entries(taskRow.requiredRanks).map(([id, rank]) => `${id}:${rank ?? "miss"}`).join(", ");
+    lines.push(
+      `| ${mdCell(taskCase.taskId)} | ${legacyRow.returnedCount} | ${taskRow.returnedCount} | ${legacyRow.tokenEstimate} | ${taskRow.tokenEstimate} | ${fmt(legacyRow.metrics.recallAtBudget)} | ${fmt(taskRow.metrics.recallAtBudget)} | ${fmt(legacyRow.metrics.mrr)} | ${fmt(taskRow.metrics.mrr)} | ${mdCell(legacyRanks || "n/a")} | ${mdCell(taskRanks || "n/a")} |`,
     );
   }
   lines.push("");

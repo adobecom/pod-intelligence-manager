@@ -1,6 +1,6 @@
 {
   "podId": "pod-emc-rbac",
-  "pulledAt": "2026-06-04T23:34:33.971Z",
+  "pulledAt": "2026-06-09T19:55:31.164Z",
   "sourceOrgSlug": "adobecom",
   "payload": {
     "pod": {
@@ -367,9 +367,486 @@
         }
       ],
       "total_matching": 230,
-      "truncated": true
+      "truncated": true,
+      "retrieval_source": "knowledge-query"
     },
     "taskRelevantLearnings": {
+      "future-emc-events-dashboard-permission-filter": {
+        "nodes": [
+          {
+            "type": "pattern",
+            "summary": "RBAC permission gating uses wildcard-matching permission strings (resource:access format) with fallback to domain-only permissions when role fetch returns 403, and gates UI elements via useHasPermission hooks and filterEvents/filterSeries helpers.",
+            "details": "Permissions are stored as Set<RBACPermission> in GroupContext and checked via useHasPermission(resource, access) or useRBACFilter helpers. Wildcard matching order: *:* → exact → resource:* → *:access. When GET /v1/roles/{roleId} returns 403, frontend falls back to event:*, series:*, session:*, cloud:*, config:*, integration:* (all domain actions visible, admin UI hidden). GroupContext increments groupVersion on group switch to trigger dashboard re-fetches; role is resolved before groupVersion bump to prevent race conditions. UI elements (TopNav tabs, Home cards, OverviewDashboard stat cards) are conditionally rendered using canReadEvents/canReadSeries/canReadClouds derived from useHasPermission. API service injects x-adobe-esp-group-id header for ESP requests when activeGroupId is set.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md",
+            "created_at": "2026-05-26T16:22:52.791Z"
+          },
+          {
+            "type": "scope_insight",
+            "summary": "Events Service Platform implements a three-tier hierarchical RBAC system (Platform → Org → Team) with type-scoped permissions, where all non-exempt endpoints require x-adobe-esp-group-id header and role resolution via middleware.",
+            "details": "The authorization model enforces a strict scope hierarchy: Platform owns Orgs, Orgs own Teams. Each scope maintains its own Groups, and users belong to Groups (not directly to scopes). All endpoints except public read/list series/events/sessions require the x-adobe-esp-group-id header. Express middleware resolves the user's role by looking up groupId in the scopes manager (pk: group#groupId, sk: role), then attaches the role object to UserInfo. Scope endpoints support type-scoped permissions (e.g., scope-team:write, scope-org:read) in addition to broad permissions (scope:*). The permission structure is {resource}:{access} where resources include scope, group, user, role, config, integration, series, event, session, and * for all; access includes read, write, delete, and *. Wildcard permissions like *:* grant full access (platform super admin), and scope-team:* grants full access only to team-type scopes.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/Platform-Org-Team-Support.md",
+            "created_at": "2026-05-26T16:22:28.856Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "Do not use Kinesis payload as source of truth for event metadata; always rehydrate from DynamoDB on every stream record, even for localization-only updates.",
+            "details": "EMC emits two Kinesis records per event save (one for event, one for localization), but only the first carries full metadata (e.g., cloud-type). In EventDataStreamProcessor.js processRecord(), the prior logic conditionally rehydrated from DynamoDB only when liveUpdate=true, causing localization records to forward partial payloads downstream. This broke `.page` preview RSVP forms when the second (partial) write overwrote the first (complete) write. Fix: always rebuild newData.itemData from liveData (DynamoDB), falling back to Kinesis payload only for localizations and localizationOverrides fields. This ensures both eventData and localization Kinesis records produce fully hydrated payloads to Hoolihan/AIO DA.",
+            "domains": [
+              "backend"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/937",
+            "created_at": "2026-05-26T16:22:30.236Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "EMC is a frontend-only ExC Shell SPA with no backend repo; all mutations and queries call external Adobe APIs (ESP, ESL) directly through a centralized ApiService with caching, validation, and dry-run support.",
+            "details": "EMC (web-src/src/) is a React 18 + TypeScript + React Spectrum S2 SPA deployed via Adobe App Builder. There is no backend in this repo. All API calls route through services/api.ts (ApiService) and cachedApi wrapper: GET requests use 10s caching with request dedup and pattern-based invalidation; all mutations require input validation via validateString()/validateObject() before dispatch; all fetch calls pass through safeFetch() with ALLOWED_HOSTS validation. Two external backends: Adobe ESP (events/series/speakers endpoints) and ESL (lifecycle/venues/attendees). Auth uses Bearer token (IMS in prod, dev token locally) + x-gw-ims-org-id header. Dry-run mode available via apiService.enableDryRun(). Form state (EventForm, SeriesForm) persists to sessionStorage with debounced auto-save; multi-step FormWizard uses useEventFormComponent hook lifecycle (onGatherPayload, onAfterSave, onLoadResponse, validate) for step registration.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "github.com/adobecom/EMC/doc:CLAUDE.md",
+            "created_at": "2026-05-26T16:22:54.952Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "EMC frontend organizes event form as 13 modular components under EventForm/ directory, each owning a logical section (venue, speakers, agenda, etc.), composed by EventForm.tsx wizard container.",
+            "details": "The EventForm/ directory contains 13 specialized components (EventFormatComponent, EventInfoComponent, VenueComponent, SpeakersComponent, SponsorsComponent, AgendaComponent, EventImagesComponent, ProfilesComponent, RegistrationConfigComponent, RegistrationFieldsComponent, PageMetadataComponent, plus index.ts barrel export) that are composed into a multi-step wizard by the parent EventForm.tsx container. Each component owns a logical domain (e.g., VenueComponent handles Google Places integration, SpeakersComponent manages speaker CRUD, RegistrationFieldsComponent configures RSVP form fields). This modular decomposition enables independent testing, reuse, and maintenance of form sections. The barrel export (index.ts) centralizes imports for the parent wizard.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.8,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/FRONTEND.md",
+            "created_at": "2026-05-26T16:23:21.912Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "Blocker encountered: RSVP API / EMC discrepancy (blocker)",
+            "details": "Reported by cli-user: EMC has per-option RSVP UI state; event API only has rsvpFormFields visible/required.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.9,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Event Form uses 4-step wizard structure where Step 1 groups 5 logical components (format, tags, info, dates, venue) rather than separating into individual steps; this matches v1 reference and improves UX.",
+            "details": "The EventForm wizard in EMC follows a deliberate 4-step structure (not 8) where Step 1 contains EventFormatComponent, Tags, Event Info, Date/Time, and Venue components as logical sub-sections. This pattern groups related fields (e.g., all basic event metadata in Step 1) while keeping the overall flow concise. Step 2 handles Speakers/Hosts, Step 3 handles images, Step 4 handles RSVP/status. When implementing new event forms or extending this wizard, maintain this grouping: do not split Step 1 into separate steps unless UX research shows users abandon multi-step forms at >6 steps. The FormWizard shared component manages progress tracking and navigation across all steps.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/EVENT_FORM.md",
+            "created_at": "2026-05-26T16:23:56.841Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "ESP resources use modificationTime for optimistic concurrency on PUT; clients must round-trip it",
+            "details": "Every ESP PUT on an updatable resource (event, series, session, speaker) requires the modificationTime field to match the server's last-known value. If they differ, PUT returns 409 with the current server state. Clients must therefore: (a) capture modificationTime on every GET, (b) send it back unchanged on the next PUT, (c) re-fetch on 409 and merge. Dropping or recomputing modificationTime client-side is the most common cause of silent edit failures on EMC.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.95,
+            "source_pod_name": "sandbox-seed-optimistic-concurrency-modtime",
+            "created_at": "2026-05-26T16:22:43.873Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Speakers and sponsors are grouped by role/tier with per-group drag-and-drop reordering; role/tier changes move items to the end of the new group and trigger per-group ordinal recomputation.",
+            "details": "In SpeakersComponent.tsx and SponsorsComponent.tsx, items are grouped by speakerType and tier respectively. Drag-and-drop is restricted to within-group moves only (cross-group drops are blocked). When a speaker's role or sponsor's tier is changed via inline picker, the item is moved to the end of the new group. On save, onAfterSave computes per-group ordinals for both components. SponsorData now includes an optional ordinal field, and updateSponsorInEvent in api.ts explicitly preserves ordinal in the merge logic. Both components display a disclaimer note that group display order on the DA page is governed by template configuration, not EMC form ordering.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/EMC/pull/142",
+            "created_at": "2026-05-26T16:23:40.904Z"
+          },
+          {
+            "type": "resolved_conflict",
+            "summary": "POI (point of interest) must not be auto-hydrated into event objects for SharePoint push; responsibility lies with event marketers and FE validation.",
+            "details": "PR #633 attempted to add POI to hydrated event objects in ServiceProcessor.js (aws/templates/lambda/events-kinesis-processor/src/ServiceProcessor.js) for SharePoint sync. This was reverted because: (1) event marketers are responsible for consciously excluding POI from form field selections during event creation, and (2) the EMC console FE (owned by Qiyun) provides safeguarding at RSVP field selection, where POI option visibility is already controlled. Do not auto-inject POI into the event hydration pipeline; enforce the contract that POI inclusion is an explicit, user-driven choice at form design time.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/635",
+            "created_at": "2026-05-26T16:23:25.742Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP API / EMC discrepancy (decision)",
+            "details": "Decision by cli-user: EMC has per-option RSVP UI state; event API only has rsvpFormFields visible/required.",
+            "domains": [
+              "frontend",
+              "backend",
+              "infra"
+            ],
+            "confidence_score": 0.9,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "CSV export filename convention: prefix with event title and ISO datetime, sanitize user input, append .csv extension only at download time.",
+            "details": "EMC attendee and campaign exports use a standardized filename pattern: `[event-title]_[YYYY-MM-DD_HH-MM-SS]` for attendees, `[event-title]_campaigns_[YYYY-MM-DD_HH-MM-SS]` for campaigns. The `utils/csvExport.ts` module provides `sanitizeFilename()` and `exportDatetime()` helpers to enforce this. Filenames are user-editable in the export dialog but must be sanitized before download; `.csv` extension is appended at download time, not stored in the user-facing field. This pattern applies across ExportDialog.tsx (attendee) and CampaignExportDialog (campaign tab).",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/EMC/pull/125",
+            "created_at": "2026-05-26T16:23:57.422Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "IMS user context must be threaded as a prop through component tree (App → UserPanel, SideBar); UserPanel displays profile data with graceful fallback when IMS profile unavailable.",
+            "details": "The UserPanel component receives an `ims` prop containing `{ profile?: IMSProfile, org?: string, token?: string }` where IMSProfile has `userId`, `name`, `email`. Components extract user context via optional chaining (e.g., `ims.profile?.name || 'Guest'`). When `ims.profile` is absent, UserPanel renders 'Not Connected' state. This pattern establishes the contract for how IMS data flows through the EMC frontend: App.tsx passes `ims` to both UserPanel and SideBar, and any component needing user context receives the same IMS object structure. Token is never rendered; user ID is truncated in UI for privacy.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/USER_PANEL_IMPLEMENTATION.md",
+            "created_at": "2026-05-26T16:23:38.739Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Session form dirty-state tracking and unsaved-changes dialog: parent components receive `sessionHasOpenForm` prop to gate navigation; SessionForm detects dirty state and triggers callbacks; FormWizard integrates confirmation dialog before allowing navigation away.",
+            "details": "The session management enhancement establishes a pattern for handling unsaved changes across the EventForm hierarchy. SessionManagementComponent tracks form state via `sessionHasOpenForm` prop and notifies parents of changes. SessionForm is responsible for detecting dirty state (form modifications) and invoking callbacks to signal this state upward. FormWizard consumes this signal and blocks navigation by rendering a confirmation dialog before allowing users to leave the form. This pattern ensures data loss prevention across nested form components without losing the ability to navigate intentionally. Apply this pattern to other multi-step forms in EMC that risk data loss on navigation.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/EMC/pull/130",
+            "created_at": "2026-05-26T16:23:57.984Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Kinesis processors must gracefully handle 403 errors from scope-config endpoints and fall back to cached/live data rather than failing the stream record.",
+            "details": "The events-kinesis-processor Lambda (EventDataStreamProcessor, SessionRecordProcessor, SessionWebhookProcessor) fetches scope configs via GET /events/{id}/configs during record processing. When this endpoint returns 403 (e.g., due to authorization or resource state), the processor must not fail the entire Kinesis record. Instead, it should gracefully degrade by using previously hydrated data or live event data. See commits 30b8fbb (graceful 403 fallback), 1f98166 (fetch live event data for rsvpFormFields on localization changes), and 781c3ca (include seriesId and detailPagePath from liveData). This prevents cascading failures in the event stream pipeline.",
+            "domains": [
+              "backend",
+              "infra"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/926",
+            "created_at": "2026-05-26T16:23:27.298Z"
+          },
+          {
+            "type": "scope_insight",
+            "summary": "Attendee status endpoint exposes only registration state, not full attendee record or event details.",
+            "details": "The GET /v1/events/{eventId}/attendees/{attendeeId or me}/status endpoint returns a minimal payload with only the `registered` boolean field. This establishes that status queries are scoped to registration state alone, not full attendee metadata or event context. The endpoint supports both explicit attendeeId and 'me' (current user) path parameters. Future status-related queries should follow this minimal-payload pattern rather than returning full attendee objects.",
+            "domains": [
+              "backend"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/135",
+            "created_at": "2026-05-26T16:22:41.339Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "ENVIRONMENT variable is baked into the bundle at build time to control API tier routing (dev/stage/prod), not set at runtime.",
+            "details": "The EMC frontend uses the ENVIRONMENT variable (dev/stage/prod) set during the build process to determine which API endpoints the app calls at runtime. This is configured in .env and baked into the bundle, not read dynamically. The mapping is: dev → dev cluster, stage → events-service-platform-stage.adobe.io + events-service-layer-stage.adobe.io, prod → events-service-platform.adobe.io + events-service-layer.adobe.io. Deploy commands (npm run deploy:dev/stage/prod) handle setting ENVIRONMENT before build. This pattern prevents runtime environment mismatches and ensures API tier consistency across a deployment.",
+            "domains": [
+              "frontend",
+              "infra"
+            ],
+            "confidence_score": 0.82,
+            "source_pod_name": "github.com/adobecom/EMC/doc:README.md",
+            "created_at": "2026-05-26T16:23:14.159Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "Do not let upstream service 403s crash the event processing pipeline; gracefully degrade config-dependent fields to null and log the error.",
+            "details": "ServiceProcessor.applyRelatedData calls scopeConfigService.getEventConfigs() to fetch event scope configs via GET /v1/events/{eventId}/configs. When the frontend has not yet integrated scope configs, CGW rejects the service OAuth token with 403 (ErrIllegalServiceOauthToken). Wrap this call in try-catch, default locales, customAttributesConfig, and rsvpConfig to null on any error, and log the warning. This prevents the entire kinesis event processing pipeline from crashing on every new event creation. See aws/templates/lambda/events-kinesis-processor/src/ServiceProcessor.js.",
+            "domains": [
+              "backend",
+              "infra"
+            ],
+            "confidence_score": 0.82,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/916",
+            "created_at": "2026-05-26T16:22:59.604Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "React Spectrum 2 Tabs component can crash when overflow/collapse unmounts its internal TabListStateContext; use SegmentedControl + conditional rendering instead.",
+            "details": "S2 horizontal Tabs on the Registrations page (/registrations) can enter an overflow/collapse path that unmounts the react-aria-components Tabs shell, leaving TabListStateContext null and causing 'Cannot read properties of null (reading selectedKey)' crashes. Replace with SegmentedControl + SegmentedControlItem (the established EMC pattern) paired with selectedTab state to conditionally render the three sections (Registrations, Campaigns, Sessions). This avoids the context unmounting issue entirely. See web-src/src/pages/Registrations/Registrations.tsx for the applied pattern.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.82,
+            "source_pod_name": "github.com/adobecom/EMC/pull/146",
+            "created_at": "2026-05-26T16:23:16.382Z"
+          },
+          {
+            "type": "scope_insight",
+            "summary": "EMC's per-option RSVP UI state model does not map cleanly to the event API's flat rsvpFormFields structure",
+            "details": "The Event Management Console maintains granular per-option UI state for RSVP fields, while the underlying event API only exposes coarser visible/required flags on rsvpFormFields. This impedance mismatch requires a translation layer or dual-source loading strategy on the frontend. Future pods touching RSVP field configuration should budget time to handle this gap explicitly rather than assuming API parity.",
+            "domains": [
+              "frontend",
+              "rsvp",
+              "api"
+            ],
+            "confidence_score": 0.85,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          }
+        ],
+        "total_matching": 42,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
+      },
+      "future-emc-invite-only-rsvp-state": {
+        "nodes": [
+          {
+            "type": "resolved_conflict",
+            "summary": "Invite-only events gate RSVP behind `inviteOnly` flag and campaign URL param; replace button with text message rather than disable.",
+            "details": "The invite-only RSVP feature gates registration on two conditions: (1) an `inviteOnly` event flag from the backend, and (2) a campaign URL parameter. When both conditions are met, the RSVP button is replaced with a text message instead of being disabled. This pattern prevents accidental user confusion and clarifies that the event is not available for self-service registration. Check `event-libs/v1/blocks/events-form/events-form.js` for the gating logic and button replacement implementation.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/119",
+            "created_at": "2026-05-26T16:23:55.213Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Invite-only events require a valid campaign URL parameter (?campaign=) to enable RSVP; gating occurs at button-disable and form-build stages with dictionary-driven error messaging.",
+            "details": "When an event has inviteOnly=true, RSVP is blocked unless a valid campaign ID is present in the URL query string. Validation uses getValidCampaignIdFromUrl() (utils/utils.js) against CAMPAIGN_ID_PATTERN (utils/constants.js). Gating is enforced in two places: (1) updateRSVPButtonState in decorate.js disables the button early via setCtaState('inviteOnlyNoCampaign'), and (2) events-form.js handleProfile blocks form construction entirely and renders an error message keyed to rsvp-invite-only-no-campaign-cta-text in the dictionary. The campaign ID is then passed to submitForm for server-side validation.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/77",
+            "created_at": "2026-05-26T16:23:34.927Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP API / EMC discrepancy (decision)",
+            "details": "Decision by cli-user: EMC has per-option RSVP UI state; event API only has rsvpFormFields visible/required.",
+            "domains": [
+              "frontend",
+              "backend",
+              "infra"
+            ],
+            "confidence_score": 0.9,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "Blocker encountered: RSVP API / EMC discrepancy (blocker)",
+            "details": "Reported by cli-user: EMC has per-option RSVP UI state; event API only has rsvpFormFields visible/required.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.9,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP button state machine: six mutually-exclusive states (loading, default, registered, waitlisted, to-waitlist, event-closed) driven by authentication, capacity, and registration status; text and accessibility managed via dictionary keys and tabindex.",
+            "details": "RSVP buttons in event-libs use hash patterns (#rsvp-form, #webinar-marketo-form) to trigger decorateEvent processing. State transitions are: Loading (disabled, tabindex=-1) → Default (enabled) → one of {Registered, Waitlisted, To Waitlist, Event Closed} based on user auth (allow-guest-registration meta), event capacity (ESP API), and waitlist config (allow-wait-listing meta). Each state maps to a dictionary key (rsvp-loading-cta-text, registered-cta-text, waitlist-cta-text, event-full-cta-text, etc.). Form 400 errors distinguish event-full vs campaign-full (via ?campaign URL param) and whether waitlisting is enabled, using separate error keys (event-full-error-msg, campaign-full-no-waitlist-error-msg, etc.). Custom button text uses pipe separator (text|fallback). State updates are reactive via BlockMediator subscriptions.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.82,
+            "source_pod_name": "github.com/adobecom/event-libs/doc:docs/rsvp-button-authoring-guidelines.md",
+            "created_at": "2026-05-26T16:23:04.212Z"
+          },
+          {
+            "type": "scope_insight",
+            "summary": "EMC's per-option RSVP UI state model does not map cleanly to the event API's flat rsvpFormFields structure",
+            "details": "The Event Management Console maintains granular per-option UI state for RSVP fields, while the underlying event API only exposes coarser visible/required flags on rsvpFormFields. This impedance mismatch requires a translation layer or dual-source loading strategy on the frontend. Future pods touching RSVP field configuration should budget time to handle this gap explicitly rather than assuming API parity.",
+            "domains": [
+              "frontend",
+              "rsvp",
+              "api"
+            ],
+            "confidence_score": 0.85,
+            "source_pod_name": "EMC-S27-ConfigsService",
+            "created_at": "2026-05-07T22:02:19.657Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP button and form 400-error handling must respect campaign capacity when ?campaign URL param is present and valid, falling back to event capacity otherwise, with campaign-specific error messages and UI state.",
+            "details": "When a valid campaign ID is present in the URL (?campaign=...), use getCampaign() to fetch campaign capacity and apply it to both RSVP button state (updateRSVPButtonState in decorate.js) and form 400-error handling (buildErrorMsg and submit handler in events-form.js). If campaign fetch fails or campaign ID is invalid (validate via CAMPAIGN_ID_PATTERN in constances.js), fall back to event capacity. On 400 response with campaign present, use campaign-full-error-msg or campaign-full-no-waitlist-error-msg keys and update submit button to waitlist or event-full state (disabled if no waitlist) to keep copy and UI consistent. This ensures campaign-level capacity gates take precedence over event-level gates when applicable.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.82,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/83",
+            "created_at": "2026-05-26T16:22:34.205Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Invite-only events without a valid campaign parameter must block RSVP UI and show a shared dictionary-driven message across all event blocks (decorate, events-form, sessions-hub).",
+            "details": "When an invite-only event is opened without a valid `campaign` URL parameter, the RSVP flow is blocked. Use `dictionaryManager.getInviteOnlyNoCampaignMessage()` to fetch the user-facing message from the dictionary sheet. In sessions-hub, compute `inviteOnlyBlocked` after `await dictionaryManager.initialize()`, then replace the sticky Register CTA and per-card event-registration buttons with the status message. Guard all click handlers and sessionStorage-deferred modal opens to prevent RSVP submission. Apply CSS classes `.sh-banner-invite-only-msg` and `.sh-invite-only-msg` for styling. This pattern ensures parity across decorate.js, events-form.js, and sessions-hub.js.",
+            "domains": [
+              "frontend",
+              "pattern"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/122",
+            "created_at": "2026-05-26T16:23:37.062Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Campaign-aware RSVP registration: when campaignId URL param is present, fetch campaign capacity and apply waitlist rules before attendee creation.",
+            "details": "In esp-controller.js, the getAndCreateAndAddAttendee flow checks for campaignId in the attendee payload. If present and event is not full, call getCampaign(eventId, campaignId) to fetch campaign capacity (attendeeLimit, attendeeCount, waitlistAttendeeCount). Apply waitlist logic: if attendeeLimit === attendeeCount, mark waitlisted; if attendeeLimit > attendeeCount and waitlistAttendeeCount > 0, mark waitlisted; if attendeeLimit > attendeeCount and waitlistAttendeeCount === 0, register normally. If no attendeeLimit, pass campaignId without campaign logic. Skip campaign lookup when event is already full. campaignId is sanitized in events-form.js (regex ^[\\w-]{1,128}$) and added to EVENT_ATTENDEE_DATA_FILTER in data-utils.js so it flows into the event attendee API body.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/68",
+            "created_at": "2026-05-26T16:22:39.367Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP field metadata is loaded from external event-libs config via configService.getRsvpConfig; boolean attendee fields render as 'Yes'/'No' in UI and CSV exports.",
+            "details": "RegistrationFieldsComponent loads RSVP field catalogs via configService.getRsvpConfig (with caching/retry), and renders each field's Label from the JSON config. In AttendeeTableComponent, boolean columns (e.g., requiresSxswTicket) display as 'yes'/'no' in table cells; AttendeeFiltersComponent maps filter chips to 'Yes'/'No'; ExportDialog normalizes boolean columns to 'Yes'/'No' in CSV. The field definition lives in external event-libs experiencecloud.json (not in EMC repo), following the Type/Options conventions of other Experience Cloud RSVP fields. Add requiresSxswTicket?: boolean to attendee.ts type definitions.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/EMC/pull/150",
+            "created_at": "2026-05-26T16:22:42.302Z"
+          },
+          {
+            "type": "anti_pattern",
+            "summary": "Do not use Kinesis payload as source of truth for event metadata; always rehydrate from DynamoDB on every stream record, even for localization-only updates.",
+            "details": "EMC emits two Kinesis records per event save (one for event, one for localization), but only the first carries full metadata (e.g., cloud-type). In EventDataStreamProcessor.js processRecord(), the prior logic conditionally rehydrated from DynamoDB only when liveUpdate=true, causing localization records to forward partial payloads downstream. This broke `.page` preview RSVP forms when the second (partial) write overwrote the first (complete) write. Fix: always rebuild newData.itemData from liveData (DynamoDB), falling back to Kinesis payload only for localizations and localizationOverrides fields. This ensures both eventData and localization Kinesis records produce fully hydrated payloads to Hoolihan/AIO DA.",
+            "domains": [
+              "backend"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/937",
+            "created_at": "2026-05-26T16:22:30.236Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "EMC frontend organizes event form as 13 modular components under EventForm/ directory, each owning a logical section (venue, speakers, agenda, etc.), composed by EventForm.tsx wizard container.",
+            "details": "The EventForm/ directory contains 13 specialized components (EventFormatComponent, EventInfoComponent, VenueComponent, SpeakersComponent, SponsorsComponent, AgendaComponent, EventImagesComponent, ProfilesComponent, RegistrationConfigComponent, RegistrationFieldsComponent, PageMetadataComponent, plus index.ts barrel export) that are composed into a multi-step wizard by the parent EventForm.tsx container. Each component owns a logical domain (e.g., VenueComponent handles Google Places integration, SpeakersComponent manages speaker CRUD, RegistrationFieldsComponent configures RSVP form fields). This modular decomposition enables independent testing, reuse, and maintenance of form sections. The barrel export (index.ts) centralizes imports for the parent wizard.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.8,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/FRONTEND.md",
+            "created_at": "2026-05-26T16:23:21.912Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Event Form uses 4-step wizard structure where Step 1 groups 5 logical components (format, tags, info, dates, venue) rather than separating into individual steps; this matches v1 reference and improves UX.",
+            "details": "The EventForm wizard in EMC follows a deliberate 4-step structure (not 8) where Step 1 contains EventFormatComponent, Tags, Event Info, Date/Time, and Venue components as logical sub-sections. This pattern groups related fields (e.g., all basic event metadata in Step 1) while keeping the overall flow concise. Step 2 handles Speakers/Hosts, Step 3 handles images, Step 4 handles RSVP/status. When implementing new event forms or extending this wizard, maintain this grouping: do not split Step 1 into separate steps unless UX research shows users abandon multi-step forms at >6 steps. The FormWizard shared component manages progress tracking and navigation across all steps.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/EMC/doc:docs/EVENT_FORM.md",
+            "created_at": "2026-05-26T16:23:56.841Z"
+          },
+          {
+            "type": "resolved_conflict",
+            "summary": "POI (point of interest) must not be auto-hydrated into event objects for SharePoint push; responsibility lies with event marketers and FE validation.",
+            "details": "PR #633 attempted to add POI to hydrated event objects in ServiceProcessor.js (aws/templates/lambda/events-kinesis-processor/src/ServiceProcessor.js) for SharePoint sync. This was reverted because: (1) event marketers are responsible for consciously excluding POI from form field selections during event creation, and (2) the EMC console FE (owned by Qiyun) provides safeguarding at RSVP field selection, where POI option visibility is already controlled. Do not auto-inject POI into the event hydration pipeline; enforce the contract that POI inclusion is an explicit, user-driven choice at form design time.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/635",
+            "created_at": "2026-05-26T16:23:25.742Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Registration form preview mode renders the form with sample data without creating records — essential for organizer testing",
+            "details": "Implemented by fe-agent-registration: The RSVP form editor includes a 'Preview' button that renders the FormRenderer in read-only mode with sample data. The preview uses the same rendering path as the live form but submits to a no-op endpoint. This lets organizers see exactly how their form will look before publishing, including locale overlays and custom attributes.",
+            "domains": [
+              "frontend",
+              "design"
+            ],
+            "confidence_score": 0.9,
+            "source_pod_name": "Registration Forms v1",
+            "created_at": "2026-04-21T04:43:57.001Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "RSVP registration payloads must include `requiresSxswTicket` flag and implicit consent via `contactMethods` field; sanitize HTML in form text/textarea inputs and enforce RSVP limit column as maxlength constraint.",
+            "details": "When submitting event-attendee payloads for RSVP, include `requiresSxswTicket` boolean when SXSW ticket filter applies (#140). Implicit consent for new registrations is recorded via the `contactMethods` field in the payload (MWPW-194036, #126). In events-form block (event-libs/v1/blocks/events-form/events-form.js), sanitize HTML in text and textarea inputs (#110) and honor the RSVP limit column value as the `maxlength` attribute constraint. These patterns ensure consistent registration data shape and prevent XSS while respecting capacity limits.",
+            "domains": [
+              "frontend",
+              "backend"
+            ],
+            "confidence_score": 0.75,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/141",
+            "created_at": "2026-05-26T16:22:41.791Z"
+          },
+          {
+            "type": "pattern",
+            "summary": "Session registration UI follows a three-state model (Registered/Waitlisted, Able to Register, Blocked) with explicit predicates for each state; SessionTimeFull responses must be read from body, not just HTTP status.",
+            "details": "In `event-libs/v1/blocks/sessions-hub/sessions-hub.js`, the per-card CTA must implement exactly three states: (1) Registered/Waitlisted badge (blue, shows checkmark + text from `waitlist-cta-text` dictionary key, hover swaps to unregister action), (2) Able-to-register button (direct `registerForSessionTime` API call, no modal), (3) Blocked button (disabled `.sh-btn-blocked`, labeled from `Registration unavailable` dictionary key). Use the pure predicate `isSessionRegistrationBlocked({ isEventWaitlisted, isEventClosed, inviteOnlyBlocked })` to determine blocked state. For session-time registration responses, read `resp.body.data.registrationStatus === 'waitlisted'` to distinguish waitlist from full registration (2xx with waitlist status must set `session.isWaitlisted`, not `isRegistered`). Use `isSessionTimeFullError(resp)` helper to detect SessionTimeFull errors by checking `error.code | errorCode | error | type | message` fields defensively. Event-level waitlist state (`rsvpData.registrationStatus === 'waitlisted'`) blocks all per-card registration; event-closed state (computed from `isFull && !allowWaitlisting`, accepting both boolean and string `'true'`) also blocks. Banner visibility: keep visible for waitlisted users (only hide when `isEventRegistered === true`), render `sh-banner-waitlist-msg` paragraph with `getEventWaitlistBannerMessage(manager, { eventTitle })` helper from `dictionary-manager.js`.",
+            "domains": [
+              "frontend"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "github.com/adobecom/event-libs/pull/128",
+            "created_at": "2026-05-26T16:22:52.344Z"
+          },
+          {
+            "type": "scope_insight",
+            "summary": "Scope configs (rsvp, locales, customAttributes) are the authoritative source for event metadata; publishing profiles are deprecated but retained for backward compatibility during migration.",
+            "details": "Events created under Creative Events (25f26faa-f8e2-4e99-b341-81a3995ef9af) and Enterprise Events (d758a3bc-ff31-4bfe-a2f5-343f074aec6c) scopes must define four config types: rsvp (pool of form fields), locales (localeNames, localeUrlCodes), and customAttributes (with primaryProductName and promotionalItems attributes). The Kinesis processor (events-kinesis-processor/ServiceProcessor.applyRelatedData) must call GET /v1/events/{eventId}/configs to hydrate event.locales, event.customAttributesConfig, and event.rsvpConfig at stream-processing time; event DDB records store only user selections (rsvpFormFields, customAttributes[] with valueId), not full definitions. Publishing profiles remain in the payload for backward compat but are no longer the source of truth. hoolihan-webhooks must read primary product from event.customAttributes[] where attribute='primaryProductName', promotional items from customAttributes[] where attribute='promotionalItems', RSVP pool from event.rsvpConfig.rsvpFormFields[], and locales from event.locales.localeNames/localeUrlCodes.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/scope-configs-wcms-aio-migration-plan.md",
+            "created_at": "2026-05-26T16:22:27.812Z"
+          },
+          {
+            "type": "resolved_conflict",
+            "summary": "Response validation must be permissive for legacy attendee data; request-side validation is decoupled and handled separately by RSVP forms.",
+            "details": "PhoneNumber and AttendeeTextField schemas in GET /v1/events/{eventId}/attendees responses were over-constrained (pattern: ^\\+?[0-9]+$, maxLength: 20 for phone; pattern rejecting all HTML for text fields with maxLength: 100), causing 12.8% of production attendee records to fail HTTP 418 validation. The fix relaxes response schemas (PhoneNumber: drop pattern, maxLength 30; AttendeeTextField: newline-tolerant pattern ^(?![\\s\\S]*<[^>]*>)[\\s\\S]*$, maxLength 200) while explicitly documenting that form-side input validation remains the responsibility of RSVP-form frontends. This resolves the architectural tension: the service layer must accept and return legacy data as-is; sanitization and strict validation belong upstream.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/pull/935",
+            "created_at": "2026-05-26T16:22:29.787Z"
+          }
+        ],
+        "total_matching": 79,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
+      },
       "real-emc-rbac-events-dashboard-gating": {
         "nodes": [
           {
@@ -562,8 +1039,9 @@
             "created_at": "2026-05-26T16:23:56.841Z"
           }
         ],
-        "total_matching": 16,
-        "truncated": false
+        "total_matching": 49,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
       },
       "real-emc-scope-group-my-filter": {
         "nodes": [
@@ -792,8 +1270,9 @@
             "created_at": "2026-05-26T16:22:42.302Z"
           }
         ],
-        "total_matching": 19,
-        "truncated": false
+        "total_matching": 55,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
       },
       "arch-delete-scope-blast-radius": {
         "nodes": [
@@ -941,18 +1420,6 @@
             "created_at": "2026-05-26T16:22:42.302Z"
           },
           {
-            "type": "resolved_conflict",
-            "summary": "RBAC scope attachment point: anchor at Series level, not Event, to enable transitive authorization through seriesId → scopeId resolution and efficient scope-based queries.",
-            "details": "Series is the natural top-level container in the ownership hierarchy (Series → Events → Sessions); every resource transitively knows its scope through seriesId. Store scopeId two ways: (1) embedded in series itemData for efficient reads, (2) as a DynamoDB relationship item (pk: scope#<scopeId>, sk: series#<seriesId>) to enable KeyConditionExpression queries like getGroupsForScope. Child scope inheritance uses recursive getDescendantScopeIds(scopeId) enumerated at query time (hierarchy is shallow: platform → org → team). Authorization middleware: resolveAccessibleScopes resolves group → descendant scope IDs → req.userInfo.accessibleScopeIds; requireResourceScopeAccess(getResourceScopeIdFn) gates single-resource access by checking resource's resolved scopeId. Backwards compatibility: treat scopeId: null as pre-RBAC (open access); new resources get scopeId on creation; existing series migrated via PUT /v1/series/:seriesId/scope using TransactWriteCommand.",
-            "domains": [
-              "backend",
-              "design"
-            ],
-            "confidence_score": 0.88,
-            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/RBAC for event resources.md",
-            "created_at": "2026-05-26T16:22:47.542Z"
-          },
-          {
             "type": "pattern",
             "summary": "Claude agent access policy: read-only commands auto-approved, destructive operations require explicit approval; word-boundary matching prevents false positives in command filtering.",
             "details": "The EMC repo grants Claude agent file-edit permissions without prompting (defaultMode: acceptEdits) but enforces approval gates on destructive operations. Allowed commands (ls, cat, grep, find, echo, pwd, which) use word-boundary matching in Bash regex — e.g., Bash(ls *) matches 'ls -la' but not 'lsof', preventing accidental approval of unintended commands. Denied list includes rm -rf *, git push *, git reset --hard *, git merge *, and any --force flags. This pattern balances agent velocity (no friction on safe reads/edits) against repository safety (human-in-loop for irreversible changes).",
@@ -963,6 +1430,18 @@
             "confidence_score": 0.78,
             "source_pod_name": "github.com/adobecom/EMC/pull/153",
             "created_at": "2026-05-26T16:23:41.967Z"
+          },
+          {
+            "type": "resolved_conflict",
+            "summary": "RBAC scope attachment point: anchor at Series level, not Event, to enable transitive authorization through seriesId → scopeId resolution and efficient scope-based queries.",
+            "details": "Series is the natural top-level container in the ownership hierarchy (Series → Events → Sessions); every resource transitively knows its scope through seriesId. Store scopeId two ways: (1) embedded in series itemData for efficient reads, (2) as a DynamoDB relationship item (pk: scope#<scopeId>, sk: series#<seriesId>) to enable KeyConditionExpression queries like getGroupsForScope. Child scope inheritance uses recursive getDescendantScopeIds(scopeId) enumerated at query time (hierarchy is shallow: platform → org → team). Authorization middleware: resolveAccessibleScopes resolves group → descendant scope IDs → req.userInfo.accessibleScopeIds; requireResourceScopeAccess(getResourceScopeIdFn) gates single-resource access by checking resource's resolved scopeId. Backwards compatibility: treat scopeId: null as pre-RBAC (open access); new resources get scopeId on creation; existing series migrated via PUT /v1/series/:seriesId/scope using TransactWriteCommand.",
+            "domains": [
+              "backend",
+              "design"
+            ],
+            "confidence_score": 0.88,
+            "source_pod_name": "git.corp.adobe.com/wcms/events-service-platform/doc:notes/RBAC for event resources.md",
+            "created_at": "2026-05-26T16:22:47.542Z"
           },
           {
             "type": "scope_insight",
@@ -1000,8 +1479,9 @@
             "created_at": "2026-05-26T16:23:32.438Z"
           }
         ],
-        "total_matching": 17,
-        "truncated": false
+        "total_matching": 66,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
       },
       "arch-rbac-permission-check-callsites": {
         "nodes": [
@@ -1101,6 +1581,18 @@
             "created_at": "2026-05-26T16:23:13.399Z"
           },
           {
+            "type": "pattern",
+            "summary": "Claude agent access policy: read-only commands auto-approved, destructive operations require explicit approval; word-boundary matching prevents false positives in command filtering.",
+            "details": "The EMC repo grants Claude agent file-edit permissions without prompting (defaultMode: acceptEdits) but enforces approval gates on destructive operations. Allowed commands (ls, cat, grep, find, echo, pwd, which) use word-boundary matching in Bash regex — e.g., Bash(ls *) matches 'ls -la' but not 'lsof', preventing accidental approval of unintended commands. Denied list includes rm -rf *, git push *, git reset --hard *, git merge *, and any --force flags. This pattern balances agent velocity (no friction on safe reads/edits) against repository safety (human-in-loop for irreversible changes).",
+            "domains": [
+              "infra",
+              "design"
+            ],
+            "confidence_score": 0.78,
+            "source_pod_name": "github.com/adobecom/EMC/pull/153",
+            "created_at": "2026-05-26T16:23:41.967Z"
+          },
+          {
             "type": "scope_insight",
             "summary": "Events Service Platform implements a three-tier hierarchical RBAC system (Platform → Org → Team) with type-scoped permissions, where all non-exempt endpoints require x-adobe-esp-group-id header and role resolution via middleware.",
             "details": "The authorization model enforces a strict scope hierarchy: Platform owns Orgs, Orgs own Teams. Each scope maintains its own Groups, and users belong to Groups (not directly to scopes). All endpoints except public read/list series/events/sessions require the x-adobe-esp-group-id header. Express middleware resolves the user's role by looking up groupId in the scopes manager (pk: group#groupId, sk: role), then attaches the role object to UserInfo. Scope endpoints support type-scoped permissions (e.g., scope-team:write, scope-org:read) in addition to broad permissions (scope:*). The permission structure is {resource}:{access} where resources include scope, group, user, role, config, integration, series, event, session, and * for all; access includes read, write, delete, and *. Wildcard permissions like *:* grant full access (platform super admin), and scope-team:* grants full access only to team-type scopes.",
@@ -1123,18 +1615,6 @@
             "confidence_score": 0.88,
             "source_pod_name": "github.com/adobecom/EMC/doc:CLAUDE.md",
             "created_at": "2026-05-26T16:22:54.952Z"
-          },
-          {
-            "type": "pattern",
-            "summary": "Claude agent access policy: read-only commands auto-approved, destructive operations require explicit approval; word-boundary matching prevents false positives in command filtering.",
-            "details": "The EMC repo grants Claude agent file-edit permissions without prompting (defaultMode: acceptEdits) but enforces approval gates on destructive operations. Allowed commands (ls, cat, grep, find, echo, pwd, which) use word-boundary matching in Bash regex — e.g., Bash(ls *) matches 'ls -la' but not 'lsof', preventing accidental approval of unintended commands. Denied list includes rm -rf *, git push *, git reset --hard *, git merge *, and any --force flags. This pattern balances agent velocity (no friction on safe reads/edits) against repository safety (human-in-loop for irreversible changes).",
-            "domains": [
-              "infra",
-              "design"
-            ],
-            "confidence_score": 0.78,
-            "source_pod_name": "github.com/adobecom/EMC/pull/153",
-            "created_at": "2026-05-26T16:23:41.967Z"
           },
           {
             "type": "pattern",
@@ -1209,8 +1689,9 @@
             "created_at": "2026-05-26T16:23:12.935Z"
           }
         ],
-        "total_matching": 17,
-        "truncated": false
+        "total_matching": 45,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
       },
       "arch-who-consumes-use-group-hook": {
         "nodes": [
@@ -1415,8 +1896,9 @@
             "created_at": "2026-05-26T16:23:12.935Z"
           }
         ],
-        "total_matching": 17,
-        "truncated": false
+        "total_matching": 41,
+        "truncated": true,
+        "retrieval_source": "knowledge-query"
       }
     },
     "recentUpdates": [

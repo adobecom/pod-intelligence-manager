@@ -238,6 +238,14 @@ export const s2TabsCrashSegmentedControl: Task = {
     "Return ONLY a unified diff (--- / +++ / @@) against the Registrations page. No prose, no full-file rewrite.",
   ].join("\n"),
   expectedSignals: ["SegmentedControl", "SegmentedControlItem", "selectedTab"],
+  kgExpectations: {
+    requiredFacts: [
+      "Spectrum 2 horizontal Tabs",
+      "SegmentedControl",
+      "conditional rendering",
+    ],
+    requiredSymbols: ["SegmentedControl", "SegmentedControlItem"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #146, merge SHA eff22c27. Parent file at 04eccca.",

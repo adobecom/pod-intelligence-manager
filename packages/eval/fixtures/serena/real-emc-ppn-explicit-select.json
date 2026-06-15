@@ -1,0 +1,145 @@
+{
+  "taskId": "real-emc-ppn-explicit-select",
+  "stratum": "S4",
+  "generatedAt": "2026-06-12T19:28:44.959Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2-lic-worktrees/emc-13fb4ce98673",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2-lic-worktrees/emc-13fb4ce98673",
+  "repoSha": "13fb4ce98673197a05b04eae8bd93e7aeb075df1",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "13fb4ce98673197a05b04eae8bd93e7aeb075df1",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-13fb4ce98673"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "9c98097c839030d3",
+  "recipe": [
+    "get_symbols_overview",
+    "find_symbol",
+    "get_diagnostics_for_file"
+  ],
+  "seed": {
+    "symbols": [
+      "PageMetadataComponent"
+    ],
+    "files": [
+      "web-src/src/pages/EventForm/PageMetadataComponent.tsx"
+    ],
+    "naturalLanguageQuery": "PPN explicit select dropdown user confusion",
+    "source": "task-serena-seed",
+    "note": "Ticket names the page-metadata (PPN) Pickers; PageMetadataComponent is the pre-merge component that renders them."
+  },
+  "calls": [
+    {
+      "tool": "get_symbols_overview",
+      "args": {
+        "relative_path": "web-src/src/pages/EventForm/PageMetadataComponent.tsx"
+      },
+      "startedAt": "2026-06-12T19:28:43.862Z",
+      "durationMs": 106,
+      "ok": true,
+      "output": "{\"Constant\": [\"METADATA_CATALOGUE_URL\", \"PageMetadataComponent\"], \"Interface\": [\"MetadataCatalogue\", \"MetadataField\", \"MetadataOption\"]}",
+      "outputHash": "09084dc3d67d40b0"
+    },
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "PageMetadataComponent",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:28:43.968Z",
+      "durationMs": 238,
+      "ok": true,
+      "output": "[{\"name_path\": \"emc-13fb4ce98673/web-src/src/pages/EventForm/PageMetadataComponent\", \"kind\": \"File\", \"relative_path\": \"web-src/src/pages/EventForm/PageMetadataComponent.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 312}, \"body\": null}, {\"name_path\": \"PageMetadataComponent\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/pages/EventForm/PageMetadataComponent.tsx\", \"body_location\": {\"start_line\": 37, \"end_line\": 310}, \"body\": \"PageMetadataComponent: React.FC = () => {\\n  // ============================================================================\\n  // LOCAL STATE\\n  // ============================================================================\\n  \\n  const [catalogue, setCatalogue] = useState<MetadataCatalogue | null>(null)\\n  const [isLoading, setIsLoading] = useState(true)\\n  const [error, setError] = useState<string | null>(null)\\n  \\n  // Track the current publishing profile for updates\\n  const publishingProfileRef = useRef<PublishingProfile | null>(null)\\n  \\n  // Ref to hold updateFormData for use in callbacks (avoids circular dependency)\\n  const updateFormDataRef = useRef<((updates: any) => void) | null>(null)\\n  \\n  // Keep a ref to formData for use in callbacks\\n  const formDataRef = useRef<any>(null)\\n  \\n  // ============================================================================\\n  // CONTEXT INTEGRATION\\n  // ============================================================================\\n  \\n  const {\\n    formData,\\n    updateFormData,\\n    eventId,\\n    isEditMode,\\n  } = useEventFormComponent({\\n    componentId: 'page-metadata',\\n    onLoadResponse: async (eventResponse: any) => {\\n      // Load the event's publishing profile when event data is loaded\\n      if (!eventResponse?.eventId) return\\n      \\n      try {\\n        const profileResponse = await cachedApi.getEventPublishingProfile(eventResponse.eventId)\\n        \\n        // Response could be an array or single object\\n        const profiles = Array.isArray(profileResponse) ? profileResponse : [profileResponse]\\n        const profileAssociation = profiles[0]\\n        \\n        if (profileAssociation && !('error' in profileAssociation)) {\\n          // API returns { eventId, profileId, profile: { metadata, ... } }\\n          // The actual profile data is nested inside the 'profile' property\\n          const actualProfile = profileAssociation.profile || profileAssociation\\n          \\n          publishingProfileRef.current = actualProfile as PublishingProfile\\n          // Populate form data with the profile's metadata\\n          if (actualProfile.metadata && updateFormDataRef.current) {\\n            updateFormDataRef.current({ metadata: actualProfile.metadata })\\n          }\\n        }\\n      } catch (err) {\\n        console.error('Failed to load publishing profile:', err)\\n        // Non-fatal - profile may not exist yet\\n      }\\n    },\\n    onAfterSave: async (eventId: string) => {\\n      // Save/update the publishing profile after the event is saved\\n      const currentMetadata = formDataRef.current?.metadata\\n      if (!currentMetadata || Object.keys(currentMetadata).length === 0) {\\n        return // Nothing to save\\n      }\\n      \\n      try {\\n        const existingProfile = publishingProfileRef.current\\n        \\n        if (existingProfile?.profileId) {\\n          // Update existing profile (ApiService refreshes modificationTime before PUT)\\n          const updateResult = await apiService.updatePublishingProfile(existingProfile.profileId, {\\n            name: existingProfile.name,\\n            description: existingProfile.description,\\n            metadata: currentMetadata,\\n            modificationTime: existingProfile.modificationTime,\\n          })\\n          if (\\n            updateResult &&\\n            typeof updateResult === 'object' &&\\n            !('error' in updateResult) &&\\n            (updateResult as PublishingProfile).profileId\\n          ) {\\n            publishingProfileRef.current = {\\n              ...existingProfile,\\n              ...(updateResult as PublishingProfile),\\n            }\\n          }\\n        } else {\\n          // Create new profile and assign to event\\n          const createResult = await apiService.createPublishingProfile({\\n            name: `Event ${eventId} Profile`,\\n            metadata: currentMetadata,\\n          })\\n          \\n          if (createResult && !('error' in createResult) && createResult.profileId) {\\n            // Assign the new profile to the event\\n            await apiService.assignPublishingProfileToEvent(eventId, createResult.profileId)\\n            publishingProfileRef.current = createResult as PublishingProfile\\n          }\\n        }\\n      } catch (err) {\\n        console.error('Failed to save publishing profile:', err)\\n        // Don't throw - we don't want to fail the entire save\\n      }\\n    },\\n  })\\n  \\n  // Update refs when values change\\n  useEffect(() => {\\n    updateFormDataRef.current = updateFormData\\n  }, [updateFormData])\\n  \\n  useEffect(() => {\\n    formDataRef.current = formData\\n  }, [formData])\\n  \\n  const metadata = formData.metadata || {}\\n  \\n  // ============================================================================\\n  // LOAD PUBLISHING PROFILE ON EDIT MODE\\n  // ============================================================================\\n  \\n  const loadPublishingProfile = useCallback(async (targetEventId: string) => {\\n    if (!targetEventId) return\\n    \\n    try {\\n      const profileResponse = await cachedApi.getEventPublishingProfile(targetEventId)\\n      \\n      // Response could be an array or single object\\n      const profiles = Array.isArray(profileResponse) ? profileResponse : [profileResponse]\\n      const profileAssociation = profiles[0]\\n      \\n      if (profileAssociation && !('error' in profileAssociation)) {\\n        // API returns { eventId, profileId, profile: { metadata, ... } }\\n        // The actual profile data is nested inside the 'profile' property\\n        const actualProfile = profileAssociation.profile || profileAssociation\\n        \\n        publishingProfileRef.current = actualProfile as PublishingProfile\\n        // Populate form data with the profile's metadata\\n        if (actualProfile.metadata) {\\n          updateFormData({ metadata: actualProfile.metadata })\\n        }\\n      }\\n    } catch (err) {\\n      console.error('Failed to load publishing profile:', err)\\n      // Non-fatal - profile may not exist yet\\n    }\\n  }, [updateFormData])\\n  \\n  useEffect(() => {\\n    // If we're in edit mode and have an eventId, load the publishing profile\\n    if (isEditMode && eventId && !publishingProfileRef.current) {\\n      loadPublishingProfile(eventId)\\n    }\\n  }, [isEditMode, eventId, loadPublishingProfile])\\n\\n  // ============================================================================\\n  // DATA LOADING (Catalogue)\\n  // ============================================================================\\n\\n  useEffect(() => {\\n    let isMounted = true\\n\\n    const fetchCatalogue = async () => {\\n      try {\\n        const response = await fetch(METADATA_CATALOGUE_URL)\\n        if (!response.ok) {\\n          throw new Error('Failed to fetch metadata catalogue')\\n        }\\n        const data = await response.json()\\n        \\n        if (isMounted) {\\n          setCatalogue(data)\\n          setIsLoading(false)\\n        }\\n      } catch (err) {\\n        console.error('Error fetching metadata catalogue:', err)\\n        if (isMounted) {\\n          setError('Failed to load metadata options')\\n          setIsLoading(false)\\n        }\\n      }\\n    }\\n\\n    fetchCatalogue()\\n\\n    return () => {\\n      isMounted = false\\n    }\\n  }, [])\\n\\n  // ============================================================================\\n  // EVENT HANDLERS\\n  // ============================================================================\\n\\n  const handleFieldChange = (fieldKey: string, value: string) => {\\n    const updatedMetadata = { ...metadata }\\n    \\n    if (value && !value.startsWith('No ')) {\\n      updatedMetadata[fieldKey] = value\\n    } else {\\n      delete updatedMetadata[fieldKey]\\n    }\\n    \\n    updateFormData({ metadata: updatedMetadata })\\n  }\\n\\n  // ============================================================================\\n  // RENDER\\n  // ============================================================================\\n\\n  if (isLoading) {\\n    return (\\n      <div className={style({display: 'flex', flexDirection: 'column', gap: 16})}>\\n        <Heading level={3} UNSAFE_style={TYPOGRAPHY.COMPONENT_HEADING}>\\n          Page metadata management\\n        </Heading>\\n        <Text>Loading metadata options...</Text>\\n      </div>\\n    )\\n  }\\n\\n  if (error) {\\n    return (\\n      <div className={style({display: 'flex', flexDirection: 'column', gap: 16})}>\\n        <Heading level={3} UNSAFE_style={TYPOGRAPHY.COMPONENT_HEADING}>\\n          Page metadata management\\n        </Heading>\\n        <Text UNSAFE_style={{ color: COLORS.STATUS_CANCELLED }}>\\n          {error}\\n        </Text>\\n      </div>\\n    )\\n  }\\n\\n  const fields = catalogue?.data?.data || []\\n\\n  return (\\n    <div className={style({display: 'flex', flexDirection: 'column', gap: 24})}>\\n      <div className={style({display: 'flex', flexDirection: 'column', gap: 8})}>\\n        <Heading level={3} UNSAFE_style={TYPOGRAPHY.COMPONENT_HEADING}>\\n          Page metadata management\\n        </Heading>\\n        <Text UNSAFE_style={TYPOGRAPHY.SECTION_DESCRIPTION}>\\n          Configure tracking and metadata settings for your event. Set your primary product name \\n          to ensure accurate analytics tracking and reporting for your webinar event page.\\n        </Text>\\n      </div>\\n\\n      {fields.map((field: MetadataField) => {\\n        const fieldOptions: MetadataOption[] = catalogue?.[field.key]?.data || []\\n        const currentValue = metadata[field.key] || ''\\n        \\n        const allOptions = [\\n          { key: `no-${field.key}`, label: `No ${field.name}` },\\n          ...fieldOptions.map(opt => ({ key: opt.value, label: opt.value }))\\n        ]\\n\\n        return (\\n          <Picker\\n            key={field.key}\\n            data-testid={`meta-${field.key}-input`}\\n            label={`${field.name} *`}\\n            placeholder={`Select ${field.name.toLowerCase()}`}\\n            selectedKey={currentValue || `no-${field.key}`}\\n            onSelectionChange={(key) => handleFieldChange(field.key, key as string)}\\n            isRequired\\n            items={allOptions}\\n          >\\n            {(item) => <PickerItem id={item.key}>{item.label}</PickerItem>}\\n          </Picker>\\n        )\\n      })}\\n    </div>\\n  )\\n}\"}]",
+      "outputHash": "7f9eb0adc1afdcbb"
+    },
+    {
+      "tool": "get_diagnostics_for_file",
+      "args": {
+        "relative_path": "web-src/src/pages/EventForm/PageMetadataComponent.tsx"
+      },
+      "startedAt": "2026-06-12T19:28:44.206Z",
+      "durationMs": 753,
+      "ok": true,
+      "output": "{\"web-src/src/pages/EventForm/PageMetadataComponent.tsx\": {\"Error\": {\"<file>\": [{\"message\": \"Cannot find module 'react' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 4, \"character\": 64}, \"end\": {\"line\": 4, \"character\": 71}}, \"code\": 2307, \"source\": \"typescript\"}, {\"message\": \"Cannot find module '@react-spectrum/s2' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 5, \"character\": 50}, \"end\": {\"line\": 5, \"character\": 70}}, \"code\": 2307, \"source\": \"typescript\"}, {\"message\": \"Cannot find module '@react-spectrum/s2/style' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 6, \"character\": 22}, \"end\": {\"line\": 6, \"character\": 48}}, \"code\": 2307, \"source\": \"typescript\"}], \"emc-13fb4ce98673/web-src/src/pages/EventForm/PageMetadataComponent\": [{\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 248, \"character\": 6}, \"end\": {\"line\": 248, \"character\": 82}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 253, \"character\": 6}, \"end\": {\"line\": 253, \"character\": 12}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 259, \"character\": 6}, \"end\": {\"line\": 259, \"character\": 82}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 266, \"character\": 6}, \"end\": {\"line\": 266, \"character\": 12}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 273, \"character\": 4}, \"end\": {\"line\": 273, \"character\": 80}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 274, \"character\": 6}, \"end\": {\"line\": 274, \"character\": 81}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 282, \"character\": 6}, \"end\": {\"line\": 282, \"character\": 12}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 308, \"character\": 4}, \"end\": {\"line\": 308, \"character\": 10}}, \"code\": 7026, \"source\": \"typescript\"}], \"PageMetadataComponent/fields.map() callback\": [{\"message\": \"Parameter 'key' implicitly has an 'any' type.\", \"range\": {\"start\": {\"line\": 300, \"character\": 32}, \"end\": {\"line\": 300, \"character\": 35}}, \"code\": 7006, \"source\": \"typescript\"}, {\"message\": \"Parameter 'item' implicitly has an 'any' type.\", \"range\": {\"start\": {\"line\": 304, \"character\": 14}, \"end\": {\"line\": 304, \"character\": 18}}, \"code\": 7006, \"source\": \"typescript\"}]}}}",
+      "outputHash": "3924ca66dfdd9cd8"
+    }
+  ],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:28:44.959Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2-lic-worktrees/emc-13fb4ce98673._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: real-emc-ppn-explicit-select (S4)._\n\n## Seed\n- Symbols: PageMetadataComponent\n- Files: web-src/src/pages/EventForm/PageMetadataComponent.tsx\n- Seed source: task-serena-seed\n- Reviewed note: Ticket names the page-metadata (PPN) Pickers; PageMetadataComponent is the pre-merge component that renders them.\n\n## Symbol Evidence\n### get_symbols_overview {\"relative_path\":\"web-src/src/pages/EventForm/PageMetadataComponent.tsx\"}\n```\n{\"Constant\": [\"METADATA_CATALOGUE_URL\", \"PageMetadataComponent\"], \"Interface\": [\"MetadataCatalogue\", \"MetadataField\", \"MetadataOption\"]}\n```\n\n### find_symbol {\"name_path_pattern\":\"PageMetadataComponent\",\"include_body\":true}\n```\n[{\"name_path\": \"emc-13fb4ce98673/web-src/src/pages/EventForm/PageMetadataComponent\", \"kind\": \"File\", \"relative_path\": \"web-src/src/pages/EventForm/PageMetadataComponent.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 312}, \"body\": null}, {\"name_path\": \"PageMetadataComponent\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/pages/EventForm/PageMetadataComponent.tsx\", \"body_location\": {\"start_line\": 37, \"end_line\": 310}, \"body\": \"PageMetadataComponent: React.FC = () => {\\n  // ============================================================================\\n  // LOCAL STATE\\n  // ============================================================================\\n  \\n  const [catalogue, setCatalogue] = useState<MetadataCatalogue | null>(null)\\n  const [isLoading, setIsLoading] = useState(true)\\n  const [error, setError] = useState<string | null>(null)\\n  \\n  // Track the current publishing profile for updates\\n  const publishingProfileRef = useRef<PublishingProfile | null>(null)\\n  \\n  // Ref to hold updateFormData for use in callbacks (avoids circular dependency)\\n  const updateFormDataRef = useRef<((updates: any) => void) | null>(null)\\n  \\n  // Keep a ref to formData for use in callbacks\\n  const formDataRef = useRef<any>(null)\\n  \\n  // ============================================================================\\n  // CONTEXT INTEGRATION\\n  // ============================================================================\\n  \\n  const {\\n    formData,\\n    updateFormData,\\n    eve\n… [call output truncated]\n```\n\n## Diagnostics\n### get_diagnostics_for_file {\"relative_path\":\"web-src/src/pages/EventForm/PageMetadataComponent.tsx\"}\n```\n{\"web-src/src/pages/EventForm/PageMetadataComponent.tsx\": {\"Error\": {\"<file>\": [{\"message\": \"Cannot find module 'react' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 4, \"character\": 64}, \"end\": {\"line\": 4, \"character\": 71}}, \"code\": 2307, \"source\": \"typescript\"}, {\"message\": \"Cannot find module '@react-spectrum/s2' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 5, \"character\": 50}, \"end\": {\"line\": 5, \"character\": 70}}, \"code\": 2307, \"source\": \"typescript\"}, {\"message\": \"Cannot find module '@react-spectrum/s2/style' or its corresponding type declarations.\", \"range\": {\"start\": {\"line\": 6, \"character\": 22}, \"end\": {\"line\": 6, \"character\": 48}}, \"code\": 2307, \"source\": \"typescript\"}], \"emc-13fb4ce98673/web-src/src/pages/EventForm/PageMetadataComponent\": [{\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 248, \"character\": 6}, \"end\": {\"line\": 248, \"character\": 82}}, \"code\": 7026, \"source\": \"typescript\"}, {\"message\": \"JSX element implicitly has type 'any' because no interface 'JSX.IntrinsicElements' exists.\", \"range\": {\"start\": {\"line\": 253, \"character\": 6}, \"end\": {\"line\": 253, \"character\": 12}}, \"code\": 7026, \"source\": \"typescript\"}, {\"mess\n\n_[truncated to budget]_\n",
+  "renderedBlockHash": "4803ec8c0f23b7d2",
+  "quality": {
+    "signal": "strong",
+    "answerLeak": false,
+    "primaryFileRetrieved": true,
+    "symbolEvidenceRetrieved": true,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": true,
+    "intentMatch": true,
+    "notes": [
+      "symbol evidence retrieved",
+      "diagnostics captured",
+      "primary file retrieved",
+      "task intent matched"
+    ]
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "taskId": "future-emc-show-sponsors-default",
+  "stratum": "S3",
+  "generatedAt": "2026-06-12T19:13:36.941Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2/EMC",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2/EMC",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "b95264fe0ae46e29",
+  "recipe": [
+    "find_symbol"
+  ],
+  "seed": {
+    "symbols": [
+      "showSponsors"
+    ],
+    "naturalLanguageQuery": "event form showSponsors default true fallback",
+    "source": "lic-seed"
+  },
+  "calls": [
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "showSponsors",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:13:36.758Z",
+      "durationMs": 183,
+      "ok": true,
+      "output": "[{\"name_path\": \"EventApiResponse/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 274, \"end_line\": 274}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EventFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 631, \"end_line\": 631}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"createDefaultFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 230, \"end_line\": 230}, \"body\": \"showSponsors: true\"}, {\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/dataFilters.ts\", \"body_location\": {\"start_line\": 127, \"end_line\": 127}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}, {\"name_path\": \"mapApiResponseToFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/eventFormMappers.ts\", \"body_location\": {\"start_line\": 198, \"end_line\": 198}, \"body\": \"showSponsors: event.showSponsors ?? true\"}, {\"name_path\": \"SponsorsComponent/handleIncludePartnersChange/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/pages/EventForm/SponsorsComponent.tsx\", \"body_location\": {\"start_line\": 879, \"end_line\": 879}, \"body\": \"showSponsors: value\"}]",
+      "outputHash": "b0c11caa528a8e41"
+    }
+  ],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:13:36.941Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2/EMC._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: future-emc-show-sponsors-default (S3)._\n\n## Seed\n- Symbols: showSponsors\n- Seed source: lic-seed\n\n## Symbol Evidence\n### find_symbol {\"name_path_pattern\":\"showSponsors\",\"include_body\":true}\n```\n[{\"name_path\": \"EventApiResponse/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 274, \"end_line\": 274}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EventFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 631, \"end_line\": 631}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"createDefaultFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 230, \"end_line\": 230}, \"body\": \"showSponsors: true\"}, {\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/dataFilters.ts\", \"body_location\": {\"start_line\": 127, \"end_line\": 127}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}, {\"name_path\": \"mapApiResponseToFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/eventFormMappers.ts\", \"body_location\": {\"start_line\": 198, \"end_line\": 198}, \"body\": \"showSponsors: event.showSponsors ?? true\"}, {\"name_path\": \"SponsorsComponent/handleIncludePartnersChange/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/pages/EventForm/SponsorsComponent.tsx\", \"body_location\": {\"start_line\": 879, \"end_line\": 879}, \"body\": \"showSponsors: value\"}]\n```\n",
+  "renderedBlockHash": "f784f80f4372a9da",
+  "quality": {
+    "signal": "medium",
+    "answerLeak": false,
+    "primaryFileRetrieved": false,
+    "symbolEvidenceRetrieved": true,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": false,
+    "intentMatch": true,
+    "notes": [
+      "symbol evidence retrieved",
+      "task intent matched"
+    ]
+  }
+}

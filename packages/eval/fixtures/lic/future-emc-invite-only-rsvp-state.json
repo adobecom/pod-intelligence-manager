@@ -1,0 +1,57 @@
+{
+  "taskId": "future-emc-invite-only-rsvp-state",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:37.553Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "invite-only RSVP campaign message gate"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 37,
+      "output": "1. web-src/src/components/shared/GateScreen.tsx (lines 5-54, 1.00)\n   5:import React, { ReactNode } from 'react'\n   6:import {\n   ...\n\n   *(also at lines 55-132)*\n3. web-src/src/pages/EventForm/EventInfoComponent.tsx (lines 271-321, 0.83)\n   arrow_function EventInfoComponent\n   ...\n 271:              data-testid=\"private-event-switch\"\n 272:              isSelected={isPrivate}\n 273:              onChange={(value) => updateFormData({ isPrivate: value })}\n 274:            >\n 275:              Set as a private event\n   ...\n\n4. web-src/src/components/RBACGate.tsx (lines 97-119, 0.77)\n   arrow_function RBACGate\n   ...\n  97:({ children }) => {\n   ...\n\n5. web-src/src/hooks/useRsvpConfig.ts (lines 106-220, 0.73)\n   function getDefaultLabel\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "inviteOnly"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 31,
+      "output": "## const `inviteOnly` (FQN: `web-src/src/types/domain.ts::EventApiResponse::inviteOnly`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 252\n\n```\n  inviteOnly?: boolean\n  allowWaitlisting?: boolean\n  allowGuestRegistration?: boolean\n  tags?: string\n  topics?: string[]\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (7 total)\n\n- `useEventFormSave` (usage) — `web-src/src/hooks/useEventFormSave.ts:252`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:285`\n- `EventInfoComponent` (usage) — `web-src/src/pages/EventForm/EventInfoComponent.tsx:271`\n- `createDefaultFormData` (usage) — `web-src/src/contexts/EventFormContext.tsx:190`\n- `(usage)` (usage) — `web-src/src/hooks/useEventFormSave.test.ts:18`\n- `EMC V2 Automation Migration Specification > 4. Complete Selector Manifests > 4.2 EventForm (All Steps)` (usage) — `docs/AUTOMATION_MIGRATION_SPEC.md:287`\n- `mapApiResponseToFormData` (usage) — `web-src/src/utils/eventFormMappers.ts:162`\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: domain (this), assets.d, attendee, campaign, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-invite-only-rsvp-state\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 invite-only RSVP campaign message gate\n```\n1. web-src/src/components/shared/GateScreen.tsx (lines 5-54, 1.00)\n   5:import React, { ReactNode } from 'react'\n   6:import {\n   ...\n\n   *(also at lines 55-132)*\n3. web-src/src/pages/EventForm/EventInfoComponent.tsx (lines 271-321, 0.83)\n   arrow_function EventInfoComponent\n   ...\n 271:              data-testid=\"private-event-switch\"\n 272:              isSelected={isPrivate}\n 273:              onChange={(value) => updateFormData({ isPrivate: value })}\n 274:            >\n 275:              Set as a private event\n   ...\n\n4. web-src/src/components/RBACGate.tsx (lines 97-119, 0.77)\n   arrow_function RBACGate\n   ...\n  97:({ children }) => {\n   ...\n\n5. web-src/src/hooks/useRsvpConfig.ts (lines 106-220, 0.73)\n   function getDefaultLabel\n```\n\n## lic explain-symbol -r inviteOnly\n```\n## const `inviteOnly` (FQN: `web-src/src/types/domain.ts::EventApiResponse::inviteOnly`)\n\n**Kind:** const | **File:** `web-src/src/types/domain.ts` | **Line:** 252\n\n```\n  inviteOnly?: boolean\n  allowWaitlisting?: boolean\n  allowGuestRegistration?: boolean\n  tags?: string\n  topics?: string[]\n  detailPagePath?: string\n  externalEventId?: string\n  creationTime?: number\n  modificationTime?: number\n  createdBy?: string\n  modifiedBy?: string\n  localizationOverrides?: Record<string, any>\n  localizations?: Record<string, EventLocalization>\n  venue?: Record<string, any>\n  agenda?: AgendaDataItem[] // Localizable array\n  rsvpFormFields?: Record<string, any>\n  rsvpDescription?: string // Localizable\n  video?: VideoData\n  registration?: RegistrationData\n  marketoIntegration?: MarketoIntegrationData\n  liveUpdate?: boolean\n  forceSpWrite?: boolean\n  defaultLocale?: string\n  showSponsors?: boolean\n  showAgendaPostEvent?: boolean\n  showVenuePostEvent?: boolean\n  showVenueAdditionalInfoPostEvent?: boolean\n  useLegacyDetailPagePath?: boolean\n  communityTopicUrl?: string | null // URL for community forum topic\n  cta?: CtaItem[] // Localizable call-to-action items\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (7 total)\n\n- `useEventFormSave` (usage) — `web-src/src/hooks/useEventFormSave.ts:252`\n- `(usage)` (usage) — `web-src/src/utils/dataFilters.ts:285`\n- `EventInfoComponent` (usage) — `web-src/src/pages/EventForm/EventInfoComponent.tsx:271`\n- `createDefaultFormData` (usage) — `web-src/src/contexts/EventFormContext.tsx:190`\n- `(usage)` (usage) — `web-src/src/hooks/useEventFormSave.test.ts:18`\n- `EMC V2 Automation Migration Specification > 4. Complete Selector Manifests > 4.2 EventForm (All Steps)` (usage) — `docs/AUTOMATION_MIGRATION_SPEC.md:287`\n- `mapApiResponseToFormData` (usage) — `web-src/src/utils/eventFormMappers.ts:162`\n\n### Parallel Patterns (symbol is a sibling in N-way tem\n```\n",
+  "renderedBlockHash": "58cd9715dd414805",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

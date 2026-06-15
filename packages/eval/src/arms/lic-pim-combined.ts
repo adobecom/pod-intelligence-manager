@@ -10,6 +10,7 @@ const SYSTEM_CODE = [
   "  1. A PIM session context: pod living-doc, conflicts, knowledge-graph learnings, and recent updates.",
   "  2. A lic context block: semantic search results, symbol references, call graphs.",
   "Use both to align your fix with already-made decisions AND with cross-file code structure.",
+  "The task prompt's exported API and input contract are authoritative. If lic snippets show surrounding app-only preconditions or dependencies, adapt the pattern to the requested self-contained module instead of requiring extra inputs.",
   "Produce a single self-contained TypeScript module that satisfies the user's task.",
   "Return ONLY a fenced ```typescript code block — no prose, no commentary outside the block.",
   "The module should export named functions matching the names mentioned in the task.",
@@ -21,6 +22,7 @@ const SYSTEM_CONTENT = [
   "  1. A PIM session context (pod state, conflicts, learnings, updates).",
   "  2. A lic context block (code-intelligence: search hits, symbols, callers).",
   "Use both when relevant. Return ONLY the requested content — no preamble, no postscript.",
+  "Treat the user task as authoritative if retrieved code context conflicts with the requested output shape.",
 ].join("\n");
 
 function buildCombinedContext(pim: SessionContextFixture, lic: LicContextFixture): string {

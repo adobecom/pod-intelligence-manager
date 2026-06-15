@@ -1,0 +1,116 @@
+{
+  "taskId": "real-emc-partner-put-sponsor-id-payload",
+  "stratum": "S3",
+  "generatedAt": "2026-06-12T19:04:12.531Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
+  "repoSha": "f5db523f36ba8c1bf9807b7bc8dce132073a9e6a",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "f5db523f36ba8c1bf9807b7bc8dce132073a9e6a",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "9dc887c10e30f94e",
+  "recipe": [
+    "find_symbol"
+  ],
+  "seed": {
+    "symbols": [
+      "getSponsorPayload"
+    ],
+    "naturalLanguageQuery": "getSponsorPayload sponsorData modificationTime localizations",
+    "source": "lic-seed"
+  },
+  "calls": [
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "getSponsorPayload",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:04:10.818Z",
+      "durationMs": 1713,
+      "ok": true,
+      "output": "[{\"name_path\": \"getSponsorPayload\", \"kind\": \"Function\", \"relative_path\": \"docs/v1-reference/data-utils.js\", \"body_location\": {\"start_line\": 349, \"end_line\": 382}, \"body\": \"export async function getSponsorPayload(sponsorData, locale, seriesId) {\\n  if (!sponsorData) return sponsorData;\\n\\n  let existingSponsorPayload = {};\\n  if (sponsorData.sponsorId) {\\n    existingSponsorPayload = await getSponsor(seriesId, sponsorData.sponsorId);\\n  }\\n\\n  // Split sponsor data into localizable and non-localizable fields\\n  const { localizableFields, nonLocalizableFields } = splitLocalizableFields(\\n    sponsorData,\\n    SPONSOR_DATA_FILTER,\\n    locale,\\n  );\\n\\n  const filteredGlobalPayload = Object.entries(nonLocalizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\\n      acc[key] = value;\\n    }\\n    return acc;\\n  }, {});\\n\\n  const filteredLocalePayload = Object.entries(localizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\\n      acc[key] = value;\\n    }\\n    return acc;\\n  }, {});\\n\\n  return {\\n    ...filteredGlobalPayload,\\n    localizations: { ...existingSponsorPayload.localizations, [locale]: filteredLocalePayload },\\n  };\\n}\"}, {\"name_path\": \"getSponsorPayload\", \"kind\": \"Function\", \"relative_path\": \"web-src/src/services/payloadBuilders.ts\", \"body_location\": {\"start_line\": 104, \"end_line\": 151}, \"body\": \"export async function getSponsorPayload(\\n  sponsorData: Record<string, any>,\\n  locale: string,\\n  seriesId: string\\n): Promise<Record<string, any>> {\\n  if (!sponsorData) return sponsorData\\n\\n  // Fetch existing sponsor data to preserve other locale's localizations\\n  let existingSponsorPayload: Record<string, any> = {}\\n  if (sponsorData.sponsorId) {\\n    const result = await cachedApi.getSponsor(seriesId, sponsorData.sponsorId)\\n    if (!('error' in result)) {\\n      existingSponsorPayload = result\\n    }\\n  }\\n\\n  // Split sponsor data into localizable and non-localizable fields\\n  const { localizableFields, nonLocalizableFields } = splitLocalizableFields(\\n    sponsorData,\\n    SPONSOR_DATA_FILTER,\\n    locale\\n  )\\n\\n  // Filter to only submittable non-localizable fields\\n  const filteredGlobalPayload = Object.entries(nonLocalizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable && isValidAttribute(value)) {\\n      acc[key] = value\\n    }\\n    return acc\\n  }, {} as Record<string, any>)\\n\\n  // Filter to only submittable localizable fields\\n  const filteredLocalePayload = Object.entries(localizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable && isValidAttribute(value)) {\\n      acc[key] = value\\n    }\\n    return acc\\n  }, {} as Record<string, any>)\\n\\n  // Merge with existing localizations (preserves other locales)\\n  return {\\n    ...filteredGlobalPayload,\\n    localizations: { \\n      ...existingSponsorPayload.localizations, \\n      [locale]: filteredLocalePayload \\n    },\\n  }\\n}\"}]",
+      "outputHash": "feb7255f6d995830"
+    }
+  ],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:04:12.531Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: real-emc-partner-put-sponsor-id-payload (S3)._\n\n## Seed\n- Symbols: getSponsorPayload\n- Seed source: lic-seed\n\n## Symbol Evidence\n### find_symbol {\"name_path_pattern\":\"getSponsorPayload\",\"include_body\":true}\n```\n[{\"name_path\": \"getSponsorPayload\", \"kind\": \"Function\", \"relative_path\": \"docs/v1-reference/data-utils.js\", \"body_location\": {\"start_line\": 349, \"end_line\": 382}, \"body\": \"export async function getSponsorPayload(sponsorData, locale, seriesId) {\\n  if (!sponsorData) return sponsorData;\\n\\n  let existingSponsorPayload = {};\\n  if (sponsorData.sponsorId) {\\n    existingSponsorPayload = await getSponsor(seriesId, sponsorData.sponsorId);\\n  }\\n\\n  // Split sponsor data into localizable and non-localizable fields\\n  const { localizableFields, nonLocalizableFields } = splitLocalizableFields(\\n    sponsorData,\\n    SPONSOR_DATA_FILTER,\\n    locale,\\n  );\\n\\n  const filteredGlobalPayload = Object.entries(nonLocalizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\\n      acc[key] = value;\\n    }\\n    return acc;\\n  }, {});\\n\\n  const filteredLocalePayload = Object.entries(localizableFields).reduce((acc, [key, value]) => {\\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\\n      acc[key] = value;\\n    }\\n    return acc;\\n  }, {});\\n\\n  return {\\n    ...filteredGlobalPayload,\\n    localizations: { ...existingSponsorPayload.localizations, [locale]: filteredLocalePayload },\\n  };\\n}\"}, {\"name_path\": \"getSponsorPayload\", \"kind\": \"Function\", \"relative_path\": \"web-src/src/services/payloadBuilders.ts\", \"body_location\": {\"start_line\": 104, \"end_line\": 151}, \"body\": \"export async function getSponsorPayload(\\n  sponsorData: Record<string, any>,\\n  local\n… [call output truncated]\n```\n",
+  "renderedBlockHash": "57e1a79f326dfbf5",
+  "quality": {
+    "signal": "medium",
+    "answerLeak": false,
+    "primaryFileRetrieved": true,
+    "symbolEvidenceRetrieved": true,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": false,
+    "intentMatch": true,
+    "notes": [
+      "symbol evidence retrieved",
+      "primary file retrieved",
+      "task intent matched"
+    ]
+  }
+}

@@ -459,6 +459,14 @@ export const ppnAckHydration: Task = {
     "profileHydrationTick",
     "eventId",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "Page metadata (PPN) fields require explicit user acknowledgment",
+      "server-backed selection",
+    ],
+    requiredSymbols: ["metadataFieldAcknowledged"],
+    forbiddenFacts: ["profileHydrationTick is sufficient"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #156, merge SHA 84f21c9. Parent file at ccc9e49.",

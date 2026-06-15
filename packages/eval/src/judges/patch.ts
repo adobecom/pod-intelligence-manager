@@ -19,6 +19,8 @@ import type { Task } from "../tasks/types.js";
  * `skipped` rather than failing, so it never silently penalizes a task.
  */
 export interface PatchJudgeResult {
+  /** Whether the model output contained an extractable unified diff. */
+  diffExtracted: boolean;
   /** True only when the diff applied cleanly (the buildability signal). */
   applies: boolean;
   /** Whether the apply check actually ran (false when skipped). */
@@ -86,23 +88,23 @@ function ensureWorktree(repo: string, sha: string, base: string): string | null 
 export function judgePatch(task: Task, output: string, opts: PatchJudgeOptions = {}): PatchJudgeResult {
   const diff = extractUnifiedDiff(output);
   if (!diff) {
-    return { applies: false, checked: false, skipped: true, buildability: 0, reason: "no unified diff in output" };
+    return { diffExtracted: false, applies: false, checked: false, skipped: true, buildability: 0, reason: "no unified diff in output" };
   }
 
   const repo = repoFromEnv(opts);
   const parentSha = task.provenance?.parentSha;
   if (!repo || !dirExists(repo)) {
-    return { applies: false, checked: false, skipped: true, buildability: 0, reason: "product repo unavailable (set EMC_REPO)" };
+    return { diffExtracted: true, applies: false, checked: false, skipped: true, buildability: 0, reason: "product repo unavailable (set EMC_REPO)" };
   }
   if (!parentSha) {
-    return { applies: false, checked: false, skipped: true, buildability: 0, reason: `no parentSha for ${task.id}` };
+    return { diffExtracted: true, applies: false, checked: false, skipped: true, buildability: 0, reason: `no parentSha for ${task.id}` };
   }
 
   const base = opts.worktreeBase ?? process.env.EMC_WORKTREE_BASE ?? join(tmpdir(), "emc-patch-judge");
   spawnSync("mkdir", ["-p", base]);
   const worktree = ensureWorktree(repo, parentSha, base);
   if (!worktree) {
-    return { applies: false, checked: false, skipped: true, buildability: 0, reason: `could not create worktree at ${parentSha}` };
+    return { diffExtracted: true, applies: false, checked: false, skipped: true, buildability: 0, reason: `could not create worktree at ${parentSha}` };
   }
 
   const tmp = mkdtempSync(join(tmpdir(), "patch-"));
@@ -123,6 +125,7 @@ export function judgePatch(task: Task, output: string, opts: PatchJudgeOptions =
       );
       if (lenient.status !== 0) {
         return {
+          diffExtracted: true,
           applies: false,
           checked: true,
           skipped: false,
@@ -133,13 +136,13 @@ export function judgePatch(task: Task, output: string, opts: PatchJudgeOptions =
     }
 
     if (!opts.typecheck) {
-      return { applies: true, checked: true, skipped: false, buildability: 1, reason: "diff applies cleanly" };
+      return { diffExtracted: true, applies: true, checked: true, skipped: false, buildability: 1, reason: "diff applies cleanly" };
     }
 
     // Apply for real, then typecheck.
     const apply = spawnSync("git", ["-C", worktree, "apply", "-p1", "--ignore-whitespace", patchFile], { encoding: "utf8" });
     if (apply.status !== 0) {
-      return { applies: true, checked: true, skipped: false, buildability: 0.5, reason: "applied in --check but real apply failed" };
+      return { diffExtracted: true, applies: true, checked: true, skipped: false, buildability: 0.5, reason: "applied in --check but real apply failed" };
     }
     const cmd = opts.typecheckCmd ?? ["npm", "run", "type-check"];
     const tc = spawnSync(cmd[0], cmd.slice(1), { cwd: worktree, encoding: "utf8", timeout: 300_000 });
@@ -147,6 +150,7 @@ export function judgePatch(task: Task, output: string, opts: PatchJudgeOptions =
     const ok = tc.status === 0;
     return {
       applies: true,
+      diffExtracted: true,
       checked: true,
       skipped: false,
       buildability: ok ? 1 : 0.5,

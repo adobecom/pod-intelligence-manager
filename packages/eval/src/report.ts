@@ -2,6 +2,8 @@ import type { JudgeResult } from "./judges/types.js";
 import type { RunUsage } from "./runners/types.js";
 import { costFor } from "./pricing.js";
 import type { LicFixtureQuality } from "./rigor/lic-quality.js";
+import type { SerenaFixtureQuality } from "./serena/types.js";
+import type { KgMaterialityRow } from "./rigor/kg-materiality.js";
 import type { ProtocolAnalysis } from "./rigor/protocol-analysis.js";
 import { realisticTicketHeadlineRows } from "./rigor/protocol-analysis.js";
 import { renderProtocolReport } from "./rigor/protocol-report.js";
@@ -31,10 +33,29 @@ export interface EvalRow {
   licFixtureHash?: string;
   /** Deterministic quality metadata for the frozen lic fixture. */
   licFixtureQuality?: LicFixtureQuality;
+  /** Full SHA-256 of the frozen Serena fixture JSON for this task, when present. */
+  serenaFixtureHash?: string;
+  /** Deterministic quality metadata for the frozen Serena fixture. */
+  serenaFixtureQuality?: SerenaFixtureQuality;
   /** 0-indexed seed number when multi-seed runs are enabled. Defaults to 0. */
   seed?: number;
   /** Run-level error if the call or judge failed. */
   error?: string;
+}
+
+export interface PatchJudgeReportRow {
+  taskId: string;
+  arm: string;
+  seed: number;
+  patch: {
+    diffExtracted?: boolean;
+    applies: boolean;
+    checked: boolean;
+    skipped: boolean;
+    buildability: number;
+    reason: string;
+    typecheck?: { ran: boolean; ok: boolean; output: string };
+  };
 }
 
 /**
@@ -79,8 +100,20 @@ export interface ReportContext {
   judgeModel: string;
   /** Filter applied (for repro). */
   filter: { taskIds?: string[]; tags?: string[]; arms?: string[] };
+  /** Requested task count after parsing explicit filters or protocol manifests. */
+  requestedTaskCount?: number;
+  /** Selected task IDs actually run, in report order. */
+  selectedTaskIds?: string[];
+  /** Optional per-arm model overrides used by the runner. */
+  armModels?: Record<string, string>;
+  /** Whether this report is backed by holdout/protocol/run-dir artifacts. */
+  mode?: "protocol" | "pilot-ad-hoc";
+  /** Post-hoc patch-judge rows, when available. */
+  patchJudgeRows?: PatchJudgeReportRow[];
   /** Protocol claim analysis, rendered as a top section in protocol-mode runs. */
   protocol?: ProtocolAnalysis;
+  /** KG-decisive materiality rows, when a KG-focused task set was selected. */
+  kgMaterialityRows?: KgMaterialityRow[];
 }
 
 export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): string {
@@ -88,6 +121,10 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   lines.push(`# PIM Eval Report`);
   lines.push(`_Generated: ${ctx.generatedAt}_`);
   lines.push("");
+  if ((ctx.mode ?? (ctx.protocol ? "protocol" : "pilot-ad-hoc")) === "pilot-ad-hoc") {
+    lines.push("> PILOT / AD-HOC RUN: this report is not benchmark-eligible without protocol, holdout, self-contained artifacts, audit, and patch-judge evidence.");
+    lines.push("");
+  }
   const comparisonArm = pickComparisonArm(rows);
 
   // Executive summary — auto-derived from rows so leadership-facing copy
@@ -111,6 +148,13 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   if (ctx.protocol) {
     lines.push(...renderProtocolReport(ctx.protocol));
   }
+
+  lines.push("## Task selection");
+  lines.push("");
+  lines.push(`- Requested tasks: ${ctx.requestedTaskCount ?? ctx.selectedTaskIds?.length ?? distinct(rows.map((r) => r.taskId)).length}`);
+  lines.push(`- Selected tasks: ${ctx.selectedTaskIds?.length ?? distinct(rows.map((r) => r.taskId)).length}`);
+  lines.push(`- Selected task IDs: \`${(ctx.selectedTaskIds ?? distinct(rows.map((r) => r.taskId))).join(", ")}\``);
+  lines.push("");
 
   lines.push("## Summary by arm");
   lines.push("");
@@ -169,6 +213,32 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
         `| ${r.label} | ${r.taskCount} | ${pct(r.controlPassRate)} (${r.controlPasses}/${r.controlTotal}) | ${pct(r.comparisonPassRate)} (${r.comparisonPasses}/${r.comparisonTotal}) | ${deltaStr} | ${r.controlAvgScore.toFixed(2)} | ${r.comparisonAvgScore.toFixed(2)} |`,
       );
     }
+    lines.push("");
+  }
+
+  const formatRows = computeFormatDiagnostics(rows);
+  if (formatRows.length > 0) {
+    lines.push("## Diff format diagnostics");
+    lines.push("");
+    lines.push("_These scores are shown separately from the semantic rubric score. They should not be read as evidence that the model understood the task._");
+    lines.push("");
+    lines.push("| Arm | Rows | Avg semantic score | Avg diff-format score | Diff-format pass | Rubric pass |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | ---: |");
+    for (const r of formatRows) {
+      lines.push(
+        `| ${r.armLabel} | ${r.rows} | ${r.avgSemanticScore.toFixed(2)} | ${r.avgFormatScore.toFixed(2)} | ${pct(r.formatPassRate)} (${r.formatPasses}/${r.rows}) | ${pct(r.rubricPassRate)} (${r.rubricPasses}/${r.rows}) |`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (ctx.patchJudgeRows && ctx.patchJudgeRows.length > 0) {
+    lines.push(...renderPatchBuildabilitySection(ctx.patchJudgeRows));
+    lines.push("");
+  }
+
+  if (ctx.kgMaterialityRows && ctx.kgMaterialityRows.length > 0) {
+    lines.push(...renderKgMaterialitySection(ctx.kgMaterialityRows));
     lines.push("");
   }
 
@@ -278,6 +348,9 @@ export function renderMarkdownReport(rows: EvalRow[], ctx: ReportContext): strin
   lines.push("");
   lines.push(`- Runner: \`${ctx.runner}\``);
   lines.push(`- Model: \`${ctx.model}\``);
+  if (ctx.armModels && Object.keys(ctx.armModels).length > 0) {
+    lines.push(`- Arm models: \`${JSON.stringify(ctx.armModels)}\``);
+  }
   lines.push(`- Judge model: \`${ctx.judgeModel}\``);
   if (ctx.gitSha) lines.push(`- Git SHA: \`${ctx.gitSha}\``);
   lines.push(`- Filter: \`${JSON.stringify(ctx.filter)}\``);
@@ -316,6 +389,121 @@ function percentile(arr: number[], p: number): number {
 function pct(x: number): string {
   if (!Number.isFinite(x)) return "—";
   return `${(x * 100).toFixed(0)}%`;
+}
+
+const FORMAT_RUBRIC_IDS = new Set(["valid_unified_diff", "valid_unified_diff_no_regression"]);
+
+interface FormatDiagnosticRow {
+  arm: string;
+  armLabel: string;
+  rows: number;
+  avgSemanticScore: number;
+  avgFormatScore: number;
+  formatPasses: number;
+  formatPassRate: number;
+  rubricPasses: number;
+  rubricPassRate: number;
+}
+
+function computeFormatDiagnostics(rows: EvalRow[]): FormatDiagnosticRow[] {
+  const eligible = rows.filter((r) => formatScore(r) !== undefined);
+  if (eligible.length === 0) return [];
+  const out: FormatDiagnosticRow[] = [];
+  for (const arm of distinct(eligible.map((r) => r.arm))) {
+    const armRows = eligible.filter((r) => r.arm === arm);
+    const scores = armRows.map((r) => formatScore(r) ?? 0);
+    const rubricPasses = armRows.filter((r) => r.judge.passed).length;
+    const formatPasses = scores.filter((s) => s >= 0.7).length;
+    out.push({
+      arm,
+      armLabel: armRows[0]?.armLabel ?? arm,
+      rows: armRows.length,
+      avgSemanticScore: mean(armRows.map((r) => semanticScoreWithoutFormat(r))),
+      avgFormatScore: mean(scores),
+      formatPasses,
+      formatPassRate: formatPasses / armRows.length,
+      rubricPasses,
+      rubricPassRate: rubricPasses / armRows.length,
+    });
+  }
+  return out;
+}
+
+function semanticScoreWithoutFormat(row: EvalRow): number {
+  const scores = row.judge.rubricScores;
+  if (!scores) return row.judge.score;
+  const semanticScores = Object.entries(scores)
+    .filter(([id]) => !FORMAT_RUBRIC_IDS.has(id))
+    .map(([, score]) => score)
+    .filter((score): score is number => typeof score === "number");
+  return semanticScores.length > 0 ? mean(semanticScores) : row.judge.score;
+}
+
+function formatScore(row: EvalRow): number | undefined {
+  const scores = row.judge.rubricScores;
+  if (!scores) return undefined;
+  for (const id of FORMAT_RUBRIC_IDS) {
+    const score = scores[id];
+    if (typeof score === "number") return score;
+  }
+  return undefined;
+}
+
+export function renderPatchBuildabilitySection(rows: PatchJudgeReportRow[]): string[] {
+  const lines: string[] = [];
+  lines.push("## Patch buildability");
+  lines.push("");
+  lines.push("| Arm | Rows | Diff extracted | Patch applies | Typecheck passed | Skipped | Avg buildability |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const arm of distinct(rows.map((r) => r.arm))) {
+    const armRows = rows.filter((r) => r.arm === arm);
+    const diffExtracted = armRows.filter((r) => r.patch.diffExtracted !== false).length;
+    const checked = armRows.filter((r) => r.patch.checked);
+    const applies = checked.filter((r) => r.patch.applies).length;
+    const typechecked = checked.filter((r) => r.patch.typecheck?.ran);
+    const typecheckPassed = typechecked.filter((r) => r.patch.typecheck?.ok).length;
+    const skipped = armRows.filter((r) => r.patch.skipped).length;
+    const typecheckCell = typechecked.length > 0 ? `${typecheckPassed}/${typechecked.length}` : "not run";
+    lines.push(
+      `| ${arm} | ${armRows.length} | ${diffExtracted}/${armRows.length} | ${applies}/${checked.length} | ${typecheckCell} | ${skipped} | ${mean(armRows.map((r) => r.patch.buildability)).toFixed(2)} |`,
+    );
+  }
+  lines.push("");
+  lines.push("| Task | Arm | Seed | Diff extracted | Patch applies | Typecheck | Reason |");
+  lines.push("| --- | --- | ---: | :---: | :---: | :---: | --- |");
+  for (const r of rows) {
+    const typecheck = r.patch.typecheck?.ran ? (r.patch.typecheck.ok ? "pass" : "fail") : "not run";
+    const applies = r.patch.checked ? (r.patch.applies ? "yes" : "no") : "not checked";
+    lines.push(
+      `| ${r.taskId} | ${r.arm} | ${r.seed} | ${r.patch.diffExtracted === false ? "no" : "yes"} | ${applies} | ${typecheck} | ${escapeTableCell(r.patch.reason)} |`,
+    );
+  }
+  return lines;
+}
+
+export function renderKgMaterialitySection(rows: KgMaterialityRow[]): string[] {
+  const lines: string[] = [];
+  lines.push("## KG Materiality");
+  lines.push("");
+  lines.push("_Computed against the point-in-time scoped KG block that the KG/PIM arms would receive. Ineligible rows should not carry a KG-decisive headline claim._");
+  lines.push("");
+  lines.push("| Task | Eligible | KG nodes | Required node | Required facts | Required symbols | Forbidden clear | Top KG learning | Reason |");
+  lines.push("| --- | :---: | ---: | :---: | :---: | :---: | :---: | --- | --- |");
+  for (const row of rows) {
+    lines.push(
+      `| ${row.taskId} | ${row.eligible ? "yes" : "no"} | ${row.kgNodeCount} | ${statusCell(row.requiredNodePresent)} | ${statusCell(row.requiredFactPresent)} | ${statusCell(row.requiredSymbolPresent)} | ${statusCell(row.forbiddenFactPresent === undefined ? undefined : !row.forbiddenFactPresent)} | ${escapeTableCell(row.topNodeSummary ?? "—")} | ${escapeTableCell(row.reason)} |`,
+    );
+  }
+  return lines;
+}
+
+function statusCell(value: boolean | undefined): string {
+  if (value === undefined) return "n/a";
+  return value ? "yes" : "no";
+}
+
+function escapeTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, " ").slice(0, 300);
 }
 
 interface ComparisonArm {

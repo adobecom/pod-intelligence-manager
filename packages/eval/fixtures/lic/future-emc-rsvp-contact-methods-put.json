@@ -1,0 +1,57 @@
+{
+  "taskId": "future-emc-rsvp-contact-methods-put",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:31.777Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "RSVP contact methods PUT helper"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 21,
+      "output": "1. web-src/src/pages/EventForm/RegistrationConfigComponent.tsx (lines 22-92, 1.00)\n   arrow_function RegistrationConfigComponent\n   ...\n  22:/**\n  23: * RegistrationConfigComponent - Manages event registration settings\n  24: * \n  25: * Uses EventFormContext for state management.\n  26: * Handles attendee limit, waitlist, guest registration, host email, RSVP description,\n   ...\n\n2. web-src/src/pages/EventForm/RegistrationConfigComponent.tsx (lines 218-269, 0.99)\n   arrow_function RegistrationConfigComponent\n   ...\n 218:uiet\n 219:                    \n 220:                  >\n 221:                    <InfoCircle />\n 222:                  </ActionButton>\n   ...\n\n3. docs/AUTOMATION_MIGRATION_SPEC.md (lines 1099-1111, 0.76)\n   section EMC V2 Automation Migration Specification > 6. Complete `data-testid` Reference > EventForm (Step 4 — RSVP)\n   ...\n1099:### EventForm (Step 4 — RSVP)\n1100:| testid | File | Element |\n1101:|--------|------|---------|\n1102:| `attendee-limit-input` | RegistrationConfigComponent.tsx | Attendee limit NumberField |\n1103:| `allow-waitlist-switch` | RegistrationConfigComponent.tsx | Waitlist Switch |\n   ...\n\n4. docs/AUTOMATION_MIGRATION_SPEC.md (lines 469-555, 0.63)\n   section EMC V2 Automation Migration Specification > 4. Complete Selector Manifests > 4.2 EventForm (All Steps)\n\n5. web-src/src/services/api.ts (lines 145-148, 0.59)\n   method enableDryRun\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "contactMethods"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 28,
+      "output": "## const `contactMethods` (FQN: `web-src/src/types/attendee.ts::Attendee::contactMethods`)\n\n**Kind:** const | **File:** `web-src/src/types/attendee.ts` | **Line:** 55\n\n```\n  contactMethods?: string[]\n  isGuest?: boolean\n  invitedBy?: string\n  shareInfoWithPartners?: boolean\n  requiresTicket?: boolean\n  ccSentiment?: string\n\n  // Campaign tracking (set via URL params, stored by the API)\n  campaignId?: string\n\n  // Timestamps\n  creationTime?: number\n  modificationTime?: number\n\n  // Allow dynamic fields from RSVP config\n  [key: string]: any\n}\n\n/**\n * Attendee list response from API\n */\nexport interface AttendeeListResponse {\n  attendees: Attendee[]\n  count?: number\n  nextPageToken?: string\n  type?: string\n}\n\n/**\n * RSVP Config field structure from external JSON configs\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: attendee (this), assets.d, campaign, domain, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-rsvp-contact-methods-put\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 RSVP contact methods PUT helper\n```\n1. web-src/src/pages/EventForm/RegistrationConfigComponent.tsx (lines 22-92, 1.00)\n   arrow_function RegistrationConfigComponent\n   ...\n  22:/**\n  23: * RegistrationConfigComponent - Manages event registration settings\n  24: * \n  25: * Uses EventFormContext for state management.\n  26: * Handles attendee limit, waitlist, guest registration, host email, RSVP description,\n   ...\n\n2. web-src/src/pages/EventForm/RegistrationConfigComponent.tsx (lines 218-269, 0.99)\n   arrow_function RegistrationConfigComponent\n   ...\n 218:uiet\n 219:                    \n 220:                  >\n 221:                    <InfoCircle />\n 222:                  </ActionButton>\n   ...\n\n3. docs/AUTOMATION_MIGRATION_SPEC.md (lines 1099-1111, 0.76)\n   section EMC V2 Automation Migration Specification > 6. Complete `data-testid` Reference > EventForm (Step 4 — RSVP)\n   ...\n1099:### EventForm (Step 4 — RSVP)\n1100:| testid | File | Element |\n1101:|--------|------|---------|\n1102:| `attendee-limit-input` | RegistrationConfigComponent.tsx | Attendee limit NumberField |\n1103:| `allow-waitlist-switch` | RegistrationConfigComponent.tsx | Waitlist Switch |\n   ...\n\n4. docs/AUTOMATION_MIGRATION_SPEC.md (lines 469-555, 0.63)\n   section EMC V2 Automation Migration Specification > 4. Complete Selector Manifests > 4.2 EventForm (All Steps)\n\n5. web-src/src/services/api.ts (lines 145-148, 0.59)\n   method enableDryRun\n\n\n> **Note**: 3 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r contactMethods\n```\n## const `contactMethods` (FQN: `web-src/src/types/attendee.ts::Attendee::contactMethods`)\n\n**Kind:** const | **File:** `web-src/src/types/attendee.ts` | **Line:** 55\n\n```\n  contactMethods?: string[]\n  isGuest?: boolean\n  invitedBy?: string\n  shareInfoWithPartners?: boolean\n  requiresTicket?: boolean\n  ccSentiment?: string\n\n  // Campaign tracking (set via URL params, stored by the API)\n  campaignId?: string\n\n  // Timestamps\n  creationTime?: number\n  modificationTime?: number\n\n  // Allow dynamic fields from RSVP config\n  [key: string]: any\n}\n\n/**\n * Attendee list response from API\n */\nexport interface AttendeeListResponse {\n  attendees: Attendee[]\n  count?: number\n  nextPageToken?: string\n  type?: string\n}\n\n/**\n * RSVP Config field structure from external JSON configs\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/types/<NAME>.ts` — 10 siblings (conf 1.00)\n  siblings: attendee (this), assets.d, campaign, domain, google-places.d, index, rbac, rbacApi, runtime, …+1 more\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:a0fdbfcb215a22d5\"])`\n```\n",
+  "renderedBlockHash": "c283302276f58fde",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": true,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "symbol lookup returned no definition/no results",
+      "task intent matched"
+    ]
+  }
+}

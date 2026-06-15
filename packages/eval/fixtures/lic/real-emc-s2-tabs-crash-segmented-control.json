@@ -6,13 +6,13 @@
     "find-references",
     "explain-symbol"
   ],
-  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "licDaemonVersion": "lic 0.9.102-1592-c7ae48ad",
   "indexSource": {
     "kind": "parentSha",
     "sha": "04eccca90b7f18df03afe27c17a6d94c5fc7d8b7",
     "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f"
   },
-  "generatedAt": "2026-06-04T23:51:51.757Z",
+  "generatedAt": "2026-06-09T15:55:37.261Z",
   "calls": [
     {
       "tool": "keyword-search",
@@ -21,48 +21,49 @@
         "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
         "-l",
         "5",
-        "Spectrum 2 Tabs SegmentedControl crash"
+        "Registrations Tabs TabPanel selectedTab CampaignsTab SessionsTab"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
       "exitCode": 0,
-      "durationMs": 102,
-      "output": "1. web-src/src/pages/UserManagement/UserManagement.tsx (lines 302-368, 0.16)\n   arrow_function UserManagement\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 766-812, 0.15)\n   arrow_function SessionForm\n\n\n> **Note**: 3 low-relevance keyword results (score < 0.15) hidden.\n\n"
+      "durationMs": 43,
+      "output": "> web-src/src/pages/Registrations/\n1. Registrations.tsx (lines 302-356, 0.36)\n   arrow_function Registrations\n2. SessionsTab.tsx (lines 257-326, 0.18)\n   arrow_function SessionsTab\n   *(also at lines 319-379)*\n4. index.ts (lines 1-24, 0.16)\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n\n"
     },
     {
       "tool": "find-references",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
-        "SegmentedControl"
+        "Registrations"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
       "exitCode": 0,
       "durationMs": 36,
-      "output": "No definition found for: SegmentedControl\n"
+      "output": "Definition: web-src/src/pages/Registrations/Registrations.tsx (lines 29-51)\n  Name: Registrations (const)\n\nReferences (22 shown, 0 total):\n\n  1. docs/FRONTEND.md:318-322 []\n  2. docs/FRONTEND.md:433-437 []\n  3. docs/PROJECT_OVERVIEW.md:58-62 []\n  4. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:29-33 []\n  5. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:87-96 []\n  6. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:190-194 []\n  7. docs/TOP_NAV_LAYOUT.md:9-13 []\n  8. docs/TOP_NAV_LAYOUT.md:26-30 []\n  9. docs/TOP_NAV_LAYOUT.md:55-59 []\n  10. web-src/src/components/App.tsx:42-46 []\n  11. web-src/src/components/App.tsx:131-136 []\n  12. web-src/src/components/layout/TopNav.tsx:113-117 []\n  13. web-src/src/config/externalConfigs.ts:30-34 []\n  14. web-src/src/pages/Home.tsx:51-55 []\n  15. web-src/src/pages/Registrations/CampaignsTab.tsx:29-33 []\n  16. web-src/src/pages/Registrations/CampaignsTab.tsx:440-444 []\n  17. web-src/src/pages/Registrations/RegistrationsTab.tsx:32-36 []\n  18. web-src/src/pages/Registrations/RegistrationsTab.tsx:147-151 []\n  19. web-src/src/pages/Registrations/SessionsTab.tsx:353-357 []\n  20. web-src/src/pages/Registrations/index.ts:4-8 []\n  21. web-src/src/pages/Registrations/index.ts:11-15 []\n  22. web-src/src/pages/index.ts:18-22 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/pages/index.ts::Registrations, web-src/src/pages/Registrations/index.ts::Registrations\n"
     },
     {
       "tool": "explain-symbol",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
-        "SegmentedControl"
+        "Registrations"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-04eccca90b7f",
       "exitCode": 0,
-      "durationMs": 15,
-      "output": "No definition found for symbol: \"SegmentedControl\"\n"
+      "durationMs": 28,
+      "output": "## const `Registrations`\n\n**Kind:** const | **File:** `web-src/src/pages/Registrations/Registrations.tsx` | **Line:** 29\n\n```\nexport const Registrations: React.FC<RegistrationsProps> = ({ ims: _ims }) => {\n  const { eventId: paramEventId } = useParams<{ eventId: string }>()\n  const [searchParams] = useSearchParams()\n  const navigate = useNavigate()\n  const toast = useToastContext()\n  const { groupVersion } = useGroup()\n  const { filterEvents } = useRBACFilter()\n\n  const initialEventId = paramEventId || searchParams.get('eventId') || ''\n\n  // State\n  const [events, setEvents] = useState<EventApiResponse[]>([])\n  const [selectedEventId, setSelectedEventId] = useState<string>(initialEventId)\n  const [attendees, setAttendees] = useState<Attendee[]>([])\n  const [campaigns, setCampaigns] = useState<Campaign[]>([])\n  const [selectedTab, setSelectedTab] = useState<string>('registrations')\n\n  const [isLoadingEvents, setIsLoadingEvents] = useState(true)\n  const [isLoadingAttendees, setIsLoadingAttendees] = useState(false)\n  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false)\n  const [, setError] = useState<string | null>(null)\n\n  const selectedEvent = useMemo(() =>\n    events.find(e => e.eventId === selectedEventId) || null,\n    [events, selectedEventId]\n  )\n\n  const { columnConfig, isLoading: isLoadingConfig } = useRsvpConfig(selectedEvent?.cloudType)\n\n  const hasCampaigns = campaigns.length > 0\n... (19 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.25 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `(usage)` (usage) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:5`\n- `(usage)` (usage) — `web-src/src/pages/Registrations/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/Home.tsx:32`\n- `(usage)` (usage) — `web-src/src/components/App.tsx:34`\n- `(usage)` (usage) — `web-src/src/config/externalConfigs.ts:18`\n- `CampaignStats` (usage) — `web-src/src/types/campaign.ts:67`\n- `TopNav` (usage) — `web-src/src/components/layout/TopNav.tsx:90`\n- `RBAC Permission Gating — Implementation Plan > 5. QA Test Scenarios > 5.1 Role: Full Admin (`*:*`)` (usage) — `docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:188`\n\n"
     }
   ],
-  "renderedBlock": "# Lic Context — task: real-emc-s2-tabs-crash-segmented-control\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 Spectrum 2 Tabs SegmentedControl crash\n```\n1. web-src/src/pages/UserManagement/UserManagement.tsx (lines 302-368, 0.16)\n   arrow_function UserManagement\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 766-812, 0.15)\n   arrow_function SessionForm\n\n\n> **Note**: 3 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic find-references -r SegmentedControl\n```\nNo definition found for: SegmentedControl\n```\n\n## lic explain-symbol -r SegmentedControl\n```\nNo definition found for symbol: \"SegmentedControl\"\n```\n",
-  "renderedBlockHash": "eb416ba34fbb93fe",
+  "renderedBlock": "# Lic Context — task: real-emc-s2-tabs-crash-segmented-control\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 Registrations Tabs TabPanel selectedTab CampaignsTab SessionsTab\n```\n> web-src/src/pages/Registrations/\n1. Registrations.tsx (lines 302-356, 0.36)\n   arrow_function Registrations\n2. SessionsTab.tsx (lines 257-326, 0.18)\n   arrow_function SessionsTab\n   *(also at lines 319-379)*\n4. index.ts (lines 1-24, 0.16)\n\n> **Note**: 1 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic find-references -r Registrations\n```\nDefinition: web-src/src/pages/Registrations/Registrations.tsx (lines 29-51)\n  Name: Registrations (const)\n\nReferences (22 shown, 0 total):\n\n  1. docs/FRONTEND.md:318-322 []\n  2. docs/FRONTEND.md:433-437 []\n  3. docs/PROJECT_OVERVIEW.md:58-62 []\n  4. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:29-33 []\n  5. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:87-96 []\n  6. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:190-194 []\n  7. docs/TOP_NAV_LAYOUT.md:9-13 []\n  8. docs/TOP_NAV_LAYOUT.md:26-30 []\n  9. docs/TOP_NAV_LAYOUT.md:55-59 []\n  10. web-src/src/components/App.tsx:42-46 []\n  11. web-src/src/components/App.tsx:131-136 []\n  12. web-src/src/components/layout/TopNav.tsx:113-117 []\n  13. web-src/src/config/externalConfigs.ts:30-34 []\n  14. web-src/src/pages/Home.tsx:51-55 []\n  15. web-src/src/pages/Registrations/CampaignsTab.tsx:29-33 []\n  16. web-src/src/pages/Registrations/CampaignsTab.tsx:440-444 []\n  17. web-src/src/pages/Registrations/RegistrationsTab.tsx:32-36 []\n  18. web-src/src/pages/Registrations/RegistrationsTab.tsx:147-151 []\n  19. web-src/src/pages/Registrations/SessionsTab.tsx:353-357 []\n  20. web-src/src/pages/Registrations/index.ts:4-8 []\n  21. web-src/src/pages/Registrations/index.ts:11-15 []\n  22. web-src/src/pages/index.ts:18-22 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/pages/index.ts::Registrations, web-src/src/pages/Registrations/index.ts::Registrations\n```\n\n## lic explain-symbol -r Registrations\n```\n## const `Registrations`\n\n**Kind:** const | **File:** `web-src/src/pages/Registrations/Registrations.tsx` | **Line:** 29\n\n```\nexport const Registrations: React.FC<RegistrationsProps> = ({ ims: _ims }) => {\n  const { eventId: paramEventId } = useParams<{ eventId: string }>()\n  const [searchParams] = useSearchParams()\n  const navigate = useNavigate()\n  const toast = useToastContext()\n  const { groupVersion } = useGroup()\n  const { filterEvents } = useRBACFilter()\n\n  const initialEventId = paramEventId || searchParams.get('eventId') || ''\n\n  // State\n  const [events, setEvents] = useState<EventApiResponse[]>([])\n  const [selectedEventId, setSelectedEventId] = useState<string>(initialEventId)\n  const [attendees, setAttendees] = useState<Attendee[]>([])\n  const [campaigns, setCampaigns] = useState<Campaign[]>([])\n  const [selectedTab, setSelectedTab] = useState<string>('registrations')\n\n  const [isLoadingEvents, setIsLoadingEvents] = useState(true)\n  const [isLoadingAttendees, setIsLoadingAttendees] = useState(false)\n  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false)\n  const [, setError] = useState<string | null>(null)\n\n  const selectedEvent = useMemo(() =>\n    events.find(e => e.eventId === selectedEventId) || null,\n    [events, selectedEventId]\n  )\n\n  const { columnConfig, isLoading: isLoadingConfig } = useRsvpConfig(selectedEvent?.cloudType)\n\n  const hasCampaigns = campaigns.length > 0\n... (19 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.25 (top 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (8 total)\n\n- `(usage)` (usage) — `web-src/src/pages/Registrations/RegistrationsTab.tsx:5`\n- `(usage)` (usage) — `web-src/src/pages/Registrations/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/Home.tsx:32`\n- `(usage)` (usage) — `web-src/src/components/App.tsx:34`\n- `(usage)` (usage) — `web-src/src/config/externalConfigs.ts:18`\n- `CampaignStats` (usage) — `web-src\n\n_[truncated to budget]_\n",
+  "renderedBlockHash": "a99c7f85aeafe034",
   "quality": {
-    "signal": "none",
+    "signal": "strong",
     "noDefinitionResult": true,
     "answerLeak": false,
     "intentMatch": true,
-    "primaryFileRetrieved": false,
+    "primaryFileRetrieved": true,
     "groundTruthSymbolOrChunkRetrieved": false,
     "notes": [
+      "primary file retrieved",
       "symbol lookup returned no definition/no results",
       "task intent matched"
     ]

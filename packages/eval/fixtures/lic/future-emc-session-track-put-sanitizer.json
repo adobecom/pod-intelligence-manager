@@ -1,0 +1,56 @@
+{
+  "taskId": "future-emc-session-track-put-sanitizer",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:29.408Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "ESP PUT sanitizer targetCms modificationTime"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 37,
+      "output": "1. web-src/src/pages/SeriesForm/SeriesForm.tsx (lines 48-92, 1.00)\n   function mapApiResponseToFormData\n   ...\n  48:/**\n  49: * Map API response to form data\n  50: */\n  51:function mapApiResponseToFormData(series: SeriesApiResponse): SeriesFormData {\n   ...\n\n2. docs/API_CENTRALIZATION.md (lines 42-79, 0.83)\n   section API Centralization Guide > Series List API Implementation > New Types (`/web-src/src/types/domain.ts`) > `SeriesApiResponse`\n   ...\n  42:#### `SeriesApiResponse`\n  43:Represents the raw series data from the backend API:\n   ...\n\n3. web-src/src/contexts/SeriesFormContext.tsx (lines 5-38, 0.59)\n   Referenced by 13 files (.tsx: 13)\n\n4. web-src/src/types/campaign.ts (lines 37-49, 0.55)\n   interface CampaignUpdatePayload\n   Referenced by 1 files (.tsx: 1)\n\n5. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx (lines 328-379, 0.54)\n   arrow_function SeriesDashboard\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "prepareEspSeriesPutPayload"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 25,
+      "output": "## function `prepareEspSeriesPutPayload`\n\n**Kind:** function | **File:** `web-src/src/utils/dataFilters.ts` | **Line:** 269\n\n```\nexport function prepareEspSeriesPutPayload(\n  data: Record<string, any>,\n  options: FilterOptions = {}\n): Record<string, any> {\n  return filterSeriesData(data, 'update', options)\n}\n\n// ============================================================================\n// EVENT FILTERING\n// ============================================================================\n\nexport type EventFilterMode = 'submission' | 'clone'\n\nconst EVENT_FILTER_STRATEGIES: Record<EventFilterMode, (descriptor: DataFieldDescriptor | undefined) => boolean> = {\n  submission: (descriptor) => descriptor?.submittable === true,\n  clone: (descriptor) => descriptor?.submittable === true && descriptor?.cloneable !== false,\n}\n\n/**\n * Keys stripped on every ESL **event** `PUT /v1/events/:id` (update, publish, unpublish, preview)\n * inside {@link prepareEslEventPutPayload} — not publish-specific.\n * - inviteOnly: read-only on ESL update.\n */\nexport const EVENT_DATA_ESL_EVENT_PUT_EXCLUDE_KEYS: readonly string[] = ['inviteOnly']\n\n/**\n * Normalize any object intended for ESL `PUT /v1/events/:id` (update, publish, unpublish, preview).\n * Applies submission filtering plus {@link EVENT_DATA_ESL_EVENT_PUT_EXCLUDE_KEYS}.\n */\nexport function prepareEslEventPutPayload(\n... (20 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 5 chunks reference this symbol\n\n### Top Callers (39 total)\n\n- `unpublishSeries` (function) — `web-src/src/services/api.ts:795`\n\n### Top Callees (4 total)\n\n- `filterSeriesData` (function) — `web-src/src/utils/dataFilters.ts:240`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-session-track-put-sanitizer\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 ESP PUT sanitizer targetCms modificationTime\n```\n1. web-src/src/pages/SeriesForm/SeriesForm.tsx (lines 48-92, 1.00)\n   function mapApiResponseToFormData\n   ...\n  48:/**\n  49: * Map API response to form data\n  50: */\n  51:function mapApiResponseToFormData(series: SeriesApiResponse): SeriesFormData {\n   ...\n\n2. docs/API_CENTRALIZATION.md (lines 42-79, 0.83)\n   section API Centralization Guide > Series List API Implementation > New Types (`/web-src/src/types/domain.ts`) > `SeriesApiResponse`\n   ...\n  42:#### `SeriesApiResponse`\n  43:Represents the raw series data from the backend API:\n   ...\n\n3. web-src/src/contexts/SeriesFormContext.tsx (lines 5-38, 0.59)\n   Referenced by 13 files (.tsx: 13)\n\n4. web-src/src/types/campaign.ts (lines 37-49, 0.55)\n   interface CampaignUpdatePayload\n   Referenced by 1 files (.tsx: 1)\n\n5. web-src/src/pages/SeriesDashboard/SeriesDashboard.tsx (lines 328-379, 0.54)\n   arrow_function SeriesDashboard\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r prepareEspSeriesPutPayload\n```\n## function `prepareEspSeriesPutPayload`\n\n**Kind:** function | **File:** `web-src/src/utils/dataFilters.ts` | **Line:** 269\n\n```\nexport function prepareEspSeriesPutPayload(\n  data: Record<string, any>,\n  options: FilterOptions = {}\n): Record<string, any> {\n  return filterSeriesData(data, 'update', options)\n}\n\n// ============================================================================\n// EVENT FILTERING\n// ============================================================================\n\nexport type EventFilterMode = 'submission' | 'clone'\n\nconst EVENT_FILTER_STRATEGIES: Record<EventFilterMode, (descriptor: DataFieldDescriptor | undefined) => boolean> = {\n  submission: (descriptor) => descriptor?.submittable === true,\n  clone: (descriptor) => descriptor?.submittable === true && descriptor?.cloneable !== false,\n}\n\n/**\n * Keys stripped on every ESL **event** `PUT /v1/events/:id` (update, publish, unpublish, preview)\n * inside {@link prepareEslEventPutPayload} — not publish-specific.\n * - inviteOnly: read-only on ESL update.\n */\nexport const EVENT_DATA_ESL_EVENT_PUT_EXCLUDE_KEYS: readonly string[] = ['inviteOnly']\n\n/**\n * Normalize any object intended for ESL `PUT /v1/events/:id` (update, publish, unpublish, preview).\n * Applies submission filtering plus {@link EVENT_DATA_ESL_EVENT_PUT_EXCLUDE_KEYS}.\n */\nexport function prepareEslEventPutPayload(\n... (20 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 5 chunks reference this symbol\n\n### Top Callers (39 total)\n\n- `unpublishSeries` (function) — `web-src/src/services/api.ts:795`\n\n### Top Callees (4 total)\n\n- `filterSeriesData` (function) — `web-src/src/utils/dataFilters.ts:240`\n```\n",
+  "renderedBlockHash": "09f4cf08aca7a15c",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

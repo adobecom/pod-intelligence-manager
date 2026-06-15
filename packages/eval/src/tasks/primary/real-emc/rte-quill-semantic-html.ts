@@ -265,6 +265,15 @@ export const rteQuillSemanticHtml: Task = {
     "Return ONLY a unified diff (--- / +++ / @@) against the RichTextEditor component. No prose, no full-file rewrite.",
   ].join("\n"),
   expectedSignals: ["getSemanticHTML", "clipboard.convert", "setContents", "formats"],
+  kgExpectations: {
+    requiredFacts: [
+      "Quill",
+      "getSemanticHTML",
+      "clipboard.convert",
+      "formats",
+    ],
+    requiredSymbols: ["getSemanticHTML", "setContents"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #122, merge SHA 704fb110. Parent file at f787c75.",

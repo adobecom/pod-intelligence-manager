@@ -1,0 +1,68 @@
+{
+  "taskId": "future-emc-rich-text-semantic-export",
+  "stratum": "S5",
+  "recipe": [
+    "keyword-search",
+    "find-references",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:16:33.686Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "Quill rich text semantic HTML NBSP"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 37,
+      "output": "1. web-src/src/index.css (lines 833-840, 1.00)\n 833:/**\n 834: * Quill snow + RichTextEditor (`.rte-wrapper`) — Spectrum-like surfaces for light/dark.\n 835: * Matches `data-color-scheme` (JS) and `prefers-color-scheme` before hydration.\n 836: */\n 837:.rte-wrapper .ql-toolbar.ql-snow {\n   ...\n\n2. docs/AUTOMATION_MIGRATION_SPEC.md (lines 40-88, 0.86)\n   section EMC V2 Automation Migration Specification > 2. S2 Component → DOM Rendering Reference\n   ...\n  40:## 2. S2 Component → DOM Rendering Reference\n  41:\n  42:| S2 Component | Rendered HTML | Selector Pattern |\n  43:|---|---|---|\n  44:| `TextField label=\"X\"` | `<label>X</label>` + `<input>` | `[data-testid]` or label association |\n   ...\n\n3. docs/AUTOMATION_MIGRATION_SPEC.md (lines 1185-1191, 0.63)\n   section EMC V2 Automation Migration Specification > 8. Risk Assessment & Migration Phases > Low Risk\n\n4. web-src/index.html (lines 1-21, 0.44)\n\n5. web-src/src/index.css (lines 889-893, 0.53)\n\n"
+    },
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "getSemanticHTML"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 37,
+      "output": "Definition: web-src/src/components/shared/RichTextEditor.tsx (lines 92-100)\n  Name: getSemanticHTML (const)\n    92: function getExportedRteHtml(quill: {\n    93:   getText: () => string\n    94:   getSemanticHTML: () => string\n    95: }): string {\n    96:   if (!quill.getText().trim()) {\n    97:     return ''\n    98:   }\n    99:   return normalizeNbspInRteHtml(quill.getSemanticHTML())\n   100: }\n\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "getSemanticHTML"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 23,
+      "output": "## const `getSemanticHTML`\n\n**Kind:** const | **File:** `web-src/src/components/shared/RichTextEditor.tsx` | **Line:** 94\n\n```\n  getSemanticHTML: () => string\n}): string {\n  if (!quill.getText().trim()) {\n    return ''\n  }\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 1 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `getExportedRteHtml` (function) — `web-src/src/components/shared/RichTextEditor.tsx:92`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-rich-text-semantic-export\n_Stratum: S5._\n\n## lic keyword-search -r -l 5 Quill rich text semantic HTML NBSP\n```\n1. web-src/src/index.css (lines 833-840, 1.00)\n 833:/**\n 834: * Quill snow + RichTextEditor (`.rte-wrapper`) — Spectrum-like surfaces for light/dark.\n 835: * Matches `data-color-scheme` (JS) and `prefers-color-scheme` before hydration.\n 836: */\n 837:.rte-wrapper .ql-toolbar.ql-snow {\n   ...\n\n2. docs/AUTOMATION_MIGRATION_SPEC.md (lines 40-88, 0.86)\n   section EMC V2 Automation Migration Specification > 2. S2 Component → DOM Rendering Reference\n   ...\n  40:## 2. S2 Component → DOM Rendering Reference\n  41:\n  42:| S2 Component | Rendered HTML | Selector Pattern |\n  43:|---|---|---|\n  44:| `TextField label=\"X\"` | `<label>X</label>` + `<input>` | `[data-testid]` or label association |\n   ...\n\n3. docs/AUTOMATION_MIGRATION_SPEC.md (lines 1185-1191, 0.63)\n   section EMC V2 Automation Migration Specification > 8. Risk Assessment & Migration Phases > Low Risk\n\n4. web-src/index.html (lines 1-21, 0.44)\n\n5. web-src/src/index.css (lines 889-893, 0.53)\n```\n\n## lic find-references -r getSemanticHTML\n```\nDefinition: web-src/src/components/shared/RichTextEditor.tsx (lines 92-100)\n  Name: getSemanticHTML (const)\n    92: function getExportedRteHtml(quill: {\n    93:   getText: () => string\n    94:   getSemanticHTML: () => string\n    95: }): string {\n    96:   if (!quill.getText().trim()) {\n    97:     return ''\n    98:   }\n    99:   return normalizeNbspInRteHtml(quill.getSemanticHTML())\n   100: }\n```\n\n## lic explain-symbol -r getSemanticHTML\n```\n## const `getSemanticHTML`\n\n**Kind:** const | **File:** `web-src/src/components/shared/RichTextEditor.tsx` | **Line:** 94\n\n```\n  getSemanticHTML: () => string\n}): string {\n  if (!quill.getText().trim()) {\n    return ''\n  }\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 1 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `getExportedRteHtml` (function) — `web-src/src/components/shared/RichTextEditor.tsx:92`\n```\n",
+  "renderedBlockHash": "ad7fa5a3f39b804a",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

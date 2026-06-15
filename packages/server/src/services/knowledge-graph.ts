@@ -1265,6 +1265,7 @@ export interface ContractedRelevantLearningsOptions {
   maxTokens: number;
   projectId?: string | null;
   taskQuery?: string;
+  taskQueryEmbedding?: number[] | null;
   requiredNodeIds?: string[];
 }
 
@@ -1293,6 +1294,7 @@ async function getTaskRelevantLearnings(
   orgId: string,
   scopes: string[],
   taskQuery: string | undefined,
+  taskQueryEmbedding: number[] | null | undefined,
   maxTokens: number,
   projectId?: string | null,
   recordRetrievals = true,
@@ -1314,6 +1316,7 @@ async function getTaskRelevantLearnings(
       include_explanations: true,
       record_retrievals: recordRetrievals,
       required_node_ids: requiredNodeIds,
+      query_embedding: taskQueryEmbedding,
     });
   }
 
@@ -1382,7 +1385,15 @@ export async function getContractedRelevantLearnings(
   orgId: string,
   options: ContractedRelevantLearningsOptions,
 ): Promise<KnowledgeQueryResult> {
-  const mode = getKgContextContract(orgId);
+  return getRelevantLearningsForContractMode(orgId, getKgContextContract(orgId), options);
+}
+
+/** Eval/test helper: exercise the same context contract switch without reading org settings. */
+export async function getRelevantLearningsForContractMode(
+  orgId: string,
+  mode: KgContextContractMode,
+  options: ContractedRelevantLearningsOptions,
+): Promise<KnowledgeQueryResult> {
   const taskQuery = options.taskQuery?.trim() || undefined;
 
   if (mode === "task_relevant") {
@@ -1390,6 +1401,7 @@ export async function getContractedRelevantLearnings(
       orgId,
       options.scopes,
       taskQuery,
+      options.taskQueryEmbedding,
       options.maxTokens,
       options.projectId,
       true,
@@ -1405,6 +1417,7 @@ export async function getContractedRelevantLearnings(
     options.maxTokens,
     options.projectId,
     options.requiredNodeIds,
+    options.taskQueryEmbedding,
   );
   if (mode === "shadow") {
     try {
@@ -1412,6 +1425,7 @@ export async function getContractedRelevantLearnings(
         orgId,
         options.scopes,
         taskQuery,
+        options.taskQueryEmbedding,
         options.maxTokens,
         options.projectId,
         false,
@@ -1443,6 +1457,7 @@ export async function getRelevantLearnings(
   maxTokens: number,
   projectId?: string | null,
   requiredNodeIds?: string[],
+  queryEmbedding?: number[] | null,
 ): Promise<KnowledgeQueryResult> {
   const keywords = keywordsFromTexts(activeConflictSummaries, 40);
 
@@ -1458,6 +1473,7 @@ export async function getRelevantLearnings(
     max_tokens: maxTokens,
     include_details: false,
     ...(queryText.trim() ? { query_text: queryText } : {}),
+    ...(queryText.trim() && queryEmbedding !== undefined ? { query_embedding: queryEmbedding } : {}),
     required_node_ids: requiredNodeIds,
   });
 }
