@@ -8,7 +8,6 @@ export const PRIMARY_PROTOCOL_ARMS = [
   "kg-only",
   "lic-full",
   "lic-pim-combined",
-  "length-matched-neutral",
 ] as const;
 
 export const SECONDARY_PROTOCOL_ARMS = ["control"] as const;
@@ -148,11 +147,9 @@ function protocolComparisons(rows: EvalRow[], armIds: readonly string[], bootstr
 }
 
 // Oriented so a positive delta favours armA. Baseline pairs come first:
-// length-matched-neutral is the primary causal baseline ("context helps"),
 // control is the operational baseline. The matched-budget pairs (vs *-clipped)
 // only resolve when those arms were run.
 const FOCUS_PAIRS: Array<[string, string, string]> = [
-  ["pim-full", "length-matched-neutral", "PIM vs length-matched neutral (primary baseline)"],
   ["pim-full", "control", "PIM vs control (operational baseline)"],
   ["pim-full", "lic-full", "PIM full bundle vs locally indexed code"],
   ["kg-only", "lic-full", "KG only vs locally indexed code"],
@@ -161,6 +158,15 @@ const FOCUS_PAIRS: Array<[string, string, string]> = [
   ["lic-pim-combined", "lic-full", "Budget-split combined vs locally indexed code only"],
   ["lic-pim-combined", "pim-clipped", "Combined vs PIM (matched budget)"],
   ["lic-pim-combined", "lic-clipped", "Combined vs locally indexed code (matched budget)"],
+  // Serena focus pairs — resolve standalone only when the serena arms were run
+  // (focusComparison returns undefined otherwise), so they are inert for non-serena runs.
+  ["serena-full", "control", "Serena vs control (standalone code-intelligence lift)"],
+  ["serena-full", "lic-full", "Serena vs locally indexed code (LIC provider comparison)"],
+  ["serena-pim-combined", "pim-full", "Serena+PIM combined vs PIM only"],
+  ["serena-pim-combined", "serena-full", "Serena+PIM combined vs Serena only"],
+  ["serena-pim-combined", "lic-pim-combined", "Serena+PIM vs LIC+PIM (combined providers)"],
+  ["serena-pim-combined", "pim-clipped", "Serena+PIM vs PIM (matched budget)"],
+  ["serena-pim-combined", "serena-clipped", "Serena+PIM vs Serena (matched budget)"],
 ];
 
 function focusVerdicts(comparisons: ProtocolComparison[], rows: EvalRow[]): FocusVerdict[] {

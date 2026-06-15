@@ -55,12 +55,12 @@ function row(overrides: Partial<EvalRow>): EvalRow {
 }
 
 describe("protocol analysis", () => {
-  it("returns all ten comparisons for the five primary arms", () => {
+  it("returns all six comparisons for the four primary arms", () => {
     const rows = ["t1", "t2"].flatMap((taskId) =>
       PRIMARY_PROTOCOL_ARMS.map((arm) => row({ taskId, arm, armLabel: arm })),
     );
     const analysis = computeProtocolAnalysis(rows, { bootstrapIterations: 100, generatedAt: "now" });
-    expect(analysis.comparisons).toHaveLength(10);
+    expect(analysis.comparisons).toHaveLength(6);
     expect(analysis.headlineTaskCount).toBe(2);
   });
 

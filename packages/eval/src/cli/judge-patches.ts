@@ -5,6 +5,7 @@ import { ALL_TASKS } from "../tasks/index.js";
 import { applyAssignment } from "../tasks/stratification.js";
 import type { Task } from "../tasks/types.js";
 import { judgePatch, type PatchJudgeResult } from "../judges/patch.js";
+import { renderPatchBuildabilitySection, type PatchJudgeReportRow } from "../report.js";
 
 /**
  * Post-hoc executable patch judge over a completed run. Applies each candidate's
@@ -65,6 +66,7 @@ async function main(): Promise<void> {
     join(runDir, "patch-judge.jsonl"),
     results.map((r) => JSON.stringify({ taskId: r.taskId, arm: r.arm, seed: r.seed, patch: r.patch })).join("\n") + (results.length ? "\n" : ""),
   );
+  await updateReport(runDir, results.map(({ taskId, arm, seed, patch }) => ({ taskId, arm, seed, patch })));
 
   // Per-arm buildability summary over rows that actually ran.
   const arms = Array.from(new Set(results.map((r) => r.arm)));
@@ -81,6 +83,28 @@ async function main(): Promise<void> {
     console.log("  (all rows skipped — set EMC_REPO to a local product checkout to enable the patch judge)");
   }
   console.log(`\n[judge-patches] wrote ${join(runDir, "patch-judge.jsonl")} (${results.length} rows)`);
+}
+
+async function updateReport(runDir: string, rows: PatchJudgeReportRow[]): Promise<void> {
+  const reportPath = join(runDir, "report.md");
+  const existing = await readFile(reportPath, "utf8").catch(() => "");
+  if (!existing || rows.length === 0) return;
+  const section = renderPatchBuildabilitySection(rows).join("\n");
+  const marker = "\n## Patch buildability\n";
+  const nextSection = /\n## (?!Patch buildability)/g;
+  const start = existing.indexOf(marker);
+  let next = -1;
+  if (start >= 0) {
+    nextSection.lastIndex = start + marker.length;
+    const match = nextSection.exec(existing);
+    next = match?.index ?? -1;
+  }
+  const updated =
+    start >= 0
+      ? existing.slice(0, start).replace(/\s+$/, "\n\n") + section + "\n\n" + (next >= 0 ? existing.slice(next + 1) : "")
+      : existing.replace(/\s+$/, "\n\n") + section + "\n";
+  await writeFile(reportPath, updated);
+  console.log(`[judge-patches] updated ${reportPath}`);
 }
 
 main().catch((err) => {

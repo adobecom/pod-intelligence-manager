@@ -178,6 +178,13 @@ export const partnerPutSponsorIdPayload: Task = {
     "filteredLocalePayload",
     "localizations",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "modificationTime for optimistic concurrency on PUT",
+      "construct narrow association payloads",
+    ],
+    requiredSymbols: ["sponsorId", "modificationTime"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #92, merge SHA bba1f6a. Parent file at f5db523.",

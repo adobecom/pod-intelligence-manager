@@ -6,6 +6,11 @@ import type { Task } from "../tasks/types.js";
 import type { EvalRow } from "../report.js";
 import type { AuditFinding, AuditResult } from "./protocol.js";
 import { computeProtocolAnalysis } from "./protocol-analysis.js";
+import { evaluateKgMateriality } from "./kg-materiality.js";
+import type { SerenaContextFixture } from "../serena/types.js";
+import { deriveSerenaFixtureQuality } from "./serena-quality.js";
+import { evaluateSerenaMateriality, readyFraction, summarizeSerenaQuality } from "./serena-materiality.js";
+import { TRACK_A_DENYLIST } from "../serena/tools.js";
 
 interface RunManifestLike {
   runId: string;
@@ -286,6 +291,96 @@ export async function auditJudging(runDir: string): Promise<AuditResult> {
     findings.push({ level: "error", message: `inter-rater kappa below 0.6 (${kappaRaw})` });
   }
   await auditPatchJudge(runDir, manifest, tasks, findings);
+  return { ok: findings.every((f) => f.level !== "error"), findings };
+}
+
+export async function auditKgMateriality(runDir: string): Promise<AuditResult> {
+  const findings: AuditFinding[] = [];
+  const manifest = await readRunManifest(runDir);
+  const tasks = taskMap();
+  for (const taskId of manifest.tasks) {
+    const task = tasks.get(taskId);
+    if (!task?.kgExpectations) continue;
+    const scopedPath = join(runDir, "fixtures", "scoped", `${taskId}.json`);
+    const rawPath = join(runDir, "fixtures", `${task.podId}.json`);
+    const fixture = await readJson<any>(scopedPath).catch(() => readJson<any>(rawPath).catch(() => null));
+    const row = evaluateKgMateriality(task, fixture);
+    if (!row.eligible) {
+      findings.push({ level: "error", message: `${taskId}: ${row.reason}` });
+    }
+  }
+  if (findings.length === 0) {
+    const expected = manifest.tasks.filter((taskId) => tasks.get(taskId)?.kgExpectations).length;
+    if (expected === 0) findings.push({ level: "warning", message: "no tasks with kgExpectations found in run" });
+  }
+  return { ok: findings.every((f) => f.level !== "error"), findings };
+}
+
+/**
+ * Serena fixture audit (the `--type=serena` branch). Generic leakage is already
+ * covered by `auditLeakage` (it walks all of `fixtures/`); this adds the
+ * Serena-specific gates: the tool gate (no denylisted tool was exposed), the
+ * answer-leak gate, and the headline fixture-quality distribution (≥75% must be
+ * medium/strong). It also reports the per-task evidence/materiality breakdown.
+ */
+export async function auditSerena(runDir: string): Promise<AuditResult> {
+  const findings: AuditFinding[] = [];
+  const tasks = taskMap();
+
+  const entries = (await fixtureEntries(runDir)).filter((e) => e.file.startsWith("serena/"));
+  if (entries.length === 0) {
+    findings.push({ level: "warning", message: "no Serena fixtures found in run (fixtures/serena/ is empty)" });
+    return { ok: true, findings };
+  }
+
+  const HEADLINE = new Set(["S1", "S2", "S3", "S4", "S5"]);
+  const headlineQuality: Array<ReturnType<typeof deriveSerenaFixtureQuality> | undefined> = [];
+  const denylist = new Set(TRACK_A_DENYLIST);
+
+  for (const { file, json } of entries) {
+    const fixture = json as SerenaContextFixture;
+    const taskId = fixture.taskId ?? file.replace(/^serena\//, "").replace(/\.json$/, "");
+    const task = tasks.get(taskId);
+
+    // Tool gate: no denylisted tool may have been exposed by the server.
+    const exposedDenied = (fixture.toolInventory ?? []).filter((t) => denylist.has(t));
+    if (exposedDenied.length > 0) {
+      findings.push({ level: "error", message: `${taskId}: denylisted Serena tool(s) exposed: ${exposedDenied.join(", ")}` });
+    }
+    // Any call to a non-allowlisted tool is a gate breach.
+    const offAllowlist = (fixture.calls ?? []).filter((c) => !fixture.toolAllowlist?.includes(c.tool)).map((c) => c.tool);
+    if (offAllowlist.length > 0) {
+      findings.push({ level: "error", message: `${taskId}: call(s) to non-allowlisted tool(s): ${Array.from(new Set(offAllowlist)).join(", ")}` });
+    }
+
+    const quality = task ? deriveSerenaFixtureQuality(task, fixture) : fixture.quality;
+    if (quality?.answerLeak || quality?.signal === "leak") {
+      findings.push({ level: "error", message: `${taskId}: Serena fixture leaks ground truth (${quality.notes.join("; ")})` });
+    }
+    if (task && fixture.stratum && HEADLINE.has(fixture.stratum)) {
+      headlineQuality.push(quality);
+      const m = evaluateSerenaMateriality(task, fixture);
+      if (!["medium", "strong"].includes(m.signal)) {
+        findings.push({
+          level: "warning",
+          message: `${taskId} [${m.stratum}] signal=${m.signal} symbol=${m.symbolEvidenceRetrieved} refs=${m.referencesRetrieved} file=${m.primaryFileRetrieved} diag=${m.diagnosticsCaptured}`,
+        });
+      }
+    }
+  }
+
+  const dist = summarizeSerenaQuality(headlineQuality);
+  const ready = readyFraction(dist);
+  findings.push({
+    level: "warning",
+    message: `Serena headline fixture quality: strong=${dist.strong} medium=${dist.medium} weak=${dist.weak} none=${dist.none} leak=${dist.leak} (medium/strong ${(ready * 100).toFixed(0)}%)`,
+  });
+  if (headlineQuality.length > 0 && ready < 0.75) {
+    findings.push({
+      level: "error",
+      message: `Serena fixture-quality gate failed: only ${(ready * 100).toFixed(0)}% of headline fixtures are medium/strong (need ≥75%)`,
+    });
+  }
   return { ok: findings.every((f) => f.level !== "error"), findings };
 }
 

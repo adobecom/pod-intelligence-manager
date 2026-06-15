@@ -1,0 +1,144 @@
+{
+  "taskId": "real-emc-include-partners-toggle",
+  "stratum": "S4",
+  "generatedAt": "2026-06-12T19:05:04.278Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2-lic-worktrees/emc-f7c19fc230c4",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2-lic-worktrees/emc-f7c19fc230c4",
+  "repoSha": "f7c19fc230c4e5aecfe06b46d12cf96304253ce8",
+  "indexSource": {
+    "kind": "parentSha",
+    "sha": "f7c19fc230c4e5aecfe06b46d12cf96304253ce8",
+    "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-f7c19fc230c4"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "6ea485b106b6bc34",
+  "recipe": [
+    "find_symbol",
+    "find_symbol",
+    "find_symbol"
+  ],
+  "seed": {
+    "symbols": [
+      "showSponsors",
+      "EventFormContext",
+      "eventFormMappers"
+    ],
+    "naturalLanguageQuery": "include partners toggle event form",
+    "source": "reviewed-derived"
+  },
+  "calls": [
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "showSponsors",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:05:02.169Z",
+      "durationMs": 1718,
+      "ok": true,
+      "output": "[{\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"docs/v1-reference/data-utils.js\", \"body_location\": {\"start_line\": 108, \"end_line\": 108}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}, {\"name_path\": \"EventApiResponse/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 274, \"end_line\": 274}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EventFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 630, \"end_line\": 630}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/dataFilters.ts\", \"body_location\": {\"start_line\": 127, \"end_line\": 127}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}]",
+      "outputHash": "b223e53d969b1012"
+    },
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "EventFormContext",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:05:03.887Z",
+      "durationMs": 194,
+      "ok": true,
+      "output": "[{\"name_path\": \"emc-f7c19fc230c4/web-src/src/contexts/EventFormContext\", \"kind\": \"File\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 694}, \"body\": null}, {\"name_path\": \"EventFormContext\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 372, \"end_line\": 372}, \"body\": \"EventFormContext = createContext<EventFormContextValue | undefined>(undefined)\"}]",
+      "outputHash": "3c27575d56f7025b"
+    },
+    {
+      "tool": "find_symbol",
+      "args": {
+        "name_path_pattern": "eventFormMappers",
+        "include_body": true
+      },
+      "startedAt": "2026-06-12T19:05:04.081Z",
+      "durationMs": 197,
+      "ok": true,
+      "output": "[{\"name_path\": \"emc-f7c19fc230c4/web-src/src/utils/eventFormMappers\", \"kind\": \"File\", \"relative_path\": \"web-src/src/utils/eventFormMappers.ts\", \"body_location\": {\"start_line\": 0, \"end_line\": 182}, \"body\": null}]",
+      "outputHash": "0373c0dc71e9b757"
+    }
+  ],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:05:04.278Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2-lic-worktrees/emc-f7c19fc230c4._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: real-emc-include-partners-toggle (S4)._\n\n## Seed\n- Symbols: showSponsors, EventFormContext, eventFormMappers\n- Seed source: reviewed-derived\n\n## Symbol Evidence\n### find_symbol {\"name_path_pattern\":\"showSponsors\",\"include_body\":true}\n```\n[{\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"docs/v1-reference/data-utils.js\", \"body_location\": {\"start_line\": 108, \"end_line\": 108}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}, {\"name_path\": \"EventApiResponse/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 274, \"end_line\": 274}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EventFormData/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/types/domain.ts\", \"body_location\": {\"start_line\": 630, \"end_line\": 630}, \"body\": \"showSponsors?: boolean\"}, {\"name_path\": \"EVENT_DATA_FILTER/showSponsors\", \"kind\": \"Property\", \"relative_path\": \"web-src/src/utils/dataFilters.ts\", \"body_location\": {\"start_line\": 127, \"end_line\": 127}, \"body\": \"showSponsors: { type: 'boolean', localizable: false, cloneable: true, submittable: true }\"}]\n```\n\n### find_symbol {\"name_path_pattern\":\"EventFormContext\",\"include_body\":true}\n```\n[{\"name_path\": \"emc-f7c19fc230c4/web-src/src/contexts/EventFormContext\", \"kind\": \"File\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 0, \"end_line\": 694}, \"body\": null}, {\"name_path\": \"EventFormContext\", \"kind\": \"Constant\", \"relative_path\": \"web-src/src/contexts/EventFormContext.tsx\", \"body_location\": {\"start_line\": 372, \"end_line\": 372}, \"body\": \"EventFormContext = createContext<EventFormContextValue | undefined>(undefined)\"}]\n```\n\n### find_symbol {\"name_path_pattern\":\"eventFormMappers\",\"include_body\":true}\n```\n[{\"name_path\": \"emc-f7c19fc230c4/web-src/src/utils/eventFormMappers\", \"kind\": \"File\", \"relative_path\": \"web-src/src/utils/eventFormMappers.ts\", \"body_location\": {\"start_line\": 0, \"end_line\": 182}, \"body\": null}]\n```\n",
+  "renderedBlockHash": "4d74dc10e8f46318",
+  "quality": {
+    "signal": "medium",
+    "answerLeak": false,
+    "primaryFileRetrieved": true,
+    "symbolEvidenceRetrieved": true,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": false,
+    "intentMatch": true,
+    "notes": [
+      "symbol evidence retrieved",
+      "primary file retrieved",
+      "task intent matched"
+    ]
+  }
+}

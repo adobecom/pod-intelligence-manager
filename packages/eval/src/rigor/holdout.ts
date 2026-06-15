@@ -7,6 +7,7 @@ import { classifyPromptTier } from "../tasks/prompt-tiers.js";
 import type { LicIndexSource } from "../arms/types.js";
 import { sha256Text, stableJson } from "./hash.js";
 import type { AuditResult, AuditFinding } from "./protocol.js";
+import { deriveLicFixtureQuality, describeLicFixtureQualityGate, isLicFixtureQualityReady, type LicFixtureQuality } from "./lic-quality.js";
 
 export interface HoldoutTaskEntry {
   id: string;
@@ -226,9 +227,16 @@ export async function validateHoldoutManifest(
     if (entry.licFixtureHash && opts.licFixtureDir) {
       try {
         const raw = await readFile(join(opts.licFixtureDir, `${entry.id}.json`), "utf8");
-        const parsed = JSON.parse(raw) as { indexSource?: LicIndexSource };
+        const parsed = JSON.parse(raw) as { indexSource?: LicIndexSource; renderedBlock?: string; quality?: LicFixtureQuality };
         if (sha256Text(raw) !== entry.licFixtureHash) {
           findings.push({ level: "error", message: `lic fixture hash drift for ${entry.id}` });
+        }
+        const quality = deriveLicFixtureQuality(task, parsed as Parameters<typeof deriveLicFixtureQuality>[1]);
+        if (isHaiku && !isLicFixtureQualityReady(quality)) {
+          findings.push({
+            level: "error",
+            message: describeLicFixtureQualityGate(entry.id, quality),
+          });
         }
         if (entry.licIndexSource !== undefined && parsed.indexSource !== undefined && !sameJson(entry.licIndexSource, parsed.indexSource)) {
           findings.push({ level: "error", message: `lic index source drift for ${entry.id}` });

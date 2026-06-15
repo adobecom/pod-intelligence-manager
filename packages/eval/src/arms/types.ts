@@ -1,6 +1,7 @@
 import type { Task } from "../tasks/types.js";
 import type { PromptSegments } from "../runners/types.js";
 import type { LicFixtureQuality } from "../rigor/lic-quality.js";
+import type { SerenaContextFixture } from "../serena/types.js";
 
 /**
  * Shape we persist to disk. Kept structural (not @pim/sdk's SessionContext)
@@ -87,6 +88,14 @@ export interface FixtureLearnings {
   }>;
   total_matching: number;
   truncated: boolean;
+  retrieval_source?: "offline" | "knowledge-query" | "context-contract";
+  context_contract?: {
+    mode: "legacy" | "shadow" | "task_relevant";
+    returned_mode: "legacy" | "task_relevant";
+    task_query_used: boolean;
+    possible_constraints?: boolean;
+    note?: string;
+  };
 }
 
 /**
@@ -111,12 +120,13 @@ export type LicIndexSource =
   | { kind: "parentSha"; sha: string; worktree: string };
 
 /**
- * Inputs an arm may consume via `buildWithInputs`. Either fixture may be null
- * when not frozen for the task; the arm decides whether that is fatal.
+ * Inputs an arm may consume via `buildWithInputs`. Any fixture may be null when
+ * not frozen for the task; the arm decides whether that is fatal.
  */
 export interface ArmBuildInputs {
   pim: SessionContextFixture | null;
   lic: LicContextFixture | null;
+  serena: SerenaContextFixture | null;
 }
 
 export interface Arm {
@@ -126,6 +136,15 @@ export interface Arm {
   readonly usesPim: boolean;
   /** Whether this arm injects a lic code-intelligence block. */
   readonly usesLic?: boolean;
+  /** Whether this arm injects a Serena code-intelligence block. */
+  readonly usesSerena?: boolean;
+  /**
+   * Whether this arm may legitimately emit NO context for a task (degrading to a
+   * control-like prompt). `kg-compact` does this by design when no KG node clears
+   * its relevance gate; such arms are exempt from the "usesPim must inject context"
+   * isolation assertion.
+   */
+  readonly mayOmitContext?: boolean;
   /** Marks an arm as part of the protocol's primary (vs. exploratory) comparison. */
   readonly primary?: boolean;
   build(task: Task, fixture: SessionContextFixture | null): PromptSegments;

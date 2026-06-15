@@ -9,6 +9,7 @@
     "test": "vitest run",
     "freeze": "tsx src/cli/freeze.ts",
     "lic-freeze": "tsx src/cli/lic-freeze.ts",
+    "lic-retrieval-eval": "tsx src/cli/lic-retrieval-eval.ts",
     "lic-migrate": "tsx src/cli/lic-migrate.ts",
     "freeze-kg-retrieval-oracle": "tsx scripts/freeze-kg-retrieval-oracle.ts",
     "freeze-kg-recall-oracle": "tsx scripts/freeze-kg-recall-oracle.ts",
@@ -19,10 +20,17 @@
     "audit-run": "tsx src/cli/audit-run.ts",
     "analyze-run": "tsx src/cli/audit-run.ts --type=analyze",
     "judge-patches": "tsx src/cli/judge-patches.ts",
-    "run-eval": "tsx src/cli/run.ts"
+    "serena-freeze": "tsx src/cli/serena-freeze.ts",
+    "serena-audit": "tsx src/cli/audit-run.ts --type=serena",
+    "run-eval": "tsx src/cli/run.ts",
+    "kg-source-manifest": "tsx scripts/prepare-kg-rebuild.ts",
+    "kg-snapshot": "tsx scripts/snapshot-sandbox-graph.ts",
+    "kg-submit": "tsx scripts/submit-candidates.ts",
+    "kg-rollback": "tsx scripts/rollback-graph-experiment.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "@pim/sdk": "workspace:*",
     "@pim/shared": "workspace:*"
   },

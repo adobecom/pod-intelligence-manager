@@ -32,6 +32,26 @@ const EVAL_PIM_BASE_URL =
   "https://d1ygncl0yqo6sv.cloudfront.net";
 const EVAL_PIM_ORG_SLUG = process.env.EVAL_PIM_ORG_SLUG ?? "adobecom";
 const USE_LIVE_KG = process.env.USE_OFFLINE_LEARNINGS !== "1";
+const KG_SOURCE = parseKgSource(process.env.EVAL_PIM_KG_SOURCE);
+const KG_CONTRACT_MODE = parseKgContractMode(process.env.EVAL_PIM_KG_CONTRACT_MODE);
+
+interface OrgConfig {
+  scopes: Array<{ id: string; label: string }>;
+  kg_context_contract?: "legacy" | "shadow" | "task_relevant";
+}
+
+function parseKgSource(raw: string | undefined): "query" | "relevant" {
+  const value = raw?.trim() || "query";
+  if (value === "query" || value === "relevant") return value;
+  throw new Error("EVAL_PIM_KG_SOURCE must be one of: query, relevant");
+}
+
+function parseKgContractMode(raw: string | undefined): OrgConfig["kg_context_contract"] | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value === "legacy" || value === "shadow" || value === "task_relevant") return value;
+  throw new Error("EVAL_PIM_KG_CONTRACT_MODE must be one of: legacy, shadow, task_relevant");
+}
 
 let cachedAuthHeader: string | null = null;
 
@@ -49,18 +69,117 @@ async function getAuthHeader(): Promise<string> {
   return cachedAuthHeader;
 }
 
+async function fetchOrgConfig(): Promise<OrgConfig> {
+  const auth = await getAuthHeader();
+  const res = await fetch(`${EVAL_PIM_BASE_URL}/api/org/config`, {
+    headers: {
+      Authorization: auth,
+      "X-Pim-Org": EVAL_PIM_ORG_SLUG,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`GET /api/org/config failed: ${res.status} ${await res.text()}`);
+  }
+  return (await res.json()) as OrgConfig;
+}
+
+async function patchOrgConfig(config: OrgConfig): Promise<OrgConfig> {
+  const auth = await getAuthHeader();
+  const res = await fetch(`${EVAL_PIM_BASE_URL}/api/org/config`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: auth,
+      "X-Pim-Org": EVAL_PIM_ORG_SLUG,
+    },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    throw new Error(`PATCH /api/org/config failed: ${res.status} ${await res.text()}`);
+  }
+  return (await res.json()) as OrgConfig;
+}
+
+async function withTemporaryKgContract<T>(fn: () => Promise<T>): Promise<T> {
+  if (!USE_LIVE_KG || KG_SOURCE !== "relevant" || !KG_CONTRACT_MODE) {
+    return fn();
+  }
+
+  const original = await fetchOrgConfig();
+  const originalMode = original.kg_context_contract ?? "legacy";
+  if (originalMode === KG_CONTRACT_MODE) {
+    console.log(`[freeze] org kg_context_contract already ${KG_CONTRACT_MODE}`);
+    return fn();
+  }
+
+  console.log(`[freeze] temporarily setting kg_context_contract ${originalMode} -> ${KG_CONTRACT_MODE}`);
+  await patchOrgConfig({ ...original, kg_context_contract: KG_CONTRACT_MODE });
+  try {
+    return await fn();
+  } finally {
+    console.log(`[freeze] restoring kg_context_contract ${KG_CONTRACT_MODE} -> ${originalMode}`);
+    await patchOrgConfig({ ...original, kg_context_contract: originalMode });
+  }
+}
+
 async function fetchLiveLearnings(podId: string, queryText?: string): Promise<FixtureLearnings> {
-  // Uses POST /api/knowledge/query (not GET /api/knowledge/relevant) because
-  // the convenience endpoint hard-codes include_details=false (server's
-  // knowledge-graph.ts:424). For the eval we want the same rich detail text
-  // that a hand-curated shim provided. Production pod agents currently get
-  // summary-only via the SDK; that's an orthogonal concern tracked separately.
+  // `query` preserves the historical fixture shape with details. `relevant`
+  // uses the same contract-aware path as the SDK / pod-agent context bundle.
   const pod = demoPods[podId];
   const scopes = Array.from(new Set((pod?.areas ?? []).map((a) => a.scope)));
   const domains = scopes.length > 0 ? scopes : ["frontend", "backend"];
   const projectId = pod?.project_id?.trim();
 
   const auth = await getAuthHeader();
+  if (KG_SOURCE === "relevant") {
+    const url = new URL(`${EVAL_PIM_BASE_URL}/api/knowledge/relevant`);
+    url.searchParams.set("scopes", domains.join(","));
+    url.searchParams.set("maxTokens", "4000");
+    if (projectId) url.searchParams.set("projectId", projectId);
+    if (queryText?.trim()) url.searchParams.set("taskQuery", queryText.trim());
+
+    const res = await fetch(url, {
+      headers: {
+        Authorization: auth,
+        "X-Pim-Org": EVAL_PIM_ORG_SLUG,
+      },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `GET /api/knowledge/relevant for pod ${podId} failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    const body = (await res.json()) as {
+      nodes: Array<{
+        type: string;
+        summary: string;
+        details?: string;
+        domains: string[];
+        confidence_score: number;
+        source_pod_name?: string;
+        created_at?: string;
+      }>;
+      total_matching: number;
+      truncated: boolean;
+      context_contract?: FixtureLearnings["context_contract"];
+    };
+    return {
+      nodes: body.nodes.map((n) => ({
+        type: n.type,
+        summary: n.summary,
+        details: n.details ?? "",
+        domains: n.domains,
+        confidence_score: n.confidence_score,
+        source_pod_name: n.source_pod_name,
+        created_at: n.created_at,
+      })),
+      total_matching: body.total_matching,
+      truncated: body.truncated,
+      retrieval_source: "context-contract",
+      ...(body.context_contract ? { context_contract: body.context_contract } : {}),
+    };
+  }
+
   const res = await fetch(`${EVAL_PIM_BASE_URL}/api/knowledge/query`, {
     method: "POST",
     headers: {
@@ -108,6 +227,7 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
     })),
     total_matching: body.total_matching,
     truncated: body.truncated,
+    retrieval_source: "knowledge-query",
   };
 }
 
@@ -127,61 +247,6 @@ function buildTaskKgQuery(task: Task): string {
     promptWithoutCode,
   ];
   return compactForKgQuery(parts.filter(Boolean).join("\n"));
-}
-
-const TASK_KG_STOP_WORDS = new Set([
-  "against",
-  "after",
-  "before",
-  "current",
-  "diff",
-  "file",
-  "fix",
-  "from",
-  "issue",
-  "only",
-  "output",
-  "prompt",
-  "return",
-  "source",
-  "task",
-  "that",
-  "this",
-  "tsx",
-  "typescript",
-  "with",
-]);
-
-function taskKeywords(text: string): Set<string> {
-  return new Set(
-    text
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 3 && !TASK_KG_STOP_WORDS.has(w)),
-  );
-}
-
-function filterTaskLearnings(learnings: FixtureLearnings, queryText: string): FixtureLearnings {
-  const queryKeywords = taskKeywords(queryText);
-  if (queryKeywords.size === 0) return { ...learnings, nodes: [], total_matching: 0, truncated: false };
-
-  const nodes = learnings.nodes.filter((node) => {
-    const nodeKeywords = taskKeywords(`${node.summary} ${node.details}`);
-    let overlap = 0;
-    for (const kw of nodeKeywords) {
-      if (queryKeywords.has(kw)) overlap++;
-    }
-    return overlap >= 3;
-  });
-
-  return {
-    ...learnings,
-    nodes,
-    total_matching: nodes.length,
-    truncated: false,
-  };
 }
 
 function latestIso(...values: Array<string | null | undefined>): string {
@@ -257,10 +322,11 @@ async function main(): Promise<void> {
 
   console.log(
     USE_LIVE_KG
-      ? `[freeze] live KG: ${EVAL_PIM_BASE_URL} org=${EVAL_PIM_ORG_SLUG}`
+      ? `[freeze] live KG: ${EVAL_PIM_BASE_URL} org=${EVAL_PIM_ORG_SLUG} source=${KG_SOURCE}`
       : "[freeze] offline shim (USE_OFFLINE_LEARNINGS=1)",
   );
 
+  await withTemporaryKgContract(async () => {
   for (const podId of podsToFreeze) {
     const pod = demoPods[podId];
     if (!pod) {
@@ -272,7 +338,10 @@ async function main(): Promise<void> {
     if (USE_LIVE_KG) {
       try {
         learnings = await fetchLiveLearnings(podId);
-        console.log(`[freeze]   live learnings for ${podId}: ${learnings.nodes.length} (matching ${learnings.total_matching})`);
+        const contract = learnings.context_contract
+          ? ` contract=${learnings.context_contract.mode}/${learnings.context_contract.returned_mode}`
+          : "";
+        console.log(`[freeze]   live learnings for ${podId}: ${learnings.nodes.length} (matching ${learnings.total_matching})${contract}`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(`[freeze]   live KG fetch failed for ${podId} (${msg}) — falling back to offline shim`);
@@ -288,20 +357,23 @@ async function main(): Promise<void> {
       const taskQuery = buildTaskKgQuery(task);
       if (USE_LIVE_KG) {
         try {
-          const taskLearnings = filterTaskLearnings(
-            await fetchLiveLearnings(podId, taskQuery),
-            taskQuery,
-          );
+          const taskLearnings = await fetchLiveLearnings(podId, taskQuery);
           taskRelevantLearnings[task.id] = taskLearnings;
+          const contract = taskLearnings.context_contract
+            ? ` contract=${taskLearnings.context_contract.mode}/${taskLearnings.context_contract.returned_mode}`
+            : "";
           console.log(
-            `[freeze]   task learnings for ${task.id}: ${taskLearnings.nodes.length} (matching ${taskLearnings.total_matching})`,
+            `[freeze]   task learnings for ${task.id}: ${taskLearnings.nodes.length} (matching ${taskLearnings.total_matching})${contract}`,
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(`[freeze]   task KG fetch failed for ${task.id} (${msg}) — using pod-level fallback`);
         }
       } else {
-        taskRelevantLearnings[task.id] = filterTaskLearnings(getCuratedLearnings(podId), taskQuery);
+        taskRelevantLearnings[task.id] = {
+          ...getCuratedLearnings(podId),
+          retrieval_source: "offline",
+        };
       }
     }
 
@@ -346,6 +418,7 @@ async function main(): Promise<void> {
     await writeFile(path, JSON.stringify(fixture, null, 2));
     console.log(`[freeze] wrote ${path} (${fixture.payload.conflicts.length} conflicts, ${fixture.payload.relevantLearnings.nodes.length} learnings, ${fixture.payload.recentUpdates.length} updates)`);
   }
+  });
 }
 
 main().catch((err) => {

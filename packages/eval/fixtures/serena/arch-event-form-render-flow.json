@@ -1,0 +1,95 @@
+{
+  "taskId": "arch-event-form-render-flow",
+  "stratum": "S6",
+  "generatedAt": "2026-06-12T19:03:48.534Z",
+  "serenaVersion": "Serena 1.5.3",
+  "backend": "language-server",
+  "mcpCommand": [
+    "/Users/rkhan/.local/bin/serena",
+    "start-mcp-server",
+    "--context",
+    "codex",
+    "--project",
+    "/Users/rkhan/emcV2/EMC",
+    "--transport",
+    "stdio",
+    "--language-backend",
+    "LSP",
+    "--enable-web-dashboard",
+    "False",
+    "--enable-gui-log-window",
+    "False",
+    "--log-level",
+    "ERROR"
+  ],
+  "projectPath": "/Users/rkhan/emcV2/EMC",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "toolAllowlist": [
+    "activate_project",
+    "get_current_config",
+    "initial_instructions",
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_declaration",
+    "find_implementations",
+    "get_diagnostics_for_file"
+  ],
+  "toolDenylist": [
+    "execute_shell_command",
+    "create_text_file",
+    "replace_content",
+    "insert_after_symbol",
+    "insert_before_symbol",
+    "replace_symbol_body",
+    "rename_symbol",
+    "safe_delete_symbol",
+    "read_file",
+    "list_dir",
+    "find_file",
+    "search_for_pattern",
+    "write_memory",
+    "read_memory",
+    "edit_memory",
+    "delete_memory",
+    "rename_memory",
+    "list_memories",
+    "onboarding"
+  ],
+  "toolInventory": [
+    "get_symbols_overview",
+    "find_symbol",
+    "find_referencing_symbols",
+    "find_implementations",
+    "find_declaration",
+    "get_diagnostics_for_file",
+    "activate_project",
+    "get_current_config",
+    "initial_instructions"
+  ],
+  "configHash": "9d2bf7063b3640f6",
+  "recipe": [],
+  "seed": {
+    "symbols": [],
+    "naturalLanguageQuery": "render and save flow from EventForm page to first API call",
+    "source": "none"
+  },
+  "calls": [],
+  "renderedBlock": "# Serena Code-Intelligence Context\n_Generated at 2026-06-12T19:03:48.534Z._\n_Backend: language-server._\n_Project: /Users/rkhan/emcV2/EMC._\n_Tool allowlist: activate_project, get_current_config, initial_instructions, get_symbols_overview, find_symbol, find_referencing_symbols, find_declaration, find_implementations, get_diagnostics_for_file._\n_Task: arch-event-form-render-flow (S6)._\n\n## Seed\n- Symbols: (none)\n- Seed source: none\n\n",
+  "renderedBlockHash": "3cc9f63b115da07b",
+  "quality": {
+    "signal": "none",
+    "answerLeak": false,
+    "primaryFileRetrieved": false,
+    "symbolEvidenceRetrieved": false,
+    "referencesRetrieved": false,
+    "diagnosticsCaptured": false,
+    "intentMatch": false,
+    "notes": [
+      "no symbol/file seed available"
+    ]
+  }
+}

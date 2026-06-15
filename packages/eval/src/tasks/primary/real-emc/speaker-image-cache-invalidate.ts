@@ -193,6 +193,13 @@ export const speakerImageCacheInvalidate: Task = {
     "formState.imageId",
     "SpeakerFormSubmitData",
   ],
+  kgExpectations: {
+    requiredFacts: [
+      "Speaker photo hydration requires explicit imagesMgr.list() join",
+      "removed image id",
+    ],
+    requiredSymbols: ["removedImageId", "SpeakerFormSubmitData"],
+  },
   groundTruth: {
     output: GROUND_TRUTH_PATCH,
     note: "adobecom/EMC PR #158, merge SHA 0d38019. Parent file at 84f21c9.",

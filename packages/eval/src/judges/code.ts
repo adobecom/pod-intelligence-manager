@@ -35,7 +35,7 @@ export async function judgeCode(task: Task, output: string): Promise<JudgeResult
   try {
     const candidatePath = join(dir, "candidate.mjs");
     const runnerPath = join(dir, "runner.mjs");
-    await writeFile(candidatePath, transpileTypeScript(buildCandidate(code, task.testHarness)));
+    await writeFile(candidatePath, transpileTypeScript(buildCandidate(sanitizeCandidateSource(code), task.testHarness)));
     await writeFile(runnerPath, transpileTypeScript(buildRunner(task.tests)));
 
     const exec = await runProcess(process.execPath, [runnerPath], {
@@ -79,6 +79,78 @@ function extractCodeBlock(text: string): string | null {
 
 function buildCandidate(code: string, harness?: string): string {
   return [harness ?? "", "", code].join("\n");
+}
+
+function sanitizeCandidateSource(source: string): string {
+  return stripUnsupportedImports(source);
+}
+
+function stripUnsupportedImports(source: string): string {
+  const sourceFile = ts.createSourceFile("candidate.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+
+  for (const stmt of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(stmt) &&
+      ts.isStringLiteral(stmt.moduleSpecifier) &&
+      isUnsupportedCandidateImport(stmt.moduleSpecifier.text)
+    ) {
+      edits.push({
+        start: stmt.getFullStart(),
+        end: stmt.end,
+        text: replacementForUnsupportedImport(stmt.importClause),
+      });
+    }
+
+    if (
+      ts.isExportDeclaration(stmt) &&
+      stmt.moduleSpecifier &&
+      ts.isStringLiteral(stmt.moduleSpecifier) &&
+      isUnsupportedCandidateImport(stmt.moduleSpecifier.text)
+    ) {
+      edits.push({ start: stmt.getFullStart(), end: stmt.end, text: "" });
+    }
+  }
+
+  if (edits.length === 0) return source;
+
+  let out = source;
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  return out;
+}
+
+function isUnsupportedCandidateImport(specifier: string): boolean {
+  return specifier.startsWith(".") || specifier.startsWith("/");
+}
+
+function replacementForUnsupportedImport(importClause: ts.ImportClause | undefined): string {
+  if (!importClause || importClause.isTypeOnly) return "";
+
+  const lines = ["\n// Relative repo imports are stubbed by the pure-module eval harness."];
+  const declarations = new Set<string>();
+
+  if (importClause.name) declarations.add(importClause.name.text);
+
+  const bindings = importClause.namedBindings;
+  if (bindings && ts.isNamedImports(bindings)) {
+    for (const spec of bindings.elements) {
+      if (!spec.isTypeOnly) declarations.add(spec.name.text);
+    }
+  }
+
+  for (const name of declarations) {
+    lines.push(`function ${name}(..._args: any[]) { return _args[0]; }`);
+  }
+
+  if (bindings && ts.isNamespaceImport(bindings)) {
+    lines.push(
+      `const ${bindings.name.text} = new Proxy({}, { get: () => (..._args: any[]) => _args[0] });`,
+    );
+  }
+
+  return lines.join("\n") + "\n";
 }
 
 function buildRunner(tests: TestCase[]): string {

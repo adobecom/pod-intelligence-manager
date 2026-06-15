@@ -10,6 +10,7 @@ const SYSTEM_CODE = [
   "  1. Relevant org learnings retrieved from the PIM knowledge graph.",
   "  2. A lic context block: semantic search results, symbol references, and call-graph excerpts from the codebase.",
   "Use the learnings to align with already-made decisions and avoid known anti-patterns, and use the lic context to ground your fix in existing code structure and cross-file relationships.",
+  "The task prompt's exported API and input contract are authoritative. If lic snippets show surrounding app-only preconditions or dependencies, adapt the pattern to the requested self-contained module instead of requiring extra inputs.",
   "Produce a single self-contained TypeScript module that satisfies the user's task.",
   "Return ONLY a fenced ```typescript code block — no prose, no commentary outside the block.",
   "The module should export named functions matching the names mentioned in the task.",
@@ -21,6 +22,7 @@ const SYSTEM_CONTENT = [
   "  1. Relevant org learnings retrieved from the PIM knowledge graph.",
   "  2. A lic context block (code-intelligence: search hits, symbols, callers).",
   "Use both when relevant. Return ONLY the requested content — no preamble, no postscript.",
+  "Treat the user task as authoritative if retrieved code context conflicts with the requested output shape.",
 ].join("\n");
 
 /**
@@ -55,15 +57,15 @@ export const kgLicArm: Arm = {
     const system = task.type === "code" ? SYSTEM_CODE : SYSTEM_CONTENT;
     return {
       system,
-      pimContext: buildKgLicContext(scopedPim, lic, task.id),
+      pimContext: buildKgLicContext(scopedPim, lic, task.id, task),
       userTask: `## Task\n${task.prompt}`,
     };
   },
 };
 
-function buildKgLicContext(pim: SessionContextFixture, lic: LicContextFixture, taskId: string): string {
+function buildKgLicContext(pim: SessionContextFixture, lic: LicContextFixture, taskId: string, task?: Task): string {
   return [
-    serializeKgOnly(pim, taskId),
+    serializeKgOnly(pim, taskId, task),
     "=== lic Code-Intelligence Context ===",
     lic.renderedBlock,
   ].join("\n");

@@ -17,12 +17,13 @@
  *   pnpm exec tsx scripts/seed-t3-events.ts --repos adobecom/EMC
  *   pnpm exec tsx scripts/seed-t3-events.ts --stage mine      # only the mining stage
  *   pnpm exec tsx scripts/seed-t3-events.ts --dry-run         # mine + classify, no submit
+ *   pnpm exec tsx scripts/seed-t3-events.ts --until 2026-06-04T00:00:00Z
  */
 
 import "../src/load-env.js";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 interface RepoSpec {
@@ -43,14 +44,30 @@ interface Args {
   dryRun: boolean;
   org: string;
   maxPrs: number;
+  until: string | null;
+  sourceManifest: string | null;
+  experimentDir: string | null;
+  allowDiagnostic: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { repos: DEFAULT_REPOS, stage: "all", dryRun: false, org: "emc-sandbox", maxPrs: 500 };
+  const args: Args = {
+    repos: DEFAULT_REPOS,
+    stage: "all",
+    dryRun: false,
+    org: "emc-sandbox",
+    maxPrs: 500,
+    until: null,
+    sourceManifest: null,
+    experimentDir: null,
+    allowDiagnostic: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = argv[i + 1];
     switch (a) {
+      case "--":
+        break;
       case "--repos":
         args.repos = next.split(",").map((slug) => {
           const trimmed = slug.trim();
@@ -64,6 +81,10 @@ function parseArgs(argv: string[]): Args {
       case "--dry-run": args.dryRun = true; break;
       case "--org": args.org = next; i++; break;
       case "--max-prs": args.maxPrs = Number(next); i++; break;
+      case "--until": args.until = next; i++; break;
+      case "--source-manifest": args.sourceManifest = resolve(next); i++; break;
+      case "--experiment-dir": args.experimentDir = resolve(next); i++; break;
+      case "--allow-diagnostic": args.allowDiagnostic = true; break;
       default:
         if (a.startsWith("--")) throw new Error(`Unknown flag: ${a}`);
     }
@@ -108,6 +129,7 @@ async function main(): Promise<void> {
   );
   await mkdir(join(ROOT, "scripts", "candidates"), { recursive: true });
   await mkdir(join(ROOT, "scripts", "classified"), { recursive: true });
+  if (args.experimentDir) await mkdir(args.experimentDir, { recursive: true });
 
   for (const spec of args.repos) {
     const candOut = candidatesPath(spec);
@@ -115,12 +137,14 @@ async function main(): Promise<void> {
     console.log(`\n=== ${spec.host}/${spec.repo} ===`);
 
     if (args.stage === "all" || args.stage === "mine") {
-      await runStage("scripts/mine-repo.ts", [
+      const mineArgs = [
         "--repo", spec.repo,
         "--host", spec.host,
         "--out", candOut,
         "--max-prs", String(args.maxPrs),
-      ]);
+      ];
+      if (args.until) mineArgs.push("--until", args.until);
+      await runStage("scripts/mine-repo.ts", mineArgs);
     }
     if (args.stage === "all" || args.stage === "classify") {
       await runStage("scripts/classify-candidates.ts", [
@@ -131,6 +155,11 @@ async function main(): Promise<void> {
     if (args.stage === "all" || args.stage === "submit") {
       const submitArgs = ["--in", classOut, "--org", args.org];
       if (args.dryRun) submitArgs.push("--dry-run");
+      if (args.sourceManifest) submitArgs.push("--source-manifest", args.sourceManifest);
+      if (args.experimentDir) {
+        submitArgs.push("--experiment-manifest", join(args.experimentDir, `${safeName(spec)}-submit-manifest.json`));
+      }
+      if (args.allowDiagnostic) submitArgs.push("--allow-diagnostic");
       await runStage("scripts/submit-candidates.ts", submitArgs);
     }
   }

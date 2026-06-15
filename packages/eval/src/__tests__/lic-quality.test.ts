@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { LicContextFixture } from "../arms/types.js";
-import { deriveLicFixtureQuality } from "../rigor/lic-quality.js";
+import {
+  deriveLicFixtureQuality,
+  describeLicFixtureQualityGate,
+  extractGroundTruthChunks,
+  extractGroundTruthFiles,
+  extractGroundTruthSymbols,
+  extractIdentifiers,
+  extractTaskContractEvidence,
+  isLicFixtureQualityReady,
+  isLikelyAnswerSymbol,
+} from "../rigor/lic-quality.js";
 import type { Task } from "../tasks/types.js";
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -68,5 +78,117 @@ describe("deriveLicFixtureQuality", () => {
     );
     expect(quality.primaryFileRetrieved).toBe(true);
     expect(quality.signal).toBe("strong");
+  });
+
+  it("credits task-contract evidence for future KG-derived helpers", () => {
+    const quality = deriveLicFixtureQuality(
+      task({
+        tags: ["future-emc", "kg-derived"],
+        licSeed: { symbol: "getSemanticHTML", investigateQuery: "Quill rich text semantic HTML NBSP" },
+        expectedSignals: ["getSemanticHTML", "NBSP", "innerHTML"],
+        kgExpectations: { requiredSymbols: ["getSemanticHTML"] },
+        groundTruth: undefined,
+      }),
+      fixture("Found 2 results\n\n**File:** `web-src/src/components/shared/RichTextEditor.tsx`\nFQN: getSemanticHTML\n### References\n- getSemanticHTML normalizes NBSP variants in editor output"),
+    );
+    expect(quality.primaryFileRetrieved).toBe(false);
+    expect(quality.taskContractEvidenceRetrieved).toBe(true);
+    expect(quality.signal).toBe("strong");
+    expect(isLicFixtureQualityReady(quality)).toBe(true);
+  });
+
+  it("does not consider weak fixtures ready for protocol runs", () => {
+    const quality = deriveLicFixtureQuality(
+      task(),
+      fixture("Found 5 results\n\n1. web-src/src/other/File.ts (lines 1-20)\nSome unrelated code."),
+    );
+    expect(quality.signal).toBe("weak");
+    expect(isLicFixtureQualityReady(quality)).toBe(false);
+    expect(describeLicFixtureQualityGate("task", quality)).toContain("medium/strong");
+  });
+});
+
+describe("LIC oracle helpers", () => {
+  it("extracts files from unified diffs", () => {
+    expect(extractGroundTruthFiles([
+      "diff --git a/web-src/src/forms/EventForm.tsx b/web-src/src/forms/EventForm.tsx",
+      "--- a/web-src/src/forms/EventForm.tsx",
+      "+++ b/web-src/src/forms/EventForm.tsx",
+      "diff --git a/web-src/src/new/File.ts b/web-src/src/new/File.ts",
+      "--- /dev/null",
+      "+++ b/web-src/src/new/File.ts",
+    ].join("\n"))).toEqual([
+      "web-src/src/forms/EventForm.tsx",
+      "web-src/src/new/File.ts",
+    ]);
+  });
+
+  it("extracts answer symbols after subtracting allowed prompt, seed, file, and expected symbols", () => {
+    const t = task({
+      prompt: "Fix allowedPromptSymbol in the event form.",
+      licSeed: { symbol: "allowedSeedSymbol", investigateQuery: "allowedQuerySymbol behavior" },
+      expectedSignals: ["allowedExpectedSignal"],
+      groundTruth: {
+        output: [
+          "diff --git a/web-src/src/forms/EventForm.tsx b/web-src/src/forms/EventForm.tsx",
+          "+++ b/web-src/src/forms/EventForm.tsx",
+          "@@",
+          "+const newMergedAnswerSymbol = allowedPromptSymbol + allowedSeedSymbol + allowedQuerySymbol + allowedExpectedSignal + EventForm;",
+        ].join("\n"),
+      },
+    });
+
+    const extracted = extractGroundTruthSymbols(t, "newMergedAnswerSymbol appears in the rendered fixture");
+
+    expect(extracted.symbols).toContain("newMergedAnswerSymbol");
+    expect(extracted.symbols).not.toContain("allowedPromptSymbol");
+    expect(extracted.symbols).not.toContain("allowedSeedSymbol");
+    expect(extracted.symbols).not.toContain("allowedQuerySymbol");
+    expect(extracted.symbols).not.toContain("allowedExpectedSignal");
+    expect(extracted.symbols).not.toContain("EventForm");
+    expect(extracted.leakedSymbols).toContain("newMergedAnswerSymbol");
+  });
+
+  it("does not treat unchanged diff context as answer symbols", () => {
+    const t = task({
+      groundTruth: {
+        output: [
+          "diff --git a/web-src/src/forms/EventForm.tsx b/web-src/src/forms/EventForm.tsx",
+          "--- a/web-src/src/forms/EventForm.tsx",
+          "+++ b/web-src/src/forms/EventForm.tsx",
+          "@@",
+          " const existingContextSymbol = buildExistingContextPayload(formState)",
+          "-const removedContextSymbol = existingContextSymbol",
+          "+const newMergedAnswerSymbol = existingContextSymbol + removedContextSymbol + buildPayloadForEventSave(formState)",
+        ].join("\n"),
+      },
+    });
+
+    const extracted = extractGroundTruthSymbols(
+      t,
+      "existingContextSymbol and removedContextSymbol appear in the rendered fixture",
+    );
+
+    expect(extracted.symbols).toContain("newMergedAnswerSymbol");
+    expect(extracted.symbols).not.toContain("existingContextSymbol");
+    expect(extracted.symbols).not.toContain("removedContextSymbol");
+    expect(extracted.leakedSymbols).toEqual([]);
+  });
+
+  it("extracts contract evidence from LIC and expected signal fields", () => {
+    const evidence = extractTaskContractEvidence(task({
+      licSignals: ["SessionTimeInfo response"],
+      expectedSignals: ["prepareContactMethodsForPut", "NBSP"],
+    }));
+
+    expect(evidence).toEqual(expect.arrayContaining(["SessionTimeInfo", "prepareContactMethodsForPut", "NBSP"]));
+  });
+
+  it("extracts long leakage chunks and likely answer symbols", () => {
+    const longText = "The shipped implementation used a narrow merged payload helper with a very specific timestamp fallback sequence and field allowlist. ";
+
+    expect(extractGroundTruthChunks(longText.repeat(2)).length).toBeGreaterThan(0);
+    expect(extractIdentifiers("const mergedPayloadForSpeakerUpdate = true")).toContain("mergedPayloadForSpeakerUpdate");
+    expect(isLikelyAnswerSymbol("mergedPayloadForSpeakerUpdate")).toBe(true);
   });
 });

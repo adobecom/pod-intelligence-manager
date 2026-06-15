@@ -40,19 +40,33 @@ export const pimFullArm: Arm = {
     const system = task.type === "code" ? SYSTEM_CODE : SYSTEM_CONTENT;
     return {
       system,
-      pimContext: serializeContext(scoped),
+      pimContext: serializeContext(scoped, task.id),
       userTask: `## Task\n${task.prompt}`,
     };
   },
 };
 
-export function serializeContext(fixture: SessionContextFixture): string {
-  const { pod, livingDocMarkdown, conflicts, relevantLearnings, recentUpdates } = fixture.payload;
+function selectRelevantLearnings(fixture: SessionContextFixture, taskId?: string): {
+  learnings: FixtureLearnings;
+  source: "task" | "pod";
+} {
+  const taskLearnings = taskId ? fixture.payload.taskRelevantLearnings?.[taskId] : undefined;
+  if (taskLearnings) return { learnings: taskLearnings, source: "task" };
+  return { learnings: fixture.payload.relevantLearnings, source: "pod" };
+}
+
+export function serializeContext(fixture: SessionContextFixture, taskId?: string): string {
+  const { pod, livingDocMarkdown, conflicts, recentUpdates } = fixture.payload;
+  const { learnings: relevantLearnings, source } = selectRelevantLearnings(fixture, taskId);
   const lines: string[] = [];
 
   lines.push(`# PIM Session Context — pod \`${pod.pod_id}\` (${pod.name})`);
   lines.push(`_Pulled at ${fixture.pulledAt}._`);
   if (fixture.asOf) lines.push(`_Point-in-time as of ${fixture.asOf}._`);
+  if (taskId) {
+    const scope = source === "task" ? `task \`${taskId}\`` : "pod fallback";
+    lines.push(`_KG retrieval scope: ${scope}._`);
+  }
   lines.push("");
 
   lines.push("## Living Doc");

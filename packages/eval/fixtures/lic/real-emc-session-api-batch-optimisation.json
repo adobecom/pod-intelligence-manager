@@ -6,25 +6,25 @@
     "call-graph",
     "explain-symbol"
   ],
-  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "licDaemonVersion": "lic 0.9.102-1592-c7ae48ad",
   "indexSource": {
     "kind": "parentSha",
     "sha": "d6078f228013c6cb05cf288356c8a155229d8f72",
     "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013"
   },
-  "generatedAt": "2026-06-04T23:56:20.612Z",
+  "generatedAt": "2026-06-09T15:55:39.176Z",
   "calls": [
     {
       "tool": "find-references",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
-        "sessionBatch"
+        "syncSessionSpeakers"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
       "exitCode": 0,
-      "durationMs": 28,
-      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n"
+      "durationMs": 47,
+      "output": "Definition: web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 222-248)\n  Name: syncSessionSpeakers (function)\n\nReferences (1 shown, 1 total):\n\n  1. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:444-448 []\n"
     },
     {
       "tool": "call-graph",
@@ -33,37 +33,37 @@
         "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
         "--direction",
         "callers",
-        "sessionBatch"
+        "syncSessionSpeakers"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
       "exitCode": 0,
-      "durationMs": 27,
-      "output": "No exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n"
+      "durationMs": 21,
+      "output": "Call Graph: syncSessionSpeakers (direction: callers)\n\n1 nodes\n\n    Function web-src/src/pages/EventForm/SessionManagement/Sessions.tsx::handleUpdateSession — web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:434 [Call] (confidence: 95%)\n"
     },
     {
       "tool": "explain-symbol",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
-        "sessionBatch"
+        "syncSessionSpeakers"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-d6078f228013",
       "exitCode": 0,
-      "durationMs": 24,
-      "output": "No definition found for \"sessionBatch\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem`\n4. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId`\n\n"
+      "durationMs": 37,
+      "output": "## function `syncSessionSpeakers`\n\n**Kind:** function | **File:** `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx` | **Line:** 222\n\n```\nasync function syncSessionSpeakers(\n  sessionId: string,\n  selectedIds: string[],\n): Promise<void> {\n  const speakersRes = await apiService.getSessionSpeakers(sessionId);\n  const currentIds: string[] =\n    speakersRes && !(\"error\" in speakersRes)\n      ? ((speakersRes as any)?.speakers ?? []).map((s: any) =>\n          String(s.speakerId),\n        )\n      : [];\n  const toRemove = currentIds.filter((id) => !selectedIds.includes(id));\n  const toAdd = selectedIds.filter((id) => !currentIds.includes(id));\n  await Promise.all(\n    toRemove.map((id) => apiService.deleteSessionSpeaker(sessionId, id)),\n  );\n  const baseOrdinal = currentIds.length - toRemove.length;\n  await Promise.all(\n    toAdd.map((id, index) =>\n      apiService.addSessionSpeaker(sessionId, {\n        speakerId: id,\n    // ... (5 more lines)\n}\n```\n\n**CodeRank:** 0.38 (top 50%)\n**References:** 1 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `handleUpdateSession` (function) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:434` (score 0.15)\n\n### Top Callees (3 total)\n\n- `deleteSessionSpeaker` (function) — `web-src/src/services/api.ts:489` (score 0.24)\n- `SessionsProps` (interface) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:250` (score 0.15)\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/pages/EventForm/SessionManagement/<NAME>.tsx` — 4 siblings (conf 1.00)\n  siblings: Sessions (this), SessionForm, SessionList, index\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:e61584a3fbc5e093\"])`\n\n\n"
     }
   ],
-  "renderedBlock": "# Lic Context — task: real-emc-session-api-batch-optimisation\n_Stratum: S2._\n\n## lic find-references -r sessionBatch\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n```\n\n## lic call-graph -r --direction callers sessionBatch\n```\nNo exact match. Did you mean (5):\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem\n  web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList\n  web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId\n```\n\n## lic explain-symbol -r sessionBatch\n```\nNo definition found for \"sessionBatch\". Did you mean:\n\n1. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::SessionFormProps`\n2. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionFormData`\n3. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionItem`\n4. `web-src/src/pages/EventForm/SessionManagement/SessionList.tsx::SessionsList`\n5. `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx::sessionTimeId`\n```\n",
-  "renderedBlockHash": "ecc16993d4d56ab4",
+  "renderedBlock": "# Lic Context — task: real-emc-session-api-batch-optimisation\n_Stratum: S2._\n\n## lic find-references -r syncSessionSpeakers\n```\nDefinition: web-src/src/pages/EventForm/SessionManagement/Sessions.tsx (lines 222-248)\n  Name: syncSessionSpeakers (function)\n\nReferences (1 shown, 1 total):\n\n  1. web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:444-448 []\n```\n\n## lic call-graph -r --direction callers syncSessionSpeakers\n```\nCall Graph: syncSessionSpeakers (direction: callers)\n\n1 nodes\n\n    Function web-src/src/pages/EventForm/SessionManagement/Sessions.tsx::handleUpdateSession — web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:434 [Call] (confidence: 95%)\n```\n\n## lic explain-symbol -r syncSessionSpeakers\n```\n## function `syncSessionSpeakers`\n\n**Kind:** function | **File:** `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx` | **Line:** 222\n\n```\nasync function syncSessionSpeakers(\n  sessionId: string,\n  selectedIds: string[],\n): Promise<void> {\n  const speakersRes = await apiService.getSessionSpeakers(sessionId);\n  const currentIds: string[] =\n    speakersRes && !(\"error\" in speakersRes)\n      ? ((speakersRes as any)?.speakers ?? []).map((s: any) =>\n          String(s.speakerId),\n        )\n      : [];\n  const toRemove = currentIds.filter((id) => !selectedIds.includes(id));\n  const toAdd = selectedIds.filter((id) => !currentIds.includes(id));\n  await Promise.all(\n    toRemove.map((id) => apiService.deleteSessionSpeaker(sessionId, id)),\n  );\n  const baseOrdinal = currentIds.length - toRemove.length;\n  await Promise.all(\n    toAdd.map((id, index) =>\n      apiService.addSessionSpeaker(sessionId, {\n        speakerId: id,\n    // ... (5 more lines)\n}\n```\n\n**CodeRank:** 0.38 (top 50%)\n**References:** 1 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `handleUpdateSession` (function) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:434` (score 0.15)\n\n### Top Callees (3 total)\n\n- `deleteSessionSpeaker` (function) — `web-src/src/services/api.ts:489` (score 0.24)\n- `SessionsProps` (interface) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:250` (score 0.15)\n\n### Parallel Patterns (symbol is a sibling in N-way templates)\n\n- `web-src/src/pages/EventForm/SessionManagement/<NAME>.tsx` — 4 siblings (conf 1.00)\n  siblings: Sessions (this), SessionForm, SessionList, index\n  Expand all siblings: `investigate.expand(bundle_id, [\"pattern:e61584a3fbc5e093\"])`\n```\n",
+  "renderedBlockHash": "bdaa54d9a5fd3e44",
   "quality": {
-    "signal": "none",
-    "noDefinitionResult": true,
+    "signal": "strong",
+    "noDefinitionResult": false,
     "answerLeak": false,
     "intentMatch": true,
-    "primaryFileRetrieved": false,
+    "primaryFileRetrieved": true,
     "groundTruthSymbolOrChunkRetrieved": false,
     "notes": [
-      "symbol lookup returned no definition/no results",
+      "primary file retrieved",
       "task intent matched"
     ]
   }

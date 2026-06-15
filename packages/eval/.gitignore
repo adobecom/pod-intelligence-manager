@@ -3,3 +3,8 @@ dist/
 runs/
 reports/
 fixtures/judge-cache/
+
+# Repo-mining intermediate artifacts (regenerable via mine-repo / classify-candidates)
+scripts/candidates/
+scripts/classified/
+

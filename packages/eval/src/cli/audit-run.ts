@@ -1,8 +1,10 @@
 import {
   analyzeRun,
   auditJudging,
+  auditKgMateriality,
   auditLeakage,
   auditRubrics,
+  auditSerena,
   auditTemporal,
   writeReviewerPacket,
 } from "../rigor/run-audits.js";
@@ -24,6 +26,8 @@ async function main(): Promise<void> {
   else if (type === "leakage") result = await auditLeakage(runDir);
   else if (type === "rubrics") result = await auditRubrics(runDir);
   else if (type === "judging") result = await auditJudging(runDir);
+  else if (type === "kg-materiality") result = await auditKgMateriality(runDir);
+  else if (type === "serena") result = await auditSerena(runDir);
   else if (type === "analyze") result = await analyzeRun(runDir);
   else if (type === "packet") {
     await writeReviewerPacket(runDir);

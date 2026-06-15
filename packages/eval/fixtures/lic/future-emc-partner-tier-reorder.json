@@ -1,0 +1,68 @@
+{
+  "taskId": "future-emc-partner-tier-reorder",
+  "stratum": "S2",
+  "recipe": [
+    "find-references",
+    "call-graph",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:19:45.703Z",
+  "calls": [
+    {
+      "tool": "find-references",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "SpeakersDashboard"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 37,
+      "output": "Definition: web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 107-129)\n  Name: SpeakersDashboard (const)\n   107: () => {\n   108:   const toast = useToast()\n   109:   const { groupVersion } = useGroup()\n   110:   const { filterSeries } = useRBACFilter()\n   111:   const canWriteEvent = useHasPermission('event', 'write')\n   112:   const canDeleteEvent = useHasPermission('event', 'delete')\n   113:   \n   114:   // ============================================================================\n   115:   // STATE\n   116:   // ============================================================================\n   117:   \n   118:   // Series selection\n   119:   const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n   120:   const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n   121:   const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n   122:   \n   123:   // Speakers data\n   124:   const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n   125:   const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n   126:   const [error, setError] = useSafeState<string | null>(null)\n  | ... (3 more lines)\n\nReferences (9 shown, 0 total):\n\n  1. CLAUDE.md:95-99 []\n  2. docs/AUTOMATION_MIGRATION_SPEC.md:691-703 []\n  3. docs/AUTOMATION_MIGRATION_SPEC.md:1125-1134 []\n  4. docs/AUTOMATION_MIGRATION_SPEC.md:1197-1201 []\n  5. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:87-91 []\n  6. web-src/src/components/App.tsx:43-47 []\n  7. web-src/src/components/App.tsx:133-137 []\n  8. web-src/src/pages/SpeakersDashboard/index.ts:3-8 []\n  9. web-src/src/pages/index.ts:19-23 []\n\nNote: auto-selected one definition. Other candidates: docs/AUTOMATION_MIGRATION_SPEC.md::SpeakersDashboard, web-src/src/pages/index.ts::SpeakersDashboard, web-src/src/pages/SpeakersDashboard/index.ts::SpeakersDashboard\n"
+    },
+    {
+      "tool": "call-graph",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "--direction",
+        "callers",
+        "SpeakersDashboard"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 18,
+      "output": "Ambiguous symbol — candidates (3):\n  docs/AUTOMATION_MIGRATION_SPEC.md::SpeakersDashboard\n  web-src/src/pages/index.ts::SpeakersDashboard\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakersDashboard\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "SpeakersDashboard"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 34,
+      "output": "## const `SpeakersDashboard`\n\n**Kind:** const | **File:** `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx` | **Line:** 107\n\n```\nexport const SpeakersDashboard: React.FC<SpeakersDashboardProps> = () => {\n  const toast = useToast()\n  const { groupVersion } = useGroup()\n  const { filterSeries } = useRBACFilter()\n  const canWriteEvent = useHasPermission('event', 'write')\n  const canDeleteEvent = useHasPermission('event', 'delete')\n  \n  // ============================================================================\n  // STATE\n  // ============================================================================\n  \n  // Series selection\n  const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n  const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n  const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n  \n  // Speakers data\n  const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n  const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n  const [error, setError] = useSafeState<string | null>(null)\n  \n  // Event connections loading\n  const [loadingEventCounts, setLoadingEventCounts] = useSafeState<Set<string>>(new Set())\n  const [eventConnections, setEventConnections] = useSafeState<Map<string, EventApiResponse[]>>(new Map())\n  \n  // Ref to track which speaker IDs we've already loaded (prevents infinite loop)\n  const loadedSpeakerIdsRef = useRef<Set<string>>(new Set())\n  \n  // Action states\n  const [actionInProgress, setActionInProgress] = useSafeState<string | null>(null)\n... (50 more lines — use `Read` for full source)\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (6 total)\n\n- `(usage)` (usage) — `web-src/src/pages/SpeakersDashboard/index.ts:1`\n- `EMC V2 Automation Migration Specification > 6. Complete `data-testid` Reference > SpeakersDashboard` (usage) — `docs/AUTOMATION_MIGRATION_SPEC.md:1127`\n- `(usage)` (usage) — `web-src/src/components/App.tsx:34`\n- `(usage)` (usage) — `web-src/src/pages/index.ts:1`\n- `CLAUDE.md > Routes` (usage) — `CLAUDE.md:88`\n- `RBAC Permission Gating — Implementation Plan > 3. Components Changed > 3.3 useRBACFilter (`web-src/src/hooks/useRBACFilter.ts`) — MODIFIED` (usage) — `docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:82`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-partner-tier-reorder\n_Stratum: S2._\n\n## lic find-references -r SpeakersDashboard\n```\nDefinition: web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx (lines 107-129)\n  Name: SpeakersDashboard (const)\n   107: () => {\n   108:   const toast = useToast()\n   109:   const { groupVersion } = useGroup()\n   110:   const { filterSeries } = useRBACFilter()\n   111:   const canWriteEvent = useHasPermission('event', 'write')\n   112:   const canDeleteEvent = useHasPermission('event', 'delete')\n   113:   \n   114:   // ============================================================================\n   115:   // STATE\n   116:   // ============================================================================\n   117:   \n   118:   // Series selection\n   119:   const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n   120:   const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n   121:   const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n   122:   \n   123:   // Speakers data\n   124:   const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n   125:   const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n   126:   const [error, setError] = useSafeState<string | null>(null)\n  | ... (3 more lines)\n\nReferences (9 shown, 0 total):\n\n  1. CLAUDE.md:95-99 []\n  2. docs/AUTOMATION_MIGRATION_SPEC.md:691-703 []\n  3. docs/AUTOMATION_MIGRATION_SPEC.md:1125-1134 []\n  4. docs/AUTOMATION_MIGRATION_SPEC.md:1197-1201 []\n  5. docs/RBAC_PERMISSION_GATING_IMPLEMENTATION.md:87-91 []\n  6. web-src/src/components/App.tsx:43-47 []\n  7. web-src/src/components/App.tsx:133-137 []\n  8. web-src/src/pages/SpeakersDashboard/index.ts:3-8 []\n  9. web-src/src/pages/index.ts:19-23 []\n\nNote: auto-selected one definition. Other candidates: docs/AUTOMATION_MIGRATION_SPEC.md::SpeakersDashboard, web-src/src/pages/index.ts::SpeakersDashboard, web-src/src/pages/SpeakersDashboard/index.ts::SpeakersDashboard\n```\n\n## lic call-graph -r --direction callers SpeakersDashboard\n```\nAmbiguous symbol — candidates (3):\n  docs/AUTOMATION_MIGRATION_SPEC.md::SpeakersDashboard\n  web-src/src/pages/index.ts::SpeakersDashboard\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakersDashboard\n```\n\n## lic explain-symbol -r SpeakersDashboard\n```\n## const `SpeakersDashboard`\n\n**Kind:** const | **File:** `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx` | **Line:** 107\n\n```\nexport const SpeakersDashboard: React.FC<SpeakersDashboardProps> = () => {\n  const toast = useToast()\n  const { groupVersion } = useGroup()\n  const { filterSeries } = useRBACFilter()\n  const canWriteEvent = useHasPermission('event', 'write')\n  const canDeleteEvent = useHasPermission('event', 'delete')\n  \n  // ============================================================================\n  // STATE\n  // ============================================================================\n  \n  // Series selection\n  const [seriesList, setSeriesList] = useSafeState<SeriesApiResponse[]>([])\n  const [selectedSeriesId, setSelectedSeriesId] = useSafeState<string | null>(null)\n  const [isLoadingSeries, setIsLoadingSeries] = useSafeState(true)\n  \n  // Speakers data\n  const [speakers, setSpeakers] = useSafeState<SpeakerDashboardItem[]>([])\n  const [isLoadingSpeakers, setIsLoadingSpeakers] = useSafeState(false)\n  const [error, setError] = useSafeState<string | null>(null)\n  \n  // Event connections loading\n  const [loadingEventCounts, setLoadingEventCounts] = useSafeState<Set<string>>(new Set())\n  const [eventConnections, setEventConnections] = useSafeState<Map<string, EventApiResponse[]>>(new Map())\n  \n  // Ref to track which speaker IDs we've already loaded (prevents infinite loop)\n  const loadedSpeakerIdsRef = useRef<Set<string>>(new Set())\n  \n  // Action states\n  const [actionInProgress, setActionInProgress] = useSafeState<string | null>(null)\n... (50 more lines — use `Read` for full\n\n_[truncated to budget]_\n",
+  "renderedBlockHash": "948a380794cf4bc2",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

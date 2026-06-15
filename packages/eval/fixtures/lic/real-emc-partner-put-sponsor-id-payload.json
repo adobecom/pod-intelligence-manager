@@ -6,13 +6,13 @@
     "regex-search",
     "explain-symbol"
   ],
-  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "licDaemonVersion": "lic 0.9.102-1592-c7ae48ad",
   "indexSource": {
     "kind": "parentSha",
     "sha": "f5db523f36ba8c1bf9807b7bc8dce132073a9e6a",
     "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba"
   },
-  "generatedAt": "2026-06-04T23:50:28.112Z",
+  "generatedAt": "2026-06-09T15:55:35.124Z",
   "calls": [
     {
       "tool": "keyword-search",
@@ -21,37 +21,39 @@
         "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
         "-l",
         "5",
-        "partner PUT sponsor id payload"
+        "getSponsorPayload sponsorData modificationTime localizations"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
       "exitCode": 0,
-      "durationMs": 107,
-      "output": "1. web-src/src/pages/EventForm/PartnerPickerDialog.tsx (lines 147-217, 0.25)\n   arrow_function PartnerPickerDialog\n\n   *(also at lines 99-151)*\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 634-688, 0.23)\n   arrow_function SponsorsComponent\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n\n"
+      "durationMs": 32,
+      "output": "1. docs/v1-reference/data-utils.js (lines 312-383, 0.23)\n   function getSpeakerPayload\n2. web-src/src/services/payloadBuilders.ts (lines 94-152, 0.21)\n   function getSponsorPayload\n   Referenced by 1 files (.tsx: 1)\n3. web-src/src/types/campaign.ts (lines 13-49, 0.16)\n   interface Campaign\n   Referenced by 4 files (.tsx: 4)\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n\n"
     },
     {
       "tool": "explain-symbol",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
-        "updatePartner"
+        "getSponsorPayload"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-f5db523f36ba",
       "exitCode": 0,
-      "durationMs": 29,
-      "output": "No definition found for \"updatePartner\". Did you mean:\n\n1. `web-src/src/services/api.ts::ApiService::updateRole`\n2. `web-src/src/services/api.ts::updateSpeaker`\n3. `web-src/src/services/api.ts::updateEvent`\n4. `web-src/src/services/api.ts::ApiService::updateScope`\n5. `web-src/src/types/domain.ts::Session::updatedAt`\n\n"
+      "durationMs": 31,
+      "output": "## function `getSponsorPayload`\n\n**Kind:** function | **File:** `docs/v1-reference/data-utils.js` | **Line:** 350\n\n```\nexport async function getSponsorPayload(sponsorData, locale, seriesId) {\n  if (!sponsorData) return sponsorData;\n\n  let existingSponsorPayload = {};\n  if (sponsorData.sponsorId) {\n    existingSponsorPayload = await getSponsor(seriesId, sponsorData.sponsorId);\n  }\n\n  // Split sponsor data into localizable and non-localizable fields\n  const { localizableFields, nonLocalizableFields } = splitLocalizableFields(\n    sponsorData,\n    SPONSOR_DATA_FILTER,\n    locale,\n  );\n\n  const filteredGlobalPayload = Object.entries(nonLocalizableFields).reduce((acc, [key, value]) => {\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\n      acc[key] = value;\n    }\n    return acc;\n  }, {});\n    // ... (12 more lines)\n}\n```\n\n**CodeRank:** 0.44 (top 25%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `getSponsorPayload` (usage) — `web-src/src/services/payloadBuilders.ts:94`\n\n"
     }
   ],
-  "renderedBlock": "# Lic Context — task: real-emc-partner-put-sponsor-id-payload\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 partner PUT sponsor id payload\n```\n1. web-src/src/pages/EventForm/PartnerPickerDialog.tsx (lines 147-217, 0.25)\n   arrow_function PartnerPickerDialog\n\n   *(also at lines 99-151)*\n2. web-src/src/pages/EventForm/SponsorsComponent.tsx (lines 634-688, 0.23)\n   arrow_function SponsorsComponent\n\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r updatePartner\n```\nNo definition found for \"updatePartner\". Did you mean:\n\n1. `web-src/src/services/api.ts::ApiService::updateRole`\n2. `web-src/src/services/api.ts::updateSpeaker`\n3. `web-src/src/services/api.ts::updateEvent`\n4. `web-src/src/services/api.ts::ApiService::updateScope`\n5. `web-src/src/types/domain.ts::Session::updatedAt`\n```\n",
-  "renderedBlockHash": "7d133e3812a5f59d",
+  "renderedBlock": "# Lic Context — task: real-emc-partner-put-sponsor-id-payload\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 getSponsorPayload sponsorData modificationTime localizations\n```\n1. docs/v1-reference/data-utils.js (lines 312-383, 0.23)\n   function getSpeakerPayload\n2. web-src/src/services/payloadBuilders.ts (lines 94-152, 0.21)\n   function getSponsorPayload\n   Referenced by 1 files (.tsx: 1)\n3. web-src/src/types/campaign.ts (lines 13-49, 0.16)\n   interface Campaign\n   Referenced by 4 files (.tsx: 4)\n\n> **Note**: 2 low-relevance keyword results (score < 0.15) hidden.\n```\n\n## lic explain-symbol -r getSponsorPayload\n```\n## function `getSponsorPayload`\n\n**Kind:** function | **File:** `docs/v1-reference/data-utils.js` | **Line:** 350\n\n```\nexport async function getSponsorPayload(sponsorData, locale, seriesId) {\n  if (!sponsorData) return sponsorData;\n\n  let existingSponsorPayload = {};\n  if (sponsorData.sponsorId) {\n    existingSponsorPayload = await getSponsor(seriesId, sponsorData.sponsorId);\n  }\n\n  // Split sponsor data into localizable and non-localizable fields\n  const { localizableFields, nonLocalizableFields } = splitLocalizableFields(\n    sponsorData,\n    SPONSOR_DATA_FILTER,\n    locale,\n  );\n\n  const filteredGlobalPayload = Object.entries(nonLocalizableFields).reduce((acc, [key, value]) => {\n    if (SPONSOR_DATA_FILTER[key]?.submittable) {\n      acc[key] = value;\n    }\n    return acc;\n  }, {});\n    // ... (12 more lines)\n}\n```\n\n**CodeRank:** 0.44 (top 25%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (1 total)\n\n- `getSponsorPayload` (usage) — `web-src/src/services/payloadBuilders.ts:94`\n```\n",
+  "renderedBlockHash": "ad67c04439f8024b",
   "quality": {
-    "signal": "none",
+    "signal": "strong",
     "noDefinitionResult": true,
     "answerLeak": false,
     "intentMatch": true,
-    "primaryFileRetrieved": false,
-    "groundTruthSymbolOrChunkRetrieved": false,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": true,
     "notes": [
+      "primary file retrieved",
       "symbol lookup returned no definition/no results",
+      "ground-truth symbol retrieved: Object",
       "task intent matched"
     ]
   }

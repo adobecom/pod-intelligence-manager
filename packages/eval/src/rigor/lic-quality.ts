@@ -10,7 +10,21 @@ export interface LicFixtureQuality {
   intentMatch: boolean;
   primaryFileRetrieved: boolean;
   groundTruthSymbolOrChunkRetrieved: boolean;
+  /** Task-contract evidence for future/synthetic tasks whose exact future file cannot exist in the index. */
+  taskContractEvidenceRetrieved?: boolean;
   notes?: string[];
+}
+
+export const LIC_READY_SIGNALS = new Set<LicFixtureSignal>(["medium", "strong"]);
+
+export function isLicFixtureQualityReady(quality: LicFixtureQuality | undefined): boolean {
+  return Boolean(quality && LIC_READY_SIGNALS.has(quality.signal));
+}
+
+export function describeLicFixtureQualityGate(taskId: string, quality: LicFixtureQuality | undefined): string {
+  if (!quality) return `lic fixture for ${taskId} is missing quality metadata`;
+  if (isLicFixtureQualityReady(quality)) return "";
+  return `lic fixture for ${taskId} has signal=${quality.signal}; runnable LIC fixtures must be medium/strong`;
 }
 
 const STOPWORDS = new Set([
@@ -66,6 +80,7 @@ const COMMON_IDENTIFIERS = new Set([
 export function deriveLicFixtureQuality(task: Task, fixture: LicContextFixture): LicFixtureQuality {
   const rendered = fixture.renderedBlock ?? "";
   const text = normalize(rendered);
+  const searchableText = normalize(searchableRenderedOutput(rendered));
   const notes: string[] = [];
 
   const primaryFiles = extractGroundTruthFiles(task.groundTruth?.output ?? "");
@@ -93,10 +108,22 @@ export function deriveLicFixtureQuality(task: Task, fixture: LicContextFixture):
   const hasUsefulResult = hasPositiveSearchResults(rendered) || /\*\*file:\*\*/i.test(rendered) || /fqn:/i.test(rendered);
   const hasStructuralEvidence = /references|top callers|call-graph|callers|callees|impact|fqn:/i.test(rendered);
   const genericQuery = isGenericQuery(task, fixture);
+  const taskContractEvidence = extractTaskContractEvidence(task);
+  const taskContractHits = isFutureKgDerivedTask(task)
+    ? taskContractEvidence.filter((symbol) => searchableText.includes(normalize(symbol)))
+    : [];
+  const taskContractEvidenceRetrieved = taskContractHits.length > 0;
+  if (taskContractEvidenceRetrieved) {
+    notes.push(`task-contract evidence retrieved: ${taskContractHits.slice(0, 5).join(", ")}`);
+  }
 
   let signal: LicFixtureSignal;
   if (answerLeak) {
     signal = "leak";
+  } else if (taskContractHits.length >= 2 && hasStructuralEvidence) {
+    signal = "strong";
+  } else if (taskContractEvidenceRetrieved || (isFutureKgDerivedTask(task) && hasUsefulResult && intentMatch)) {
+    signal = "medium";
   } else if (!hasUsefulResult && !primaryFileRetrieved && (noDefinitionResult || genericQuery)) {
     signal = "none";
   } else if (!primaryFileRetrieved && (noDefinitionResult || !symbolHit)) {
@@ -116,6 +143,7 @@ export function deriveLicFixtureQuality(task: Task, fixture: LicContextFixture):
     intentMatch,
     primaryFileRetrieved,
     groundTruthSymbolOrChunkRetrieved,
+    ...(taskContractEvidenceRetrieved ? { taskContractEvidenceRetrieved } : {}),
     ...(notes.length > 0 ? { notes } : {}),
   };
 }
@@ -132,7 +160,7 @@ function tokenize(value: string): string[] {
   ));
 }
 
-function hasNoDefinitionSignal(text: string): boolean {
+export function hasNoDefinitionSignal(text: string): boolean {
   if (text.trim().length === 0) return true;
   return (
     /\(no output\)/i.test(text) ||
@@ -144,7 +172,7 @@ function hasNoDefinitionSignal(text: string): boolean {
   );
 }
 
-function hasPositiveSearchResults(text: string): boolean {
+export function hasPositiveSearchResults(text: string): boolean {
   for (const match of text.matchAll(/found\s+(\d+)\s+results/gi)) {
     if (Number(match[1]) > 0) return true;
   }
@@ -152,7 +180,7 @@ function hasPositiveSearchResults(text: string): boolean {
 }
 
 function hasIntentMatch(task: Task, rendered: string, fixture: LicContextFixture): boolean {
-  const text = normalize(rendered);
+  const text = normalize(searchableRenderedOutput(rendered));
   const queryTokens = tokenize(task.licSeed?.investigateQuery ?? "");
   if (queryTokens.length > 0 && queryTokens.filter((token) => text.includes(token)).length >= Math.min(2, queryTokens.length)) {
     return true;
@@ -166,10 +194,35 @@ function hasIntentMatch(task: Task, rendered: string, fixture: LicContextFixture
   return queryTokens.some((token) => normalize(recipeText).includes(token));
 }
 
+function searchableRenderedOutput(rendered: string): string {
+  return rendered
+    .split(/\r?\n/)
+    .filter((line) => !/^## lic\b/i.test(line.trim()))
+    .filter((line) => !/no definition|definition not found|symbol not found|found\s+0\s+results|0 chunks reference this symbol/i.test(line))
+    .join("\n");
+}
+
 function isGenericQuery(task: Task, fixture: LicContextFixture): boolean {
   const query = task.licSeed?.investigateQuery ?? inferQueryFromCalls(fixture);
   const tokens = tokenize(query);
   return tokens.length <= 1;
+}
+
+function isFutureKgDerivedTask(task: Task): boolean {
+  return Boolean(task.tags?.includes("kg-derived") || task.tags?.includes("future-emc"));
+}
+
+export function extractTaskContractEvidence(task: Task): string[] {
+  const evidence = new Set<string>();
+  for (const value of [
+    ...(task.licSignals ?? []),
+    ...(task.expectedSignals ?? []),
+  ]) {
+    if (!value) continue;
+    for (const identifier of extractIdentifiers(value)) evidence.add(identifier);
+    if (/^[A-Za-z0-9_$#{}.-]{4,}$/.test(value)) evidence.add(value);
+  }
+  return Array.from(evidence);
 }
 
 function inferQueryFromCalls(fixture: LicContextFixture): string {
@@ -182,7 +235,7 @@ function inferQueryFromCalls(fixture: LicContextFixture): string {
   return "";
 }
 
-function extractGroundTruthFiles(groundTruth: string): string[] {
+export function extractGroundTruthFiles(groundTruth: string): string[] {
   const files = new Set<string>();
   for (const line of groundTruth.split(/\r?\n/)) {
     const diff = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
@@ -198,7 +251,7 @@ function extractGroundTruthFiles(groundTruth: string): string[] {
   return Array.from(files);
 }
 
-function extractGroundTruthChunks(groundTruth: string): string[] {
+export function extractGroundTruthChunks(groundTruth: string): string[] {
   const normalized = groundTruth.replace(/\s+/g, " ").trim();
   if (normalized.length < 120) return [];
   const chunks: string[] = [];
@@ -209,7 +262,7 @@ function extractGroundTruthChunks(groundTruth: string): string[] {
   return chunks;
 }
 
-function extractGroundTruthSymbols(task: Task, rendered: string): { symbols: string[]; leakedSymbols: string[] } {
+export function extractGroundTruthSymbols(task: Task, rendered: string): { symbols: string[]; leakedSymbols: string[] } {
   const promptSymbols = new Set(extractIdentifiers(task.prompt));
   const allowedSymbols = new Set([
     ...promptSymbols,
@@ -219,7 +272,10 @@ function extractGroundTruthSymbols(task: Task, rendered: string): { symbols: str
     ...(task.expectedSignals ?? []).flatMap(extractIdentifiers),
   ].map((s) => s.toLowerCase()));
 
-  const symbols = extractIdentifiers(task.groundTruth?.output ?? "")
+  const answerText = answerBearingGroundTruthText(task.groundTruth?.output ?? "");
+  const preExistingSymbols = new Set(preExistingGroundTruthSymbols(task.groundTruth?.output ?? "").map((s) => s.toLowerCase()));
+  const symbols = extractIdentifiers(answerText)
+    .filter((symbol) => !preExistingSymbols.has(symbol.toLowerCase()))
     .filter((symbol) => !allowedSymbols.has(symbol.toLowerCase()))
     .slice(0, 50);
 
@@ -228,7 +284,37 @@ function extractGroundTruthSymbols(task: Task, rendered: string): { symbols: str
   return { symbols, leakedSymbols };
 }
 
-function extractIdentifiers(text: string): string[] {
+function answerBearingGroundTruthText(groundTruth: string): string {
+  const addedLines = groundTruth
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .map((line) => line.slice(1));
+
+  return addedLines.length > 0 ? addedLines.join("\n") : groundTruth;
+}
+
+function preExistingGroundTruthSymbols(groundTruth: string): string[] {
+  const addedLineCount = groundTruth
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+    .length;
+  if (addedLineCount === 0) return [];
+
+  const preExistingText = groundTruth
+    .split(/\r?\n/)
+    .filter((line) => !line.startsWith("diff --git "))
+    .filter((line) => !line.startsWith("index "))
+    .filter((line) => !line.startsWith("@@"))
+    .filter((line) => !line.startsWith("+++"))
+    .filter((line) => !line.startsWith("---"))
+    .filter((line) => !line.startsWith("+"))
+    .map((line) => line.startsWith("-") || line.startsWith(" ") ? line.slice(1) : line)
+    .join("\n");
+
+  return extractIdentifiers(preExistingText);
+}
+
+export function extractIdentifiers(text: string): string[] {
   const out = new Set<string>();
   for (const match of text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]{4,}\b/g)) {
     const symbol = match[0];
@@ -238,6 +324,6 @@ function extractIdentifiers(text: string): string[] {
   return Array.from(out);
 }
 
-function isLikelyAnswerSymbol(symbol: string): boolean {
+export function isLikelyAnswerSymbol(symbol: string): boolean {
   return symbol.length >= 10 || /[a-z][A-Z]/.test(symbol) || /[A-Z][a-z]+[A-Z]/.test(symbol);
 }

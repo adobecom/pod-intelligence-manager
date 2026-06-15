@@ -50,12 +50,23 @@ Important fields:
 - `provenance`: real-task source metadata such as `parentSha`, `mergeSha`, and
   `sourceUrl`.
 - `asOf`: point-in-time cutoff for PIM filtering and audits.
+- `kgExpectations`: reviewed required KG facts/symbols/refs for KG-decisive
+  materiality checks. These never go to the candidate prompt or judge.
 
 `src/tasks/index.ts` keeps all registered tasks importable as `ALL_TASKS`, but
 the unfiltered default is `DEFAULT_TASKS`, currently the 15-task `PRIMARY_TASKS`
 set listed in `src/tasks/task-sets.ts`. Diagnostic and excluded tasks remain
 runnable by explicit `--tasks` or `--tags`, but should not be blended into
 headline comparisons.
+
+KG-focused task sets are split deliberately:
+
+- `kg-decisive`: reviewed candidates; fails fast if scoped KG materiality is not
+  satisfied.
+- `kg-decisive-eligible`: same candidates, but filters out materiality failures
+  and records them in `exclusions.jsonl`.
+- `kg-negative-control`, `kg-lic-favorable`, and `kg-control-solvable`: pilot
+  diagnostic splits that should not be folded into a KG headline.
 
 Most real-task metadata is not declared inline. It is applied by
 `applyAssignment` / `applyAssignmentsToAll` in `src/tasks/stratification.ts`.
@@ -97,7 +108,6 @@ task and the frozen fixtures it needs.
 Available arms:
 
 - `control`: minimal baseline, no PIM context and no LIC context.
-- `length-matched-neutral`: context-length placebo with no task-relevant facts.
 - `pim-full`: full PIM session context filtered to the task `asOf`.
 - `kg-only`: only the PIM knowledge-graph retrieval block.
 - `lic-full`: full LIC context block for the task.
@@ -272,7 +282,7 @@ pnpm --filter @pim/eval run-eval -- \
   --holdout=holdouts/holdout-haiku-v2.json \
   --protocol=protocols/pim-vs-lic-haiku-v2.md \
   --run-dir=runs/<run-id> \
-  --arms=control,length-matched-neutral,pim-full,kg-only,lic-full,lic-pim-combined,pim-clipped,lic-clipped
+  --arms=control,pim-full,kg-only,lic-full,lic-pim-combined,pim-clipped,lic-clipped
 ```
 
 Protocol mode:
@@ -358,8 +368,10 @@ Run audits:
 
 ```sh
 pnpm --filter @pim/eval audit-run -- --type=temporal --run-dir=runs/<run-id>
+pnpm --filter @pim/eval audit-run -- --type=kg-materiality --run-dir=runs/<run-id>
 pnpm --filter @pim/eval audit-run -- --type=leakage --run-dir=runs/<run-id>
 pnpm --filter @pim/eval audit-run -- --type=rubrics --run-dir=runs/<run-id>
+pnpm --filter @pim/eval judge-patches -- --run-dir=runs/<run-id> --emc-repo=/path/to/EMC
 pnpm --filter @pim/eval audit-run -- --type=judging --run-dir=runs/<run-id>
 pnpm --filter @pim/eval analyze-run -- --run-dir=runs/<run-id>
 pnpm --filter @pim/eval audit-run -- --type=packet --run-dir=runs/<run-id>
@@ -370,6 +382,8 @@ What each audit checks:
 - `temporal`: scoped PIM fixtures exist for tasks with `asOf`; living doc
   sections, updates, conflicts, and learnings do not exceed the cutoff; rendered
   living doc markdown matches filtered sections.
+- `kg-materiality`: tasks with `kgExpectations` have non-empty point-in-time
+  scoped KG context containing required facts/symbols and no forbidden advice.
 - `leakage`: ground-truth chunks and provenance values did not leak into prompts
   or copied fixtures.
 - `rubrics`: rubrics do not contain PIM-only priming phrases.
@@ -441,7 +455,7 @@ pnpm --filter @pim/eval run-eval -- \
   --holdout=holdouts/holdout-haiku-v2.json \
   --protocol=protocols/pim-vs-lic-haiku-v2.md \
   --run-dir=runs/<run-id> \
-  --arms=control,length-matched-neutral,pim-full,kg-only,lic-full,lic-pim-combined,pim-clipped,lic-clipped
+  --arms=control,pim-full,kg-only,lic-full,lic-pim-combined,pim-clipped,lic-clipped
 pnpm --filter @pim/eval judge-patches -- --run-dir=runs/<run-id> --emc-repo=<product-repo> --typecheck
 pnpm --filter @pim/eval audit-run -- --type=temporal --run-dir=runs/<run-id>
 pnpm --filter @pim/eval audit-run -- --type=leakage --run-dir=runs/<run-id>

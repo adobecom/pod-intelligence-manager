@@ -121,4 +121,56 @@ describe("validateHoldoutManifest", () => {
     expect(messages).toContain("primary claim has 1 realistic-ticket headline tasks");
     expect(messages).toContain("must be parentSha-indexed");
   });
+
+  it("fails haiku holdouts that snapshot weak LIC fixtures", async () => {
+    const t = task();
+    const fixtureDir = await mkdtemp(join(tmpdir(), "pim-eval-holdout-"));
+    const raw = JSON.stringify({
+      taskId: t.id,
+      indexSource: { kind: "parentSha", sha: t.provenance?.parentSha, worktree: "/repo-parent" },
+      renderedBlock: "Found 5 results\n\n1. web-src/src/other/File.ts (lines 1-20)\nSome unrelated code.",
+      quality: {
+        signal: "weak",
+        noDefinitionResult: false,
+        answerLeak: false,
+        intentMatch: false,
+        primaryFileRetrieved: false,
+        groundTruthSymbolOrChunkRetrieved: false,
+      },
+    });
+    await writeFile(join(fixtureDir, `${t.id}.json`), raw);
+
+    const manifest: HoldoutManifest = {
+      id: "holdout",
+      protocol: "protocols/pim-vs-lic-haiku-v2.md",
+      minimumTaskCount: 30,
+      createdAt: "2026-06-01T00:00:00Z",
+      tasks: [
+        {
+          id: t.id,
+          promptHash: hashTaskPrompt(t),
+          groundTruthHash: hashTaskGroundTruth(t),
+          rubricHash: hashTaskRubric(t),
+          asOf: t.asOf,
+          promptTier: "realistic-ticket",
+          stratum: t.stratum,
+          provenance: t.provenance,
+          licSeedHash: sha256Text(stableJson(t.licSeed)),
+          licFixtureHash: sha256Text(raw),
+          licIndexSource: { kind: "parentSha", sha: t.provenance!.parentSha!, worktree: "/repo-parent" },
+          objectiveClass: {
+            taskType: "content",
+            hasGroundTruth: true,
+            promptChars: t.prompt.length,
+            groundTruthChars: t.groundTruth?.output.length ?? 0,
+            sourceTagSnapshot: t.tags ?? [],
+          },
+        },
+      ],
+    };
+
+    const result = await validateHoldoutManifest(manifest, { tasks: [t], licFixtureDir: fixtureDir });
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((finding) => finding.message).join("\n")).toContain("signal=weak");
+  });
 });

@@ -6,25 +6,25 @@
     "call-graph",
     "explain-symbol"
   ],
-  "licDaemonVersion": "lic 0.9.97-1497-dd38ff47",
+  "licDaemonVersion": "lic 0.9.102-1592-c7ae48ad",
   "indexSource": {
     "kind": "parentSha",
     "sha": "84f21c9d968beaaac01eebca2dc1b2cb853a1b68",
     "worktree": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b"
   },
-  "generatedAt": "2026-06-04T23:56:58.890Z",
+  "generatedAt": "2026-06-09T15:55:39.579Z",
   "calls": [
     {
       "tool": "find-references",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
-        "speakerImageCache"
+        "SpeakerFormDialog"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
       "exitCode": 0,
-      "durationMs": 29,
-      "output": "No exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n"
+      "durationMs": 38,
+      "output": "Definition: web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx (lines 109-140)\n  Name: SpeakerFormDialog (const)\n   109: ({\n   110:   isOpen,\n   111:   onClose,\n   112:   onSubmit,\n   113:   speaker,\n   114:   seriesId: _seriesId,\n   115:   isSubmitting,\n   116:   cascadeToEvents,\n   117: }) => {\n   118:   void _seriesId\n   119:   const [formState, setFormState] = useState<FormState>(initialFormState)\n   120:   const [localizationDrafts, setLocalizationDrafts] = useState<\n   121:     Record<string, SpeakerDashboardLocalizationDraft>\n   122:   >(emptyLocalizationDrafts)\n   123:   const [selectedLocale, setSelectedLocale] = useState<string>(DEFAULT_LOCALE)\n   124:   const [pendingFile, setPendingFile] = useState<File | null>(null)\n   125:   const [shouldCascade, setShouldCascade] = useState(cascadeToEvents ?? false)\n   126: \n   127:   const isEditing = !!speaker\n   128: \n  | ... (12 more lines)\n\nReferences (3 shown, 0 total):\n\n  1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:54-61 []\n  2. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:948-952 []\n  3. web-src/src/pages/SpeakersDashboard/index.ts:5-10 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormDialog\n"
     },
     {
       "tool": "call-graph",
@@ -33,39 +33,38 @@
         "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
         "--direction",
         "callers",
-        "speakerImageCache"
+        "SpeakerFormDialog"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
       "exitCode": 0,
-      "durationMs": 26,
-      "output": "No exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n"
+      "durationMs": 17,
+      "output": "Ambiguous symbol — candidates (1):\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormDialog\n"
     },
     {
       "tool": "explain-symbol",
       "args": [
         "-r",
         "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
-        "speakerImageCache"
+        "SpeakerFormDialog"
       ],
       "cwd": "/Users/rkhan/emcV2-lic-worktrees/emc-84f21c9d968b",
       "exitCode": 0,
-      "durationMs": 25,
-      "output": "No definition found for \"speakerImageCache\". Did you mean:\n\n1. `web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft`\n2. `web-src/src/utils/eventFormMappers.ts::speakerHasLocalization`\n3. `web-src/src/services/api.ts::ApiService::speakerId`\n4. `web-src/src/services/api.ts::ApiService::speakerType`\n5. `web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions`\n\n"
+      "durationMs": 50,
+      "output": "## const `SpeakerFormDialog`\n\n**Kind:** const | **File:** `web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx` | **Line:** 109\n\n```\nexport const SpeakerFormDialog: React.FC<SpeakerFormDialogProps> = ({\n  isOpen,\n  onClose,\n  onSubmit,\n  speaker,\n  seriesId: _seriesId,\n  isSubmitting,\n  cascadeToEvents,\n}) => {\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (2 total)\n\n- `(usage)` (usage) — `web-src/src/pages/SpeakersDashboard/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:41`\n\n"
     }
   ],
-  "renderedBlock": "# Lic Context — task: real-emc-speaker-image-cache-invalidate\n_Stratum: S2._\n\n## lic find-references -r speakerImageCache\n```\nNo exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n```\n\n## lic call-graph -r --direction callers speakerImageCache\n```\nNo exact match. Did you mean (5):\n  web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft\n  web-src/src/utils/eventFormMappers.ts::speakerHasLocalization\n  web-src/src/services/api.ts::ApiService::speakerId\n  web-src/src/services/api.ts::ApiService::speakerType\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions\n```\n\n## lic explain-symbol -r speakerImageCache\n```\nNo definition found for \"speakerImageCache\". Did you mean:\n\n1. `web-src/src/services/payloadBuilders.ts::SpeakerDashboardLocalizationDraft`\n2. `web-src/src/utils/eventFormMappers.ts::speakerHasLocalization`\n3. `web-src/src/services/api.ts::ApiService::speakerId`\n4. `web-src/src/services/api.ts::ApiService::speakerType`\n5. `web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormSaveOptions`\n```\n",
-  "renderedBlockHash": "e976c0589e4c75ad",
+  "renderedBlock": "# Lic Context — task: real-emc-speaker-image-cache-invalidate\n_Stratum: S2._\n\n## lic find-references -r SpeakerFormDialog\n```\nDefinition: web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx (lines 109-140)\n  Name: SpeakerFormDialog (const)\n   109: ({\n   110:   isOpen,\n   111:   onClose,\n   112:   onSubmit,\n   113:   speaker,\n   114:   seriesId: _seriesId,\n   115:   isSubmitting,\n   116:   cascadeToEvents,\n   117: }) => {\n   118:   void _seriesId\n   119:   const [formState, setFormState] = useState<FormState>(initialFormState)\n   120:   const [localizationDrafts, setLocalizationDrafts] = useState<\n   121:     Record<string, SpeakerDashboardLocalizationDraft>\n   122:   >(emptyLocalizationDrafts)\n   123:   const [selectedLocale, setSelectedLocale] = useState<string>(DEFAULT_LOCALE)\n   124:   const [pendingFile, setPendingFile] = useState<File | null>(null)\n   125:   const [shouldCascade, setShouldCascade] = useState(cascadeToEvents ?? false)\n   126: \n   127:   const isEditing = !!speaker\n   128: \n  | ... (12 more lines)\n\nReferences (3 shown, 0 total):\n\n  1. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:54-61 []\n  2. web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:948-952 []\n  3. web-src/src/pages/SpeakersDashboard/index.ts:5-10 []\n\nNote: auto-selected one definition. Other candidates: web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormDialog\n```\n\n## lic call-graph -r --direction callers SpeakerFormDialog\n```\nAmbiguous symbol — candidates (1):\n  web-src/src/pages/SpeakersDashboard/index.ts::SpeakerFormDialog\n```\n\n## lic explain-symbol -r SpeakerFormDialog\n```\n## const `SpeakerFormDialog`\n\n**Kind:** const | **File:** `web-src/src/pages/SpeakersDashboard/SpeakerFormDialog.tsx` | **Line:** 109\n\n```\nexport const SpeakerFormDialog: React.FC<SpeakerFormDialogProps> = ({\n  isOpen,\n  onClose,\n  onSubmit,\n  speaker,\n  seriesId: _seriesId,\n  isSubmitting,\n  cascadeToEvents,\n}) => {\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 0 chunks reference this symbol\n\n### Top Callers (2 total)\n\n- `(usage)` (usage) — `web-src/src/pages/SpeakersDashboard/index.ts:1`\n- `(usage)` (usage) — `web-src/src/pages/SpeakersDashboard/SpeakersDashboard.tsx:41`\n```\n",
+  "renderedBlockHash": "11f2a280ab64da92",
   "quality": {
-    "signal": "leak",
+    "signal": "strong",
     "noDefinitionResult": true,
-    "answerLeak": true,
+    "answerLeak": false,
     "intentMatch": true,
-    "primaryFileRetrieved": false,
-    "groundTruthSymbolOrChunkRetrieved": true,
+    "primaryFileRetrieved": true,
+    "groundTruthSymbolOrChunkRetrieved": false,
     "notes": [
+      "primary file retrieved",
       "symbol lookup returned no definition/no results",
-      "ground-truth symbol retrieved: SpeakerDashboardLocalizationDraft",
-      "post-merge answer symbol leak: SpeakerDashboardLocalizationDraft",
       "task intent matched"
     ]
   }

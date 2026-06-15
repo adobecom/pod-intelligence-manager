@@ -5,9 +5,16 @@ import { fileURLToPath } from "node:url";
 import { ALL_TASKS } from "../tasks/index.js";
 import { headlineTasks } from "../tasks/stratification.js";
 import { classifyPromptTier } from "../tasks/prompt-tiers.js";
+import type { Task } from "../tasks/types.js";
 import { isRealHeadlineTask, makeHoldoutEntry, type HoldoutManifest } from "../rigor/holdout.js";
 import { sha256Text } from "../rigor/hash.js";
 import type { LicIndexSource } from "../arms/types.js";
+import {
+  deriveLicFixtureQuality,
+  describeLicFixtureQualityGate,
+  isLicFixtureQualityReady,
+  type LicFixtureQuality,
+} from "../rigor/lic-quality.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const PKG_ROOT = join(dirname(__filename), "..", "..");
@@ -15,11 +22,15 @@ const HOLDOUTS_DIR = join(PKG_ROOT, "holdouts");
 const LIC_FIXTURES_DIR = join(PKG_ROOT, "fixtures", "lic");
 const MINIMUM_TASK_COUNT = 30;
 
-async function maybeLicFixtureMetadata(taskId: string): Promise<{ hash?: string; indexSource?: LicIndexSource }> {
+async function maybeLicFixtureMetadata(task: Task): Promise<{ hash?: string; indexSource?: LicIndexSource; quality?: LicFixtureQuality }> {
   try {
-    const raw = await readFile(join(LIC_FIXTURES_DIR, `${taskId}.json`), "utf8");
-    const parsed = JSON.parse(raw) as { indexSource?: LicIndexSource };
-    return { hash: sha256Text(raw), indexSource: parsed.indexSource };
+    const raw = await readFile(join(LIC_FIXTURES_DIR, `${task.id}.json`), "utf8");
+    const parsed = JSON.parse(raw) as { indexSource?: LicIndexSource; quality?: LicFixtureQuality };
+    return {
+      hash: sha256Text(raw),
+      indexSource: parsed.indexSource,
+      quality: deriveLicFixtureQuality(task, parsed as Parameters<typeof deriveLicFixtureQuality>[1]),
+    };
   } catch {
     return {};
   }
@@ -37,23 +48,30 @@ async function main(): Promise<void> {
   }
 
   const licMetadata = new Map(
-    await Promise.all(tasks.map(async (t) => [t.id, await maybeLicFixtureMetadata(t.id)] as const)),
+    await Promise.all(tasks.map(async (t) => [t.id, await maybeLicFixtureMetadata(t)] as const)),
   );
 
-  // Fail closed: real headline tasks must carry a parent SHA AND their lic
-  // fixtures must already be frozen from that exact parent SHA. --allow-head-leak
-  // generates an explicitly exploratory (not headline-clean) holdout instead.
+  // Fail closed: LIC fixtures must be present and medium/strong. Real headline
+  // tasks must also carry a parent SHA and be frozen from that exact parent SHA.
+  // --allow-head-leak waives only temporal cleanliness for exploratory holdouts;
+  // it does not waive missing/weak/leaky fixtures.
+  const licQualityReasons: string[] = [];
   const headLeakReasons: string[] = [];
   for (const task of tasks) {
-    if (!isRealHeadlineTask(task)) continue;
-    const parentSha = task.provenance?.parentSha;
     const lic = licMetadata.get(task.id);
-    if (!parentSha) {
-      headLeakReasons.push(`${task.id} (${task.stratum}) lacks provenance.parentSha`);
+    if (!lic?.hash) {
+      licQualityReasons.push(`${task.id} (${task.stratum}) is missing a frozen lic fixture`);
       continue;
     }
-    if (!lic?.hash) {
-      headLeakReasons.push(`${task.id} (${task.stratum}) is missing a frozen lic fixture`);
+    if (!isLicFixtureQualityReady(lic.quality)) {
+      licQualityReasons.push(`${task.id} (${task.stratum}) ${describeLicFixtureQualityGate(task.id, lic.quality)}`);
+      continue;
+    }
+
+    if (!isRealHeadlineTask(task)) continue;
+    const parentSha = task.provenance?.parentSha;
+    if (!parentSha) {
+      headLeakReasons.push(`${task.id} (${task.stratum}) lacks provenance.parentSha`);
       continue;
     }
     if (!lic.indexSource) {
@@ -63,6 +81,14 @@ async function main(): Promise<void> {
     } else if (lic.indexSource.sha !== parentSha) {
       headLeakReasons.push(`${task.id} (${task.stratum}) lic fixture sha ${lic.indexSource.sha} != parentSha ${parentSha}`);
     }
+  }
+
+  if (licQualityReasons.length > 0) {
+    throw new Error(
+      `${licQualityReasons.length} headline lic fixture(s) are not quality-ready:\n` +
+        licQualityReasons.map((reason) => `  - ${reason}`).join("\n") +
+        `\nRe-freeze with \`pnpm --filter @pim/eval lic-freeze -- --task=headline --refresh\`.`,
+    );
   }
 
   if (headLeakReasons.length > 0 && !allowHeadLeak) {

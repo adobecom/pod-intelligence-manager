@@ -1,0 +1,56 @@
+{
+  "taskId": "future-emc-session-location-overlap",
+  "stratum": "S3",
+  "recipe": [
+    "keyword-search",
+    "regex-search",
+    "explain-symbol"
+  ],
+  "licDaemonVersion": "lic 0.9.102-1569-5838ef7e",
+  "indexSource": {
+    "kind": "head",
+    "repo": "/Users/rkhan/emcV2/EMC"
+  },
+  "generatedAt": "2026-06-07T22:19:45.585Z",
+  "calls": [
+    {
+      "tool": "keyword-search",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "-l",
+        "5",
+        "session location time overlap UTC validation"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 30,
+      "output": "1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 469-514, 1.00)\n   arrow_function SessionForm\n   ...\n 469:g() ?? \"\"})`\n 470:    : undefined;\n 471:\n 472:  const isEndTimeInvalid = Boolean(\n 473:    startTime && endTime && (endTime.hour < startTime.hour ||\n   ...\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 100-155, 0.97)\n 100:function mapApiToSession(item: Record<string, unknown>): Session {\n   ...\n\n3. web-src/src/utils/dateTime.ts (lines 110-163, 0.65)\n   function naiveDateTimeToUTCMillis\n   Referenced by 2 files (.tsx: 2)\n\n   *(also at lines 37-108)*\n5. docs/EVENT_FORM.md (lines 129-146, 0.26)\n   section Event Form - Complete Guide > Form Structure > Step 1: Basic Info > 4. Date & Time\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n"
+    },
+    {
+      "tool": "explain-symbol",
+      "args": [
+        "-r",
+        "/Users/rkhan/emcV2/EMC",
+        "naiveDateTimeToUTCMillis"
+      ],
+      "cwd": "/Users/rkhan/emcV2/EMC",
+      "exitCode": 0,
+      "durationMs": 22,
+      "output": "## function `naiveDateTimeToUTCMillis`\n\n**Kind:** function | **File:** `web-src/src/utils/dateTime.ts` | **Line:** 119\n\n**Doc:** Converts a naive datetime string (no timezone indicator) representing wall-clock time in the given IANA timezone to UTC milliseconds. Mirrors the save approach in EventInfoComponent: wall-clock time +...\n\n```\nexport function naiveDateTimeToUTCMillis(dateTimeStr: string, timezone: string): number {\n  // Treat the naive string as UTC to get a reference probe point\n  const probe = new Date(dateTimeStr + \"Z\").getTime();\n\n  // Find what wall-clock time the probe shows in the target timezone\n  const formatter = new Intl.DateTimeFormat(\"en-CA\", {\n    timeZone: timezone,\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\",\n    hour12: false,\n  });\n  const parts = Object.fromEntries(\n    formatter.formatToParts(new Date(probe)).map((p) => [p.type, p.value]),\n  );\n  const h = parts.hour === \"24\" ? \"00\" : parts.hour;\n  const localMs = new Date(\n    `${parts.year}-${parts.month}-${parts.day}T${h}:${parts.minute}:${parts.second}Z`,\n    // ... (4 more lines)\n}\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 7 chunks reference this symbol\n\n### Top Callers (43 total)\n\n- `createSessionTimeForSession` (function) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:161`\n- `handleSave` (function) — `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:392`\n\n"
+    }
+  ],
+  "renderedBlock": "# Lic Context — task: future-emc-session-location-overlap\n_Stratum: S3._\n\n## lic keyword-search -r -l 5 session location time overlap UTC validation\n```\n1. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 469-514, 1.00)\n   arrow_function SessionForm\n   ...\n 469:g() ?? \"\"})`\n 470:    : undefined;\n 471:\n 472:  const isEndTimeInvalid = Boolean(\n 473:    startTime && endTime && (endTime.hour < startTime.hour ||\n   ...\n\n2. web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx (lines 100-155, 0.97)\n 100:function mapApiToSession(item: Record<string, unknown>): Session {\n   ...\n\n3. web-src/src/utils/dateTime.ts (lines 110-163, 0.65)\n   function naiveDateTimeToUTCMillis\n   Referenced by 2 files (.tsx: 2)\n\n   *(also at lines 37-108)*\n5. docs/EVENT_FORM.md (lines 129-146, 0.26)\n   section Event Form - Complete Guide > Form Structure > Step 1: Basic Info > 4. Date & Time\n\n\n> **Note**: 4 of 5 results are from `web-src/src/`. Consider searching other directories for full cross-platform coverage.\n```\n\n## lic explain-symbol -r naiveDateTimeToUTCMillis\n```\n## function `naiveDateTimeToUTCMillis`\n\n**Kind:** function | **File:** `web-src/src/utils/dateTime.ts` | **Line:** 119\n\n**Doc:** Converts a naive datetime string (no timezone indicator) representing wall-clock time in the given IANA timezone to UTC milliseconds. Mirrors the save approach in EventInfoComponent: wall-clock time +...\n\n```\nexport function naiveDateTimeToUTCMillis(dateTimeStr: string, timezone: string): number {\n  // Treat the naive string as UTC to get a reference probe point\n  const probe = new Date(dateTimeStr + \"Z\").getTime();\n\n  // Find what wall-clock time the probe shows in the target timezone\n  const formatter = new Intl.DateTimeFormat(\"en-CA\", {\n    timeZone: timezone,\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\",\n    hour12: false,\n  });\n  const parts = Object.fromEntries(\n    formatter.formatToParts(new Date(probe)).map((p) => [p.type, p.value]),\n  );\n  const h = parts.hour === \"24\" ? \"00\" : parts.hour;\n  const localMs = new Date(\n    `${parts.year}-${parts.month}-${parts.day}T${h}:${parts.minute}:${parts.second}Z`,\n    // ... (4 more lines)\n}\n```\n\n**CodeRank:** 0.00 (bottom 50%)\n**References:** 7 chunks reference this symbol\n\n### Top Callers (43 total)\n\n- `createSessionTimeForSession` (function) — `web-src/src/pages/EventForm/SessionManagement/Sessions.tsx:161`\n- `handleSave` (function) — `web-src/src/pages/EventForm/SessionManagement/SessionForm.tsx:392`\n```\n",
+  "renderedBlockHash": "a5679db4ff7e1bc4",
+  "quality": {
+    "signal": "weak",
+    "noDefinitionResult": false,
+    "answerLeak": false,
+    "intentMatch": true,
+    "primaryFileRetrieved": false,
+    "groundTruthSymbolOrChunkRetrieved": false,
+    "notes": [
+      "task intent matched"
+    ]
+  }
+}

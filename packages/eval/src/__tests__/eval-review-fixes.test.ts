@@ -13,7 +13,9 @@ import { extractUnifiedDiff } from "../judges/patch.js";
 import { classifyPromptTier } from "../tasks/prompt-tiers.js";
 import { computeProtocolAnalysis } from "../rigor/protocol-analysis.js";
 import { renderProtocolReport } from "../rigor/protocol-report.js";
-import { auditJudging } from "../rigor/run-audits.js";
+import { auditJudging, auditKgMateriality } from "../rigor/run-audits.js";
+import { evaluateKgMateriality } from "../rigor/kg-materiality.js";
+import { renderKgMaterialitySection } from "../report.js";
 
 const ASOF = "2026-04-01T00:00:00Z";
 
@@ -115,20 +117,17 @@ describe("protocol analysis + report (#6, #10, #11)", () => {
   const rows: EvalRow[] = [];
   for (const t of ["A", "B", "C"]) {
     rows.push(row(t, "pim-full", true));
-    rows.push(row(t, "length-matched-neutral", t === "A"));
     rows.push(row(t, "control", t !== "C"));
     rows.push(row(t, "lic-full", t === "A"));
   }
   rows.push(row("D", "pim-full", false, "saturated"));
-  rows.push(row("D", "length-matched-neutral", false, "saturated"));
   const analysis = computeProtocolAnalysis(rows, {
     bootstrapIterations: 200,
-    primaryArms: ["pim-full", "kg-only", "lic-full", "lic-pim-combined", "length-matched-neutral"],
+    primaryArms: ["pim-full", "kg-only", "lic-full", "lic-pim-combined"],
   });
 
-  it("includes both baselines in the focus verdicts", () => {
+  it("includes the operational baseline in the focus verdicts", () => {
     const labels = analysis.focusVerdicts.map((f) => `${f.armA}|${f.armB}`);
-    expect(labels).toContain("pim-full|length-matched-neutral");
     expect(labels).toContain("pim-full|control");
   });
 
@@ -148,7 +147,7 @@ describe("protocol analysis + report (#6, #10, #11)", () => {
     expect(md).toContain("## Protocol Claim Analysis");
     expect(md).toContain("Headline claim — realistic-ticket tasks only");
     expect(md).toContain("Pass rate by prompt-realism tier");
-    expect(md).toContain("length-matched neutral (primary baseline)");
+    expect(md).toContain("Operational baseline");
   });
 });
 
@@ -193,5 +192,122 @@ describe("auditJudging patch-judge enforcement (#9)", () => {
       }) + "\n",
     );
     expect((await auditJudging(runDir)).ok).toBe(true);
+  });
+});
+
+describe("KG materiality gate", () => {
+  it("fails when point-in-time scoped KG removes required nodes", () => {
+    const task = contentTask({
+      id: "kg-task",
+      asOf: ASOF,
+      kgExpectations: {
+        requiredFacts: ["useHasPermission"],
+        requiredSymbols: ["event:write"],
+      },
+    });
+    const fixture: SessionContextFixture = {
+      podId: "pod-x",
+      pulledAt: "2026-06-01T00:00:00Z",
+      payload: {
+        pod: { pod_id: "pod-x", name: "X" },
+        livingDocMarkdown: "",
+        conflicts: [],
+        relevantLearnings: { nodes: [], total_matching: 0, truncated: false },
+        taskRelevantLearnings: {
+          "kg-task": {
+            nodes: [{
+              type: "pattern",
+              summary: "RBAC gates UI controls with useHasPermission and event:write.",
+              details: "",
+              domains: ["frontend"],
+              confidence_score: 0.9,
+              created_at: "2026-05-01T00:00:00Z",
+            }],
+            total_matching: 1,
+            truncated: false,
+          },
+        },
+        recentUpdates: [],
+      },
+    };
+
+    const row = evaluateKgMateriality(task, fixture);
+    expect(row.eligible).toBe(false);
+    expect(row.kgNodeCount).toBe(0);
+    expect(row.reason).toContain("zero nodes");
+    expect(row.reason).toContain("useHasPermission");
+  });
+
+  it("passes when required KG facts survive scoping and renders the report table", () => {
+    const task = contentTask({
+      id: "kg-task",
+      asOf: ASOF,
+      kgExpectations: {
+        requiredFacts: ["useHasPermission"],
+        requiredSymbols: ["event:write"],
+      },
+    });
+    const fixture: SessionContextFixture = {
+      podId: "pod-x",
+      pulledAt: "2026-06-01T00:00:00Z",
+      payload: {
+        pod: { pod_id: "pod-x", name: "X" },
+        livingDocMarkdown: "",
+        conflicts: [],
+        relevantLearnings: { nodes: [], total_matching: 0, truncated: false },
+        taskRelevantLearnings: {
+          "kg-task": {
+            nodes: [{
+              type: "pattern",
+              summary: "RBAC gates UI controls with useHasPermission and event:write.",
+              details: "",
+              domains: ["frontend"],
+              confidence_score: 0.9,
+              created_at: "2026-03-01T00:00:00Z",
+            }],
+            total_matching: 1,
+            truncated: false,
+          },
+        },
+        recentUpdates: [],
+      },
+    };
+
+    const materiality = evaluateKgMateriality(task, fixture);
+    expect(materiality.eligible).toBe(true);
+    const md = renderKgMaterialitySection([materiality]).join("\n");
+    expect(md).toContain("## KG Materiality");
+    expect(md).toContain("| kg-task | yes | 1 |");
+  });
+
+  it("auditKgMateriality fails completed runs with empty scoped KG for expected tasks", async () => {
+    const runDir = await mkdtemp(join(tmpdir(), "pim-eval-kg-"));
+    await mkdir(join(runDir, "fixtures", "scoped"), { recursive: true });
+    await writeFile(
+      join(runDir, "manifest.json"),
+      JSON.stringify({ runId: "r1", tasks: ["real-emc-rbac-events-dashboard-gating"] }),
+    );
+    await writeFile(
+      join(runDir, "fixtures", "scoped", "real-emc-rbac-events-dashboard-gating.json"),
+      JSON.stringify({
+        podId: "pod-emc-rbac",
+        pulledAt: "2026-06-01T00:00:00Z",
+        asOf: "2026-03-25T16:02:19-07:00",
+        payload: {
+          pod: { pod_id: "pod-emc-rbac", name: "RBAC" },
+          livingDocMarkdown: "",
+          conflicts: [],
+          relevantLearnings: { nodes: [], total_matching: 0, truncated: false },
+          taskRelevantLearnings: {
+            "real-emc-rbac-events-dashboard-gating": { nodes: [], total_matching: 44, truncated: true },
+          },
+          recentUpdates: [],
+        },
+      }),
+    );
+
+    const result = await auditKgMateriality(runDir);
+    expect(result.ok).toBe(false);
+    expect(result.findings.map((f) => f.message).join("\n")).toContain("zero nodes");
   });
 });

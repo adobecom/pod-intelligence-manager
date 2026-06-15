@@ -45,6 +45,20 @@ export interface LicSeed {
   investigateQuery?: string;
 }
 
+/**
+ * Reviewed seed `serena-freeze` uses to drive Serena's symbol-oriented tools.
+ * Serena is not a natural-language search engine, so a symbol/file seed makes the
+ * difference between a useful fixture and a no-signal one. `note` records why the
+ * seed was chosen (for audit). Absent on most tasks — the freezer falls back to
+ * `licSeed.symbol` and then to stable identifiers in `licSignals`/`expectedSignals`.
+ */
+export interface SerenaSeedSpec {
+  symbols?: string[];
+  files?: string[];
+  patterns?: string[];
+  note: string;
+}
+
 /** Provenance of a real-PR-derived task; consumed by the lic freezer and rigor audits. */
 export interface TaskProvenance {
   /** Merge commit SHA of the source PR. */
@@ -53,6 +67,21 @@ export interface TaskProvenance {
   parentSha?: string;
   /** URL of the source PR or issue. */
   sourceUrl?: string;
+}
+
+/**
+ * Reviewed KG facts that should be present for a task to carry a KG-decisive
+ * claim. These are evaluated against the point-in-time scoped KG block.
+ */
+export interface KgExpectations {
+  /** Stable source/pod/doc/PR refs or unique text fragments expected in matching nodes. */
+  requiredNodeRefs?: string[];
+  /** Non-obvious facts the KG should surface before this task is headline-eligible. */
+  requiredFacts?: string[];
+  /** Symbols/API fields that should appear in the scoped KG evidence. */
+  requiredSymbols?: string[];
+  /** Advice that would indicate stale or contradictory context. */
+  forbiddenFacts?: string[];
 }
 
 export interface Task {
@@ -103,6 +132,13 @@ export interface Task {
   promptTier?: PromptTier;
   /** Seed used by `lic-freeze` to retrieve this task's lic fixture. */
   licSeed?: LicSeed;
+  /** Reviewed symbol-first seed used by `serena-freeze` (see SerenaSeedSpec). */
+  serenaSeed?: SerenaSeedSpec;
+  /**
+   * Reviewed symbols/phrases that make a LIC fixture useful for this task but
+   * are not necessarily required in KG evidence or model output.
+   */
+  licSignals?: string[];
   /** Provenance of a real-PR-derived task. */
   provenance?: TaskProvenance;
   /**
@@ -110,4 +146,9 @@ export interface Task {
    * PIM context to on/before this instant to avoid temporal leakage.
    */
   asOf?: string;
+  /**
+   * Optional reviewed KG materiality contract. Used by the KG-decisive gate and
+   * reporting; not used by the candidate or judge prompts.
+   */
+  kgExpectations?: KgExpectations;
 }
