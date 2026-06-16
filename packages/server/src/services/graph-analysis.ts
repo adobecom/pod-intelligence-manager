@@ -34,15 +34,49 @@ const STOP_WORDS = new Set([
   "node", "context",
 ]);
 const BARE_HTTP_VERB_IDENTIFIERS = new Set(["get", "post", "put", "patch", "delete"]);
-const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set(["api", "current", "how", "implemented", "implementation", "status"]);
+const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set([
+  "api",
+  "current",
+  "how",
+  "implemented",
+  "implementation",
+  "status",
+]);
+
+function countChar(value: string, char: string): number {
+  return value.split(char).length - 1;
+}
+
+function restoreBalancedTrailingDelimiter(value: string, stripped: string, open: string, close: string): string {
+  if (countChar(stripped, open) <= countChar(stripped, close)) return stripped;
+  const removedTail = value.slice(stripped.length);
+  return removedTail.includes(close) ? `${stripped}${close}` : stripped;
+}
 
 function normalizeIdentifierMatch(value: string): string {
-  return value
+  const normalized = value
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .replace(/^[`"'([{]+/g, "")
-    .replace(/[`"',.;)]+$/g, "");
+    .replace(/^[`"'([{]+/g, "");
+  let stripped = normalized.replace(/[`"',.;)\]}]+$/g, "");
+  stripped = restoreBalancedTrailingDelimiter(normalized, stripped, "{", "}");
+  stripped = restoreBalancedTrailingDelimiter(normalized, stripped, "[", "]");
+  return stripped;
+}
+
+function isLowSignalPathIdentifier(value: string): boolean {
+  const path = value.replace(/[?#].*$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length !== 1) return false;
+  const [segment] = segments;
+  return segment.length <= 3 || /^v\d+(?:\.\d+)?$/i.test(segment);
+}
+
+function isLowSignalIdentifier(value: string): boolean {
+  if (value.startsWith("/") && isLowSignalPathIdentifier(value)) return true;
+  const httpPath = /^(?:get|post|put|patch|delete)\s+(\/.*)$/i.exec(value)?.[1];
+  return httpPath ? isLowSignalPathIdentifier(httpPath) : false;
 }
 
 export function extractKeywords(text: string): Set<string> {
@@ -80,6 +114,7 @@ export function extractIdentifiers(text: string): Set<string> {
       const cleaned = normalizeIdentifierMatch(match);
       if (STOP_WORDS.has(cleaned)) continue;
       if (BARE_HTTP_VERB_IDENTIFIERS.has(cleaned)) continue;
+      if (isLowSignalIdentifier(cleaned)) continue;
       if (cleaned.length > 2) identifiers.add(cleaned);
     }
   }

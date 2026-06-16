@@ -142,6 +142,7 @@ export default async function graphRoutes(app: FastifyInstance) {
       taskQuery?: string;
       externalQuery?: string;
       query?: string;
+      compactHeadingOffset?: string;
     };
   }>(
     "/api/knowledge/relevant",
@@ -151,11 +152,15 @@ export default async function graphRoutes(app: FastifyInstance) {
       const maxTokens = parseInt(req.query.maxTokens ?? "2000", 10);
       const projectId = req.query.projectId?.trim() || null;
       const taskQuery = (req.query.taskQuery ?? req.query.externalQuery ?? req.query.query)?.trim();
+      const compactHeadingOffset = Number.parseInt(req.query.compactHeadingOffset ?? "", 10);
       return getContractedRelevantLearnings(req.org!.org_id, {
         scopes,
         maxTokens,
         projectId,
         ...(taskQuery ? { taskQuery } : {}),
+        ...(Number.isFinite(compactHeadingOffset) && compactHeadingOffset > 0
+          ? { compactHeadingOffset }
+          : {}),
       });
     },
   );

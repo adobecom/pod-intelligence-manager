@@ -133,6 +133,37 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(webhookFirstWhenRelevant).toBeLessThan(cdnFirstWhenRelevant);
   });
 
+  it("uses high-signal keywords for semantic-gate fallback thresholds", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "scope_insight",
+        summary: "Webhook authentication is implemented with signed callbacks",
+        details: "The current webhook path authenticates requests with signatures.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "scope_insight",
+        summary: "Status pages render from cached project metadata",
+        details: "Unrelated status implementation notes.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const result = queryKnowledge(orgId, {
+      filters: {},
+      query_text: "how current status implemented webhook authentication",
+      query_embedding: [1, 0],
+      max_tokens: 500,
+      expand_graph: false,
+    });
+
+    expect(result.nodes.map((n) => n.summary)).toContain("Webhook authentication is implemented with signed callbacks");
+  });
+
   it("queryKnowledge omits node embeddings by default; include_embeddings restores them", async () => {
     const orgId = await seedGraph([
       {
@@ -556,7 +587,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(result.nodes).toHaveLength(5);
     expect(result.total_matching).toBe(10);
-    expect(result.compact_context).toContain("Retrieval had 7 additional match(es) not shown");
+    expect(result.compact_context).toContain("Retrieval had 5 additional match(es) not shown");
   });
 
   it("returns a tiny possible_constraints block without taskQuery in task_relevant mode", async () => {
@@ -1409,6 +1440,7 @@ describe("text_search index behavior", () => {
     const text = [
       "RBAC calls useHasPermission before event:write and scope-team:* actions.",
       "Requests include x-adobe-esp-group-id for GET /v1/events/{eventId}.",
+      "Do not index short root paths like /v1 or /api as useful identifiers.",
       "Fallback handlers live in dataFilters.ts, while CURRENT STATUS IMPLEMENTED HOW are generic.",
     ].join(" ");
 
@@ -1427,8 +1459,37 @@ describe("text_search index behavior", () => {
       ]),
     );
     expect(retrievalIds).not.toEqual(
-      expect.arrayContaining(["current", "status", "implemented", "how"]),
+      expect.arrayContaining(["/v1", "/api", "current", "status", "implemented", "how"]),
     );
+  });
+
+  it("filters low-signal query keywords before scoring longer task queries", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Webhook authentication contract",
+        details: "Webhook authentication should use signed callbacks.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Generic implementation status update",
+        details: "How current status is implemented using existing work.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+
+    const result = queryKnowledge(orgId, {
+      filters: { scopes: ["backend"] },
+      query_text: "how current status implemented using existing work webhook authentication",
+      max_tokens: 2000,
+    });
+
+    expect(result.nodes[0]?.summary).toBe("Webhook authentication contract");
   });
 });
 

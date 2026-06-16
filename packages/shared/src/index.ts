@@ -31,6 +31,29 @@ export type {
 export { EMPTY_PROJECT_ANATOMY } from "./types/project.js";
 
 export type {
+  ProjectSearchSource,
+  ProjectSearchFreshness,
+  ProjectSearchChunkKind,
+  ProjectSearchDocument,
+  ProjectSearchChunk,
+  ProjectSearchEntityType,
+  ProjectSearchEntity,
+  ProjectSearchEdgeType,
+  ProjectSearchEdge,
+  ProjectSearchRequest,
+  ProjectSearchMatch,
+  ProjectSearchHit,
+  ProjectSearchKgHit,
+  ProjectSearchAnswerCitation,
+  ProjectSearchFocusFeature,
+  ProjectSearchMindMap,
+  ProjectSearchResponse,
+  ProjectSearchIndexStats,
+} from "./types/project-search.js";
+
+export { PROJECT_SEARCH_SOURCES } from "./types/project-search.js";
+
+export type {
   OrgConfig,
   OrgScopeDefinition,
   KgContextContractMode,

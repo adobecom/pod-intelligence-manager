@@ -23,15 +23,20 @@ import {
   rejectProjectMemoryCandidate,
 } from "../services/project-memory.js";
 import { answerProjectQuestion } from "../services/project-answers.js";
+import { searchProject } from "../services/project-search.js";
+import { purgeProjectSearch, reindexProjectSearch } from "../services/project-search-index.js";
 
 const ResourcesSchema = z.object({
   jira: z
     .object({
       project_keys: z.array(z.string()).optional(),
       team: z.string().optional(),
+      components: z.array(z.string()).optional(),
       epics: z.array(z.string()).optional(),
       issue_keys: z.array(z.string()).optional(),
       fix_versions: z.array(z.string()).optional(),
+      version_prefixes: z.array(z.string()).optional(),
+      lookback_days: z.number().int().positive().max(3650).optional(),
     })
     .optional(),
   github: z.object({
@@ -47,7 +52,10 @@ const ResourcesSchema = z.object({
     page_ids: z.array(z.string()).optional(),
     page_urls: z.array(z.string()).optional(),
   }).optional(),
-  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  git: z.object({
+    repo_paths: z.array(z.string()).optional(),
+    lookback_days: z.number().int().positive().max(3650).optional(),
+  }).optional(),
   aliases: z.array(z.string()).optional(),
   glossary: z.array(z.object({
     term: z.string().min(1),
@@ -90,6 +98,31 @@ const ResourceBindingSchema = z.object({
 const AnswerProjectSchema = z.object({
   query: z.string().min(1).transform(s => s.trim()),
   include_raw_hits: z.boolean().optional(),
+});
+
+const SearchProjectSchema = z.object({
+  query: z.string().min(1).transform((s) => s.trim()),
+  sources: z
+    .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update"]))
+    .optional(),
+  entity_types: z
+    .array(
+      z.enum([
+        "ticket", "pr", "commit", "file", "symbol", "person",
+        "doc", "feature", "decision", "risk", "blocker",
+      ]),
+    )
+    .optional(),
+  time_window_days: z.number().int().positive().max(3650).optional(),
+  include_kg: z.boolean().optional(),
+  include_mind_map: z.boolean().optional(),
+  graph_expansion: z.boolean().optional(),
+  max_hits: z.number().int().positive().max(50).optional(),
+  synthesize: z.boolean().optional(),
+});
+
+const ReindexProjectSchema = z.object({
+  embed: z.boolean().optional(),
 });
 
 function parseResources(raw: string | null | undefined): ProjectResources | undefined {
@@ -604,6 +637,33 @@ export default async function projectRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Params: { projectId: string }; Body: z.infer<typeof SearchProjectSchema> }>(
+    "/api/projects/:projectId/search",
+    { preHandler: validateBody(SearchProjectSchema) },
+    async (req, reply) => {
+      const result = await searchProject(req.org!.org_id, req.params.projectId, req.body);
+      if (!result) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return result;
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: z.infer<typeof ReindexProjectSchema> }>(
+    "/api/projects/:projectId/search/reindex",
+    { preHandler: validateBody(ReindexProjectSchema) },
+    async (req, reply) => {
+      const orgId = req.org!.org_id;
+      const exists = db.prepare("SELECT 1 FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, orgId);
+      if (!exists) {
+        reply.code(404);
+        return { error: "Project not found" };
+      }
+      return reindexProjectSearch(orgId, req.params.projectId, { embed: req.body.embed ?? false });
+    },
+  );
+
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
     const projectId = req.params.projectId;
     const orgId = req.org!.org_id;
@@ -634,6 +694,7 @@ export default async function projectRoutes(app: FastifyInstance) {
         `INSERT INTO archived_projects (project_id, name, description, created_at, anatomy_json, archived_date, org_id)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       ).run(row.project_id, row.name, row.description, row.created_at, anatomyJson, archivedDate, orgId);
+      purgeProjectSearch(orgId, projectId);
       db.prepare("DELETE FROM projects WHERE project_id = ? AND org_id = ?").run(projectId, orgId);
     };
     withTransaction(run);

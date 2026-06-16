@@ -324,7 +324,9 @@ describe("PimClient", () => {
       const knowledgeUrl = mockFetch.mock.calls
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
-      expect(knowledgeUrl).toBe("http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000");
+      expect(knowledgeUrl).toBe(
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&compactHeadingOffset=2",
+      );
     });
 
     it("uses taskQuery as the task-specific KG query when supplied", async () => {
@@ -396,7 +398,7 @@ describe("PimClient", () => {
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
       expect(knowledgeUrl).toBe(
-        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&projectId=project-demo",
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&projectId=project-demo&compactHeadingOffset=2",
       );
     });
 

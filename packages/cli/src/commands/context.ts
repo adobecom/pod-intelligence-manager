@@ -64,8 +64,11 @@ function formatMarkdownBundle(ctx: SessionContext): string {
   lines.push("");
 
   const compactContext = ctx.relevantLearnings.compact_context?.trim();
+  const compactContextNodeCount = (
+    ctx.relevantLearnings as typeof ctx.relevantLearnings & { compact_context_node_count?: number }
+  ).compact_context_node_count;
   const renderedLearnings = compactContext
-    ? compactContext.split("\n").filter((line) => /^- rank \d+ /.test(line)).length
+    ? (compactContextNodeCount ?? ctx.relevantLearnings.nodes.length)
     : Math.min(ctx.relevantLearnings.nodes.length, 12);
   const returnedLearnings = ctx.relevantLearnings.nodes.length;
   const learningsCount = renderedLearnings < returnedLearnings

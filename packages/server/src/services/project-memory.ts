@@ -12,6 +12,7 @@ import type {
 import { ingestLearnings } from "./ingestion-gateway.js";
 import { queryKnowledge } from "./knowledge-graph.js";
 import { extractIdentifiers, extractKeywords } from "./graph-analysis.js";
+import { indexEvidenceItem } from "./project-search-index.js";
 
 const AUTO_PROMOTE_CONFIDENCE_MIN = 0.85;
 const SOURCE_HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -376,14 +377,14 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
 
   const existing = db
     .prepare(
-      `SELECT id FROM project_evidence_items
+      `SELECT id, occurred_at FROM project_evidence_items
        WHERE org_id = ? AND project_id = ? AND source = ? AND source_id = ?`,
     )
-    .get(input.org_id, input.project_id, input.source, input.source_id) as { id: string } | undefined;
+    .get(input.org_id, input.project_id, input.source, input.source_id) as { id: string; occurred_at: string } | undefined;
 
   const id = existing?.id ?? `pei-${crypto.randomUUID().slice(0, 8)}`;
-  const occurredAt = input.occurred_at ?? new Date().toISOString();
   const ingestedAt = new Date().toISOString();
+  const occurredAt = input.occurred_at ?? existing?.occurred_at ?? ingestedAt;
   const strongSource =
     (input.source === "github" && input.source_type === "merged_pr") ||
     (input.source === "jira" && input.source_type === "resolved_issue");
@@ -427,6 +428,7 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
 
   const row = db.prepare("SELECT * FROM project_evidence_items WHERE id = ?").get(id) as unknown as EvidenceRow;
   const evidence = rowToEvidence(row);
+  indexEvidenceItem(evidence);
   const candidate = createOrLoadCandidate(evidence);
   if (shouldAutoPromote(evidence) && !hasCurrentContradiction(evidence) && candidate.status !== "promoted") {
     await promoteProjectMemoryCandidate(input.org_id, input.project_id, candidate.id);
@@ -702,6 +704,10 @@ function buildPollJql(resources: ProjectResources, since: string): string | null
   const keys = resources.jira?.project_keys ?? [];
   if (keys.length > 0) clauses.push(`project in (${keys.map((k) => `"${escapeJql(k)}"`).join(", ")})`);
   if (resources.jira?.team) clauses.push(`"Team" = "${escapeJql(resources.jira.team)}"`);
+  const components = resources.jira?.components ?? [];
+  if (components.length > 0) {
+    clauses.push(`component in (${components.map((c) => `"${escapeJql(c)}"`).join(", ")})`);
+  }
   const epics = resources.jira?.epics ?? [];
   if (epics.length > 0) {
     const list = epics.map((k) => `"${escapeJql(k)}"`).join(", ");
@@ -713,7 +719,10 @@ function buildPollJql(resources: ProjectResources, since: string): string | null
   if (issueKeys.length > 0) clauses.push(`issuekey in (${issueKeys.map((k) => `"${escapeJql(k)}"`).join(", ")})`);
   if (clauses.length === 0) return null;
   clauses.push(`updated >= "${since.slice(0, 16).replace("T", " ")}"`);
-  return `${clauses.join(" AND ")} ORDER BY updated ASC`;
+  // Newest-first keeps polling focused on the latest tickets. When this window
+  // is truncated by MAX_JIRA_ISSUES, pollJira deliberately does not advance the
+  // cursor past older matching tickets it did not fetch.
+  return `${clauses.join(" AND ")} ORDER BY updated DESC, key DESC`;
 }
 
 function buildProbeJql(resources: ProjectResources): string | null {
@@ -829,6 +838,106 @@ async function probeJiraHealth(resources: ProjectResources): Promise<HealthProbe
   }
 }
 
+const MAX_JIRA_ISSUES = 500;
+const MAX_JIRA_DESCRIPTION_WALK_NODES = 10_000;
+
+interface JiraFields {
+  summary?: string;
+  description?: unknown;
+  updated?: string;
+  created?: string;
+  duedate?: string | null;
+  resolutiondate?: string | null;
+  resolution?: { name?: string } | null;
+  status?: { name?: string; statusCategory?: { key?: string; name?: string } };
+  priority?: { name?: string };
+  issuetype?: { name?: string };
+  creator?: { displayName?: string; emailAddress?: string };
+  assignee?: { displayName?: string; emailAddress?: string };
+  reporter?: { displayName?: string; emailAddress?: string };
+  fixVersions?: Array<{ name?: string; released?: boolean }>;
+  components?: Array<{ name?: string }>;
+  labels?: string[];
+  parent?: { key?: string; fields?: { summary?: string } };
+}
+
+const JIRA_FIELDS = [
+  "summary", "description", "status", "priority", "issuetype", "labels", "components",
+  "updated", "created", "duedate", "creator", "assignee", "reporter", "resolution",
+  "resolutiondate", "fixVersions", "parent",
+];
+
+/** Flattens a Jira description (plain string or Atlassian Document Format) to readable text. */
+function jiraDescriptionToText(d: unknown): string {
+  if (typeof d === "string") return d;
+  if (!d || typeof d !== "object") return "";
+  const parts: string[] = [];
+  const seen = new WeakSet<object>();
+  const stack: unknown[] = [d];
+  let visited = 0;
+  while (stack.length > 0 && visited < MAX_JIRA_DESCRIPTION_WALK_NODES) {
+    const n = stack.pop();
+    visited++;
+    if (!n) continue;
+    if (typeof n === "string") { parts.push(n); continue; }
+    if (typeof n !== "object") continue;
+    if (seen.has(n)) continue;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (let i = n.length - 1; i >= 0; i--) stack.push(n[i]);
+      continue;
+    }
+    const node = n as { text?: string; content?: unknown };
+    if (typeof node.text === "string") parts.push(node.text);
+    if (node.content) stack.push(node.content);
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/** Maps Jira status category to a working-memory source_type + confidence. */
+function jiraIssueType(f: JiraFields): { type: string; resolved: boolean; confidence: number } {
+  const cat = f.status?.statusCategory?.key;
+  const resolved = !!f.resolutiondate || cat === "done";
+  if (resolved) return { type: "resolved_issue", resolved: true, confidence: 0.9 };
+  if (cat === "indeterminate") return { type: "active_issue", resolved: false, confidence: 0.75 };
+  return { type: "backlog_issue", resolved: false, confidence: 0.6 };
+}
+
+/** Renders a human-readable ticket body — readable by both PMs and engineers. */
+function renderJiraBody(key: string, f: JiraFields): string {
+  const comps = (f.components ?? []).map((c) => c.name).filter(Boolean);
+  const fixv = (f.fixVersions ?? []).map((v) => v.name).filter(Boolean);
+  const lines: string[] = [
+    `${f.issuetype?.name ?? "Issue"} ${key}: ${f.summary ?? ""}`.trim(),
+    `Status: ${f.status?.name ?? "?"}${f.status?.statusCategory?.name ? ` (${f.status.statusCategory.name})` : ""}`
+      + `${f.priority?.name ? ` · Priority: ${f.priority.name}` : ""}`
+      + ` · ${f.assignee?.displayName ? `Assignee: ${f.assignee.displayName}` : "Unassigned"}`,
+  ];
+  if (comps.length) lines.push(`Components: ${comps.join(", ")}`);
+  if (fixv.length) lines.push(`Fix version(s): ${fixv.join(", ")}`);
+  if (f.labels?.length) lines.push(`Labels: ${f.labels.join(", ")}`);
+  if (f.parent?.key) lines.push(`Parent: ${f.parent.key}${f.parent.fields?.summary ? ` — ${f.parent.fields.summary}` : ""}`);
+  if (f.resolution?.name) lines.push(`Resolution: ${f.resolution.name}`);
+  if (f.duedate) lines.push(`Due: ${f.duedate}`);
+  const desc = jiraDescriptionToText(f.description);
+  if (desc) lines.push("", desc);
+  return lines.join("\n");
+}
+
+function jiraAuth(base: string, token: string, email?: string): { restPath: string; apiBasePath: string; authHeader: string } {
+  const isCloud = /atlassian\.net$/i.test(base) && !!email;
+  const apiBasePath = isCloud ? "rest/api/3" : "rest/api/2";
+  return {
+    restPath: `${apiBasePath}/search`,
+    apiBasePath,
+    authHeader: isCloud ? "Basic " + Buffer.from(`${email}:${token}`).toString("base64") : `Bearer ${token}`,
+  };
+}
+
+function jiraDateToStartOfDay(date: string | undefined): string | undefined {
+  return date ? `${date}T00:00:00.000Z` : undefined;
+}
+
 async function pollJira(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
   const base = process.env.JIRA_BASE_URL;
   const token = process.env.JIRA_TOKEN;
@@ -836,79 +945,170 @@ async function pollJira(project: ProjectRow, resources: ProjectResources): Promi
   if (!base || !token) return { source: "jira", ingested: 0, missing: "JIRA_BASE_URL or JIRA_TOKEN not set" };
 
   const cursorKey = "issues";
-  const since = getProjectCursor(project.org_id, project.project_id, "jira", cursorKey) ?? sinceDefault();
+  const lookbackDays = resources.jira?.lookback_days ?? 90;
+  const windowSince = new Date(Date.now() - lookbackDays * 864e5).toISOString();
+  const cursor = getProjectCursor(project.org_id, project.project_id, "jira", cursorKey);
+  // Floor the lookback at the configured window so we never re-pull ancient history.
+  const since = cursor && cursor > windowSince ? cursor : windowSince;
   const jql = buildPollJql(resources, since);
   if (!jql) return { source: "jira", ingested: 0 };
 
-  const isCloud = /atlassian\.net$/i.test(base) && !!email;
-  const restPath = isCloud ? "rest/api/3/search" : "rest/api/2/search";
-  const authHeader = isCloud
-    ? "Basic " + Buffer.from(`${email}:${token}`).toString("base64")
-    : `Bearer ${token}`;
-
-  interface JiraIssue {
-    key: string;
-    fields?: {
-      summary?: string;
-      description?: unknown;
-      updated?: string;
-      resolutiondate?: string | null;
-      status?: { name?: string; statusCategory?: { key?: string } };
-      creator?: { displayName?: string; emailAddress?: string };
-      assignee?: { displayName?: string; emailAddress?: string };
-      fixVersions?: Array<{ name?: string }>;
-    };
-  }
-  interface JiraResponse { issues?: JiraIssue[] }
-
-  const data = await fetchJson<JiraResponse>(`${base.replace(/\/$/, "")}/${restPath}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader,
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
-      jql,
-      maxResults: 50,
-      fields: ["summary", "description", "status", "updated", "creator", "assignee", "resolutiondate", "fixVersions"],
-    }),
-  });
+  const { restPath, authHeader } = jiraAuth(base, token, email);
+  const url = `${base.replace(/\/$/, "")}/${restPath}`;
+  const headers = { "Content-Type": "application/json", Authorization: authHeader, Accept: "application/json" };
 
   let ingested = 0;
   let newest = since;
-  for (const issue of data.issues ?? []) {
-    const f = issue.fields ?? {};
-    const updated = f.updated ?? new Date().toISOString();
-    if (updated > newest) newest = updated;
-    const resolved = !!f.resolutiondate || f.status?.statusCategory?.key === "done";
-    const description = typeof f.description === "string"
-      ? f.description
-      : JSON.stringify(f.description ?? "");
-    await recordProjectEvidence({
-      org_id: project.org_id,
-      project_id: project.project_id,
-      source: "jira",
-      source_type: resolved ? "resolved_issue" : "issue",
-      source_id: issue.key,
-      source_url: `${base.replace(/\/$/, "")}/browse/${issue.key}`,
-      source_title: `${issue.key}: ${f.summary ?? ""}`,
-      summary: f.summary ?? issue.key,
-      body: description,
-      author: f.creator?.displayName ?? f.creator?.emailAddress,
-      occurred_at: f.resolutiondate ?? updated,
-      metadata: {
-        key: issue.key,
-        status: f.status?.name,
-        assignee: f.assignee?.displayName ?? f.assignee?.emailAddress,
-        fix_versions: (f.fixVersions ?? []).map((v) => v.name).filter(Boolean),
-      },
-      confidence_score: resolved ? 0.9 : 0.65,
+  let startAt = 0;
+  let total = Infinity;
+  // Paginate so the full backlog (not just the first page) is ingested.
+  while (startAt < total && startAt < MAX_JIRA_ISSUES) {
+    const data = await fetchJson<{ issues?: Array<{ key: string; fields?: JiraFields }>; total?: number }>(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ jql, startAt, maxResults: 50, fields: JIRA_FIELDS }),
     });
-    ingested++;
+    total = data.total ?? (data.issues?.length ?? 0);
+    const issues = data.issues ?? [];
+    if (issues.length === 0) break;
+    for (const issue of issues) {
+      const f = issue.fields ?? {};
+      const updated = f.updated ?? new Date().toISOString();
+      if (updated > newest) newest = updated;
+      const { type, resolved, confidence } = jiraIssueType(f);
+      await recordProjectEvidence({
+        org_id: project.org_id,
+        project_id: project.project_id,
+        source: "jira",
+        source_type: type,
+        source_id: issue.key,
+        source_url: `${base.replace(/\/$/, "")}/browse/${issue.key}`,
+        source_title: `${issue.key}: ${f.summary ?? ""}`,
+        summary: f.summary ?? issue.key,
+        body: renderJiraBody(issue.key, f),
+        author: f.assignee?.displayName ?? f.creator?.displayName ?? f.creator?.emailAddress,
+        occurred_at: resolved ? (f.resolutiondate ?? updated) : updated,
+        metadata: {
+          key: issue.key,
+          status: f.status?.name,
+          status_category: f.status?.statusCategory?.name,
+          issue_type: f.issuetype?.name,
+          priority: f.priority?.name,
+          assignee: f.assignee?.displayName ?? f.assignee?.emailAddress,
+          reporter: f.reporter?.displayName ?? f.reporter?.emailAddress,
+          components: (f.components ?? []).map((c) => c.name).filter(Boolean),
+          labels: f.labels ?? [],
+          fix_versions: (f.fixVersions ?? []).map((v) => v.name).filter(Boolean),
+          parent: f.parent?.key,
+          parent_summary: f.parent?.fields?.summary,
+          due_date: f.duedate ?? undefined,
+          resolved,
+        },
+        confidence_score: confidence,
+      });
+      ingested++;
+    }
+    startAt += issues.length;
   }
-  if (newest > since) setProjectCursor(project.org_id, project.project_id, "jira", cursorKey, newest);
+  const truncatedByCap = startAt < total;
+  if (!truncatedByCap && newest > since) setProjectCursor(project.org_id, project.project_id, "jira", cursorKey, newest);
   return { source: "jira", ingested };
+}
+
+interface JiraVersion {
+  name?: string;
+  description?: string;
+  released?: boolean;
+  archived?: boolean;
+  overdue?: boolean;
+  releaseDate?: string;
+  startDate?: string;
+}
+
+/** Ingests Jira releases (versions) so "what's shipping next / what shipped" is answerable. */
+async function pollJiraReleases(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
+  const base = process.env.JIRA_BASE_URL;
+  const token = process.env.JIRA_TOKEN;
+  const email = process.env.JIRA_EMAIL;
+  const prefixes = resources.jira?.version_prefixes ?? [];
+  const keys = resources.jira?.project_keys ?? [];
+  if (prefixes.length === 0 || keys.length === 0) return { source: "jira", ingested: 0 };
+  if (!base || !token) return { source: "jira", ingested: 0, missing: "JIRA_BASE_URL or JIRA_TOKEN not set" };
+
+  const { apiBasePath, authHeader } = jiraAuth(base, token, email);
+  const headers = { Authorization: authHeader, Accept: "application/json" };
+  const matchesPrefix = (name: string) => prefixes.some((p) => name.toLowerCase().startsWith(p.toLowerCase()));
+
+  let ingested = 0;
+  for (const key of keys) {
+    let versions: JiraVersion[];
+    try {
+      versions = await fetchJson<JiraVersion[]>(
+        `${base.replace(/\/$/, "")}/${apiBasePath}/project/${encodeURIComponent(key)}/versions`,
+        { headers },
+      );
+    } catch {
+      continue; // project may not expose versions; skip quietly
+    }
+    for (const v of versions) {
+      const name = v.name ?? "";
+      if (!name || v.archived || !matchesPrefix(name)) continue;
+      const status = v.released ? "Released" : "Upcoming";
+      const bodyLines = [`Release ${name} (${key}) — ${status}`];
+      if (v.releaseDate) bodyLines.push(`Release date: ${v.releaseDate}`);
+      if (v.startDate) bodyLines.push(`Start date: ${v.startDate}`);
+      if (!v.released && v.overdue) bodyLines.push("This upcoming release is overdue.");
+      if (v.description) bodyLines.push("", v.description);
+      const occurredAt = jiraDateToStartOfDay(v.releaseDate ?? v.startDate);
+      await recordProjectEvidence({
+        org_id: project.org_id,
+        project_id: project.project_id,
+        source: "jira",
+        source_type: "release",
+        source_id: `release:${key}:${name}`,
+        source_url: `${base.replace(/\/$/, "")}/projects/${encodeURIComponent(key)}/versions`,
+        source_title: `Release ${name} — ${status}`,
+        summary: `${name} (${status}${v.releaseDate ? `, ${v.releaseDate}` : ""})`,
+        body: bodyLines.join("\n"),
+        ...(occurredAt ? { occurred_at: occurredAt } : {}),
+        metadata: {
+          name,
+          project_key: key,
+          status,
+          released: !!v.released,
+          release_date: v.releaseDate,
+          overdue: !!v.overdue,
+        },
+        confidence_score: 0.7,
+        promotable: false,
+      });
+      ingested++;
+    }
+  }
+  return { source: "jira", ingested };
+}
+
+async function pollJiraResources(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
+  const parts: Array<[string, () => Promise<PollSourceResult>]> = [
+    ["issues", () => pollJira(project, resources)],
+    ["releases", () => pollJiraReleases(project, resources)],
+  ];
+  let ingested = 0;
+  const missing: string[] = [];
+  for (const [label, poller] of parts) {
+    try {
+      const result = await poller();
+      ingested += result.ingested;
+      if (result.missing) missing.push(`${label}: ${result.missing}`);
+    } catch (err) {
+      missing.push(`${label}: ${(err as Error).message}`);
+    }
+  }
+  return {
+    source: "jira",
+    ingested,
+    ...(missing.length > 0 ? { missing: missing.join("; ") } : {}),
+  };
 }
 
 async function ingestSlackThreadUrls(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
@@ -941,15 +1141,15 @@ export async function pollProjectSources(orgId: string, projectId: string): Prom
   const resources = parseJson<ProjectResources>(project.resources_json, {});
   const results: PollSourceResult[] = [];
 
-  for (const poller of [
-    () => pollGithub(project, resources),
-    () => pollJira(project, resources),
-    () => ingestSlackThreadUrls(project, resources),
-  ]) {
+  const pollers: Array<[ProjectEvidenceSource, () => Promise<PollSourceResult>]> = [
+    ["github", () => pollGithub(project, resources)],
+    ["jira", () => pollJiraResources(project, resources)],
+    ["slack", () => ingestSlackThreadUrls(project, resources)],
+  ];
+  for (const [source, poller] of pollers) {
     try {
       results.push(await poller());
     } catch (err) {
-      const source = results.length === 0 ? "github" : results.length === 1 ? "jira" : "slack";
       results.push({ source, ingested: 0, missing: (err as Error).message });
     }
   }

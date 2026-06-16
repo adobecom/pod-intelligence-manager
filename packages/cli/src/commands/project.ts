@@ -1,7 +1,14 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { Project, ProjectResources } from "@pim/shared";
+import { PROJECT_SEARCH_SOURCES, type Project, type ProjectResources, type ProjectSearchResponse, type ProjectSearchIndexStats } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
+
+type ProjectSearchAnswerCitationView = {
+  ref: string;
+  source: string;
+  title: string;
+  url?: string;
+};
 
 function parseList(raw: string | undefined): string[] | undefined {
   if (!raw) return undefined;
@@ -155,6 +162,126 @@ export function registerProjectCommands(program: Command) {
       );
       console.log(chalk.green("\n  Resources updated.\n"));
       printResources(updated);
+      console.log();
+    });
+
+  project
+    .command("search")
+    .description("Search a project's indexed artifacts (hybrid lexical + semantic)")
+    .argument("<projectId>", "Project ID")
+    .argument("<query...>", "Search query or exact identifier (Jira key, PR #, file path)")
+    .option("--sources <list>", "Comma-separated sources (jira,github,confluence,slack,git,project_update,pod_update)")
+    .option("--days <n>", "Only artifacts updated within this many days", (v) => parseInt(v, 10))
+    .option("--max <n>", "Max hits to return", (v) => parseInt(v, 10))
+    .option("--mind-map", "Include an entity/edge mind-map neighborhood")
+    .option("--answer", "Include a plain-language synthesized answer over the hits")
+    .option("--no-graph", "Disable bounded graph expansion")
+    .option("--no-kg", "Skip the project-scoped KG overlay")
+    .option("--json", "Print the raw JSON response")
+    .action(async (projectId: string, queryParts: string[], opts) => {
+      const base = getBaseUrl(program);
+      const query = queryParts.join(" ");
+      const body: Record<string, unknown> = { query };
+      const sources = parseList(opts.sources);
+      if (sources) body.sources = sources;
+      if (opts.days) body.time_window_days = opts.days;
+      if (opts.max) body.max_hits = opts.max;
+      if (opts.mindMap) body.include_mind_map = true;
+      if (opts.answer) body.synthesize = true;
+      if (opts.graph === false) body.graph_expansion = false;
+      if (opts.kg === false) body.include_kg = false;
+
+      const res = await fetchJSON<ProjectSearchResponse>(`${base}/api/projects/${projectId}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (opts.json) {
+        console.log(JSON.stringify(res, null, 2));
+        return;
+      }
+
+      console.log(
+        chalk.dim(
+          `\n  ${res.hits.length} hit(s) · ${res.retrieval_mode} · sources: ${res.sources_used.join(", ") || "none"} · embedding coverage ${(res.embedding_coverage * 100).toFixed(0)}%`,
+        ),
+      );
+      if (res.detected_identifiers.length > 0) {
+        console.log(chalk.dim(`  identifiers: ${res.detected_identifiers.join(", ")}`));
+      }
+      const coverage = PROJECT_SEARCH_SOURCES
+        .map((s) => `${s}:${res.documents_by_source[s] ?? 0}`)
+        .join(" ");
+      console.log(chalk.dim(`  coverage: ${coverage}`));
+      console.log();
+      if (res.summary_md) {
+        const answerCitations = (res as ProjectSearchResponse & {
+          answer_citations?: ProjectSearchAnswerCitationView[];
+        }).answer_citations;
+        console.log(chalk.bold("  Answer\n"));
+        console.log(res.summary_md.split("\n").map((l) => `  ${l}`).join("\n"));
+        if (answerCitations?.length) {
+          console.log(chalk.bold("\n  Answer evidence\n"));
+          for (const c of answerCitations.slice(0, 8)) {
+            console.log(`  ${chalk.bold(`[${c.ref}]`)} ${chalk.dim(c.source)} — ${c.title}`);
+            if (c.url) console.log(`      ${chalk.blue(c.url)}`);
+          }
+        }
+        console.log(chalk.dim("\n  ── sources ──"));
+      }
+      if (res.hits.length === 0) {
+        console.log(chalk.yellow("  No matching project artifacts.\n"));
+      }
+      res.hits.forEach((h, i) => {
+        const when = h.occurred_at ? chalk.dim(` (${h.occurred_at.slice(0, 10)})`) : "";
+        const tags = [
+          h.source,
+          h.matched.identifier ? "exact" : null,
+          h.matched.semantic ? "semantic" : null,
+          h.matched.graph ? "graph" : null,
+        ]
+          .filter(Boolean)
+          .join("/");
+        console.log(`  ${chalk.bold(`[${i + 1}]`)} ${chalk.cyan(h.title)}${when}  ${chalk.dim(`{${tags}}`)}`);
+        console.log(`      ${chalk.dim(h.snippet)}`);
+        if (h.url) console.log(`      ${chalk.blue(h.url)}`);
+      });
+      if (res.kg_overlay?.length) {
+        console.log(chalk.bold("\n  KG overlay"));
+        for (const k of res.kg_overlay) console.log(`   • ${k.summary} ${chalk.dim(`(${k.type})`)}`);
+      }
+      if (res.mind_map) {
+        console.log(
+          chalk.dim(`\n  mind-map: ${res.mind_map.entities.length} entities, ${res.mind_map.edges.length} edges`),
+        );
+      }
+      console.log();
+    });
+
+  project
+    .command("reindex")
+    .description("Rebuild a project's search index from its working memory (and optionally embed)")
+    .argument("<projectId>", "Project ID")
+    .option("--embed", "Generate chunk embeddings (requires Bedrock credentials; rate-limited)")
+    .action(async (projectId: string, opts) => {
+      const base = getBaseUrl(program);
+      const stats = await fetchJSON<ProjectSearchIndexStats>(
+        `${base}/api/projects/${projectId}/search/reindex`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ embed: !!opts.embed }),
+        },
+      );
+      console.log(chalk.green("\n  Reindex complete.\n"));
+      console.log(`  Documents: ${chalk.bold(stats.documents_indexed)}`);
+      console.log(`  Chunks:    ${chalk.bold(stats.chunks_indexed)}`);
+      console.log(`  Entities:  ${chalk.bold(stats.entities_indexed)}`);
+      console.log(`  Edges:     ${chalk.bold(stats.edges_indexed)}`);
+      console.log(
+        `  Embedded:  ${chalk.bold(stats.chunks_embedded)} ${stats.embedding_available ? "" : chalk.dim("(embedding service unavailable)")}`,
+      );
       console.log();
     });
 }

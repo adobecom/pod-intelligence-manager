@@ -59,12 +59,6 @@ function capitalizeStatus(status: string): string {
   return status.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
-function demoteCompactKgHeadings(markdown: string): string {
-  return markdown
-    .replace(/^# /gm, "### ")
-    .replace(/^## /gm, "#### ");
-}
-
 // Template-based living doc generation from database state
 export async function regenerateLivingDoc(podId: string): Promise<string> {
   const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
@@ -166,6 +160,7 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
       scopes: activeScopes,
       maxTokens: 1500,
       projectId: pod.project_id ?? null,
+      compactHeadingOffset: 2,
       ...(taskQuery ? { taskQuery } : {}),
     });
     const compactContext = knowledgeResult.compact_context?.trim();
@@ -173,7 +168,7 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
       md += `## Knowledge Context\n\n`;
       if (compactContext) {
         md += `*From organizational memory (compact KG context; ${knowledgeResult.nodes.length} returned learnings):*\n\n`;
-        md += `${demoteCompactKgHeadings(compactContext)}\n`;
+        md += `${compactContext}\n`;
       } else {
         md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
         for (const node of knowledgeResult.nodes.slice(0, 8)) {

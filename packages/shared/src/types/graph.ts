@@ -216,6 +216,8 @@ export interface KnowledgeQueryResult {
   context_contract?: KnowledgeContextContractInfo;
   /** Prompt-ready summary-only KG context for task-query retrieval. */
   compact_context?: string;
+  /** Number of KG nodes rendered into compact_context before character clipping. */
+  compact_context_node_count?: number;
 }
 
 // --- Stats ---

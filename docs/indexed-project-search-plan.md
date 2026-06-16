@@ -1,6 +1,6 @@
 # Indexed Project Search Plan
 
-Status: planning note.
+Status: **Phases 1–3 implemented** (schema + index, hybrid retrieval, deterministic mind-map). Phase 4 (KG promotion) reuses the existing project-memory promotion path; Phase 5 (evals) has a focused test suite — see [Implementation status](#implementation-status).
 
 This plan restores the mind-map side of PIM without expanding workflow-management scope. It focuses on project-scoped search over current project artifacts, while keeping the org knowledge graph reserved for durable learnings.
 
@@ -308,3 +308,65 @@ Postgres v1 target:
 - composite indexes on entity keys and edge endpoints
 
 OpenSearch can be considered later if project-search volume or ranking needs outgrow Postgres. It should not be a prerequisite for proving the product value.
+
+## Implementation status
+
+Landed on branch `pimUpdates`. The index is a layer *over* the existing project working memory (evidence items, project updates, linked pod updates) — it does not replace `project_evidence_items` or the KG promotion path.
+
+### Schema (`packages/server/src/db/schema.ts`)
+- `project_search_documents`, `project_search_chunks`, `project_search_entities`, `project_search_edges` (all org+project scoped, FK-cascading).
+- `project_search_fts` — FTS5 (`porter unicode61`) over chunk title+body, created in a **guarded** block so a SQLite build without FTS5 degrades to a keyword-LIKE fallback instead of failing boot.
+
+### Write path (`services/project-search-index.ts`)
+- `indexProjectDocument()` — content-hash-guarded upsert: rebuilds chunks + FTS + the deterministic entity/edge mind-map only when content changes. Title is always its own chunk; bodies window at ~1000 chars with overlap; each chunk's `retrieval_text` carries title context.
+- Deterministic mind-map extraction: self-entity (ticket/pr/commit/doc/decision/blocker), author→`owns`, and mentioned Jira keys / PR numbers / file paths as `mentions`/`fixes`/`touches` edges.
+- `indexEvidenceItem()` is called from `recordProjectEvidence()` so every polled artifact (GitHub/Jira/Slack/Confluence/project update) lands in the index live.
+- `backfillProjectSearch()` rebuilds from existing evidence + project updates + linked pod updates (idempotent, dedup-keyed by `source:source_id`).
+- `embedProjectSearchChunks()` — incremental, rate-limited Bedrock embeddings (skips unchanged chunks by text hash).
+- `purgeProjectSearch()` — archive cleanup.
+
+### Read path (`services/project-search.ts`)
+- Hybrid: exact-identifier lookup + FTS bm25 lexical + cosine semantic, fused with reciprocal-rank fusion, reranked by identifier match (dominant), in-scope resource, recency, source authority, **intent** (release/backlog/active/done questions boost the matching doc-type), and a stale penalty. A **diversity cap** stops one doc-type (e.g. 54 releases) from flooding the answer. `deleted` docs are excluded. Hard-scoped to `(org_id, project_id)`.
+- **Readable answer** (`synthesize: true`): an LLM (Bedrock `MODELS.fast`, `prompts/project-search-synthesis.md`) turns the top hits into a plain-language, cited answer (`summary_md`) for non-technical *and* technical readers — leads with a direct answer, cites tickets/PRs/releases by ref (`MWPW-196040`, `PR #159`, `T3-26.25`), groups by release/status, and refuses to invent facts. Degrades gracefully (omitted) when no LLM/credentials.
+- `retrieval_mode` is `"hybrid"` only when the query embedded **and** the corpus has embedded chunks; otherwise `"lexical"`. Reports `embedding_coverage`, `detected_identifiers`, optional project-scoped KG overlay, and optional mind-map neighborhood.
+
+### Source ingestion (`services/project-memory.ts`)
+- **Jira tickets** (`pollJira`) — scoped by `project_keys` + `team` (e.g. "Strata") and/or `components` (e.g. "Events Tier 3"); paginated (up to 500); rich readable body (type, status, priority, assignee, components, fix versions, labels, parent, description); `source_type` reflects lifecycle: `backlog_issue` / `active_issue` / `resolved_issue`.
+- **Jira releases** (`pollJiraReleases`) — ingests project versions matching `version_prefixes` (e.g. "T3-") as `source_type: "release"` docs (Upcoming/Released, date), so "what's shipping" is answerable.
+- **GitHub** (`pollGithub`) — PRs/issues/commits for configured repos (already present).
+- All flow through `recordProjectEvidence` → `indexEvidenceItem`, so a poll lands in the search index live. `ProjectResources.jira` gained `components` and `version_prefixes`.
+
+### Surfaces
+- REST: `POST /api/projects/:projectId/search` (supports `synthesize`, `sources`, `time_window_days`, `include_kg`, `include_mind_map`, `max_hits`), `POST /api/projects/:projectId/search/reindex`.
+- MCP tool `project_search` (incl. `synthesize`); SDK `PimClient.searchProjectIndex()`; CLI `pim project search [--answer] [--mind-map] [--sources] [--days] [--max]` / `pim project reindex [--embed]`.
+- Local scripts: `npm --prefix packages/server run seed-project-search -- <projectId> [--poll] [--embed] [--answer] [--query "…"]`; `tsx src/scripts/ask-project.ts <projectId> <question…>` (read-only Q&A, no server); `bash scripts/set-secrets.sh` + `node scripts/check-tokens.mjs` (token rotation + masked health).
+
+### Tests
+- `services/__tests__/project-search.test.ts` — exact-identifier lookup, lexical keyword search, wrong-project negative control, deleted-doc exclusion, source filter, pod-update backfill, mind-map neighborhood, reindex stats.
+- `services/__tests__/project-search-semantic.test.ts` — embedding + hybrid fusion + incremental re-embed (offline deterministic embedding mock).
+
+### Seeding T3 Events (`project-event-management-console-emc-cbaff6`)
+
+This project is the whole **T3 Events** initiative (Event Management Console is part of it). It is seeded locally from real data:
+
+- **Resources:** GitHub `adobecom/EMC` + `adobecom/event-libs`; Jira `project_keys: ["MWPW"]`, `team: "Strata"`, `version_prefixes: ["T3-"]`; aliases T3 Events / EMC / Event Management Console.
+- **Seeded:** ~100 GitHub PRs/commits + 500 Strata Jira tickets (backlog/active/resolved) + 54 T3 releases ≈ **654 documents** (1.5k chunks, ~800 entities, ~1.1k edges), embedded for hybrid search.
+- Run `tsx src/scripts/ask-project.ts project-event-management-console-emc-cbaff6 "what is shipping next?"` for a synthesized answer.
+
+Reproduce / refresh:
+
+1. **Reset tokens** (in your own terminal — keeps secrets out of any transcript):
+   ```bash
+   bash scripts/set-secrets.sh        # silent prompts for GH_TOKEN, GITCORP_TOKEN, JIRA_TOKEN
+   node scripts/check-tokens.mjs      # masked health check — all ✓ (corp hosts need VPN)
+   ```
+   The generic-account PAT (`pimagent`) goes in `JIRA_TOKEN` (on-prem `jira.corp.adobe.com` uses Bearer PAT).
+
+2. **Resources** are already configured on the project (`Team = Strata` scopes the whole T3 Events ticket set; `version_prefixes` selects the T3 release trains).
+
+3. **Enrich + embed:**
+   ```bash
+   npm --prefix packages/server run seed-project-search -- project-event-management-console-emc-cbaff6 --poll --embed --answer
+   ```
+
+4. **Hosted:** deploy this branch, set `GH_TOKEN`/`JIRA_TOKEN`/`AWS_*` on the host, ensure the project's resources are configured (`configure_project_resources` MCP tool or `PUT /api/projects/:id/resources`), then `POST /api/projects/project-event-management-console-emc-cbaff6/search/reindex {"embed":true}` after `/ingest/poll`, or run the seed script there.

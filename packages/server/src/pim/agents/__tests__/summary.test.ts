@@ -199,6 +199,7 @@ describe("regenerateLivingDoc", () => {
       maxTokens: 1500,
       projectId: null,
       taskQuery: "API contract mismatch",
+      compactHeadingOffset: 2,
     });
   });
 
@@ -210,7 +211,7 @@ describe("regenerateLivingDoc", () => {
       ],
       truncated: false,
       total_matching: 1,
-      compact_context: "# PIM KG Compact Context\n## Possible KG constraints\n- rank 1 [pattern/related]: Use shared schemas\n  - Signals: topic:schema",
+      compact_context: "### PIM KG Compact Context\n#### Possible KG constraints\n- rank 1 [pattern/related]: Use shared schemas\n  - Signals: topic:schema",
     } as any);
 
     const md = await regenerateLivingDoc("pod-1");
