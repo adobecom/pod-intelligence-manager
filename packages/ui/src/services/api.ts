@@ -24,6 +24,8 @@ import type {
   ProjectResources,
   ProjectMemoryCandidate,
   ProjectAnswerResponse,
+  ProjectSearchRequest,
+  ProjectSearchResponse,
   ProjectSourceHealth,
 } from "@pim/shared";
 
@@ -388,6 +390,22 @@ export async function answerProjectQuestion(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
+    },
+  );
+}
+
+/** Hybrid (lexical + semantic) search over a project's indexed artifacts.
+ * Set `synthesize: true` for a plain-language, cited answer over the hits. */
+export async function searchProjectIndex(
+  projectId: string,
+  request: ProjectSearchRequest,
+): Promise<ProjectSearchResponse> {
+  return fetchJSON<ProjectSearchResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/search`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
     },
   );
 }

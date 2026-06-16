@@ -60,9 +60,12 @@ const ProjectResourcesSchema = z.object({
     .object({
       project_keys: z.array(z.string()).optional(),
       team: z.string().optional().describe("Jira 'Team' custom field value (e.g. 'Strata')"),
+      components: z.array(z.string()).optional(),
       epics: z.array(z.string()).optional(),
       issue_keys: z.array(z.string()).optional(),
       fix_versions: z.array(z.string()).optional(),
+      version_prefixes: z.array(z.string()).optional(),
+      lookback_days: z.number().int().positive().max(3650).optional(),
     })
     .optional(),
   github: z.object({
@@ -78,7 +81,10 @@ const ProjectResourcesSchema = z.object({
     page_ids: z.array(z.string()).optional(),
     page_urls: z.array(z.string()).optional(),
   }).optional(),
-  git: z.object({ repo_paths: z.array(z.string()).optional() }).optional(),
+  git: z.object({
+    repo_paths: z.array(z.string()).optional(),
+    lookback_days: z.number().int().positive().max(3650).optional(),
+  }).optional(),
   aliases: z.array(z.string()).optional(),
   glossary: z.array(z.object({
     term: z.string().min(1),
@@ -551,6 +557,38 @@ export function registerTools(server: McpServer) {
     },
     async ({ project_id, ...body }) => {
       const result = await apiPost(`/api/projects/${project_id}/context-updates`, { ...body, source: "mcp" });
+      return json(result);
+    },
+  );
+
+  server.tool(
+    "project_search",
+    "Search ONE project's indexed artifacts — Jira issues, GitHub PRs/commits, Confluence pages, Slack threads, and project + pod context updates — with hybrid lexical + semantic retrieval. Use this to find where something is implemented, discussed, decided, or blocked WITHOUT loading separate Jira/Slack/GitHub MCPs or live-fanning out across systems. Hard-scoped to the given project (results never leak across projects). Pass an exact identifier (Jira key like EMC-123, PR number, or file path) for a precise lookup, or a natural-language question for a ranked semantic+keyword search. Returns cited hits, an optional project-scoped knowledge-graph overlay, and an optional entity/edge mind-map neighborhood. This searches the project's current working memory; for durable org-wide learnings use `query_knowledge`.",
+    {
+      project_id: ProjectId,
+      query: z.string().describe("Natural-language question or an exact identifier (Jira key, PR #, file path)"),
+      sources: z
+        .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update"]))
+        .optional()
+        .describe("Restrict the search to these sources"),
+      time_window_days: z.number().int().positive().optional().describe("Only artifacts updated within this many days"),
+      include_kg: z.boolean().optional().describe("Attach a small project-scoped KG overlay (default true)"),
+      include_mind_map: z
+        .boolean()
+        .optional()
+        .describe("Attach an entity/edge neighborhood (tickets/PRs/files/people) for the top hits (default false)"),
+      graph_expansion: z
+        .boolean()
+        .optional()
+        .describe("Use bounded graph expansion for feature/ticket/PR/file neighbors and hit explanations (default true)"),
+      max_hits: z.number().int().positive().max(50).optional().describe("Max ranked hits to return (default 10)"),
+      synthesize: z
+        .boolean()
+        .optional()
+        .describe("Return a plain-language, cited summary answer (summary_md) over KG evidence plus artifact hits — readable for non-technical stakeholders. Default false."),
+    },
+    async ({ project_id, ...body }) => {
+      const result = await apiPost(`/api/projects/${project_id}/search`, body);
       return json(result);
     },
   );

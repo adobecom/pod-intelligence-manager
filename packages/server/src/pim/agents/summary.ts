@@ -160,17 +160,24 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
       scopes: activeScopes,
       maxTokens: 1500,
       projectId: pod.project_id ?? null,
+      compactHeadingOffset: 2,
       ...(taskQuery ? { taskQuery } : {}),
     });
-    if (knowledgeResult.nodes.length > 0) {
+    const compactContext = knowledgeResult.compact_context?.trim();
+    if (compactContext || knowledgeResult.nodes.length > 0) {
       md += `## Knowledge Context\n\n`;
-      md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
-      for (const node of knowledgeResult.nodes.slice(0, 8)) {
-        const icon = node.type === "anti_pattern" ? "⚠" : node.type === "pattern" ? "✓" : "•";
-        md += `- ${icon} ${node.summary} *(${node.source_pod_name})*\n`;
-      }
-      if (knowledgeResult.truncated) {
-        md += `\n*${knowledgeResult.total_matching - knowledgeResult.nodes.length} more learnings available — query the knowledge graph for details.*\n`;
+      if (compactContext) {
+        md += `*From organizational memory (compact KG context; ${knowledgeResult.nodes.length} returned learnings):*\n\n`;
+        md += `${compactContext}\n`;
+      } else {
+        md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
+        for (const node of knowledgeResult.nodes.slice(0, 8)) {
+          const icon = node.type === "anti_pattern" ? "⚠" : node.type === "pattern" ? "✓" : "•";
+          md += `- ${icon} ${node.summary} *(${node.source_pod_name})*\n`;
+        }
+        if (knowledgeResult.truncated) {
+          md += `\n*${knowledgeResult.total_matching - knowledgeResult.nodes.length} more learnings available — query the knowledge graph for details.*\n`;
+        }
       }
       md += `\n`;
     }

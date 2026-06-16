@@ -34,7 +34,50 @@ const STOP_WORDS = new Set([
   "node", "context",
 ]);
 const BARE_HTTP_VERB_IDENTIFIERS = new Set(["get", "post", "put", "patch", "delete"]);
-const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set(["api", "current"]);
+const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set([
+  "api",
+  "current",
+  "how",
+  "implemented",
+  "implementation",
+  "status",
+]);
+
+function countChar(value: string, char: string): number {
+  return value.split(char).length - 1;
+}
+
+function restoreBalancedTrailingDelimiter(value: string, stripped: string, open: string, close: string): string {
+  if (countChar(stripped, open) <= countChar(stripped, close)) return stripped;
+  const removedTail = value.slice(stripped.length);
+  return removedTail.includes(close) ? `${stripped}${close}` : stripped;
+}
+
+function normalizeIdentifierMatch(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/^[`"'([{]+/g, "");
+  let stripped = normalized.replace(/[`"',.;)\]}]+$/g, "");
+  stripped = restoreBalancedTrailingDelimiter(normalized, stripped, "{", "}");
+  stripped = restoreBalancedTrailingDelimiter(normalized, stripped, "[", "]");
+  return stripped;
+}
+
+function isLowSignalPathIdentifier(value: string): boolean {
+  const path = value.replace(/[?#].*$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length !== 1) return false;
+  const [segment] = segments;
+  return segment.length <= 3 || /^v\d+(?:\.\d+)?$/i.test(segment);
+}
+
+function isLowSignalIdentifier(value: string): boolean {
+  if (value.startsWith("/") && isLowSignalPathIdentifier(value)) return true;
+  const httpPath = /^(?:get|post|put|patch|delete)\s+(\/.*)$/i.exec(value)?.[1];
+  return httpPath ? isLowSignalPathIdentifier(httpPath) : false;
+}
 
 export function extractKeywords(text: string): Set<string> {
   return new Set(
@@ -52,6 +95,12 @@ export function extractIdentifiers(text: string): Set<string> {
     /\b[A-Z][A-Z0-9]+-\d+\b/g,
     /\b(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g,
     /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
+    /(?:^|\s)\/[A-Za-z0-9_./:{}-]+/g,
+    /\b[A-Za-z][A-Za-z0-9_-]*:[A-Za-z*][A-Za-z0-9_-]*\b/g,
+    /\b[A-Za-z][A-Za-z0-9_-]*:\*/g,
+    /\*:[A-Za-z*][A-Za-z0-9_-]*/g,
+    /\*:\*/g,
+    /\b[A-Za-z][A-Za-z0-9]*-(?:[A-Za-z0-9]+-)+[A-Za-z0-9]+\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:_[A-Za-z0-9_$]+)+\b/g,
     /\b[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*\b/g,
@@ -62,9 +111,10 @@ export function extractIdentifiers(text: string): Set<string> {
   ];
   for (const pattern of patterns) {
     for (const match of text.match(pattern) ?? []) {
-      const cleaned = match.trim().toLowerCase();
+      const cleaned = normalizeIdentifierMatch(match);
       if (STOP_WORDS.has(cleaned)) continue;
       if (BARE_HTTP_VERB_IDENTIFIERS.has(cleaned)) continue;
+      if (isLowSignalIdentifier(cleaned)) continue;
       if (cleaned.length > 2) identifiers.add(cleaned);
     }
   }

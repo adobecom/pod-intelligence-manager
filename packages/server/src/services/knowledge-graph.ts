@@ -271,6 +271,7 @@ export function loadedOrgIds(): string[] {
 /** Test helper: clear the in-memory cache. Production code should never call this. */
 export function _resetForTests(): void {
   orgStates.clear();
+  compactContextConfigCache = null;
 }
 
 export interface LoadGraphForOfflineEvaluationOptions {
@@ -307,6 +308,8 @@ const TOKENS_PER_EDGE = 10;
 /** Aligns with ad-hoc submission default (0.7) so submit_knowledge_learning nodes are queryable. */
 const DEFAULT_CONFIDENCE_MIN = 0.7;
 const DEFAULT_QUERY_MAX_TOKENS = 2000;
+const DEFAULT_COMPACT_CONTEXT_TOP_N = 3;
+const DEFAULT_COMPACT_CONTEXT_MAX_CHARS = 1_000;
 /** Minimum share of query keywords that must appear on a node to bypass the cosine gate. */
 const KEYWORD_OVERLAP_GATE_RATIO = 0.5;
 /** Minimum absolute keyword hits (when the query has many terms). */
@@ -325,6 +328,29 @@ const HTTP_CONTRACT_CONTEXT_FRAGMENTS = [
   "rest",
   "route",
 ];
+const LOW_SIGNAL_QUERY_KEYWORDS = new Set([
+  "about",
+  "current",
+  "does",
+  "existing",
+  "explain",
+  "how",
+  "implemented",
+  "implementation",
+  "status",
+  "using",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "why",
+  "work",
+  "works",
+]);
+const RARE_KEYWORD_RECALL_MAX_TERMS = 3;
+const RARE_KEYWORD_RECALL_MAX_ABSOLUTE_MATCHES = 3;
+const RARE_KEYWORD_RECALL_MAX_GRAPH_SHARE = 0.02;
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
   return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN));
@@ -560,6 +586,31 @@ export async function addLearningsToGraph(
 
 // --- Query Knowledge ---
 
+function isHighSignalQueryKeyword(value: string): boolean {
+  const term = value.toLowerCase().trim();
+  return term.length > 2 && !LOW_SIGNAL_QUERY_KEYWORDS.has(term);
+}
+
+function queryKeywordsFromText(queryText?: string): string[] {
+  if (!queryText) return [];
+  const keywords = keywordsFromTexts([queryText]);
+  return keywords.length <= RARE_KEYWORD_RECALL_MAX_TERMS
+    ? keywords.filter(isHighSignalQueryKeyword)
+    : keywords;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const normalized = value.toLowerCase().trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
 function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"], queryText?: string): string[] {
   const fromExplicit =
     filters.keywords?.map((k) => k.toLowerCase().trim()).filter((k) => k.length > 2) ?? [];
@@ -569,16 +620,9 @@ function mergeScoringKeywords(filters: KnowledgeQueryOptions["filters"], queryTe
         .filter((w) => w.length > 2)
         .map((w) => w.toLowerCase())
     : [];
-  const fromQueryText = queryText ? keywordsFromTexts([queryText]) : [];
+  const fromQueryText = queryKeywordsFromText(queryText);
   const identifiers = queryText ? [...extractRetrievalIdentifiers(queryText)] : [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const w of [...fromExplicit, ...fromTextSearch, ...fromQueryText, ...identifiers]) {
-    if (seen.has(w)) continue;
-    seen.add(w);
-    out.push(w);
-  }
-  return out;
+  return uniqueStrings([...fromExplicit, ...fromTextSearch, ...fromQueryText, ...identifiers]);
 }
 
 function mergeQueryIdentifiers(filters: KnowledgeQueryOptions["filters"], queryText?: string): string[] {
@@ -588,6 +632,65 @@ function mergeQueryIdentifiers(filters: KnowledgeQueryOptions["filters"], queryT
     ...(filters.keywords ?? []),
   ].filter(Boolean).join(" ");
   return [...extractRetrievalIdentifiers(text)];
+}
+
+interface QuerySignalPlan {
+  strongIdentifiers: string[];
+  rareKeywords: string[];
+  recallIds: Set<string>;
+  forceLexicalRecall: boolean;
+}
+
+function shouldForceLexicalRecall(keywords: string[], strongIdentifiers: string[]): boolean {
+  if (strongIdentifiers.length > 0) {
+    return strongIdentifiers.length <= 3 && keywords.length <= 8;
+  }
+  return keywords.length > 0 && keywords.length <= RARE_KEYWORD_RECALL_MAX_TERMS;
+}
+
+function rareQueryKeywords(
+  state: OrgGraphState,
+  keywords: string[],
+  strongIdentifiers: string[],
+  forceLexicalRecall: boolean,
+): string[] {
+  if (!forceLexicalRecall) return [];
+  const highSignalKeywords = keywords.filter(isHighSignalQueryKeyword);
+  if (highSignalKeywords.length === 0 || highSignalKeywords.length > RARE_KEYWORD_RECALL_MAX_TERMS) return [];
+
+  const strongIdentifierSet = new Set(strongIdentifiers);
+  const graphSize = Math.max(1, state.graph.nodes.length);
+  const maxMatches = Math.max(
+    RARE_KEYWORD_RECALL_MAX_ABSOLUTE_MATCHES,
+    Math.ceil(graphSize * RARE_KEYWORD_RECALL_MAX_GRAPH_SHARE),
+  );
+
+  return uniqueStrings(highSignalKeywords).filter((keyword) => {
+    if (strongIdentifierSet.has(keyword)) return true;
+    const matches = state.keywordIndex.get(keyword);
+    return !!matches && matches.size > 0 && matches.size <= maxMatches;
+  });
+}
+
+function buildQuerySignalPlan(
+  state: OrgGraphState,
+  keywords: string[],
+  identifiers: string[],
+): QuerySignalPlan {
+  const strongIdentifiers = uniqueStrings(identifiers);
+  const forceLexicalRecall = shouldForceLexicalRecall(keywords, strongIdentifiers);
+  const rareKeywords = rareQueryKeywords(state, keywords, strongIdentifiers, forceLexicalRecall);
+  const recallIds = new Set<string>();
+
+  for (const identifier of strongIdentifiers) {
+    for (const id of state.identifierIndex.get(identifier) ?? []) recallIds.add(id);
+    for (const id of state.keywordIndex.get(identifier) ?? []) recallIds.add(id);
+  }
+  for (const keyword of rareKeywords) {
+    for (const id of state.keywordIndex.get(keyword) ?? []) recallIds.add(id);
+  }
+
+  return { strongIdentifiers, rareKeywords, recallIds, forceLexicalRecall };
 }
 
 function hasExactShortKeywordMatch(nodeKeywords: Set<string> | undefined, keywords: string[]): boolean {
@@ -602,6 +705,11 @@ function countKeywordMatches(nodeKeywords: Set<string> | undefined, keywords: st
     if (nodeKeywords.has(kw.toLowerCase())) hits++;
   }
   return hits;
+}
+
+function highSignalKeywordsForScoring(keywords: string[]): string[] {
+  const highSignalKeywords = keywords.filter(isHighSignalQueryKeyword);
+  return highSignalKeywords.length > 0 ? highSignalKeywords : keywords;
 }
 
 function countIdentifierMatches(nodeIdentifiers: Set<string> | undefined, identifiers: string[]): number {
@@ -693,6 +801,7 @@ type ScoredNode = {
   exactShortKeywordMatch: boolean;
   keywordHits: number;
   identifierHits: number;
+  lexicalRecallHits: number;
   score: number;
   graphExpanded?: boolean;
 };
@@ -710,16 +819,25 @@ function directEvidenceBonus(querySimilarity: number | undefined, keywordHits: n
   return bonus;
 }
 
+function lexicalRecallScore(identifierHits: number, rareKeywordHits: number, lexicalRecall: boolean): number {
+  if (!lexicalRecall) return 0;
+  const identifierScore = Math.min(identifierHits, 2) * 0.45;
+  const rareKeywordScore = Math.min(rareKeywordHits, 2) * 0.3;
+  return Math.min(0.95, 0.2 + identifierScore + rareKeywordScore);
+}
+
 function scoreCandidates(
   candidates: KnowledgeNode[],
   state: OrgGraphState,
   scopes: string[],
   keywords: string[],
   identifiers: string[],
+  querySignals: QuerySignalPlan,
   queryEmbedding: number[] | null | undefined,
   hubIds: Set<string>,
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
 ): ScoredNode[] {
+  const scoringKeywords = highSignalKeywordsForScoring(keywords);
   return candidates.map((node) => {
     const precomputedKeywords = state.nodeKeywords.get(node.id);
     const precomputedIdentifiers = state.nodeIdentifiers.get(node.id);
@@ -728,22 +846,28 @@ function scoreCandidates(
         ? cosineSimilarity(queryEmbedding, node.embedding)
         : undefined;
     const identifierHits = countIdentifierMatches(precomputedIdentifiers, identifiers);
-    const keywordHits = countKeywordMatches(precomputedKeywords, keywords);
-    const scoringIdentifierHits = identifierHits + countHttpContractMethodMatches(precomputedKeywords, keywords, identifiers);
+    const keywordHits = countKeywordMatches(precomputedKeywords, scoringKeywords);
+    const lexicalIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.strongIdentifiers);
+    const rareKeywordHits = countKeywordMatches(precomputedKeywords, querySignals.rareKeywords);
+    const lexicalRecall = querySignals.forceLexicalRecall && querySignals.recallIds.has(node.id);
+    const lexicalRecallHits = lexicalRecall ? Math.max(1, lexicalIdentifierHits, rareKeywordHits) : 0;
+    const scoringIdentifierHits = identifierHits + countHttpContractMethodMatches(precomputedKeywords, scoringKeywords, identifiers);
     return {
       node,
       querySimilarity,
-      exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, keywords),
+      exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, scoringKeywords),
       keywordHits,
       identifierHits,
+      lexicalRecallHits,
       score: scoreRelevance(
         node,
-        { scopes, keywords, querySimilarity, precomputedKeywords },
+        { scopes, keywords: scoringKeywords, querySimilarity, precomputedKeywords },
         hubIds,
         graphTuning,
       ) +
         identifierMatchScore(scoringIdentifierHits) +
         directEvidenceBonus(querySimilarity, keywordHits, scoringIdentifierHits) +
+        lexicalRecallScore(lexicalIdentifierHits, rareKeywordHits, lexicalRecall) +
         sourceAuthorityScore(node) +
         retrievalTierScore(node),
     };
@@ -778,6 +902,7 @@ function pinRequiredScoredNodes(
   scopes: string[],
   keywords: string[],
   identifiers: string[],
+  querySignals: QuerySignalPlan,
   queryEmbedding: number[] | null | undefined,
   hubIds: Set<string>,
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
@@ -794,7 +919,7 @@ function pinRequiredScoredNodes(
     .filter((node): node is KnowledgeNode => !!node)
     .filter((node) => passesScalarQueryFilters(node, filters, mode, asOf, state));
   if (missingRequired.length === 0) return boosted;
-  const pinned = scoreCandidates(missingRequired, state, scopes, keywords, identifiers, queryEmbedding, hubIds, graphTuning)
+  const pinned = scoreCandidates(missingRequired, state, scopes, keywords, identifiers, querySignals, queryEmbedding, hubIds, graphTuning)
     .map((entry) => ({ ...entry, score: Math.max(entry.score, 10) }));
   return [...boosted, ...pinned];
 }
@@ -803,31 +928,45 @@ function applySemanticGate(
   scored: ScoredNode[],
   state: OrgGraphState,
   keywords: string[],
+  querySignals: QuerySignalPlan,
   queryEmbedding: number[] | null | undefined,
   minQuerySimilarity: number,
 ): ScoredNode[] {
   if (!queryEmbedding) return scored;
+  const scoringKeywords = highSignalKeywordsForScoring(keywords);
+  const hasFilteredScoringKeywords =
+    scoringKeywords.length !== keywords.length ||
+    scoringKeywords.some((keyword, index) => keyword !== keywords[index]);
 
-  const gated = scored.filter(({ node, querySimilarity, identifierHits }) =>
-    passesSemanticRelevanceGate(
-      state.nodeKeywords.get(node.id),
-      keywords,
-      identifierHits,
-      querySimilarity,
-      minQuerySimilarity,
-    ),
+  const gated = scored.filter(({ node, querySimilarity, identifierHits, lexicalRecallHits }) =>
+    lexicalRecallHits > 0 ||
+      passesSemanticRelevanceGate(
+        state.nodeKeywords.get(node.id),
+        keywords,
+        identifierHits,
+        querySimilarity,
+        minQuerySimilarity,
+      ) ||
+      (hasFilteredScoringKeywords &&
+        passesSemanticRelevanceGate(
+          state.nodeKeywords.get(node.id),
+          scoringKeywords,
+          identifierHits,
+          querySimilarity,
+          minQuerySimilarity,
+        )),
   );
 
   // Cosine gate eliminated everyone — fall back to keyword-strong matches only.
-  if (gated.length === 0 && keywords.length > 0) {
+  if (gated.length === 0 && scoringKeywords.length > 0) {
     return scored
-      .filter(({ keywordHits, identifierHits }) => {
-        if (identifierHits > 0) return true;
+      .filter(({ keywordHits, identifierHits, lexicalRecallHits }) => {
+        if (lexicalRecallHits > 0 || identifierHits > 0) return true;
         if (keywordHits === 0) return false;
-        if (keywords.length <= 3) return keywordHits >= 1;
+        if (scoringKeywords.length <= 3) return keywordHits >= 1;
         return keywordHits >= Math.max(
           KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS + 1,
-          Math.ceil(keywords.length * KEYWORD_OVERLAP_GATE_RATIO),
+          Math.ceil(scoringKeywords.length * KEYWORD_OVERLAP_GATE_RATIO),
         );
       })
       .sort((a, b) => b.keywordHits - a.keywordHits || b.score - a.score);
@@ -940,7 +1079,13 @@ function expandWithGraphNeighbors(
   if (scored.length === 0 || state.graph.edges.length === 0) return scored;
   const byId = new Map(scored.map((s) => [s.node.id, s]));
   const seeds = scored
-    .filter((s) => s.score >= 0.45 || s.exactShortKeywordMatch || s.identifierHits > 0 || (s.querySimilarity ?? 0) >= 0.75)
+    .filter((s) =>
+      s.score >= 0.45 ||
+      s.exactShortKeywordMatch ||
+      s.identifierHits > 0 ||
+      s.lexicalRecallHits > 0 ||
+      (s.querySimilarity ?? 0) >= 0.75,
+    )
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
   if (seeds.length === 0) return scored;
@@ -978,6 +1123,7 @@ function expandWithGraphNeighbors(
       exactShortKeywordMatch: false,
       keywordHits: 0,
       identifierHits: 0,
+      lexicalRecallHits: 0,
       score: graphScore,
       graphExpanded: true,
     };
@@ -1037,6 +1183,158 @@ function explanationForScoredNode(
     ...(scored.querySimilarity !== undefined ? { semantic_score: scored.querySimilarity } : {}),
     ...(scored.graphExpanded !== undefined ? { graph_expanded: scored.graphExpanded } : {}),
   };
+}
+
+interface CompactKgContextOptions {
+  scopes: string[];
+  taskQuery?: string;
+  possibleConstraints?: boolean;
+  headingOffset?: number;
+}
+
+let compactContextConfigCache: { topN: number; maxChars: number } | null = null;
+
+function compactContextConfig(): { topN: number; maxChars: number } {
+  if (!compactContextConfigCache) {
+    compactContextConfigCache = {
+      topN: positiveIntFromEnv("PIM_KG_COMPACT_CONTEXT_TOP_N", DEFAULT_COMPACT_CONTEXT_TOP_N),
+      maxChars: positiveIntFromEnv("PIM_KG_COMPACT_CONTEXT_MAX_CHARS", DEFAULT_COMPACT_CONTEXT_MAX_CHARS),
+    };
+  }
+  return compactContextConfigCache;
+}
+
+function compactContextTopN(): number {
+  return compactContextConfig().topN;
+}
+
+function compactContextMaxChars(): number {
+  return compactContextConfig().maxChars;
+}
+
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function normalizeSpaces(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function clipOneLine(text: string, maxChars: number): string {
+  const normalized = normalizeSpaces(text);
+  if (normalized.length <= maxChars) return normalized;
+  if (maxChars <= 0) return "";
+  if (maxChars <= 3) return normalized.slice(0, maxChars);
+  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function clipContext(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  if (maxChars <= 0) return "";
+  const marker = "\n_(compact context clipped)_";
+  if (maxChars <= marker.length) {
+    const shortMarker = "_clipped_";
+    if (maxChars <= shortMarker.length) return shortMarker.slice(0, maxChars);
+    return `${text.slice(0, maxChars - shortMarker.length).trimEnd()}${shortMarker}`;
+  }
+  return `${text.slice(0, maxChars - marker.length).trimEnd()}${marker}`;
+}
+
+function uniqueCompactSignals(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values.map((v) => normalizeSpaces(v)).filter(Boolean)) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out;
+}
+
+function joinCompactSignals(values: string[], maxChars = 320): string {
+  const joined: string[] = [];
+  for (const value of uniqueCompactSignals(values)) {
+    const next = [...joined, value].join("; ");
+    if (next.length > maxChars) {
+      if (joined.length === 0) joined.push(clipOneLine(value, maxChars));
+      break;
+    }
+    joined.push(value);
+  }
+  return joined.join("; ");
+}
+
+function compactHeading(level: number, text: string, headingOffset = 0): string {
+  const adjusted = Math.min(6, Math.max(1, level + Math.max(0, Math.trunc(headingOffset))));
+  return `${"#".repeat(adjusted)} ${text}`;
+}
+
+function compactSignalsForNode(
+  node: KnowledgeNode,
+  explanation: KnowledgeRetrievalExplanation | undefined,
+): string {
+  return joinCompactSignals([
+    ...(explanation?.matched_scopes ?? []).slice(0, 3).map((scope) => `scope:${scope}`),
+    ...(explanation?.matched_topics ?? []).slice(0, 5).map((topic) => `topic:${topic}`),
+    ...(explanation?.semantic_score !== undefined ? [`semantic:${explanation.semantic_score.toFixed(2)}`] : []),
+    ...(explanation?.graph_expanded ? ["graph-expanded"] : []),
+    `confidence:${node.confidence_score.toFixed(2)}`,
+    ...(node.type === "anti_pattern" ? ["anti-pattern"] : []),
+  ]);
+}
+
+function serializeCompactKgContext(
+  result: KnowledgeQueryResult,
+  options: CompactKgContextOptions,
+): string | undefined {
+  if (result.nodes.length === 0) return undefined;
+
+  const topN = compactContextTopN();
+  const selected = result.nodes.slice(0, topN);
+  const explanationById = new Map((result.explanations ?? []).map((e) => [e.node_id, e]));
+  const lines: string[] = [];
+  const headingOffset = options.headingOffset ?? 0;
+
+  lines.push(compactHeading(1, "PIM KG Compact Context", headingOffset));
+  if (options.taskQuery?.trim()) {
+    lines.push(`Scope: task query \`${clipOneLine(options.taskQuery, 180)}\`.`);
+  } else if (options.scopes.length > 0) {
+    lines.push(`Scope: broad constraints for ${options.scopes.map((scope) => `\`${scope}\``).join(", ")}.`);
+  } else {
+    lines.push("Scope: broad org constraints.");
+  }
+  lines.push("Guard: task prompt API/input/output shape is authoritative.");
+  lines.push("");
+  lines.push(compactHeading(
+    2,
+    options.possibleConstraints ? "Possible KG constraints" : "High-confidence KG constraints",
+    headingOffset,
+  ));
+
+  selected.forEach((node, index) => {
+    const explanation = explanationById.get(node.id);
+    const strength = explanation?.strength ? `/${explanation.strength}` : "";
+    lines.push(`- rank ${index + 1} [${node.type}${strength}]: ${clipOneLine(node.summary, 260)}`);
+    const signals = compactSignalsForNode(node, explanation);
+    if (signals) lines.push(`  - Signals: ${signals}`);
+  });
+
+  const omittedReturned = Math.max(0, result.nodes.length - selected.length);
+  if (omittedReturned > 0) {
+    lines.push(`_Omitted ${omittedReturned} lower-ranked KG candidate(s) after compact gate._`);
+  }
+  const omittedByRetrieval = Math.max(0, result.total_matching - result.nodes.length);
+  if (result.truncated && omittedByRetrieval > 0) {
+    lines.push(`_Retrieval had ${omittedByRetrieval} additional match(es) not shown in this compact context._`);
+  }
+
+  return clipContext(lines.join("\n"), compactContextMaxChars());
+}
+
+function compactContextNodeCount(result: KnowledgeQueryResult): number {
+  return Math.min(result.nodes.length, compactContextTopN());
 }
 
 export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOptions): KnowledgeQueryResult {
@@ -1144,6 +1442,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
   const scopes = filters.scopes ?? filters.domains ?? [];
   const keywords = mergeScoringKeywords(filters, query_text);
   const identifiers = mergeQueryIdentifiers(filters, query_text);
+  const querySignals = buildQuerySignalPlan(state, keywords, identifiers);
   const graphTuning = graph.org_id ? getOrgTuning(graph.org_id).graphScoring : DEFAULT_ORG_TUNING.graphScoring;
 
   let scored = scoreCandidates(
@@ -1152,6 +1451,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     scopes,
     keywords,
     identifiers,
+    querySignals,
     query_embedding,
     hubIds,
     graphTuning,
@@ -1159,11 +1459,12 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
 
   if (query_embedding) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
-    const gated = applySemanticGate(scored, state, keywords, query_embedding, minQuerySimilarity);
+    const gated = applySemanticGate(scored, state, keywords, querySignals, query_embedding, minQuerySimilarity);
+    const scoringKeywords = highSignalKeywordsForScoring(keywords);
     const filteredRecallHasLexicalSignal = scored.some((entry) => {
       if (entry.exactShortKeywordMatch || entry.identifierHits > 0) return true;
-      if (keywords.length <= 2) return entry.keywordHits === keywords.length && keywords.length > 0;
-      return entry.keywordHits >= Math.max(2, Math.ceil(keywords.length * 0.25));
+      if (scoringKeywords.length <= 2) return entry.keywordHits === scoringKeywords.length && scoringKeywords.length > 0;
+      return entry.keywordHits >= Math.max(2, Math.ceil(scoringKeywords.length * 0.25));
     });
     const shouldUseFilteredCandidatesAsRecallFallback =
       gated.length === 0 &&
@@ -1184,6 +1485,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     scopes,
     keywords,
     identifiers,
+    querySignals,
     query_embedding,
     hubIds,
     graphTuning,
@@ -1250,12 +1552,13 @@ export async function queryKnowledgeSemantic(
   orgId: string,
   options: InternalKnowledgeQueryOptions,
 ): Promise<KnowledgeQueryResult> {
-  const queryText = options.query_text?.trim();
-  const queryEmbedding = options.query_embedding ?? (queryText ? await generateEmbedding(queryText) : null);
+  const queryText = typeof options.query_text === "string" ? options.query_text.trim() : undefined;
+  const hasQueryText = !!queryText;
+  const queryEmbedding = options.query_embedding ?? (hasQueryText ? await generateEmbedding(queryText) : null);
   const { query_text: _queryText, query_embedding: _queryEmbedding, ...rest } = options;
   return queryKnowledge(orgId, {
     ...rest,
-    ...(queryText ? { query_text: queryText } : {}),
+    ...(hasQueryText ? { query_text: queryText } : {}),
     query_embedding: queryEmbedding,
   });
 }
@@ -1267,6 +1570,7 @@ export interface ContractedRelevantLearningsOptions {
   taskQuery?: string;
   taskQueryEmbedding?: number[] | null;
   requiredNodeIds?: string[];
+  compactHeadingOffset?: number;
 }
 
 function withContextContract(
@@ -1275,17 +1579,31 @@ function withContextContract(
   returnedMode: "legacy" | "task_relevant",
   taskQueryUsed: boolean,
   possibleConstraints = false,
+  compactOptions?: CompactKgContextOptions,
 ): KnowledgeQueryResult {
+  const compactContext = compactOptions
+    ? serializeCompactKgContext(result, {
+        ...compactOptions,
+        possibleConstraints: compactOptions.possibleConstraints ?? possibleConstraints,
+      })
+    : undefined;
+  const possibleConstraintsNote = taskQueryUsed && returnedMode === "legacy"
+    ? "Legacy keyword KG context only; treat these as possible constraints and call query_knowledge for a deeper task-semantic lookup."
+    : "Broad scope context only; pass taskQuery or call query_knowledge for a deeper precedent lookup.";
   return {
     ...result,
+    ...(compactContext
+      ? {
+          compact_context: compactContext,
+          compact_context_node_count: compactContextNodeCount(result),
+        }
+      : {}),
     context_contract: {
       mode,
       returned_mode: returnedMode,
       task_query_used: taskQueryUsed,
       ...(possibleConstraints ? { possible_constraints: true } : {}),
-      ...(possibleConstraints
-        ? { note: "Broad scope context only; pass taskQuery or call query_knowledge for a deeper precedent lookup." }
-        : {}),
+      ...(possibleConstraints ? { note: possibleConstraintsNote } : {}),
     },
   };
 }
@@ -1407,7 +1725,12 @@ export async function getRelevantLearningsForContractMode(
       true,
       options.requiredNodeIds,
     );
-    return withContextContract(result, mode, "task_relevant", Boolean(taskQuery), !taskQuery);
+    return withContextContract(result, mode, "task_relevant", Boolean(taskQuery), !taskQuery, {
+      scopes: options.scopes,
+      ...(taskQuery ? { taskQuery } : {}),
+      possibleConstraints: !taskQuery,
+      ...(options.compactHeadingOffset !== undefined ? { headingOffset: options.compactHeadingOffset } : {}),
+    });
   }
 
   const legacy = await getRelevantLearnings(
@@ -1445,7 +1768,20 @@ export async function getRelevantLearningsForContractMode(
     }
   }
 
-  return withContextContract(legacy, mode, "legacy", Boolean(taskQuery));
+  return withContextContract(
+    legacy,
+    mode,
+    "legacy",
+    Boolean(taskQuery),
+    Boolean(taskQuery),
+    taskQuery
+      ? {
+          scopes: options.scopes,
+          taskQuery,
+          ...(options.compactHeadingOffset !== undefined ? { headingOffset: options.compactHeadingOffset } : {}),
+        }
+      : undefined,
+  );
 }
 
 // --- Convenience: Get Relevant Learnings ---

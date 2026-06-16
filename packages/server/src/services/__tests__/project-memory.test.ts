@@ -32,8 +32,10 @@ import { createTables } from "../../db/schema.js";
 import { upsertUserByIms } from "../users.js";
 import { createOrg } from "../orgs.js";
 import {
+  getProjectCursor,
   getProjectSourceHealthLive,
   listProjectMemoryCandidates,
+  pollProjectSources,
   recordProjectEvidence,
 } from "../project-memory.js";
 import { answerProjectQuestion } from "../project-answers.js";
@@ -281,6 +283,134 @@ describe("project source health", () => {
       "not_configured",
     ]);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("project source polling", () => {
+  it("ingests deeply nested Jira ADF descriptions without failing the Jira poll", async () => {
+    setProjectResources({ jira: { project_keys: ["MWPW"] } });
+    process.env.JIRA_BASE_URL = "https://jira.example.com";
+    process.env.JIRA_TOKEN = "token";
+
+    let description: unknown = { text: "leaf text" };
+    for (let i = 0; i < 12_000; i++) {
+      description = { content: [description] };
+    }
+
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        total: 1,
+        issues: [{
+          key: "MWPW-999",
+          fields: {
+            summary: "Deep ADF issue",
+            description,
+            updated: "2026-06-01T00:00:00.000Z",
+            status: { name: "To Do", statusCategory: { key: "new", name: "To Do" } },
+            issuetype: { name: "Task" },
+          },
+        }],
+      }),
+      text: async () => "",
+    })));
+
+    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(result?.results.filter((r) => r.source === "jira")).toHaveLength(1);
+    expect(result?.results.find((r) => r.source === "jira")?.missing).toBeUndefined();
+    expect(
+      testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-999"),
+    ).toMatchObject({ c: 1 });
+  });
+
+  it("fetches latest Jira issues first and leaves the cursor unchanged when capped", async () => {
+    setProjectResources({ jira: { project_keys: ["MWPW"] } });
+    process.env.JIRA_BASE_URL = "https://jira.example.com";
+    process.env.JIRA_TOKEN = "token";
+
+    const updatedAt = (n: number) => {
+      const minutes = n;
+      const hh = String(Math.floor(minutes / 60)).padStart(2, "0");
+      const mm = String(minutes % 60).padStart(2, "0");
+      return `2026-06-01T${hh}:${mm}:00.000Z`;
+    };
+    const issues = Array.from({ length: 550 }, (_, i) => {
+      const n = 550 - i;
+      return {
+        key: `MWPW-${n}`,
+        fields: {
+          summary: `Issue ${n}`,
+          updated: updatedAt(n),
+          status: { name: "To Do", statusCategory: { key: "new", name: "To Do" } },
+          issuetype: { name: "Task" },
+        },
+      };
+    });
+    const requests: Array<{ jql: string; startAt: number; maxResults: number }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { jql: string; startAt?: number; maxResults?: number };
+      requests.push({ jql: body.jql, startAt: body.startAt ?? 0, maxResults: body.maxResults ?? 50 });
+      const startAt = body.startAt ?? 0;
+      const maxResults = body.maxResults ?? 50;
+      return new Response(JSON.stringify({
+        total: issues.length,
+        issues: issues.slice(startAt, startAt + maxResults),
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+
+    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(result?.results.find((r) => r.source === "jira" && r.ingested > 0)?.ingested).toBe(500);
+    expect(requests[0].jql).toContain("ORDER BY updated DESC, key DESC");
+    expect(requests.map((r) => r.startAt)).toEqual([0, 50, 100, 150, 200, 250, 300, 350, 400, 450]);
+    expect(
+      testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-550"),
+    ).toMatchObject({ c: 1 });
+    expect(
+      testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-1"),
+    ).toMatchObject({ c: 0 });
+    expect(getProjectCursor(ORG_ID, PROJECT_ID, "jira", "issues")).toBeNull();
+  });
+
+  it("keeps undated Jira release occurred_at stable across polls and returns one Jira result", async () => {
+    setProjectResources({ jira: { project_keys: ["MWPW"], version_prefixes: ["T3-"] } });
+    process.env.JIRA_BASE_URL = "https://jira.example.com";
+    process.env.JIRA_TOKEN = "token";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url.includes("/versions")) {
+        return new Response(JSON.stringify([
+          { name: "T3-26.16", released: false, archived: false },
+        ]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ total: 0, issues: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-01T00:00:00.000Z"));
+      const first = await pollProjectSources(ORG_ID, PROJECT_ID);
+      const firstOccurredAt = (testDb
+        .prepare("SELECT occurred_at FROM project_evidence_items WHERE source_id = ?")
+        .get("release:MWPW:T3-26.16") as { occurred_at: string }).occurred_at;
+
+      vi.setSystemTime(new Date("2026-06-02T00:00:00.000Z"));
+      const second = await pollProjectSources(ORG_ID, PROJECT_ID);
+      const secondOccurredAt = (testDb
+        .prepare("SELECT occurred_at FROM project_evidence_items WHERE source_id = ?")
+        .get("release:MWPW:T3-26.16") as { occurred_at: string }).occurred_at;
+
+      expect(first?.results.filter((r) => r.source === "jira")).toHaveLength(1);
+      expect(second?.results.filter((r) => r.source === "jira")).toHaveLength(1);
+      expect(first?.results.find((r) => r.source === "jira")?.ingested).toBe(1);
+      expect(secondOccurredAt).toBe(firstOccurredAt);
+      expect(secondOccurredAt).not.toBe("2026-06-02T00:00:00.000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

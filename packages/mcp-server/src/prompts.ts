@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { KnowledgeQueryResult } from "@pim/shared";
 import { apiFetch, apiFetchText, apiPost } from "./api.js";
 
 /* ------------------------------------------------------------------ */
@@ -46,12 +47,6 @@ interface PendingWork {
   summary: string;
   presumes: string;
   rework_cost: string;
-}
-
-interface KnowledgeQueryResult {
-  nodes: Array<{ id: string; type: string; summary: string; details: string; domains: string[] }>;
-  total_matching: number;
-  truncated: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -321,7 +316,13 @@ Based on this context:
               max_tokens: 2000,
               include_details: true,
             })
-          : Promise.resolve({ nodes: [], total_matching: 0, truncated: false } as KnowledgeQueryResult),
+          : Promise.resolve({
+              nodes: [],
+              edges: [],
+              total_matching: 0,
+              token_estimate: 0,
+              truncated: false,
+            } satisfies KnowledgeQueryResult),
         apiFetch<Array<{ pod_id: string; name: string; duration_days: number; final_pressure: number }>>(
           "/api/org/archived",
         ),

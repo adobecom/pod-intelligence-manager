@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "retrieval-eval": "tsx scripts/kg-retrieval-eval.ts",
-    "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts"
+    "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts",
+    "seed-project-search": "tsx src/scripts/seed-project-search.ts"
   },
   "dependencies": {
     "@pim/shared": "workspace:*",

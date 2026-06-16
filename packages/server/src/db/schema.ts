@@ -302,6 +302,88 @@ export function createTables() {
       PRIMARY KEY (org_id, project_id, source, cursor_key)
     );
 
+    -- Indexed Project Search: broad, current project-artifact index (distinct from the org KG).
+    CREATE TABLE IF NOT EXISTS project_search_documents (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      source_url TEXT,
+      title TEXT NOT NULL,
+      author TEXT,
+      status TEXT,
+      occurred_at TEXT,
+      ingested_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      permissions_json TEXT NOT NULL DEFAULT '{}',
+      freshness_state TEXT NOT NULL DEFAULT 'fresh',
+      UNIQUE (org_id, project_id, source, source_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_search_docs_scope
+      ON project_search_documents(org_id, project_id, source, occurred_at DESC);
+
+    CREATE TABLE IF NOT EXISTS project_search_chunks (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL REFERENCES project_search_documents(id) ON DELETE CASCADE,
+      org_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      chunk_kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      retrieval_text TEXT,
+      embedding_json TEXT,
+      embedding_model TEXT,
+      embedding_text_hash TEXT,
+      token_estimate INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_search_chunks_doc
+      ON project_search_chunks(document_id);
+    CREATE INDEX IF NOT EXISTS idx_project_search_chunks_scope
+      ON project_search_chunks(org_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS project_search_entities (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL,
+      entity_key TEXT NOT NULL,
+      label TEXT NOT NULL,
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      source_document_id TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      UNIQUE (org_id, project_id, entity_type, entity_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_search_entities_scope
+      ON project_search_entities(org_id, project_id, entity_type);
+
+    CREATE TABLE IF NOT EXISTS project_search_edges (
+      id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source_entity_id TEXT NOT NULL REFERENCES project_search_entities(id) ON DELETE CASCADE,
+      target_entity_id TEXT NOT NULL REFERENCES project_search_entities(id) ON DELETE CASCADE,
+      edge_type TEXT NOT NULL,
+      evidence_document_id TEXT,
+      confidence_score REAL NOT NULL DEFAULT 0.5,
+      created_at TEXT NOT NULL,
+      UNIQUE (org_id, project_id, source_entity_id, target_entity_id, edge_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_project_search_edges_src
+      ON project_search_edges(org_id, project_id, source_entity_id);
+    CREATE INDEX IF NOT EXISTS idx_project_search_edges_tgt
+      ON project_search_edges(org_id, project_id, target_entity_id);
+
     CREATE TABLE IF NOT EXISTS ingestion_queue (
       id TEXT PRIMARY KEY,
       pod_id TEXT NOT NULL REFERENCES pods(pod_id),
@@ -495,6 +577,24 @@ export function createTables() {
   try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN retrieval_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN last_retrieved_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE agent_sessions ADD COLUMN last_compacted_event_rowid INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+
+  // FTS5 lexical index for project search chunks. Guarded: if the SQLite build
+  // lacks FTS5, the index service falls back to keyword scoring (isProjectSearchFtsAvailable()).
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS project_search_fts USING fts5(
+        chunk_id UNINDEXED,
+        document_id UNINDEXED,
+        org_id UNINDEXED,
+        project_id UNINDEXED,
+        title,
+        body,
+        tokenize = 'porter unicode61'
+      );
+    `);
+  } catch (err) {
+    console.warn("[schema] FTS5 unavailable; project search will use keyword fallback:", (err as Error).message);
+  }
 
   try {
     db.exec(`

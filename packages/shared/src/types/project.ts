@@ -24,9 +24,15 @@ export interface ProjectResources {
   jira?: {
     project_keys?: string[];
     team?: string;
+    /** Jira components to scope to (e.g. ["Events Tier 3"]) — narrows a large shared project. */
+    components?: string[];
     epics?: string[];
     issue_keys?: string[];
     fix_versions?: string[];
+    /** Version-name prefixes whose releases to ingest (e.g. ["T3-"]). */
+    version_prefixes?: string[];
+    /** Only ingest tickets updated within this many days (keeps the index current + bounded). */
+    lookback_days?: number;
   };
   github?: {
     repos?: string[];
@@ -42,7 +48,10 @@ export interface ProjectResources {
     page_ids?: string[];
     page_urls?: string[];
   };
-  git?: { repo_paths?: string[] };
+  git?: {
+    repo_paths?: string[];
+    lookback_days?: number;
+  };
   aliases?: string[];
   glossary?: ProjectGlossaryTerm[];
 }

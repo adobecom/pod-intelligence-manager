@@ -14,6 +14,8 @@ import type {
   AdHocLearningInput,
   ContextSearchRequest,
   ContextSearchResult,
+  ProjectSearchRequest,
+  ProjectSearchResponse,
 } from "@pim/shared";
 
 export interface SessionContextOptions {
@@ -221,6 +223,27 @@ export class PimClient {
     );
   }
 
+  /**
+   * Hybrid lexical + semantic search over this project's indexed artifacts
+   * (Jira/GitHub/Confluence/Slack/updates). Project-scoped client only. Prefer
+   * this over fanning out to external systems when you need to locate where
+   * something is implemented, discussed, decided, or blocked within the project.
+   */
+  async searchProjectIndex(
+    query: string,
+    opts?: Omit<ProjectSearchRequest, "query">,
+  ): Promise<ProjectSearchResponse> {
+    if (this.isPodMode()) throw new Error("searchProjectIndex requires a project-scoped client (projectId)");
+    return fetchJSON<ProjectSearchResponse>(
+      this.url(`/api/projects/${this.config.projectId}/search`),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, ...opts }),
+      }),
+    );
+  }
+
   // Query the organizational knowledge graph with token budget
   async queryKnowledge(options: KnowledgeQueryOptions): Promise<KnowledgeQueryResult> {
     return fetchJSON<KnowledgeQueryResult>(
@@ -239,7 +262,7 @@ export class PimClient {
   // falls back to keyword + domain matching only.
   async getRelevantLearnings(
     maxTokens: number = 2000,
-    opts?: { projectId?: string | null; taskQuery?: string; query?: string },
+    opts?: { projectId?: string | null; taskQuery?: string; query?: string; compactHeadingOffset?: number },
   ): Promise<KnowledgeQueryResult> {
     const scopes = encodeURIComponent(this.config.scope);
     const projectParam = opts?.projectId
@@ -249,8 +272,11 @@ export class PimClient {
     const queryParam = taskQuery
       ? `&taskQuery=${encodeURIComponent(taskQuery)}`
       : "";
+    const compactHeadingOffsetParam = opts?.compactHeadingOffset && opts.compactHeadingOffset > 0
+      ? `&compactHeadingOffset=${encodeURIComponent(String(opts.compactHeadingOffset))}`
+      : "";
     return fetchJSON<KnowledgeQueryResult>(
-      this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}${projectParam}${queryParam}`),
+      this.url(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTokens}${projectParam}${queryParam}${compactHeadingOffsetParam}`),
       this.withHeaders(),
     );
   }
@@ -314,6 +340,7 @@ export class PimClient {
     const learningsOpts = {
       projectId: pod.project_id ?? null,
       taskQuery,
+      compactHeadingOffset: 2,
     };
 
     const baseFetches = [
@@ -375,6 +402,7 @@ export class PimClient {
     const learningsOpts = {
       projectId: this.config.projectId ?? null,
       taskQuery,
+      compactHeadingOffset: 2,
     };
 
     const baseFetches = [
