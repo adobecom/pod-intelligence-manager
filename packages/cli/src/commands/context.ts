@@ -63,14 +63,24 @@ function formatMarkdownBundle(ctx: SessionContext): string {
   }
   lines.push("");
 
-  lines.push(
-    `## Relevant org learnings (${ctx.relevantLearnings.nodes.length}${ctx.relevantLearnings.truncated ? ", truncated" : ""})`,
-  );
-  for (const n of ctx.relevantLearnings.nodes.slice(0, 12)) {
-    lines.push(`- [${n.type}] ${n.summary}`);
-  }
-  if (ctx.relevantLearnings.nodes.length === 0) {
-    lines.push("- None returned");
+  const compactContext = ctx.relevantLearnings.compact_context?.trim();
+  const renderedLearnings = compactContext
+    ? compactContext.split("\n").filter((line) => /^- rank \d+ /.test(line)).length
+    : Math.min(ctx.relevantLearnings.nodes.length, 12);
+  const returnedLearnings = ctx.relevantLearnings.nodes.length;
+  const learningsCount = renderedLearnings < returnedLearnings
+    ? `${renderedLearnings} shown of ${returnedLearnings}${ctx.relevantLearnings.truncated ? ", truncated" : ""}`
+    : `${returnedLearnings}${ctx.relevantLearnings.truncated ? ", truncated" : ""}`;
+  lines.push(`## Relevant org learnings (${learningsCount})`);
+  if (compactContext) {
+    lines.push(compactContext);
+  } else {
+    for (const n of ctx.relevantLearnings.nodes.slice(0, 12)) {
+      lines.push(`- [${n.type}] ${n.summary}`);
+    }
+    if (ctx.relevantLearnings.nodes.length === 0) {
+      lines.push("- None returned");
+    }
   }
   lines.push("");
 
@@ -80,6 +90,12 @@ function formatMarkdownBundle(ctx: SessionContext): string {
   }
 
   return lines.join("\n");
+}
+
+function contextForJson(ctx: SessionContext): SessionContext {
+  const relevantLearnings = { ...ctx.relevantLearnings };
+  delete relevantLearnings.compact_context;
+  return { ...ctx, relevantLearnings };
 }
 
 function formatBrief(ctx: SessionContext): string {
@@ -204,7 +220,7 @@ export function registerContextCommand(program: Command): void {
           console.log(opts.brief ? formatBrief(ctx) : md);
         }
       } else if (opts.json) {
-        console.log(JSON.stringify(ctx, null, 2));
+        console.log(JSON.stringify(contextForJson(ctx), null, 2));
       } else if (opts.brief) {
         console.log(formatBrief(ctx));
       } else {

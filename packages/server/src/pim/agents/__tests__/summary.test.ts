@@ -201,4 +201,22 @@ describe("regenerateLivingDoc", () => {
       taskQuery: "API contract mismatch",
     });
   });
+
+  it("uses compact knowledge context when supplied", async () => {
+    setupDb({});
+    vi.mocked(getContractedRelevantLearnings).mockResolvedValue({
+      nodes: [
+        { id: "n1", type: "pattern", summary: "Raw node should not be re-rendered", source_pod_name: "Beta Pod", confidence_score: 0.8, details: "", domain_tags: [], created_at: "", source_pod_id: "" },
+      ],
+      truncated: false,
+      total_matching: 1,
+      compact_context: "# PIM KG Compact Context\n## Possible KG constraints\n- rank 1 [pattern/related]: Use shared schemas\n  - Signals: topic:schema",
+    } as any);
+
+    const md = await regenerateLivingDoc("pod-1");
+    expect(md).toContain("### PIM KG Compact Context");
+    expect(md).toContain("#### Possible KG constraints");
+    expect(md).toContain("Signals: topic:schema");
+    expect(md).not.toContain("Raw node should not be re-rendered");
+  });
 });

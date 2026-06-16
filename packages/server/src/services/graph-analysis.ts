@@ -34,7 +34,16 @@ const STOP_WORDS = new Set([
   "node", "context",
 ]);
 const BARE_HTTP_VERB_IDENTIFIERS = new Set(["get", "post", "put", "patch", "delete"]);
-const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set(["api", "current"]);
+const LOW_SIGNAL_RETRIEVAL_IDENTIFIERS = new Set(["api", "current", "how", "implemented", "implementation", "status"]);
+
+function normalizeIdentifierMatch(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/^[`"'([{]+/g, "")
+    .replace(/[`"',.;)]+$/g, "");
+}
 
 export function extractKeywords(text: string): Set<string> {
   return new Set(
@@ -52,6 +61,12 @@ export function extractIdentifiers(text: string): Set<string> {
     /\b[A-Z][A-Z0-9]+-\d+\b/g,
     /\b(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g,
     /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
+    /(?:^|\s)\/[A-Za-z0-9_./:{}-]+/g,
+    /\b[A-Za-z][A-Za-z0-9_-]*:[A-Za-z*][A-Za-z0-9_-]*\b/g,
+    /\b[A-Za-z][A-Za-z0-9_-]*:\*/g,
+    /\*:[A-Za-z*][A-Za-z0-9_-]*/g,
+    /\*:\*/g,
+    /\b[A-Za-z][A-Za-z0-9]*-(?:[A-Za-z0-9]+-)+[A-Za-z0-9]+\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+\b/g,
     /\b[A-Za-z_$][A-Za-z0-9_$]*(?:_[A-Za-z0-9_$]+)+\b/g,
     /\b[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*\b/g,
@@ -62,7 +77,7 @@ export function extractIdentifiers(text: string): Set<string> {
   ];
   for (const pattern of patterns) {
     for (const match of text.match(pattern) ?? []) {
-      const cleaned = match.trim().toLowerCase();
+      const cleaned = normalizeIdentifierMatch(match);
       if (STOP_WORDS.has(cleaned)) continue;
       if (BARE_HTTP_VERB_IDENTIFIERS.has(cleaned)) continue;
       if (cleaned.length > 2) identifiers.add(cleaned);

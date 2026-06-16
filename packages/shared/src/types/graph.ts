@@ -214,6 +214,8 @@ export interface KnowledgeQueryResult {
   as_of?: string;
   explanations?: KnowledgeRetrievalExplanation[];
   context_contract?: KnowledgeContextContractInfo;
+  /** Prompt-ready summary-only KG context for task-query retrieval. */
+  compact_context?: string;
 }
 
 // --- Stats ---

@@ -91,6 +91,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     vi.clearAllMocks();
     _resetForTests();
     orgSettingsState.kgContextContract = "legacy";
+    delete process.env.PIM_KG_COMPACT_CONTEXT_TOP_N;
+    delete process.env.PIM_KG_COMPACT_CONTEXT_MAX_CHARS;
   });
 
   it("ranks nodes matching conflict-derived keywords ahead of same-domain peers", async () => {
@@ -424,7 +426,12 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       mode: "legacy",
       returned_mode: "legacy",
       task_query_used: true,
+      possible_constraints: true,
+      note: expect.stringContaining("Legacy keyword KG context"),
     });
+    expect(result.compact_context).toContain("PIM KG Compact Context");
+    expect(result.compact_context).toContain("Possible KG constraints");
+    expect(result.compact_context).toContain("webhook authentication");
     expect(result.nodes).toHaveLength(2);
     expect(result.nodes[0]?.summary).toBe("Webhook authentication pattern");
     expect(result.explanations).toBeUndefined();
@@ -470,9 +477,86 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(result.nodes.length).toBeGreaterThan(0);
     expect(result.nodes.length).toBeLessThanOrEqual(5);
     expect(result.nodes.map((n) => n.summary)).not.toContain("Cache static assets at the CDN edge");
+    expect(result.compact_context).toContain("PIM KG Compact Context");
+    expect(result.compact_context).toContain("task prompt API/input/output shape is authoritative");
+    expect(result.compact_context).toContain("payment webhook callback signature verification");
+    expect(result.compact_context).toContain("Use webhook signatures for payment callbacks");
+    expect(result.compact_context).not.toContain("Cache static assets at the CDN edge");
+    expect(result.compact_context).not.toContain("Seed Pod");
+    expect(result.compact_context!.length).toBeLessThanOrEqual(1000);
     expect(result.explanations?.length).toBe(result.nodes.length);
     expect(result.explanations?.[0].node_id).toBe(result.nodes[0].id);
     expect(result.explanations?.some((e) => e.strength === "avoid")).toBe(true);
+  });
+
+  it("clips an overlong first compact signal instead of dropping the signals line", async () => {
+    const longScope = `backend-${"x".repeat(360)}`;
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Use scoped webhook validation",
+        details: "Webhook validation constraints should retain retrieval signals.",
+        domains: [longScope],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+    ]);
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: [longScope],
+      taskQuery: "webhook validation",
+      maxTokens: 2000,
+    });
+
+    expect(result.compact_context).toContain("  - Signals: scope:");
+    expect(result.compact_context).toContain("...");
+  });
+
+  it("keeps compact context within tiny configured max char budgets", async () => {
+    process.env.PIM_KG_COMPACT_CONTEXT_MAX_CHARS = "10";
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "Keep context budget bounded",
+        details: "Compact context must not exceed its configured character limit.",
+        domains: ["backend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+    ]);
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "context budget",
+      maxTokens: 2000,
+    });
+
+    expect(result.compact_context?.length).toBeLessThanOrEqual(10);
+  });
+
+  it("reports compact-context unseen matches from the number of nodes actually shown", async () => {
+    process.env.PIM_KG_COMPACT_CONTEXT_TOP_N = "3";
+    const orgId = await seedGraph(Array.from({ length: 10 }, (_, i) => ({
+      type: "pattern" as const,
+      summary: `Backend webhook pattern ${i}`,
+      details: "Backend webhook validation guidance.",
+      domains: ["backend"],
+      confidence: "extracted" as const,
+      confidence_score: 0.9,
+    })));
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["backend"],
+      taskQuery: "backend webhook validation",
+      maxTokens: 2000,
+    });
+
+    expect(result.nodes).toHaveLength(5);
+    expect(result.total_matching).toBe(10);
+    expect(result.compact_context).toContain("Retrieval had 7 additional match(es) not shown");
   });
 
   it("returns a tiny possible_constraints block without taskQuery in task_relevant mode", async () => {
@@ -493,6 +577,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(result.context_contract?.possible_constraints).toBe(true);
     expect(result.context_contract?.note).toContain("query_knowledge");
+    expect(result.compact_context).toContain("Possible KG constraints");
     expect(result.nodes).toHaveLength(3);
     expect(result.explanations).toHaveLength(3);
   });
@@ -767,6 +852,134 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(q.nodes.map((n) => n.summary)).toEqual(["EMC frontend route shell layout pattern"]);
     expect(q.total_matching).toBe(1);
+  });
+
+  it("recalls RBAC context for short natural questions through rare exact-term lookup", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "RBAC permission gating uses useHasPermission",
+        details: "Permissions use event:write and event:delete checks before rendering write actions.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "Checkout animation storyboard timing",
+        details: "Motion timing for the mobile checkout storyboard.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    const rbacNode = getGraph(orgId).nodes.find((n) => n.summary.includes("RBAC"))!;
+    const animationNode = getGraph(orgId).nodes.find((n) => n.summary.includes("animation"))!;
+    rbacNode.embedding = [1, 0, 0];
+    animationNode.embedding = [0, 1, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { domains: ["frontend"] },
+      max_tokens: 20_000,
+      query_text: "how is rbac implemented",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes[0]?.summary).toBe("RBAC permission gating uses useHasPermission");
+    expect(q.nodes.map((n) => n.summary)).toContain("Checkout animation storyboard timing");
+  });
+
+  it.each(["x-adobe-esp-group-id", "event:write", "useHasPermission"])(
+    "force-recalls exact query signal %s despite weak cosine similarity",
+    async (signal) => {
+      const orgId = await seedGraph([
+        {
+          type: "pattern",
+          summary: "ESP RBAC UI permission contract",
+          details: "API requests inject x-adobe-esp-group-id, and UI actions gate writes with useHasPermission and event:write.",
+          domains: ["frontend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+        {
+          type: "pattern",
+          summary: "Semantically strong unrelated checkout result",
+          details: "This node is intentionally closest to the supplied embedding.",
+          domains: ["frontend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+      ]);
+      const target = getGraph(orgId).nodes.find((n) => n.summary.includes("ESP RBAC"))!;
+      const distractor = getGraph(orgId).nodes.find((n) => n.summary.includes("checkout"))!;
+      target.embedding = [1, 0, 0];
+      distractor.embedding = [0, 1, 0];
+
+      const q = queryKnowledge(orgId, {
+        filters: { domains: ["frontend"] },
+        max_tokens: 20_000,
+        query_text: signal,
+        query_embedding: [0, 1, 0],
+      });
+
+      expect(q.nodes[0]?.summary).toBe("ESP RBAC UI permission contract");
+    },
+  );
+
+  it("does not rescue low-signal short generic questions when semantic similarity is weak", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "Current status implementation note",
+        details: "A generic status note should not be recalled by low-signal query words alone.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: {},
+      max_tokens: 20_000,
+      query_text: "current status",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
+  });
+
+  it("keeps project filters authoritative for lexical recall matches", async () => {
+    const orgId = nextOrgId("kg-project-lexical");
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [
+        {
+          type: "pattern",
+          summary: "Beta project useHasPermission gating",
+          details: "Project Beta gates event:write actions with useHasPermission.",
+          domains: ["frontend"],
+          confidence: "extracted",
+          confidence_score: 0.9,
+        },
+      ],
+      "pod-beta",
+      "Beta Pod",
+      { project_id: "proj-beta", project_name: "Beta" },
+    );
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const q = queryKnowledge(orgId, {
+      filters: { include_project_id: "proj-alpha" },
+      max_tokens: 20_000,
+      query_text: "useHasPermission",
+      query_embedding: [0, 1, 0],
+    });
+
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
   });
 
   it("does not let partial keyword overlap from a long semantic query bypass the gate", async () => {
@@ -1190,6 +1403,32 @@ describe("text_search index behavior", () => {
     expect(retrievalIds).not.toContain("api");
     expect(retrievalIds).not.toContain("current");
     expect(retrievalIds).not.toContain("put");
+  });
+
+  it("extracts strong retrieval signals and excludes low-signal query terms", () => {
+    const text = [
+      "RBAC calls useHasPermission before event:write and scope-team:* actions.",
+      "Requests include x-adobe-esp-group-id for GET /v1/events/{eventId}.",
+      "Fallback handlers live in dataFilters.ts, while CURRENT STATUS IMPLEMENTED HOW are generic.",
+    ].join(" ");
+
+    const retrievalIds = [...extractRetrievalIdentifiers(text)];
+
+    expect(retrievalIds).toEqual(
+      expect.arrayContaining([
+        "rbac",
+        "usehaspermission",
+        "event:write",
+        "scope-team:*",
+        "x-adobe-esp-group-id",
+        "get /v1/events/{eventid}",
+        "/v1/events/{eventid}",
+        "datafilters.ts",
+      ]),
+    );
+    expect(retrievalIds).not.toEqual(
+      expect.arrayContaining(["current", "status", "implemented", "how"]),
+    );
   });
 });
 

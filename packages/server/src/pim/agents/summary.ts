@@ -59,6 +59,12 @@ function capitalizeStatus(status: string): string {
   return status.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
 }
 
+function demoteCompactKgHeadings(markdown: string): string {
+  return markdown
+    .replace(/^# /gm, "### ")
+    .replace(/^## /gm, "#### ");
+}
+
 // Template-based living doc generation from database state
 export async function regenerateLivingDoc(podId: string): Promise<string> {
   const pod = db.prepare("SELECT * FROM pods WHERE pod_id = ?").get(podId) as PodRow | undefined;
@@ -162,15 +168,21 @@ export async function regenerateLivingDoc(podId: string): Promise<string> {
       projectId: pod.project_id ?? null,
       ...(taskQuery ? { taskQuery } : {}),
     });
-    if (knowledgeResult.nodes.length > 0) {
+    const compactContext = knowledgeResult.compact_context?.trim();
+    if (compactContext || knowledgeResult.nodes.length > 0) {
       md += `## Knowledge Context\n\n`;
-      md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
-      for (const node of knowledgeResult.nodes.slice(0, 8)) {
-        const icon = node.type === "anti_pattern" ? "⚠" : node.type === "pattern" ? "✓" : "•";
-        md += `- ${icon} ${node.summary} *(${node.source_pod_name})*\n`;
-      }
-      if (knowledgeResult.truncated) {
-        md += `\n*${knowledgeResult.total_matching - knowledgeResult.nodes.length} more learnings available — query the knowledge graph for details.*\n`;
+      if (compactContext) {
+        md += `*From organizational memory (compact KG context; ${knowledgeResult.nodes.length} returned learnings):*\n\n`;
+        md += `${demoteCompactKgHeadings(compactContext)}\n`;
+      } else {
+        md += `*From organizational memory (${knowledgeResult.nodes.length} relevant learnings):*\n\n`;
+        for (const node of knowledgeResult.nodes.slice(0, 8)) {
+          const icon = node.type === "anti_pattern" ? "⚠" : node.type === "pattern" ? "✓" : "•";
+          md += `- ${icon} ${node.summary} *(${node.source_pod_name})*\n`;
+        }
+        if (knowledgeResult.truncated) {
+          md += `\n*${knowledgeResult.total_matching - knowledgeResult.nodes.length} more learnings available — query the knowledge graph for details.*\n`;
+        }
       }
       md += `\n`;
     }
