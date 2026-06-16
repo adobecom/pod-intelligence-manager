@@ -136,6 +136,7 @@ export default async function graphRoutes(app: FastifyInstance) {
   app.get<{
     Querystring: {
       scopes?: string;
+      scope?: string;  // singular alias — some clients send scope= not scopes=
       domains?: string;
       maxTokens?: string;
       projectId?: string;
@@ -147,7 +148,7 @@ export default async function graphRoutes(app: FastifyInstance) {
   }>(
     "/api/knowledge/relevant",
     async (req) => {
-      const scopeParam = req.query.scopes ?? req.query.domains ?? "";
+      const scopeParam = req.query.scopes ?? req.query.scope ?? req.query.domains ?? "";
       const scopes = scopeParam.split(",").map((s) => s.trim()).filter(Boolean);
       const maxTokens = parseInt(req.query.maxTokens ?? "2000", 10);
       const projectId = req.query.projectId?.trim() || null;
