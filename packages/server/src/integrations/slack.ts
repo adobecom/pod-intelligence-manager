@@ -1,5 +1,5 @@
 import { WebClient } from "@slack/web-api";
-import type { ContextSearchHit } from "@pim/shared";
+import type { SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate, isoDaysAgo } from "./types.js";
 
 // Per-workspace user tokens. Empty entries are skipped.
@@ -50,7 +50,7 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
   if (configured.length === 0) {
     return {
       source: "slack",
-      hits: [],
+      documents: [],
       missing: "No Slack workspace tokens set (SLACK_USER_TOKEN_MWP/AEM_ENG/ADOBEDOTCOM)",
     };
   }
@@ -74,10 +74,14 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
       const publicOnly = matches.filter(
         (m) => m.channel && m.channel.is_private !== true && !m.channel.is_im && !m.channel.is_mpim,
       );
-      return publicOnly.map<ContextSearchHit>((m) => ({
+      return publicOnly.map<SearchDocument>((m) => ({
+        org_id: opts.org_id,
+        project_id: opts.project_id,
         source: "slack",
+        source_type: "message",
+        source_id: m.permalink ?? `${ws.name}:${m.ts ?? "unknown"}`,
+        source_url: m.permalink,
         title: `#${m.channel?.name ?? "unknown"} (${ws.name})`,
-        url: m.permalink,
         snippet: truncate(m.text ?? ""),
         author: m.username ?? m.user,
         timestamp: m.ts ? new Date(Number(m.ts) * 1000).toISOString() : undefined,
@@ -86,12 +90,12 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
     }),
   );
 
-  const hits: ContextSearchHit[] = [];
+  const documents: SearchDocument[] = [];
   const errors: string[] = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     if (r.status === "fulfilled") {
-      hits.push(...r.value);
+      documents.push(...r.value);
     } else {
       errors.push(`${configured[i].name}: ${r.reason?.message ?? r.reason}`);
     }
@@ -99,7 +103,7 @@ export async function searchSlack(opts: IntegrationSearchOpts): Promise<Integrat
 
   return {
     source: "slack",
-    hits: hits.slice(0, opts.max_hits_per_source),
-    ...(errors.length && hits.length === 0 ? { missing: `All Slack workspaces failed: ${errors.join("; ")}` } : {}),
+    documents: documents.slice(0, opts.max_hits_per_source),
+    ...(errors.length && documents.length === 0 ? { missing: `All Slack workspaces failed: ${errors.join("; ")}` } : {}),
   };
 }

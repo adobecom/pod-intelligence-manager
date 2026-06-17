@@ -147,6 +147,9 @@ export interface ProjectSearchRequest {
   max_hits?: number;
   /** Produce a plain-language, cited summary answer over the hits (LLM; default false). */
   synthesize?: boolean;
+  /** Fall back to live connector fan-out when the index returns no candidates.
+   *  Default false. Requires PROJECT_SEARCH_LIVE_FALLBACK=1 env flag on the server. */
+  use_live?: boolean;
 }
 
 /** Why a hit surfaced — useful for explaining ranking. */

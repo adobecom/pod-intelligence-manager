@@ -37,38 +37,38 @@ vi.mock("../../integrations/jira.js", async () => {
   return {
     ...actual,
     searchJira: vi.fn(
-      async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "jira", hits: [] }),
+      async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "jira", documents: [] }),
     ),
   };
 });
 vi.mock("../../integrations/slack.js", () => ({
   searchSlack: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "slack", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "slack", documents: [] }),
   ),
 }));
 vi.mock("../../integrations/github.js", () => ({
   searchGithub: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "github", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "github", documents: [] }),
   ),
 }));
 vi.mock("../../integrations/git.js", () => ({
   searchGit: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "git", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "git", documents: [] }),
   ),
 }));
 vi.mock("../../integrations/confluence.js", () => ({
   searchConfluence: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "confluence", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "confluence", documents: [] }),
   ),
 }));
 vi.mock("../../integrations/fluffyjaws.js", () => ({
   searchFluffyjaws: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "fluffyjaws", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "fluffyjaws", documents: [] }),
   ),
 }));
 vi.mock("../../integrations/kg.js", () => ({
   searchKG: vi.fn(
-    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "kg", hits: [] }),
+    async (_opts: IntegrationSearchOpts): Promise<IntegrationResult> => ({ source: "kg", documents: [] }),
   ),
 }));
 
@@ -212,12 +212,15 @@ describe("searchContext synthesis prompt", () => {
   beforeEach(() => {
     vi.mocked(searchSlack).mockImplementationOnce(async () => ({
       source: "slack",
-      hits: [
+      documents: [
         {
+          org_id: TEST_ORG_ID,
           source: "slack",
+          source_type: "message",
+          source_id: "https://slack.example/x",
+          source_url: "https://slack.example/x",
           title: "#milo-devs",
           snippet: "block init pattern discussion",
-          url: "https://slack.example/x",
         },
       ],
     }));
@@ -256,7 +259,7 @@ describe("searchContext synthesis prompt", () => {
   it("zero-hits deterministic summary returns undefined under IMS fallback (no actor narrative)", async () => {
     // Override the slack mock so this test gets zero hits.
     vi.mocked(searchSlack).mockReset();
-    vi.mocked(searchSlack).mockImplementation(async () => ({ source: "slack", hits: [] }));
+    vi.mocked(searchSlack).mockImplementation(async () => ({ source: "slack", documents: [] }));
 
     const result = await searchContext(
       { query: "milo block init", use_cache: false },

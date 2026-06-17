@@ -1,4 +1,4 @@
-import type { ContextSearchActor, ContextSearchHit } from "@pim/shared";
+import type { ContextSearchActor, SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 function stripPersonTokens(query: string, actor?: ContextSearchActor): string {
@@ -53,7 +53,7 @@ function repoScope(opts: IntegrationSearchOpts): string {
 export async function searchGithub(opts: IntegrationSearchOpts): Promise<IntegrationResult> {
   const token = process.env.GH_TOKEN;
   if (!token) {
-    return { source: "github", hits: [], missing: "GH_TOKEN not set" };
+    return { source: "github", documents: [], missing: "GH_TOKEN not set" };
   }
 
   // Prefer project-configured repos over the env org scope. If neither is
@@ -63,7 +63,7 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   if (!scope && !opts.actor?.github_login) {
     return {
       source: "github",
-      hits: [],
+      documents: [],
       missing:
         "No scope: configure GITHUB_SEARCH_ORGS, add repos to the project, or pass an actor",
     };
@@ -111,17 +111,21 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   ]);
   clearTimeout(timer);
 
-  const hits: ContextSearchHit[] = [];
+  const documents: SearchDocument[] = [];
   const errors: string[] = [];
 
   if (codeRes.status === "fulfilled" && codeRes.value.ok) {
     const data = (await codeRes.value.json()) as SearchResponse<CodeItem>;
     for (const item of data.items ?? []) {
       const fragment = item.text_matches?.[0]?.fragment ?? item.path ?? "";
-      hits.push({
+      documents.push({
+        org_id: opts.org_id,
+        project_id: opts.project_id,
         source: "github",
+        source_type: "code",
+        source_id: item.html_url ?? `${item.repository?.full_name}/${item.path}`,
+        source_url: item.html_url,
         title: `${item.repository?.full_name ?? ""}/${item.path ?? item.name ?? ""}`,
-        url: item.html_url,
         snippet: truncate(fragment),
         metadata: { kind: "code", repo: item.repository?.full_name },
       });
@@ -140,13 +144,18 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
     if (res.status === "fulfilled" && res.value.ok) {
       const data = (await res.value.json()) as SearchResponse<IssueItem>;
       for (const item of data.items ?? []) {
-        hits.push({
+        documents.push({
+          org_id: opts.org_id,
+          project_id: opts.project_id,
           source: "github",
+          source_type: item.pull_request ? "pr" : "issue",
+          source_id: item.html_url ?? item.title ?? "unknown",
+          source_url: item.html_url,
           title: `${item.pull_request ? "PR" : "Issue"}: ${item.title ?? ""}`,
-          url: item.html_url,
           snippet: truncate(item.body ?? ""),
           author: item.user?.login,
           timestamp: item.updated_at ?? item.created_at,
+          status: item.state,
           metadata: { kind: item.pull_request ? "pr" : "issue", state: item.state },
         });
       }
@@ -161,7 +170,7 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
 
   return {
     source: "github",
-    hits: hits.slice(0, opts.max_hits_per_source),
-    ...(errors.length && hits.length === 0 ? { missing: `GitHub: ${errors.join("; ")}` } : {}),
+    documents: documents.slice(0, opts.max_hits_per_source),
+    ...(errors.length && documents.length === 0 ? { missing: `GitHub: ${errors.join("; ")}` } : {}),
   };
 }

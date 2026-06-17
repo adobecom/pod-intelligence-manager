@@ -40,7 +40,7 @@ describe("searchJira fail-closed scope guard", () => {
   it("refuses an unscoped query (no project, no actor, no fixVersion)", async () => {
     const res = await searchJira(baseOpts());
     expect(res.source).toBe("jira");
-    expect(res.hits).toEqual([]);
+    expect(res.documents).toEqual([]);
     expect(res.missing).toMatch(/refused/i);
     expect(res.missing).toMatch(/project|actor|version/i);
     expect(globalThis.fetch).not.toHaveBeenCalled();

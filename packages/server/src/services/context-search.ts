@@ -8,10 +8,12 @@ import type {
   ContextSearchResult,
   ContextSource,
   ProjectResources,
+  SearchDocument,
 } from "@pim/shared";
 import { CONTEXT_SOURCES } from "@pim/shared";
-import { callLLM, isLLMAvailable, MODELS } from "../pim/llm.js";
-import { redactSecrets } from "./secret-scan.js";
+import { redactSecrets, scrubHits } from "./search-core/scrub.js";
+import { synthesizeSearch } from "./search-core/synthesizer.js";
+import { LIVE_SOURCE_AUTHORITY } from "./search-core/weights.js";
 import { searchSlack } from "../integrations/slack.js";
 import { searchFluffyjaws } from "../integrations/fluffyjaws.js";
 import { searchJira, extractFixVersions } from "../integrations/jira.js";
@@ -32,7 +34,7 @@ const PARTIAL_RESULT_CACHE_TTL_SEC = 300;
 const CACHE_DIR = path.resolve(process.cwd(), ".data", "context-search-cache");
 const PROMPT_PATH = path.resolve(
   new URL(".", import.meta.url).pathname,
-  "../../../../prompts/context-search-synthesis.md",
+  "../../../../prompts/search-synthesis.md",
 );
 
 type Integration = (opts: IntegrationSearchOpts) => Promise<IntegrationResult>;
@@ -409,6 +411,22 @@ export async function resolveScope(
   return scope;
 }
 
+/** Adapt a `SearchDocument` (connector output) to a `ContextSearchHit` for the
+ *  live ranking pipeline. This keeps the ranker, dedup, and synthesis paths
+ *  unchanged while the connectors move to the unified document shape.
+ */
+function toContextHit(doc: SearchDocument): ContextSearchHit {
+  return {
+    source: doc.source as ContextSource,
+    title: doc.title,
+    url: doc.source_url,
+    snippet: doc.snippet,
+    author: doc.author,
+    timestamp: doc.timestamp,
+    metadata: doc.metadata,
+  };
+}
+
 function boostFor(hit: ContextSearchHit, resources?: ProjectResources): number {
   if (!resources) return 0;
   const url = (hit.url ?? "").toLowerCase();
@@ -438,12 +456,6 @@ function boostFor(hit: ContextSearchHit, resources?: ProjectResources): number {
   return 0;
 }
 
-function sourceAuthority(source: ContextSource): number {
-  // Higher is better. Used as a ranking bonus. The KG sits above every
-  // other source — it is the org's curated learning, not a raw artifact.
-  return { kg: 6, jira: 4, confluence: 4, github: 3, git: 3, slack: 2, fluffyjaws: 1 }[source];
-}
-
 function rankHits(
   hits: ContextSearchHit[],
   query: string,
@@ -456,7 +468,7 @@ function rankHits(
   return [...hits].sort((a, b) => score(b) - score(a));
 
   function score(h: ContextSearchHit): number {
-    const authority = sourceAuthority(h.source);
+    const authority = LIVE_SOURCE_AUTHORITY[h.source] ?? 0;
     const text = `${h.title} ${h.snippet}`.toLowerCase();
     const exact = text.includes(q) ? 3 : 0;
     const phraseHits = phrases.filter((p) => text.includes(p)).length;
@@ -482,25 +494,6 @@ function dedupe(hits: ContextSearchHit[]): ContextSearchHit[] {
     if (!seen.has(key)) seen.set(key, h);
   }
   return [...seen.values()];
-}
-
-function scrubHits(hits: ContextSearchHit[]): ContextSearchHit[] {
-  return hits.map((h) => ({
-    ...h,
-    title: redactSecrets(h.title).text,
-    snippet: redactSecrets(h.snippet).text,
-  }));
-}
-
-let cachedPrompt: string | null = null;
-function loadPrompt(): string {
-  if (cachedPrompt) return cachedPrompt;
-  try {
-    cachedPrompt = fs.readFileSync(PROMPT_PATH, "utf-8");
-  } catch {
-    cachedPrompt = "Synthesize the following search hits into a concise, citable markdown summary.";
-  }
-  return cachedPrompt;
 }
 
 async function synthesize(
@@ -530,31 +523,28 @@ async function synthesize(
     }
     return undefined;
   }
-  if (!isLLMAvailable()) return undefined;
-  try {
-    const system = loadPrompt();
-    const prompt = JSON.stringify(
-      {
-        query,
-        hits,
-        project_scope: scope.project_name
-          ? {
-              name: scope.project_name,
-              aliases: scope.project_resources?.aliases ?? [],
-              resources: scope.project_resources,
-            }
-          : undefined,
-        actor: effectiveActor,
-      },
-      null,
-      2,
-    );
-    const md = await callLLM({ model: MODELS.fast, system, prompt, maxTokens: 1500 });
-    return redactSecrets(md).text;
-  } catch (err) {
-    console.error("[context-search] synthesis failed:", (err as Error).message);
-    return undefined;
-  }
+
+  const md = await synthesizeSearch({
+    systemPromptPath: PROMPT_PATH,
+    evidence: {
+      mode: "live",
+      query,
+      hits,
+      project_scope: scope.project_name
+        ? {
+            name: scope.project_name,
+            aliases: scope.project_resources?.aliases ?? [],
+            resources: scope.project_resources,
+          }
+        : undefined,
+      actor: effectiveActor,
+    },
+    maxTokens: 1500,
+    label: "context-search",
+  });
+  // Belt-and-suspenders: scrub any secrets that may have slipped through
+  // into the synthesized markdown itself.
+  return md !== undefined ? redactSecrets(md).text : undefined;
 }
 
 export async function searchContext(
@@ -640,7 +630,7 @@ export async function searchContext(
     // Success (no error) → report as used even when 0 hits, so callers
     // can distinguish "searched, nothing matched" from "never ran".
     sources_used.push(source);
-    if (res.hits.length > 0) allHits.push(...res.hits);
+    if (res.documents.length > 0) allHits.push(...res.documents.map(toContextHit));
   });
 
   const ranked = rankHits(dedupe(scrubHits(allHits)), req.query, scope.project_resources);

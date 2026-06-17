@@ -53,6 +53,8 @@ export type {
 
 export { PROJECT_SEARCH_SOURCES } from "./types/project-search.js";
 
+export type { SearchDocument, SearchDocumentSource } from "./types/search-document.js";
+
 export type {
   OrgConfig,
   OrgScopeDefinition,
