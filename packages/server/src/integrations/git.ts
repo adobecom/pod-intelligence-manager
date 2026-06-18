@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
-import type { ContextSearchHit } from "@pim/shared";
+import type { SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 import db from "../db/connection.js";
 
@@ -30,7 +30,7 @@ async function gitLog(
   cwd: string,
   args: string[],
   opts: IntegrationSearchOpts,
-): Promise<ContextSearchHit[]> {
+): Promise<SearchDocument[]> {
   const format = "%H%x1f%an%x1f%aI%x1f%s%x1f%b%x1e";
   const { stdout } = await exec(
     "git",
@@ -42,10 +42,14 @@ async function gitLog(
     .split("\x1e")
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .map<ContextSearchHit>((entry) => {
+    .map<SearchDocument>((entry) => {
       const [hash, author, date, subject, body] = entry.split("\x1f");
       return {
+        org_id: opts.org_id,
+        project_id: opts.project_id,
         source: "git",
+        source_type: "commit",
+        source_id: hash ?? "unknown",
         title: `${hash?.slice(0, 7) ?? "?"}: ${subject ?? ""}`,
         snippet: truncate(body ?? subject ?? ""),
         author,
@@ -73,7 +77,7 @@ export async function searchGit(opts: IntegrationSearchOpts): Promise<Integratio
   if (repos.length === 0) {
     return {
       source: "git",
-      hits: [],
+      documents: [],
       missing: opts.project_id
         ? `No repo_paths configured for project ${opts.project_id}`
         : opts.pod_id
@@ -108,19 +112,19 @@ export async function searchGit(opts: IntegrationSearchOpts): Promise<Integratio
     );
 
     const seen = new Set<string>();
-    const merged: ContextSearchHit[] = [];
+    const merged: SearchDocument[] = [];
     for (const h of perRepo.flat()) {
-      const key = (h.metadata as { hash?: string } | undefined)?.hash ?? h.title;
+      const key = (h.metadata as { hash?: string } | undefined)?.hash ?? h.source_id;
       if (seen.has(key)) continue;
       seen.add(key);
       merged.push(h);
     }
 
-    return { source: "git", hits: merged.slice(0, opts.max_hits_per_source) };
+    return { source: "git", documents: merged.slice(0, opts.max_hits_per_source) };
   } catch (err) {
     return {
       source: "git",
-      hits: [],
+      documents: [],
       missing: `git error: ${(err as Error).message}`,
     };
   }

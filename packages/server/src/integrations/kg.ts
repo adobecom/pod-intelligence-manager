@@ -1,4 +1,4 @@
-import type { ContextSearchHit, KnowledgeNode } from "@pim/shared";
+import type { KnowledgeNode, SearchDocument } from "@pim/shared";
 import { queryKnowledge } from "../services/knowledge-graph.js";
 import { generateEmbedding, isEmbeddingAvailable } from "../services/embeddings.js";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
@@ -21,15 +21,19 @@ import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./
 const TOKEN_BUDGET = 1500;
 const MAX_QUERY_VARIANTS = 2;
 
-function nodeToHit(node: KnowledgeNode): ContextSearchHit {
+function nodeToDocument(node: KnowledgeNode, opts: IntegrationSearchOpts): SearchDocument {
   const typeLabel = node.type.replace(/_/g, " ");
   const title = node.curated
     ? `[curated] ${typeLabel}: ${node.summary}`
     : `${typeLabel}: ${node.summary}`;
   return {
+    org_id: opts.org_id,
+    project_id: opts.project_id,
     source: "kg",
+    source_type: node.type,
+    source_id: node.id,
+    source_url: `/knowledge#${node.id}`,
     title,
-    url: `/knowledge#${node.id}`,
     snippet: truncate(node.retrieval_text || node.details || node.summary, 600),
     timestamp: node.created_at,
     metadata: {
@@ -104,17 +108,20 @@ export async function searchKG(opts: IntegrationSearchOpts): Promise<Integration
       // Empty graph or no matches under the project filter — surface as a
       // soft "no hits" rather than an integration failure so the synthesis
       // step can still emit a deterministic "no org learnings yet" line.
-      return { source: "kg", hits: [] };
+      return { source: "kg", documents: [] };
     }
 
-    return { source: "kg", hits: [...byId.values()].slice(0, limit).map(nodeToHit) };
+    return {
+      source: "kg",
+      documents: [...byId.values()].slice(0, limit).map((n) => nodeToDocument(n, opts)),
+    };
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
     // queryKnowledge throws when the graph is uninitialized — treat that as
     // missing rather than a hard error so other sources still run.
     if (msg.includes("not initialized")) {
-      return { source: "kg", hits: [], missing: "Knowledge graph not initialized on server" };
+      return { source: "kg", documents: [], missing: "Knowledge graph not initialized on server" };
     }
-    return { source: "kg", hits: [], missing: `KG error: ${msg}` };
+    return { source: "kg", documents: [], missing: `KG error: ${msg}` };
   }
 }

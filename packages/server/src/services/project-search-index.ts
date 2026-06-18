@@ -28,6 +28,7 @@ import type {
 } from "@pim/shared";
 import { embeddingTextHash, generateEmbedding, isEmbeddingAvailable } from "./embeddings.js";
 import { extractIdentifiers } from "./graph-analysis.js";
+import { queryKnowledge } from "./knowledge-graph.js";
 
 const EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0";
 const MAX_CHUNKS_PER_DOC = 24;
@@ -1240,6 +1241,108 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
   chunks += gitStats.chunks;
 
   return { documents, chunks };
+}
+
+// ---------------------------------------------------------------------------
+// KG → project index bridge
+// ---------------------------------------------------------------------------
+
+/** Minimum KG confidence score for a node to be indexed into project search. */
+const KG_INDEX_CONFIDENCE_MIN = 0.5;
+
+/** Maximum KG nodes to index per project per refresh run. */
+const KG_INDEX_LIMIT = 200;
+
+/**
+ * Resolves all org-KG nodes relevant to a project (via `include_project_id`
+ * scoping) and persists them as `kg`-typed project search documents so that
+ * org learnings participate in lexical + semantic ranking alongside raw artifacts.
+ *
+ * Idempotent: each node maps to a stable `source_id = node.id`; unchanged nodes
+ * are no-ops via `indexProjectDocument`'s content-hash short-circuit.
+ *
+ * Staleness reconciliation: any previously-indexed `kg` doc whose node is no
+ * longer returned (pruned, superseded, or confidence-dropped) is marked
+ * `freshness_state = 'deleted'` so it is excluded from future searches.
+ *
+ * This is a pull model — it piggybacks on the scheduled `refreshProjectSearch`
+ * tick (project-search-refresh.ts). Because it reads from the KG (which runs
+ * its own 7-day synthesis cycle), every project refresh automatically picks up
+ * new KG nodes without any hook into the synthesis internals.
+ */
+export function indexProjectKgNodes(orgId: string, projectId: string): { indexed: number; deleted: number; skipped: number } {
+  // Fetch all project-relevant KG nodes (no query text → full scoped set).
+  // record_retrievals: false avoids counting index-building as agent context delivery.
+  const result = queryKnowledge(orgId, {
+    filters: {
+      include_project_id: projectId,
+      confidence_min: KG_INDEX_CONFIDENCE_MIN,
+      include_superseded: false,
+    },
+    limit: KG_INDEX_LIMIT,
+    include_details: true,
+    record_retrievals: false,
+  });
+
+  const liveNodeIds = new Set(result.nodes.map((n) => n.id));
+  let indexed = 0;
+  let skipped = 0;
+
+  // Upsert each live node as a kg-typed search document.
+  for (const node of result.nodes) {
+    const input: IndexDocumentInput = {
+      org_id: orgId,
+      project_id: projectId,
+      source: "kg",
+      source_type: node.type,
+      source_id: node.id,
+      source_url: `/knowledge#${node.id}`,
+      title: node.summary,
+      body: node.details || node.summary,
+      occurred_at: node.created_at,
+      freshness_state: "fresh",
+      metadata: {
+        confidence_score: node.confidence_score,
+        curated: node.curated,
+        node_type: node.type,
+        retrieval_tier: node.retrieval_tier,
+        community_id: node.community_id,
+      },
+    };
+
+    const res = indexProjectDocument(input);
+    if (res.reused) {
+      skipped++;
+    } else {
+      indexed++;
+    }
+  }
+
+  // Staleness reconciliation: find previously-indexed kg docs that are no longer
+  // in the live result set and mark them deleted so they drop out of searches.
+  const existingRows = db
+    .prepare(
+      `SELECT source_id FROM project_search_documents
+       WHERE org_id = ? AND project_id = ? AND source = 'kg' AND freshness_state != 'deleted'`,
+    )
+    .all(orgId, projectId) as Array<{ source_id: string }>;
+
+  const toDelete = existingRows.filter((r) => !liveNodeIds.has(r.source_id));
+  let deleted = 0;
+
+  if (toDelete.length > 0) {
+    const stmt = db.prepare(
+      `UPDATE project_search_documents
+       SET freshness_state = 'deleted', updated_at = ?
+       WHERE org_id = ? AND project_id = ? AND source = 'kg' AND source_id = ?`,
+    );
+    for (const { source_id } of toDelete) {
+      stmt.run(new Date().toISOString(), orgId, projectId, source_id);
+      deleted++;
+    }
+  }
+
+  return { indexed, deleted, skipped };
 }
 
 // ---------------------------------------------------------------------------

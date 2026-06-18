@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@pim/shared";
+import type { SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 
 // Fluffyjaws is a conversational RAG API, not a REST search endpoint. The
@@ -216,7 +216,7 @@ export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<Int
   if (!sessionId) {
     return {
       source: "fluffyjaws",
-      hits: [],
+      documents: [],
       missing:
         "FLUFFYJAWS_SESSION_ID not set — copy `sessionId` from ~/.config/fj/session.json (or run `fj login`)",
     };
@@ -230,7 +230,7 @@ export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<Int
     const text = await streamAssistantText(base, sessionId, scopedQuery);
 
     if (!text.trim()) {
-      return { source: "fluffyjaws", hits: [], missing: "Fluffyjaws returned empty response" };
+      return { source: "fluffyjaws", documents: [], missing: "Fluffyjaws returned empty response" };
     }
 
     if (looksLikeRefusal(text)) {
@@ -239,25 +239,29 @@ export async function searchFluffyjaws(opts: IntegrationSearchOpts): Promise<Int
       // actual refusal so the caller can debug if needed.
       return {
         source: "fluffyjaws",
-        hits: [],
+        documents: [],
         missing: `Fluffyjaws declined to answer: ${truncate(text, 200)}`,
       };
     }
 
-    const hit: ContextSearchHit = {
+    const doc: SearchDocument = {
+      org_id: opts.org_id,
+      project_id: opts.project_id,
       source: "fluffyjaws",
+      source_type: "synthesis",
+      source_id: "synthesis",
+      source_url: base.replace(/^https:\/\/api\./, "https://"),
       title: "Fluffyjaws synthesis",
-      url: base.replace(/^https:\/\/api\./, "https://"),
       snippet: truncate(text, 1200),
       timestamp: new Date().toISOString(),
       metadata: { low_trust: true, full_response_length: text.length },
     };
 
-    return { source: "fluffyjaws", hits: [hit] };
+    return { source: "fluffyjaws", documents: [doc] };
   } catch (err) {
     return {
       source: "fluffyjaws",
-      hits: [],
+      documents: [],
       missing: `Fluffyjaws error: ${(err as Error).message}`,
     };
   }

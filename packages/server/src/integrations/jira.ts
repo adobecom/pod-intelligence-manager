@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@pim/shared";
+import type { SearchDocument } from "@pim/shared";
 import {
   type IntegrationResult,
   type IntegrationSearchOpts,
@@ -118,7 +118,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
   const token = process.env.JIRA_TOKEN;
   const email = process.env.JIRA_EMAIL;
   if (!base || !token) {
-    return { source: "jira", hits: [], missing: "JIRA_BASE_URL or JIRA_TOKEN not set" };
+    return { source: "jira", documents: [], missing: "JIRA_BASE_URL or JIRA_TOKEN not set" };
   }
 
   // Fail-closed scope guard. Unscoped full-text JQL against the shared
@@ -138,7 +138,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
   if (!hasNarrowingScope) {
     return {
       source: "jira",
-      hits: [],
+      documents: [],
       missing:
         "Jira search refused: no project scope, team, actor, or release version. " +
         "Configure project_resources.jira.project_keys or project_resources.jira.team " +
@@ -178,23 +178,28 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
 
     if (!res.ok) {
       const body = (await res.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
-      return { source: "jira", hits: [], missing: `Jira ${res.status}: ${body}` };
+      return { source: "jira", documents: [], missing: `Jira ${res.status}: ${body}` };
     }
 
     const data = (await res.json()) as JiraSearchResponse;
-    const hits: ContextSearchHit[] = (data.issues ?? []).map((issue) => {
+    const documents: SearchDocument[] = (data.issues ?? []).map((issue) => {
       const f = issue.fields ?? {};
       const descText =
         typeof f.description === "string"
           ? f.description
           : JSON.stringify(f.description ?? "").slice(0, 500);
       return {
+        org_id: opts.org_id,
+        project_id: opts.project_id,
         source: "jira",
+        source_type: "issue",
+        source_id: issue.key,
+        source_url: `${base.replace(/\/$/, "")}/browse/${issue.key}`,
         title: `${issue.key}: ${f.summary ?? ""}`,
-        url: `${base.replace(/\/$/, "")}/browse/${issue.key}`,
         snippet: truncate(descText),
         author: f.creator?.displayName ?? f.creator?.emailAddress,
         timestamp: f.updated,
+        status: f.status?.name,
         metadata: {
           key: issue.key,
           status: f.status?.name,
@@ -203,11 +208,11 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
       };
     });
 
-    return { source: "jira", hits };
+    return { source: "jira", documents };
   } catch (err) {
     return {
       source: "jira",
-      hits: [],
+      documents: [],
       missing: `Jira error: ${describeFetchError(err, base)}`,
     };
   } finally {

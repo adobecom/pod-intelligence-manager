@@ -1,4 +1,4 @@
-import type { ContextSearchHit } from "@pim/shared";
+import type { SearchDocument } from "@pim/shared";
 import {
   type IntegrationResult,
   type IntegrationSearchOpts,
@@ -36,7 +36,7 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
   const token = process.env.CONFLUENCE_TOKEN;
   const email = process.env.CONFLUENCE_EMAIL ?? process.env.JIRA_EMAIL;
   if (!base || !token) {
-    return { source: "confluence", hits: [], missing: "CONFLUENCE_BASE_URL or CONFLUENCE_TOKEN not set" };
+    return { source: "confluence", documents: [], missing: "CONFLUENCE_BASE_URL or CONFLUENCE_TOKEN not set" };
   }
 
   const isCloud = /atlassian\.net$/i.test(base) && !!email;
@@ -72,25 +72,30 @@ export async function searchConfluence(opts: IntegrationSearchOpts): Promise<Int
 
     if (!res.ok) {
       const body = (await res.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
-      return { source: "confluence", hits: [], missing: `Confluence ${res.status}: ${body}` };
+      return { source: "confluence", documents: [], missing: `Confluence ${res.status}: ${body}` };
     }
 
     const data = (await res.json()) as ConfluenceSearchResponse;
-    const hits: ContextSearchHit[] = (data.results ?? []).map((p) => ({
+    const webBase = base.replace(/\/$/, "");
+    const documents: SearchDocument[] = (data.results ?? []).map((p) => ({
+      org_id: opts.org_id,
+      project_id: opts.project_id,
       source: "confluence",
+      source_type: "page",
+      source_id: p.id,
+      source_url: p._links?.webui ? `${webBase}${p._links.webui}` : undefined,
       title: p.title ?? p.id,
-      url: p._links?.webui ? `${base.replace(/\/$/, "")}${p._links.webui}` : undefined,
       snippet: truncate(stripHtml(p.body?.view?.value ?? p.body?.storage?.value ?? "")),
       author: p.history?.createdBy?.displayName,
       timestamp: p.history?.lastUpdated?.when ?? p.history?.createdDate,
       metadata: { page_id: p.id },
     }));
 
-    return { source: "confluence", hits };
+    return { source: "confluence", documents };
   } catch (err) {
     return {
       source: "confluence",
-      hits: [],
+      documents: [],
       missing: `Confluence error: ${describeFetchError(err, base)}`,
     };
   } finally {

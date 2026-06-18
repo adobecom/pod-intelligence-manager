@@ -25,26 +25,25 @@ import type {
   ProjectSearchRequest,
   ProjectSearchResponse,
   ProjectSearchSource,
+  SearchDocument,
 } from "@pim/shared";
-import fs from "node:fs";
 import path from "node:path";
 import { cosineSimilarity, generateEmbedding, isEmbeddingAvailable } from "./embeddings.js";
 import { extractIdentifiers } from "./graph-analysis.js";
 import { isProjectSearchFtsAvailable } from "./project-search-index.js";
 import { queryKnowledge } from "./knowledge-graph.js";
-import { callLLM, isLLMAvailable, MODELS } from "../pim/llm.js";
+import { scrubHits, redactSecrets } from "./search-core/scrub.js";
+import { synthesizeSearch } from "./search-core/synthesizer.js";
+import { INDEXED_SOURCE_AUTHORITY, INDEXED_RECENCY_DAYS, INDEXED_RECENCY_MAX } from "./search-core/weights.js";
+import { searchJira } from "../integrations/jira.js";
+import { searchGithub } from "../integrations/github.js";
+import { searchConfluence } from "../integrations/confluence.js";
+import { searchGit } from "../integrations/git.js";
 
 const SYNTHESIS_PROMPT_PATH = path.resolve(
   new URL(".", import.meta.url).pathname,
-  "../../../../prompts/project-search-synthesis.md",
+  "../../../../prompts/search-synthesis.md",
 );
-let synthesisPromptCache: string | null = null;
-function loadSynthesisPrompt(): string {
-  if (synthesisPromptCache === null) {
-    synthesisPromptCache = fs.readFileSync(SYNTHESIS_PROMPT_PATH, "utf8");
-  }
-  return synthesisPromptCache;
-}
 
 /** A short, human-meaningful citation token for a hit (Jira key, PR #, release name, commit). */
 function refFor(h: ProjectSearchHit): string {
@@ -131,30 +130,23 @@ async function synthesizeAnswer(
   kgHits: ProjectSearchKgHit[],
 ): Promise<string | undefined> {
   const evidence = synthesisEvidence(kgHits, hits);
-  if (evidence.length === 0 || !isLLMAvailable()) return undefined;
-  try {
-    const system = loadSynthesisPrompt();
-    const prompt = JSON.stringify(
-      {
-        query,
-        project: { name: projectName, aliases },
-        evidence,
-      },
-      null,
-      2,
-    );
-    const md = await callLLM({ model: MODELS.fast, system, prompt, maxTokens: 1200 });
-    return md.trim() || undefined;
-  } catch (err) {
-    console.error("[project-search] synthesis failed:", (err as Error).message);
-    return undefined;
-  }
+  if (evidence.length === 0) return undefined;
+  return synthesizeSearch({
+    systemPromptPath: SYNTHESIS_PROMPT_PATH,
+    evidence: {
+      mode: "indexed",
+      query,
+      project: { name: projectName, aliases },
+      evidence,
+    },
+    maxTokens: 1200,
+    label: "project-search",
+  });
 }
 
 const RRF_K = 60;
 const CANDIDATE_K = 200;
 const DEFAULT_MAX_HITS = 10;
-const RECENT_DAYS = 30;
 const GRAPH_MAX_CONTRIBUTION = 0.22;
 const GRAPH_HUB_DEGREE = 24;
 const GRAPH_SEED_DOCUMENTS = 12;
@@ -182,16 +174,6 @@ const STOP_WORDS = new Set([
   "this", "that", "into", "about", "are", "our", "their", "how", "why", "did", "does",
   "is", "of", "to", "in", "on", "a", "an", "be", "or",
 ]);
-
-const SOURCE_AUTHORITY: Record<ProjectSearchSource, number> = {
-  jira: 0.05,
-  confluence: 0.05,
-  github: 0.04,
-  git: 0.04,
-  project_update: 0.03,
-  pod_update: 0.03,
-  slack: 0.01,
-};
 
 interface ProjectRow {
   project_id: string;
@@ -432,6 +414,10 @@ function inScope(doc: DocRow, resources: ProjectResources): boolean {
       const space = typeof doc.source_id === "string" ? doc.source_id : "";
       return spaces.some((s) => space.includes(s));
     }
+    case "kg":
+      // KG docs are project-scoped by construction (indexed via indexProjectKgNodes
+      // which filters by include_project_id) — always count as in-scope.
+      return true;
     default:
       return false;
   }
@@ -461,15 +447,6 @@ function intentBoost(query: string, doc: DocRow): number {
     else b += 0.15;
   }
   return b;
-}
-
-function recencyBoost(occurredAt: string | null): number {
-  if (!occurredAt) return 0;
-  const ts = new Date(occurredAt).getTime();
-  if (Number.isNaN(ts)) return 0;
-  const ageDays = (Date.now() - ts) / 864e5;
-  if (ageDays <= RECENT_DAYS) return 0.08 * (1 - ageDays / RECENT_DAYS);
-  return 0;
 }
 
 function emptyGraphExpansion(): GraphExpansion {
@@ -917,6 +894,83 @@ interface DocAccumulator {
   graphEntityIds?: Set<string>;
 }
 
+// ── Live fallback (indexed → live) ───────────────────────────────────────────
+// Gated by PROJECT_SEARCH_LIVE_FALLBACK=1 env flag AND req.use_live=true.
+// Triggered only when the index returns zero candidates. Connectors run in
+// parallel over the project's configured sources; results are scrubbed and
+// adapted to ProjectSearchHit shape but NOT written back to the index.
+// The repair path (write-through) is Phase 3b and is intentionally deferred
+// until the ephemeral path is validated in integration tests.
+
+const LIVE_SOURCES: ProjectSearchSource[] = ["jira", "github", "confluence", "git"];
+
+/** True when the feature flag and per-request opt-in are both set. */
+function liveFallbackEnabled(req: ProjectSearchRequest): boolean {
+  return req.use_live === true && process.env.PROJECT_SEARCH_LIVE_FALLBACK === "1";
+}
+
+/** Adapt a `SearchDocument` from a live connector to a `ProjectSearchHit`.
+ *  Live hits carry no index-specific fields (document_id, chunk_id, RRF scores).
+ *  They are marked `freshness: "unknown"` since they are not persisted.
+ */
+function liveDocToHit(doc: SearchDocument, score: number): ProjectSearchHit {
+  return {
+    document_id: `live:${doc.source_id}`,
+    source: doc.source as ProjectSearchSource,
+    source_type: doc.source_type ?? "unknown",
+    source_id: doc.source_id,
+    title: doc.title,
+    snippet: doc.snippet,
+    ...(doc.source_url ? { url: doc.source_url } : {}),
+    ...(doc.author ? { author: doc.author } : {}),
+    ...(doc.timestamp ? { occurred_at: doc.timestamp } : {}),
+    ...(doc.status ? { status: doc.status } : {}),
+    freshness: "unknown",
+    score,
+    matched: {},
+  };
+}
+
+/** Fan-out to live connectors scoped to this project and return scrubbed hits.
+ *  Called only when the index returned zero candidates and the feature flag is on.
+ */
+async function liveFallbackHits(
+  orgId: string,
+  projectId: string,
+  req: ProjectSearchRequest,
+  resources: ProjectResources,
+  maxHits: number,
+): Promise<ProjectSearchHit[]> {
+  const opts = {
+    query: req.query,
+    org_id: orgId,
+    project_id: projectId,
+    project_resources: resources,
+    time_window_days: req.time_window_days ?? 90,
+    max_hits_per_source: Math.ceil(maxHits / 2),
+  };
+
+  const sourceFilter = req.sources
+    ? new Set(req.sources.filter((s) => LIVE_SOURCES.includes(s)))
+    : new Set(LIVE_SOURCES);
+
+  const connectors = ([
+    sourceFilter.has("jira") ? searchJira(opts) : null,
+    sourceFilter.has("github") ? searchGithub(opts) : null,
+    sourceFilter.has("confluence") ? searchConfluence(opts) : null,
+    sourceFilter.has("git") ? searchGit(opts) : null,
+  ] as Array<ReturnType<typeof searchJira> | null>).filter(Boolean) as Array<ReturnType<typeof searchJira>>;
+
+  const settled = await Promise.allSettled(connectors);
+  const docs: SearchDocument[] = [];
+  for (const r of settled) {
+    if (r.status === "fulfilled") docs.push(...r.value.documents);
+  }
+
+  const scrubbed = scrubHits(docs);
+  return scrubbed.slice(0, maxHits).map((doc, i) => liveDocToHit(doc, 1 / (1 + i)));
+}
+
 /**
  * Runs a hybrid search over one project's index. Returns null when the project
  * does not exist for the org (so the route can 404).
@@ -990,6 +1044,36 @@ export async function searchProject(
   }
 
   if (acc.size === 0) {
+    // Live fallback: when the index has no candidates and the caller opted in,
+    // fan out to live connectors scoped to this project's resources.
+    if (liveFallbackEnabled(req)) {
+      const liveHits = await liveFallbackHits(orgId, projectId, req, resources, maxHits);
+      if (liveHits.length > 0) {
+        const coverage = embeddingCoverage(orgId, projectId);
+        const overlay = includeKg ? kgOverlay(orgId, projectId, req.query, queryVec) : [];
+        const response: ProjectSearchResponse = {
+          query: req.query,
+          project_id: projectId,
+          project_name: project.name,
+          hits: liveHits,
+          sources_used: [...new Set(liveHits.map((h) => h.source))],
+          documents_by_source: documentCounts,
+          detected_identifiers: identifiers,
+          embedding_coverage: coverage,
+          retrieval_mode: "lexical",
+          total_documents: totalDocumentCount(documentCounts),
+          generated_at: new Date().toISOString(),
+        };
+        if (overlay.length > 0) response.kg_overlay = overlay;
+        if (req.synthesize) {
+          const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], liveHits, overlay);
+          if (summary) response.summary_md = redactSecrets(summary).text;
+          const citations = answerCitations(overlay, liveHits);
+          if (citations.length > 0) response.answer_citations = citations;
+        }
+        return response;
+      }
+    }
     return emptyResponse(
       project,
       resources,
@@ -1050,8 +1134,12 @@ export async function searchProject(
     let score = lexScore + semScore + graphScore;
     if (a.identifier) score += 1; // exact identifier lookups dominate
     if (scopeHit) score += 0.15;
-    score += recencyBoost(doc.occurred_at);
-    score += SOURCE_AUTHORITY[doc.source] ?? 0;
+    if (doc.occurred_at) {
+      const ageDays = (Date.now() - new Date(doc.occurred_at).getTime()) / 864e5;
+      if (!Number.isNaN(ageDays) && ageDays <= INDEXED_RECENCY_DAYS)
+        score += INDEXED_RECENCY_MAX * (1 - ageDays / INDEXED_RECENCY_DAYS);
+    }
+    score += INDEXED_SOURCE_AUTHORITY[doc.source] ?? 0;
     score += intentBoost(req.query, doc);
     if (doc.freshness_state === "stale") score -= 0.1;
 
@@ -1127,7 +1215,7 @@ export async function searchProject(
     query: req.query,
     project_id: projectId,
     project_name: project.name,
-    hits: top,
+    hits: scrubHits(top),
     sources_used: sourcesUsed,
     documents_by_source: documentCounts,
     detected_identifiers: identifiers,
@@ -1142,7 +1230,8 @@ export async function searchProject(
   if (req.synthesize) {
     const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], top, overlay);
     if (summary || implementationGuard) {
-      response.summary_md = [implementationGuard, summary].filter(Boolean).join("\n\n");
+      const scrubbed = summary ? redactSecrets(summary).text : undefined;
+      response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
     }
     const citations = answerCitations(overlay, top);
     if (citations.length > 0) response.answer_citations = citations;
@@ -1198,7 +1287,8 @@ async function emptyResponse(
     const implementationGuard = implementationEvidenceGuard(documentCounts);
     const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], [], overlay);
     if (summary || implementationGuard) {
-      response.summary_md = [implementationGuard, summary].filter(Boolean).join("\n\n");
+      const scrubbed = summary ? redactSecrets(summary).text : undefined;
+      response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
     }
     const citations = answerCitations(overlay, []);
     if (citations.length > 0) response.answer_citations = citations;

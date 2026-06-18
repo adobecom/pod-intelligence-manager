@@ -1,8 +1,8 @@
 import type {
   ContextSearchActor,
-  ContextSearchHit,
   ContextSource,
   ProjectResources,
+  SearchDocument,
   TemporalQueryMode,
 } from "@pim/shared";
 
@@ -26,7 +26,8 @@ export interface IntegrationSearchOpts {
 
 export interface IntegrationResult {
   source: ContextSource;
-  hits: ContextSearchHit[];
+  /** Normalized documents produced by this integration. Empty when `missing` is set. */
+  documents: SearchDocument[];
   // When set, this source was skipped or failed. Surfaced as missing_sources in the response.
   missing?: string;
 }
