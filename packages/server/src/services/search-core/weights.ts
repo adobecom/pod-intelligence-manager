@@ -45,6 +45,8 @@ export const LIVE_RECENCY_MAX = 2.0;
  *  project_update and pod_update are project-internal sources.
  */
 export const INDEXED_SOURCE_AUTHORITY: Record<string, number> = {
+  /** KG nodes are curated org memory — ranked above raw artifact sources. */
+  kg: 0.06,
   jira: 0.05,
   confluence: 0.05,
   github: 0.04,

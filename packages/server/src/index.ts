@@ -26,6 +26,7 @@ import { runLintPass } from "./pim/agents/lint.js";
 import { initializeKnowledgeGraph, loadedOrgIds, pruneStaleNodes, refreshAnalysisIfStale } from "./services/knowledge-graph.js";
 import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
+import { runProjectSearchRefreshTick } from "./services/project-search-refresh.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import { registerJsonBodyParser } from "./middleware/validation.js";
@@ -205,6 +206,12 @@ const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10)
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
 const GRAPH_PRUNE_INTERVAL_MS = parseInt(process.env.GRAPH_PRUNE_INTERVAL_MS ?? "86400000", 10); // 24 hours
 const GRAPH_SYNTHESIS_INTERVAL_MS = parseInt(process.env.GRAPH_SYNTHESIS_INTERVAL_MS ?? "604800000", 10); // 7 days
+/** How often (ms) to sweep active projects for incremental search-index refresh. Default 6 h. */
+const PROJECT_SEARCH_REFRESH_INTERVAL_MS = parseInt(process.env.PROJECT_SEARCH_REFRESH_INTERVAL_MS ?? "21600000", 10); // 6 hours
+/** Trailing activity window (days) for determining which projects to include in the refresh sweep. */
+const PROJECT_SEARCH_REFRESH_WINDOW_DAYS = parseInt(process.env.PROJECT_SEARCH_REFRESH_WINDOW_DAYS ?? "30", 10);
+/** Set to "0" to disable the scheduled project-search refresh (e.g. in read-only worker processes). */
+const PROJECT_SEARCH_REFRESH_ENABLED = process.env.PROJECT_SEARCH_REFRESH_ENABLED !== "0";
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -297,11 +304,32 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     })();
   }, GRAPH_SYNTHESIS_INTERVAL_MS);
 
+  // Scheduled incremental project-search refresh.
+  // Each tick: enumerate active+configured projects, live-pull deltas, fold into index.
+  // Projects are spread across the interval with per-project jitter to avoid API bursts.
+  // Gated by PROJECT_SEARCH_REFRESH_ENABLED (default on).
+  if (PROJECT_SEARCH_REFRESH_ENABLED) {
+    setInterval(() => {
+      void (async () => {
+        try {
+          await runProjectSearchRefreshTick(PROJECT_SEARCH_REFRESH_INTERVAL_MS, app.log, PROJECT_SEARCH_REFRESH_WINDOW_DAYS);
+        } catch (e) {
+          app.log.error(e, "Project search refresh tick failed");
+        }
+      })();
+    }, PROJECT_SEARCH_REFRESH_INTERVAL_MS);
+  }
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph prune interval: ${GRAPH_PRUNE_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph synthesis interval: ${GRAPH_SYNTHESIS_INTERVAL_MS}ms`);
+  app.log.info(
+    PROJECT_SEARCH_REFRESH_ENABLED
+      ? `Project search refresh interval: ${PROJECT_SEARCH_REFRESH_INTERVAL_MS}ms (window: ${PROJECT_SEARCH_REFRESH_WINDOW_DAYS}d)`
+      : "Project search refresh: disabled (PROJECT_SEARCH_REFRESH_ENABLED=0)",
+  );
 });
 
 // Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.

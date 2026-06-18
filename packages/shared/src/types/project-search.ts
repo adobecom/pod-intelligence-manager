@@ -16,7 +16,9 @@ export type ProjectSearchSource =
   | "slack"
   | "git"
   | "project_update"
-  | "pod_update";
+  | "pod_update"
+  /** Durable org-KG nodes persisted into the project index for ranking alongside artifacts. */
+  | "kg";
 
 export const PROJECT_SEARCH_SOURCES: ProjectSearchSource[] = [
   "jira",
@@ -26,6 +28,7 @@ export const PROJECT_SEARCH_SOURCES: ProjectSearchSource[] = [
   "git",
   "project_update",
   "pod_update",
+  "kg",
 ];
 
 /** Lifecycle of an indexed document relative to its upstream source. */

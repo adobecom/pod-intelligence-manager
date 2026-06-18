@@ -414,6 +414,10 @@ function inScope(doc: DocRow, resources: ProjectResources): boolean {
       const space = typeof doc.source_id === "string" ? doc.source_id : "";
       return spaces.some((s) => space.includes(s));
     }
+    case "kg":
+      // KG docs are project-scoped by construction (indexed via indexProjectKgNodes
+      // which filters by include_project_id) — always count as in-scope.
+      return true;
     default:
       return false;
   }
