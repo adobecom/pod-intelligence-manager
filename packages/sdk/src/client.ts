@@ -16,7 +16,19 @@ import type {
   ContextSearchResult,
   ProjectSearchRequest,
   ProjectSearchResponse,
+  AgentCheckpoint,
+  AgentResumeContext,
+  AgentRun,
+  AgentRunEvent,
+  AgentRunEventType,
+  AgentRunStatus,
+  AgentSession,
+  AgentSessionStatus,
+  MemoryCandidate,
+  MemoryCandidateStatus,
 } from "@pim/shared";
+
+type JsonRecord = Record<string, unknown>;
 
 export interface SessionContextOptions {
   learningsMaxTokens?: number;
@@ -41,7 +53,13 @@ export interface ProjectSessionContext {
   pulledAt: string;
   project: Project;
   relevantLearnings: KnowledgeQueryResult;
+  /**
+   * Kept for backward compatibility. Project-only context no longer injects
+   * unfiltered recent feed items; use `projectSearch` for task-ranked project
+   * and pod update hits when a task query is supplied.
+   */
   recentUpdates: ProjectContextUpdate[];
+  projectSearch?: ProjectSearchResponse;
   externalContext?: ContextSearchResult;
 }
 
@@ -105,7 +123,7 @@ export interface ReportInput {
   needs_input_from?: InputRequest[];
 }
 
-export interface ReportResult {
+export interface ReportSuccessResult {
   id: string;
   update: ContextUpdate | ProjectContextUpdate;
   pim: {
@@ -115,6 +133,73 @@ export interface ReportResult {
     conflictId?: string;
     note?: string;
   };
+}
+
+export interface ReportQueuedResult {
+  queued: true;
+  queue_id: string;
+  queue_size: number;
+  conflict_pressure: number;
+  message: string;
+}
+
+export interface ReportDeduplicatedResult {
+  deduplicated: true;
+  message: string;
+}
+
+export type ReportResult = ReportSuccessResult | ReportQueuedResult | ReportDeduplicatedResult;
+
+export interface CreateAgentSessionInput {
+  project_id?: string | null;
+  pod_id?: string | null;
+  scope?: string | null;
+  agent_id?: string;
+  goal?: string | null;
+  current_task?: string | null;
+  working_state?: JsonRecord;
+  metadata?: JsonRecord;
+}
+
+export interface UpdateAgentSessionWorkingStateInput {
+  working_state: JsonRecord;
+  merge?: boolean;
+  current_task?: string | null;
+  status?: AgentSessionStatus;
+}
+
+export interface CreateAgentRunInput {
+  input_prompt?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  metadata?: JsonRecord;
+}
+
+export interface AppendAgentRunEventInput {
+  event_type: AgentRunEventType;
+  payload?: JsonRecord;
+  summary?: string | null;
+  artifact_refs?: Artifact[];
+  token_count?: number;
+  expected_seq?: number;
+}
+
+export interface CreateAgentCheckpointInput {
+  run_id?: string | null;
+  snapshot: JsonRecord;
+  summary?: string | null;
+  artifact_refs?: Artifact[];
+}
+
+export interface EndAgentRunInput {
+  status: Exclude<AgentRunStatus, "running">;
+  final_output?: string | null;
+  error_message?: string | null;
+  token_input_count?: number;
+  token_output_count?: number;
+  total_cost_usd?: number;
+  context_update_id?: string | null;
+  compacted_summary?: string | null;
 }
 
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
@@ -172,6 +257,136 @@ export class PimClient {
           ...input,
         }),
       }),
+    );
+  }
+
+  /**
+   * Create one curated agent-session ledger. By default this inherits the
+   * client's project/pod binding plus `agentId` and `scope`, while still letting
+   * callers override those fields explicitly for service-to-service workflows.
+   */
+  async createAgentSession(input: CreateAgentSessionInput = {}): Promise<AgentSession> {
+    return fetchJSON<AgentSession>(
+      this.url("/api/agent-sessions"),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: input.project_id !== undefined ? input.project_id : this.config.projectId ?? null,
+          pod_id: input.pod_id !== undefined ? input.pod_id : this.config.podId ?? null,
+          scope: input.scope ?? this.config.scope,
+          agent_id: input.agent_id ?? this.config.agentId,
+          ...(input.goal !== undefined ? { goal: input.goal } : {}),
+          ...(input.current_task !== undefined ? { current_task: input.current_task } : {}),
+          ...(input.working_state !== undefined ? { working_state: input.working_state } : {}),
+          ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+        }),
+      }),
+    );
+  }
+
+  async createAgentRun(sessionId: string, input: CreateAgentRunInput = {}): Promise<AgentRun> {
+    return fetchJSON<AgentRun>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/runs`),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async appendAgentRunEvent(runId: string, input: AppendAgentRunEventInput): Promise<AgentRunEvent> {
+    return fetchJSON<AgentRunEvent>(
+      this.url(`/api/agent-runs/${encodeURIComponent(runId)}/events`),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async createAgentCheckpoint(sessionId: string, input: CreateAgentCheckpointInput): Promise<AgentCheckpoint> {
+    return fetchJSON<AgentCheckpoint>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/checkpoints`),
+      this.withHeaders({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async updateAgentSessionWorkingState(
+    sessionId: string,
+    input: UpdateAgentSessionWorkingStateInput,
+  ): Promise<AgentSession> {
+    return fetchJSON<AgentSession>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/working-state`),
+      this.withHeaders({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async endAgentRun(runId: string, input: EndAgentRunInput): Promise<AgentRun> {
+    return fetchJSON<AgentRun>(
+      this.url(`/api/agent-runs/${encodeURIComponent(runId)}/end`),
+      this.withHeaders({
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      }),
+    );
+  }
+
+  async endAgentSession(sessionId: string): Promise<AgentSession> {
+    return fetchJSON<AgentSession>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/end`),
+      this.withHeaders({ method: "POST" }),
+    );
+  }
+
+  async getAgentResumeContext(sessionId: string, eventLimit?: number): Promise<AgentResumeContext> {
+    const query = eventLimit ? `?event_limit=${encodeURIComponent(String(eventLimit))}` : "";
+    return fetchJSON<AgentResumeContext>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/resume-context${query}`),
+      this.withHeaders(),
+    );
+  }
+
+  async rollupAgentSession(sessionId: string): Promise<MemoryCandidate[]> {
+    return fetchJSON<MemoryCandidate[]>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/rollup`),
+      this.withHeaders({ method: "POST" }),
+    );
+  }
+
+  async listSessionMemoryCandidates(
+    sessionId: string,
+    opts?: { status?: MemoryCandidateStatus },
+  ): Promise<MemoryCandidate[]> {
+    const query = opts?.status ? `?status=${encodeURIComponent(opts.status)}` : "";
+    return fetchJSON<MemoryCandidate[]>(
+      this.url(`/api/agent-sessions/${encodeURIComponent(sessionId)}/memory-candidates${query}`),
+      this.withHeaders(),
+    );
+  }
+
+  async promoteMemoryCandidate(candidateId: string): Promise<MemoryCandidate> {
+    return fetchJSON<MemoryCandidate>(
+      this.url(`/api/memory-candidates/${encodeURIComponent(candidateId)}/promote`),
+      this.withHeaders({ method: "POST" }),
+    );
+  }
+
+  async rejectMemoryCandidate(candidateId: string): Promise<MemoryCandidate> {
+    return fetchJSON<MemoryCandidate>(
+      this.url(`/api/memory-candidates/${encodeURIComponent(candidateId)}/reject`),
+      this.withHeaders({ method: "POST" }),
     );
   }
 
@@ -318,7 +533,7 @@ export class PimClient {
       ...opts,
       pod_id: opts?.pod_id ?? this.config.podId,
     };
-    return searchContext(this.config.baseUrl, body, this.config.orgSlug);
+    return searchContext(this.config.baseUrl, body, this.config.orgSlug, this.config.authToken);
   }
 
   // Pull bundled session context (living doc, pod state, conflicts, learnings, recent updates)
@@ -381,8 +596,8 @@ export class PimClient {
   /**
    * Project-scoped equivalent of pullSessionContext. Use this on project-only clients
    * (PM, review, or between-sprint agents) to get a single bundled read: project
-   * metadata, recent project context updates, project-scoped org learnings, and an
-   * optional external context search.
+   * metadata, project-scoped org learnings, optional task-ranked project/pod
+   * update hits, and optional external context search.
    */
   async pullProjectSessionContext(opts?: SessionContextOptions): Promise<ProjectSessionContext> {
     if (this.isPodMode()) {
@@ -405,21 +620,30 @@ export class PimClient {
       compactHeadingOffset: 2,
     };
 
-    const baseFetches = [
-      this.getProjectUpdates(),
-      this.getRelevantLearnings(maxTokens, learningsOpts),
-    ] as const;
+    const relevantLearningsFetch = this.getRelevantLearnings(maxTokens, learningsOpts);
+    const projectSearchFetch = taskQuery
+      ? this.searchProjectIndex(taskQuery, {
+          sources: ["project_update", "pod_update"],
+          max_hits: recentLimit,
+          synthesize: true,
+          include_kg: false,
+          include_mind_map: false,
+        })
+      : null;
 
     const externalFetch = taskQuery
       ? this.searchContext(taskQuery, { project_id: this.config.projectId })
       : null;
 
-    const results = await Promise.allSettled([...baseFetches, externalFetch]);
+    const results = await Promise.allSettled([relevantLearningsFetch, projectSearchFetch, externalFetch]);
 
-    const allUpdates = results[0].status === "fulfilled" ? (results[0].value as ProjectContextUpdate[]) : [];
-    const relevantLearnings: KnowledgeQueryResult = results[1].status === "fulfilled"
-      ? (results[1].value as KnowledgeQueryResult)
+    const relevantLearnings: KnowledgeQueryResult = results[0].status === "fulfilled"
+      ? (results[0].value as KnowledgeQueryResult)
       : { nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false };
+    const projectSearch =
+      projectSearchFetch && results[1].status === "fulfilled"
+        ? (results[1].value as ProjectSearchResponse)
+        : undefined;
     const externalContext =
       externalFetch && results[2].status === "fulfilled"
         ? (results[2].value as ContextSearchResult)
@@ -429,8 +653,16 @@ export class PimClient {
       pulledAt: new Date().toISOString(),
       project,
       relevantLearnings,
-      recentUpdates: allUpdates.slice(0, recentLimit),
+      recentUpdates: [],
+      ...(projectSearch ? { projectSearch } : {}),
       ...(externalContext ? { externalContext } : {}),
     };
+  }
+
+  async pullProjectTaskContext(
+    taskQuery: string,
+    opts?: Omit<SessionContextOptions, "taskQuery" | "externalQuery">,
+  ): Promise<ProjectSessionContext> {
+    return this.pullProjectSessionContext({ ...opts, taskQuery });
   }
 }

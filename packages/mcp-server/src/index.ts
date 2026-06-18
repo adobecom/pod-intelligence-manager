@@ -64,7 +64,7 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 - \`get_agent_session_context(pod_id, agent_id, scope, learnings_max_tokens?, recent_updates_limit?, task_query?, external_query?)\`
   Returns: living doc markdown, pod metadata, open conflicts, token-budgeted org learnings scoped to your pod/project, recent updates. Add \`external_query\` to also fan out to Slack/Jira/Confluence/GitHub/git in the same call.
 - \`get_project_session_context(project_id, agent_id, scope, learnings_max_tokens?, recent_updates_limit?, task_query?, external_query?)\`
-  Equivalent for between-sprint or project-level work. No living doc or conflicts — returns project metadata, recent project updates, and project-scoped learnings.
+  Equivalent for between-sprint or project-level work. No living doc or conflicts — returns project metadata, project-scoped learnings, and task-ranked project/pod update hits only when \`task_query\` is provided.
 
 ### Context Updates (MANDATORY after lock-in)
 - \`submit_context_update(pod_id, agent_id, type, scope, summary, details, status, ...)\`
