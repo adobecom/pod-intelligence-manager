@@ -475,13 +475,13 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "get_project_session_context",
-    "Project-scoped equivalent of get_agent_session_context for agents working between sprints or on long-lived initiatives (PM, PR review, etc.). Bundles: project metadata (anatomy, resources), recent project context updates, project-scoped org learnings, and optional external context search. Use this when you don't have an active pod but need to orient yourself on a project before acting.",
+    "Project-scoped equivalent of get_agent_session_context for agents working between sprints or on long-lived initiatives (PM, PR review, etc.). Bundles: project metadata (anatomy, resources), project-scoped org learnings, optional task-ranked project/pod update hits, and optional external context search. Use this when you don't have an active pod but need to orient yourself on a project before acting.",
     {
       project_id: ProjectId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
       learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
-      recent_updates_limit: z.number().optional().describe("Max recent project context updates to return (default 20)"),
+      recent_updates_limit: z.number().optional().describe("Max task-ranked project/pod update hits to return when task_query is provided (default 20)"),
       task_query: z
         .string()
         .optional()
@@ -506,25 +506,35 @@ export function registerTools(server: McpServer) {
       const taskQuery = (task_query ?? external_query)?.trim();
       const queryParam = taskQuery ? `&taskQuery=${encodeURIComponent(taskQuery)}` : "";
 
-      const [project_updates, relevant_learnings, external_context] = await Promise.all([
-        apiFetch(`/api/projects/${encodeURIComponent(project_id)}/context-updates`),
-        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}`),
+      const [relevant_learnings, project_search_result, external_context] = await Promise.all([
+        apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}&compactHeadingOffset=2`),
+        taskQuery
+          ? apiPost(`/api/projects/${encodeURIComponent(project_id)}/search`, {
+              query: taskQuery,
+              sources: ["project_update", "pod_update"],
+              max_hits: recentLimit,
+              synthesize: true,
+              include_kg: false,
+              include_mind_map: false,
+            })
+              .then((project_search) => ({ project_search }))
+              .catch((err) => ({
+                project_search_error: err instanceof Error ? err.message : String(err),
+              }))
+          : Promise.resolve({}),
         taskQuery
           ? apiPost("/api/context-search", { query: taskQuery, project_id }).catch(() => null)
           : Promise.resolve(null),
       ]);
-
-      const recent_updates = Array.isArray(project_updates)
-        ? (project_updates as unknown[]).slice(0, recentLimit)
-        : [];
 
       return json({
         pulled_at: new Date().toISOString(),
         agent_id,
         scope,
         project,
-        recent_updates,
+        recent_updates: [],
         relevant_learnings,
+        ...project_search_result,
         ...(external_context ? { external_context } : {}),
       });
     },
