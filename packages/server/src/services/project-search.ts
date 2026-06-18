@@ -32,7 +32,7 @@ import { cosineSimilarity, generateEmbedding, isEmbeddingAvailable } from "./emb
 import { extractIdentifiers } from "./graph-analysis.js";
 import { isProjectSearchFtsAvailable } from "./project-search-index.js";
 import { queryKnowledge } from "./knowledge-graph.js";
-import { scrubHits } from "./search-core/scrub.js";
+import { scrubHits, redactSecrets } from "./search-core/scrub.js";
 import { synthesizeSearch } from "./search-core/synthesizer.js";
 import { INDEXED_SOURCE_AUTHORITY, INDEXED_RECENCY_DAYS, INDEXED_RECENCY_MAX } from "./search-core/weights.js";
 import { searchJira } from "../integrations/jira.js";
@@ -902,7 +902,7 @@ interface DocAccumulator {
 // The repair path (write-through) is Phase 3b and is intentionally deferred
 // until the ephemeral path is validated in integration tests.
 
-const LIVE_SOURCES: ProjectSearchSource[] = ["jira", "github", "confluence", "git", "slack"];
+const LIVE_SOURCES: ProjectSearchSource[] = ["jira", "github", "confluence", "git"];
 
 /** True when the feature flag and per-request opt-in are both set. */
 function liveFallbackEnabled(req: ProjectSearchRequest): boolean {
@@ -1067,7 +1067,7 @@ export async function searchProject(
         if (overlay.length > 0) response.kg_overlay = overlay;
         if (req.synthesize) {
           const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], liveHits, overlay);
-          if (summary) response.summary_md = summary;
+          if (summary) response.summary_md = redactSecrets(summary).text;
           const citations = answerCitations(overlay, liveHits);
           if (citations.length > 0) response.answer_citations = citations;
         }
@@ -1230,7 +1230,8 @@ export async function searchProject(
   if (req.synthesize) {
     const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], top, overlay);
     if (summary || implementationGuard) {
-      response.summary_md = [implementationGuard, summary].filter(Boolean).join("\n\n");
+      const scrubbed = summary ? redactSecrets(summary).text : undefined;
+      response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
     }
     const citations = answerCitations(overlay, top);
     if (citations.length > 0) response.answer_citations = citations;
@@ -1286,7 +1287,8 @@ async function emptyResponse(
     const implementationGuard = implementationEvidenceGuard(documentCounts);
     const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], [], overlay);
     if (summary || implementationGuard) {
-      response.summary_md = [implementationGuard, summary].filter(Boolean).join("\n\n");
+      const scrubbed = summary ? redactSecrets(summary).text : undefined;
+      response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
     }
     const citations = answerCitations(overlay, []);
     if (citations.length > 0) response.answer_citations = citations;
