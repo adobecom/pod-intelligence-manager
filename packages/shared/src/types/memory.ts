@@ -65,6 +65,25 @@ export const AGENT_RUN_EVENT_TYPES = [
 ] as const;
 export type AgentRunEventType = typeof AGENT_RUN_EVENT_TYPES[number];
 
+export type AgentMemoryRollupPolicy = "none" | "candidate_only" | "auto_promote";
+export type AgentRunKind = "real" | "demo" | "dry_run";
+export type AgentSideEffectMode = "real" | "stubbed" | "mixed";
+export type AgentPromotionIntent = "audit_only" | "durable_learning";
+
+export interface AgentMemoryRollupMetadata {
+  rollup_policy?: AgentMemoryRollupPolicy;
+  run_kind?: AgentRunKind;
+  side_effect_mode?: AgentSideEffectMode;
+  real_pr_created?: boolean;
+  stubbed_systems?: string[];
+  verification_status?: string;
+  promotion_intent?: AgentPromotionIntent;
+  learning_summary?: string;
+  learning_details?: string;
+  test_kind?: string;
+  [key: string]: unknown;
+}
+
 export interface AgentSession {
   session_id: string;
   org_id: string;
