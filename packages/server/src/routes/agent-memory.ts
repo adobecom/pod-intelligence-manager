@@ -11,6 +11,8 @@ import {
   createAgentRun,
   createAgentSession,
   endAgentRun,
+  getAgentRun,
+  getMemoryCandidate,
   getAgentSession,
   getAgentSessionTimeline,
   listMemoryCandidates,
@@ -19,6 +21,10 @@ import {
   rollupAgentSession,
   updateAgentSessionWorkingState,
 } from "../services/agent-memory.js";
+import {
+  requireResourceBinding,
+  requireServiceScope,
+} from "../middleware/service-authz.js";
 
 const JsonRecordSchema = z.record(z.unknown());
 const AgentRunEventTypeSchema = z.enum([
@@ -111,6 +117,8 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-sessions",
     { preHandler: validateBody(CreateSessionSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      if (!requireResourceBinding(req, reply, { projectId: req.body.project_id, podId: req.body.pod_id })) return;
       const session = createAgentSession({ orgId: req.org!.org_id, ...req.body });
       if (!session) {
         reply.code(404);
@@ -122,11 +130,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   );
 
   app.get<{ Params: { sessionId: string } }>("/api/agent-sessions/:sessionId", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "agent-session:read")) return;
     const session = getAgentSession(req.org!.org_id, req.params.sessionId);
     if (!session) {
       reply.code(404);
       return { error: "Agent session not found" };
     }
+    if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
     return session;
   });
 
@@ -134,6 +144,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-sessions/:sessionId/working-state",
     { preHandler: validateBody(WorkingStateSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      const current = getAgentSession(req.org!.org_id, req.params.sessionId);
+      if (!current) {
+        reply.code(404);
+        return { error: "Agent session not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: current.project_id, podId: current.pod_id })) return;
       const session = updateAgentSessionWorkingState(req.org!.org_id, req.params.sessionId, req.body);
       if (!session) {
         reply.code(404);
@@ -147,6 +164,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-sessions/:sessionId/runs",
     { preHandler: validateBody(CreateRunSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+      if (!session) {
+        reply.code(404);
+        return { error: "Agent session not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
       const run = createAgentRun(req.org!.org_id, req.params.sessionId, req.body);
       if (!run) {
         reply.code(404);
@@ -161,6 +185,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-runs/:runId/events",
     { preHandler: validateBody(AppendEventSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      const run = getAgentRun(req.org!.org_id, req.params.runId);
+      if (!run) {
+        reply.code(404);
+        return { error: "Agent run not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: run.project_id, podId: run.pod_id })) return;
       try {
         const event = appendAgentRunEvent(req.org!.org_id, req.params.runId, req.body);
         if (!event) {
@@ -187,6 +218,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-sessions/:sessionId/checkpoints",
     { preHandler: validateBody(CheckpointSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+      if (!session) {
+        reply.code(404);
+        return { error: "Agent session or run not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
       const checkpoint = createAgentCheckpoint(req.org!.org_id, req.params.sessionId, req.body);
       if (!checkpoint) {
         reply.code(404);
@@ -201,6 +239,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
     "/api/agent-runs/:runId/end",
     { preHandler: validateBody(EndRunSchema) },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:write")) return;
+      const current = getAgentRun(req.org!.org_id, req.params.runId);
+      if (!current) {
+        reply.code(404);
+        return { error: "Agent run not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: current.project_id, podId: current.pod_id })) return;
       const run = await endAgentRun(req.org!.org_id, req.params.runId, req.body);
       if (!run) {
         reply.code(404);
@@ -211,6 +256,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   );
 
   app.get<{ Params: { sessionId: string } }>("/api/agent-sessions/:sessionId/timeline", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "agent-session:read")) return;
+    const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+    if (!session) {
+      reply.code(404);
+      return { error: "Agent session not found" };
+    }
+    if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
     const timeline = getAgentSessionTimeline(req.org!.org_id, req.params.sessionId);
     if (!timeline) {
       reply.code(404);
@@ -222,6 +274,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   app.get<{ Params: { sessionId: string }; Querystring: { event_limit?: string } }>(
     "/api/agent-sessions/:sessionId/resume-context",
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:read")) return;
+      const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+      if (!session) {
+        reply.code(404);
+        return { error: "Agent session not found" };
+      }
+      if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
       const limit = parseEventLimit(req.query.event_limit);
       if (limit === null) {
         reply.code(400);
@@ -237,20 +296,26 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   );
 
   app.post<{ Params: { sessionId: string } }>("/api/agent-sessions/:sessionId/rollup", async (req, reply) => {
-    if (!getAgentSession(req.org!.org_id, req.params.sessionId)) {
+    if (!requireServiceScope(req, reply, "agent-session:write")) return;
+    const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+    if (!session) {
       reply.code(404);
       return { error: "Agent session not found" };
     }
+    if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
     return rollupAgentSession(req.org!.org_id, req.params.sessionId);
   });
 
   app.get<{ Params: { sessionId: string }; Querystring: { status?: string } }>(
     "/api/agent-sessions/:sessionId/memory-candidates",
     async (req, reply) => {
-      if (!getAgentSession(req.org!.org_id, req.params.sessionId)) {
+      if (!requireServiceScope(req, reply, "agent-session:read")) return;
+      const session = getAgentSession(req.org!.org_id, req.params.sessionId);
+      if (!session) {
         reply.code(404);
         return { error: "Agent session not found" };
       }
+      if (!requireResourceBinding(req, reply, { projectId: session.project_id, podId: session.pod_id })) return;
       const status = memoryCandidateStatus(req.query.status);
       if (req.query.status && !status) {
         reply.code(400);
@@ -264,6 +329,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   );
 
   app.post<{ Params: { sessionId: string } }>("/api/agent-sessions/:sessionId/end", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "agent-session:write")) return;
+    const current = getAgentSession(req.org!.org_id, req.params.sessionId);
+    if (!current) {
+      reply.code(404);
+      return { error: "Agent session not found" };
+    }
+    if (!requireResourceBinding(req, reply, { projectId: current.project_id, podId: current.pod_id })) return;
     const session = closeAgentSession(req.org!.org_id, req.params.sessionId);
     if (!session) {
       reply.code(404);
@@ -273,6 +345,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { candidateId: string } }>("/api/memory-candidates/:candidateId/promote", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "agent-memory:curate")) return;
+    const current = getMemoryCandidate(req.org!.org_id, req.params.candidateId);
+    if (!current) {
+      reply.code(404);
+      return { error: "Memory candidate not found" };
+    }
+    if (!requireResourceBinding(req, reply, { projectId: current.project_id, podId: current.pod_id })) return;
     const candidate = await promoteMemoryCandidate(req.org!.org_id, req.params.candidateId);
     if (!candidate) {
       reply.code(404);
@@ -282,6 +361,13 @@ export default async function agentMemoryRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { candidateId: string } }>("/api/memory-candidates/:candidateId/reject", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "agent-memory:curate")) return;
+    const current = getMemoryCandidate(req.org!.org_id, req.params.candidateId);
+    if (!current) {
+      reply.code(404);
+      return { error: "Memory candidate not found" };
+    }
+    if (!requireResourceBinding(req, reply, { projectId: current.project_id, podId: current.pod_id })) return;
     const candidate = rejectMemoryCandidate(req.org!.org_id, req.params.candidateId);
     if (!candidate) {
       reply.code(404);

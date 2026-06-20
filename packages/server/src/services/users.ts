@@ -6,6 +6,7 @@ export interface UserRecord {
   ims_user_id: string | null;
   email: string;
   display_name: string | null;
+  is_service: number;
   created_at: string;
   last_login_at: string | null;
 }
@@ -18,6 +19,7 @@ function row(r: unknown): UserRecord | null {
     ims_user_id: x.ims_user_id,
     email: x.email,
     display_name: x.display_name,
+    is_service: Number(x.is_service ?? 0),
     created_at: x.created_at,
     last_login_at: x.last_login_at,
   };
@@ -31,7 +33,7 @@ export function findUserByImsId(imsUserId: string): UserRecord | null {
 
 export function findUserByEmail(email: string): UserRecord | null {
   return row(
-    db.prepare("SELECT * FROM users WHERE lower(email) = lower(?)").get(email),
+    db.prepare("SELECT * FROM users WHERE lower(email) = lower(?) AND is_service = 0").get(email),
   );
 }
 
@@ -75,7 +77,7 @@ export function upsertUserByIms(input: UpsertUserInput): UserRecord {
 
   const userId = `user_${randomUUID()}`;
   db.prepare(
-    "INSERT INTO users (user_id, ims_user_id, email, display_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO users (user_id, ims_user_id, email, display_name, is_service, created_at, last_login_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
   ).run(userId, input.ims_user_id ?? null, input.email, input.display_name ?? null, now, now);
 
   return {
@@ -83,6 +85,7 @@ export function upsertUserByIms(input: UpsertUserInput): UserRecord {
     ims_user_id: input.ims_user_id ?? null,
     email: input.email,
     display_name: input.display_name ?? null,
+    is_service: 0,
     created_at: now,
     last_login_at: now,
   };

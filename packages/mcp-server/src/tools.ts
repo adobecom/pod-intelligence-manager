@@ -382,7 +382,7 @@ export function registerTools(server: McpServer) {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
-      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
+      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 4000)"),
       recent_updates_limit: z.number().optional().describe("Max recent context updates to return (default 20)"),
       task_query: z
         .string()
@@ -394,7 +394,7 @@ export function registerTools(server: McpServer) {
         .describe("Backward-compatible alias for task_query."),
     },
     async ({ pod_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, task_query, external_query }) => {
-      const maxTok = learnings_max_tokens ?? 2000;
+      const maxTok = learnings_max_tokens ?? 4000;
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
 
@@ -480,7 +480,7 @@ export function registerTools(server: McpServer) {
       project_id: ProjectId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
-      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 2000)"),
+      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 4000)"),
       recent_updates_limit: z.number().optional().describe("Max task-ranked project/pod update hits to return when task_query is provided (default 20)"),
       task_query: z
         .string()
@@ -494,7 +494,7 @@ export function registerTools(server: McpServer) {
         ),
     },
     async ({ project_id, agent_id, scope, learnings_max_tokens, recent_updates_limit, task_query, external_query }) => {
-      const maxTok = learnings_max_tokens ?? 2000;
+      const maxTok = learnings_max_tokens ?? 4000;
       const recentLimit = recent_updates_limit ?? 20;
       const scopes = encodeURIComponent(scope);
       const projectParam = `&projectId=${encodeURIComponent(project_id)}`;

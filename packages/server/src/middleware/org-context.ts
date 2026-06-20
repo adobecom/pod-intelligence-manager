@@ -41,6 +41,26 @@ export async function resolveRequestOrg(req: FastifyRequest, reply: FastifyReply
   const headerVal = req.headers[ORG_HEADER];
   const slug = Array.isArray(headerVal) ? headerVal[0] : headerVal;
 
+  if (req.auth?.kind === "service_token") {
+    if (!slug) {
+      return reply.code(400).send({ error: "X-Pim-Org is required for PIM service tokens" });
+    }
+    const org = findOrgBySlug(slug);
+    if (!org) {
+      return reply.code(404).send({ error: `Org "${slug}" not found` });
+    }
+    if (org.org_id !== req.auth.orgId) {
+      return reply.code(403).send({ error: "PIM service token is not valid for this org" });
+    }
+    const membership = getMembership(org.org_id, req.userRecord.user_id);
+    if (!membership) {
+      return reply.code(403).send({ error: "Service principal is not a member of this org" });
+    }
+    req.org = org;
+    req.membership = membership;
+    return;
+  }
+
   if (slug) {
     const org = findOrgBySlug(slug);
     if (!org) {

@@ -6,6 +6,7 @@ import { regenerateLivingDoc } from "../pim/agents/summary.js";
 import { runLintPass } from "../pim/agents/lint.js";
 import { getContractedRelevantLearnings } from "../services/knowledge-graph.js";
 import { validateBody } from "../middleware/validation.js";
+import { rejectServiceToken, requirePodBinding, requireServiceScope } from "../middleware/service-authz.js";
 import { getOrgScopeIdsOrdered } from "../services/org-settings.js";
 import { allocateUniqueResourceId } from "../utils/resource-ids.js";
 import { computeCurrentDay } from "../services/pod-day.js";
@@ -70,6 +71,8 @@ function rowToPod(row: PodRow, areas: AreaRow[]): Pod {
 
 export default async function podRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const row = db.prepare("SELECT * FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id) as PodRow | undefined;
     if (!row) {
       reply.code(404);
@@ -83,6 +86,7 @@ export default async function podRoutes(app: FastifyInstance) {
     Params: { podId: string };
     Body: z.infer<typeof PatchPodSchema>;
   }>("/api/pods/:podId", { preHandler: validateBody(PatchPodSchema) }, async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId } = req.params;
     const { project_id } = req.body;
 
@@ -111,6 +115,7 @@ export default async function podRoutes(app: FastifyInstance) {
     Params: { podId: string };
     Body: z.infer<typeof PatchMilestoneSchema>;
   }>("/api/pods/:podId/milestone", { preHandler: validateBody(PatchMilestoneSchema) }, async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId } = req.params;
     const row = db.prepare("SELECT milestone_json FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id) as { milestone_json: string } | undefined;
     if (!row) {
@@ -131,6 +136,7 @@ export default async function podRoutes(app: FastifyInstance) {
   app.post<{
     Body: z.infer<typeof CreatePodSchema>;
   }>("/api/pods", { preHandler: validateBody(CreatePodSchema) }, async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { name, sprint_days, milestone_name, project_id } = req.body;
 
     const podId = allocateUniqueResourceId("pod", name, (id) =>
@@ -250,6 +256,7 @@ export default async function podRoutes(app: FastifyInstance) {
 
   // Lint pass routes
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/lint-findings", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
@@ -259,6 +266,7 @@ export default async function podRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/lint", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);

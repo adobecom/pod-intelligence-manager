@@ -1,6 +1,11 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { verifyImsToken } from "./ims-verify.js";
 import { upsertUserByIms, type UserRecord } from "../services/users.js";
+import {
+  isServiceTokenValue,
+  verifyServiceToken,
+  type ServiceTokenAuthMetadata,
+} from "../services/service-tokens.js";
 
 export type AuthMode = "trust" | "ims";
 
@@ -12,17 +17,20 @@ export interface UserInfo {
   roles: string[];
 }
 
+export type RequestAuth = { kind: "ims_user" } | ServiceTokenAuthMetadata;
+
 declare module "fastify" {
   interface FastifyRequest {
     user: UserInfo;
     userRecord: UserRecord;
+    auth: RequestAuth;
   }
 }
 
 const TRUST_MODE_EMAIL = process.env.DEV_USER_EMAIL ?? "dev@local";
 const TRUST_MODE_NAME = process.env.DEV_USER_NAME ?? "Local Dev";
 
-function attach(req: FastifyRequest, record: UserRecord) {
+function attach(req: FastifyRequest, record: UserRecord, auth: RequestAuth = { kind: "ims_user" }) {
   req.userRecord = record;
   req.user = {
     id: record.user_id,
@@ -31,10 +39,25 @@ function attach(req: FastifyRequest, record: UserRecord) {
     ims_user_id: record.ims_user_id,
     roles: ["user"],
   };
+  req.auth = auth;
 }
 
 export function createAuthHook(mode: AuthMode) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
+    const authHeader = req.headers.authorization;
+    const bearerToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice("Bearer ".length).trim()
+      : null;
+
+    if (isServiceTokenValue(bearerToken)) {
+      const verified = bearerToken ? verifyServiceToken(bearerToken) : null;
+      if (!verified) {
+        return reply.code(401).send({ error: "Invalid or expired PIM service token" });
+      }
+      attach(req, verified.user, verified.auth);
+      return;
+    }
+
     if (mode === "trust") {
       const record = upsertUserByIms({
         email: TRUST_MODE_EMAIL,
@@ -44,11 +67,10 @@ export function createAuthHook(mode: AuthMode) {
       return;
     }
 
-    const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
       return reply.code(401).send({ error: "Missing or invalid Authorization header" });
     }
-    const token = authHeader.slice("Bearer ".length).trim();
+    const token = bearerToken ?? "";
     if (!token) {
       return reply.code(401).send({ error: "Empty Bearer token" });
     }

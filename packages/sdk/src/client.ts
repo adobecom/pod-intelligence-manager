@@ -476,7 +476,7 @@ export class PimClient {
   // Pass `query` as free text to enable semantic (embedding) scoring; without it, scoring
   // falls back to keyword + domain matching only.
   async getRelevantLearnings(
-    maxTokens: number = 2000,
+    maxTokens: number = 4000,
     opts?: { projectId?: string | null; taskQuery?: string; query?: string; compactHeadingOffset?: number },
   ): Promise<KnowledgeQueryResult> {
     const scopes = encodeURIComponent(this.config.scope);
@@ -543,7 +543,7 @@ export class PimClient {
         "pullSessionContext requires a pod-scoped client (podId). For project-only mode use getProject(), getProjectUpdates(), and queryKnowledge().",
       );
     }
-    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const maxTokens = opts?.learningsMaxTokens ?? 4000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
     // Fetch the pod first so we can scope learnings to its project (avoids cross-project knowledge bleed).
@@ -605,7 +605,7 @@ export class PimClient {
         "pullProjectSessionContext requires a project-scoped client (projectId). For pod mode use pullSessionContext().",
       );
     }
-    const maxTokens = opts?.learningsMaxTokens ?? 2000;
+    const maxTokens = opts?.learningsMaxTokens ?? 4000;
     const recentLimit = opts?.recentUpdateLimit ?? 20;
 
     // Fetch project first for metadata. Project names are intentionally not used

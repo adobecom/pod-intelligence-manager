@@ -8,6 +8,7 @@ import { getOrgTuning } from "../services/org-settings.js";
 import { notifyConflictResolved } from "../services/slack.js";
 import { validateBody } from "../middleware/validation.js";
 import { drainQueue } from "../services/ingestion-queue.js";
+import { rejectServiceToken, requirePodBinding, requireServiceScope } from "../middleware/service-authz.js";
 
 const ResolveConflictSchema = z.object({
   resolution: z.string().min(1, "resolution is required"),
@@ -51,6 +52,8 @@ function rowToConflict(row: ConflictRow): Conflict {
 
 export default async function conflictRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/conflicts", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
@@ -61,6 +64,8 @@ export default async function conflictRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { podId: string; conflictId: string } }>("/api/pods/:podId/conflicts/:conflictId", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const row = db.prepare("SELECT * FROM conflicts WHERE pod_id = ? AND id = ? AND org_id = ?").get(req.params.podId, req.params.conflictId, req.org!.org_id) as ConflictRow | undefined;
     if (!row) {
       reply.code(404);
@@ -73,6 +78,7 @@ export default async function conflictRoutes(app: FastifyInstance) {
     Params: { podId: string; conflictId: string };
     Body: z.infer<typeof ResolveConflictSchema>;
   }>("/api/pods/:podId/conflicts/:conflictId/resolve", { preHandler: validateBody(ResolveConflictSchema) }, async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId, conflictId } = req.params;
     const { resolution, resolved_by } = req.body;
     const now = new Date().toISOString();

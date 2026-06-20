@@ -9,6 +9,11 @@ import {
   EMPTY_PROJECT_ANATOMY,
 } from "@pim/shared";
 import { validateBody } from "../middleware/validation.js";
+import {
+  rejectServiceToken,
+  requireProjectBinding,
+  requireServiceScope,
+} from "../middleware/service-authz.js";
 import { ingestProjectContextUpdate } from "../services/project-ingestion.js";
 import { broadcastToAll } from "../ws/index.js";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
@@ -262,16 +267,27 @@ function removeBinding(resources: ProjectResources, source: string, field: strin
 }
 
 export default async function projectRoutes(app: FastifyInstance) {
-  app.get("/api/projects", async (req) => {
+  app.get("/api/projects", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project:read")) return;
+    const projectFilter = req.auth?.kind === "service_token" ? req.auth.projectId : undefined;
+    if (req.auth?.kind === "service_token" && req.auth.podId) {
+      reply.code(403);
+      return { error: "PIM pod-bound service token cannot list projects" };
+    }
     const rows = db
       .prepare(
-        "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE org_id = ? ORDER BY name",
+        `SELECT project_id, name, description, created_at, anatomy_json, resources_json
+         FROM projects
+         WHERE org_id = ?${projectFilter ? " AND project_id = ?" : ""}
+         ORDER BY name`,
       )
-      .all(req.org!.org_id) as unknown as ProjectRow[];
+      .all(...(projectFilter ? [req.org!.org_id, projectFilter] : [req.org!.org_id])) as unknown as ProjectRow[];
     return rows.map(rowToProject);
   });
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project:read")) return;
+    if (!requireProjectBinding(req, reply, req.params.projectId)) return;
     const row = db
       .prepare(
         "SELECT project_id, name, description, created_at, anatomy_json, resources_json FROM projects WHERE project_id = ? AND org_id = ?",
@@ -287,6 +303,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { projectId: string } }>(
     "/api/projects/:projectId/resources",
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const row = db
         .prepare("SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?")
         .get(req.params.projectId, req.org!.org_id) as { resources_json: string | null } | undefined;
@@ -305,6 +322,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources",
     { preHandler: validateBody(ResourcesSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const exists = db
         .prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?")
         .get(req.params.projectId, req.org!.org_id);
@@ -323,6 +341,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   );
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/profile", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const row = projectResourceRow(req.params.projectId, req.org!.org_id);
     if (!row) {
       reply.code(404);
@@ -335,6 +354,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/profile",
     { preHandler: validateBody(ResourcesPatchSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -350,6 +370,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -370,6 +391,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -390,6 +412,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects",
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const { name, description, resources } = req.body;
       const orgId = req.org!.org_id;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
@@ -417,6 +440,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     Params: { projectId: string };
     Body: z.infer<typeof PatchProjectSchema>;
   }>("/api/projects/:projectId", { preHandler: validateBody(PatchProjectSchema) }, async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const row = db.prepare("SELECT * FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id) as
       | ProjectRow
       | undefined;
@@ -455,6 +479,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { projectId: string }; Querystring: { include_retracted?: string } }>("/api/projects/:projectId/context-updates", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requireProjectBinding(req, reply, req.params.projectId)) return;
     const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id);
     if (!project) {
       reply.code(404);
@@ -513,6 +539,8 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/context-updates",
     { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "context-update:write")) return;
+      if (!requireProjectBinding(req, reply, req.params.projectId)) return;
       const project = db.prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, req.org!.org_id);
       if (!project) {
         reply.code(404);
@@ -533,6 +561,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   );
 
   app.delete<{ Params: { projectId: string; updateId: string } }>("/api/projects/:projectId/context-updates/:updateId", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { projectId, updateId } = req.params;
 
     const row = db.prepare(
@@ -555,6 +584,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { projectId: string }; Querystring: { limit?: string } }>(
     "/api/projects/:projectId/evidence",
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "project-context:read")) return;
+      if (!requireProjectBinding(req, reply, req.params.projectId)) return;
       const limit = Math.max(1, Math.min(500, parseInt(req.query.limit ?? "100", 10)));
       const rows = listProjectEvidence(req.org!.org_id, req.params.projectId, limit);
       if (!rows) {
@@ -568,6 +599,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { projectId: string }; Querystring: { status?: string } }>(
     "/api/projects/:projectId/memory-candidates",
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-session:read")) return;
+      if (!requireProjectBinding(req, reply, req.params.projectId)) return;
       const status = req.query.status as "pending" | "promoted" | "rejected" | undefined;
       if (status && !["pending", "promoted", "rejected"].includes(status)) {
         reply.code(400);
@@ -585,6 +618,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   app.post<{ Params: { projectId: string; candidateId: string } }>(
     "/api/projects/:projectId/memory-candidates/:candidateId/promote",
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-memory:curate")) return;
+      if (!requireProjectBinding(req, reply, req.params.projectId)) return;
       const candidate = await promoteProjectMemoryCandidate(req.org!.org_id, req.params.projectId, req.params.candidateId);
       if (!candidate) {
         reply.code(404);
@@ -597,6 +632,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   app.post<{ Params: { projectId: string; candidateId: string } }>(
     "/api/projects/:projectId/memory-candidates/:candidateId/reject",
     async (req, reply) => {
+      if (!requireServiceScope(req, reply, "agent-memory:curate")) return;
+      if (!requireProjectBinding(req, reply, req.params.projectId)) return;
       const candidate = rejectProjectMemoryCandidate(req.org!.org_id, req.params.projectId, req.params.candidateId);
       if (!candidate) {
         reply.code(404);
@@ -607,6 +644,8 @@ export default async function projectRoutes(app: FastifyInstance) {
   );
 
   app.get<{ Params: { projectId: string } }>("/api/projects/:projectId/source-health", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project:read")) return;
+    if (!requireProjectBinding(req, reply, req.params.projectId)) return;
     const health = await getProjectSourceHealthLive(req.org!.org_id, req.params.projectId);
     if (!health) {
       reply.code(404);
@@ -616,6 +655,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   });
 
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/ingest/poll", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const result = await pollProjectSources(req.org!.org_id, req.params.projectId);
     if (!result) {
       reply.code(404);
@@ -628,6 +668,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/answers",
     { preHandler: validateBody(AnswerProjectSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const answer = answerProjectQuestion(req.org!.org_id, req.params.projectId, req.body.query);
       if (!answer) {
         reply.code(404);
@@ -641,6 +682,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/search",
     { preHandler: validateBody(SearchProjectSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const result = await searchProject(req.org!.org_id, req.params.projectId, req.body);
       if (!result) {
         reply.code(404);
@@ -654,6 +696,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/search/reindex",
     { preHandler: validateBody(ReindexProjectSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const orgId = req.org!.org_id;
       const exists = db.prepare("SELECT 1 FROM projects WHERE project_id = ? AND org_id = ?").get(req.params.projectId, orgId);
       if (!exists) {
@@ -665,6 +708,7 @@ export default async function projectRoutes(app: FastifyInstance) {
   );
 
   app.post<{ Params: { projectId: string } }>("/api/projects/:projectId/archive", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const projectId = req.params.projectId;
     const orgId = req.org!.org_id;
     const row = db.prepare("SELECT * FROM projects WHERE project_id = ? AND org_id = ?").get(projectId, orgId) as

@@ -28,6 +28,8 @@ vi.mock("../embeddings.js", () => ({
 }));
 
 import {
+  addLearningsToGraph,
+  getRelevantLearningsForContractMode,
   initializeKnowledgeGraph,
   queryKnowledgeSemantic,
   _resetForTests,
@@ -50,5 +52,54 @@ describe("queryKnowledgeSemantic input handling", () => {
     });
 
     expect(embeddingMock.generateEmbedding).toHaveBeenCalledWith("webhook authentication");
+  });
+
+  it("keeps scoped task context when strict task relevance has no query embedding", async () => {
+    const orgId = "kg-semantic-outage";
+    initializeKnowledgeGraph(orgId);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      await addLearningsToGraph(
+        orgId,
+        [
+          {
+            type: "pattern",
+            summary: "Backend queue retry policy",
+            details: "Retry jobs with capped exponential backoff.",
+            domains: ["backend"],
+            confidence: "extracted",
+            confidence_score: 0.9,
+          },
+          {
+            type: "pattern",
+            summary: "Backend worker concurrency limit",
+            details: "Keep worker pools bounded by deployment capacity.",
+            domains: ["backend"],
+            confidence: "extracted",
+            confidence_score: 0.9,
+          },
+        ],
+        "pod-seed",
+        "Seed Pod",
+      );
+      embeddingMock.generateEmbedding.mockClear();
+
+      const result = await getRelevantLearningsForContractMode(orgId, "task_relevant", {
+        scopes: ["backend"],
+        taskQuery: "mobile sign-in regression",
+        maxTokens: 2000,
+      });
+
+      expect(embeddingMock.generateEmbedding).toHaveBeenCalledWith("mobile sign-in regression");
+      expect(result.context_contract?.returned_mode).toBe("task_relevant");
+      expect(result.context_contract?.task_query_used).toBe(true);
+      expect(result.nodes.map((node) => node.summary).sort()).toEqual([
+        "Backend queue retry policy",
+        "Backend worker concurrency limit",
+      ]);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

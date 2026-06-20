@@ -7,6 +7,11 @@ import { notifyQueueBacklog } from "../services/slack.js";
 import { broadcast } from "../ws/index.js";
 import { regenerateLivingDoc } from "../pim/agents/summary.js";
 import { getOrgTuning } from "../services/org-settings.js";
+import {
+  rejectServiceToken,
+  requirePodBinding,
+  requireServiceScope,
+} from "../middleware/service-authz.js";
 
 interface ContextUpdateRow {
   id: string;
@@ -54,6 +59,8 @@ function rowToContextUpdate(row: ContextUpdateRow): ContextUpdate {
 
 export default async function contextUpdateRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string }; Querystring: { include_retracted?: string } }>("/api/pods/:podId/context-updates", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
@@ -68,6 +75,8 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/quality-stats", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
@@ -90,6 +99,8 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   app.post<{ Params: { podId: string }; Body: unknown }>("/api/pods/:podId/context-updates", {
     config: { rateLimit: { max: 20, timeWindow: "1 minute" } },
   }, async (req, reply) => {
+    if (!requireServiceScope(req, reply, "context-update:write")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT conflict_pressure FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id) as { conflict_pressure: number } | undefined;
     if (!pod) {
       reply.code(404);
@@ -139,6 +150,8 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   });
 
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/ingestion-queue", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(
       req.params.podId,
       req.org!.org_id,
@@ -151,6 +164,7 @@ export default async function contextUpdateRoutes(app: FastifyInstance) {
   });
 
   app.delete<{ Params: { podId: string; updateId: string } }>("/api/pods/:podId/context-updates/:updateId", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId, updateId } = req.params;
 
     const row = db.prepare(

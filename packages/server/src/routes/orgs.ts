@@ -19,6 +19,7 @@ import {
 } from "../services/orgs.js";
 import { canInvite, canRemoveMember, canUpdateMemberRole } from "../services/org-permissions.js";
 import { notifyOrgInviteDM } from "../services/slack.js";
+import { rejectServiceToken } from "../middleware/service-authz.js";
 
 const CreateOrgSchema = z.object({
   slug: z.string().min(2).max(40),
@@ -58,6 +59,10 @@ function requireMember(
 }
 
 export default async function orgsRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
+  });
+
   app.get("/api/me", async (req, reply) => {
     const user = req.userRecord;
     if (!user) {

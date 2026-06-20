@@ -249,7 +249,7 @@ Synthesize these learnings into actionable guidance. Highlight:
         apiFetch<Conflict[]>(`/api/pods/${pod_id}/conflicts`),
         apiFetch<ContextUpdate[]>(`/api/pods/${pod_id}/context-updates`),
         apiFetch<KnowledgeQueryResult>(
-          `/api/knowledge/relevant?maxTokens=2000${scopeParam}${projectParam}`,
+          `/api/knowledge/relevant?maxTokens=4000${scopeParam}${projectParam}`,
         ),
       ]);
 

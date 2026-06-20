@@ -1062,6 +1062,11 @@ export function getAgentSession(orgId: string, sessionId: string): AgentSession 
   return row ? toSession(row) : null;
 }
 
+export function getAgentRun(orgId: string, runId: string): AgentRun | null {
+  const row = getRunRow(orgId, runId);
+  return row ? toRun(row) : null;
+}
+
 export function updateAgentSessionWorkingState(
   orgId: string,
   sessionId: string,
@@ -1582,27 +1587,62 @@ function isNonEmptySignal(value: unknown): boolean {
   return true;
 }
 
+const VERIFICATION_FAILURE_TOKEN = /\b(?:fail(?:s|ed|ing|ures?)?|errors?|warnings?)\b/i;
+const BENIGN_VERIFICATION_STATUS_PATTERNS = [
+  /\b(?:no|none|zero|0)\s+(?:fail(?:s|ed|ing|ures?)?|errors?|warnings?)(?:\s*(?:,|and|or|\/)\s*(?:fail(?:s|ed|ing|ures?)?|errors?|warnings?))*\b/gi,
+  /\b(?:fail(?:s|ed|ing|ures?)?|errors?|warnings?)\s*(?::|=)\s*(?:0|none|no|false)\b/gi,
+  /\b(?:error|warning|failure)s?[-_\s]?free\b/gi,
+];
+
+function verificationStatusHasWarningsOrErrors(status: string | undefined): boolean {
+  if (!status?.trim()) return false;
+  const normalized = BENIGN_VERIFICATION_STATUS_PATTERNS.reduce(
+    (text, pattern) => text.replace(pattern, " "),
+    status.toLowerCase(),
+  );
+  return VERIFICATION_FAILURE_TOKEN.test(normalized);
+}
+
 function hasFinalWarningsOrErrors(run: RunRow, metadata: AgentRunRollupMetadata): boolean {
   if (run.error_message?.trim()) return true;
-  const verification = metadata.verificationStatus?.toLowerCase();
-  if (verification && (verification.includes("fail") || verification.includes("error") || verification.includes("warning"))) {
-    return true;
-  }
+  if (verificationStatusHasWarningsOrErrors(metadata.verificationStatus)) return true;
   if (isNonEmptySignal(metadata.warnings) || isNonEmptySignal(metadata.errors)) return true;
   if (isNonEmptySignal(metadata.finalState?.warnings) || isNonEmptySignal(metadata.finalState?.errors)) return true;
   return false;
+}
+
+const PLACEHOLDER_CONTEXT_UPDATE_ID = /^(?:demo|dry[-_]?run|stub(?:bed)?|placeholder|example|fake|mock)(?:$|[-_:])/i;
+
+function hasContextUpdateRowForRun(run: RunRow, contextUpdateId: string): boolean {
+  const podUpdate = db
+    .prepare(
+      `SELECT 1
+       FROM context_updates
+       WHERE org_id = ? AND id = ? AND retracted_at IS NULL
+         AND (? IS NULL OR pod_id = ?)
+       LIMIT 1`,
+    )
+    .get(run.org_id, contextUpdateId, run.pod_id, run.pod_id) as { "1": number } | undefined;
+  if (podUpdate) return true;
+
+  const projectUpdate = db
+    .prepare(
+      `SELECT 1
+       FROM project_context_updates
+       WHERE org_id = ? AND id = ? AND retracted_at IS NULL
+         AND (? IS NULL OR project_id = ?)
+       LIMIT 1`,
+    )
+    .get(run.org_id, contextUpdateId, run.project_id, run.project_id) as { "1": number } | undefined;
+  return !!projectUpdate;
 }
 
 function hasRealContextUpdate(run: RunRow): boolean {
   const contextUpdateId = run.context_update_id?.trim();
   if (!contextUpdateId) return false;
   const normalized = contextUpdateId.toLowerCase();
-  return normalized !== "demo"
-    && normalized !== "dry-run"
-    && normalized !== "stubbed"
-    && normalized !== "placeholder"
-    && normalized !== "example"
-    && !normalized.includes("example.invalid");
+  if (PLACEHOLDER_CONTEXT_UPDATE_ID.test(normalized) || normalized.includes("example.invalid")) return false;
+  return hasContextUpdateRowForRun(run, contextUpdateId);
 }
 
 const GENERIC_STATUS_PATTERNS = [
@@ -1803,7 +1843,7 @@ async function promoteCandidate(candidate: MemoryCandidate, auto: boolean): Prom
   return getMemoryCandidate(candidate.org_id, candidate.id) ?? { ...candidate, status, promoted_node_id: nodeId, reviewed_at: now };
 }
 
-function getMemoryCandidate(orgId: string, candidateId: string): MemoryCandidate | null {
+export function getMemoryCandidate(orgId: string, candidateId: string): MemoryCandidate | null {
   const row = db
     .prepare("SELECT * FROM memory_candidates WHERE org_id = ? AND id = ?")
     .get(orgId, candidateId) as unknown as CandidateRow | undefined;
@@ -2294,9 +2334,15 @@ export async function rollupAgentSession(orgId: string, sessionId: string): Prom
     if (candidate.status === "pending") {
       const gate = asJsonRecord(candidate.evidence.promotion_gate);
       if (gate?.decision === "allowed") {
-        const promoted = await promoteCandidate(candidate, true);
-        rolled.push(promoted);
-        rolledIds.add(promoted.id);
+        try {
+          const promoted = await promoteCandidate(candidate, true);
+          rolled.push(promoted);
+          rolledIds.add(promoted.id);
+        } catch (err) {
+          console.error(`[agent-memory] auto-promote failed for ${candidate.id}:`, err);
+          rolled.push(candidate);
+          rolledIds.add(candidate.id);
+        }
         continue;
       }
     }
