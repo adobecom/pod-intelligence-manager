@@ -207,7 +207,7 @@ Agent sessions and runs accept a free-form `metadata` object. PIM reads rollup m
 |--------|----------|
 | `none` | Do not create a memory candidate |
 | `candidate_only` | Create/keep a pending candidate, but do not auto-promote |
-| `auto_promote` | Request auto-promotion eligibility; PIM still applies its promotion gate |
+| `auto_promote` | Request auto-promotion eligibility; PIM still applies initial and validation gates |
 
 Production callers should default to `candidate_only`. Demo, dry-run, smoke-test, and stubbed-side-effect runs should send metadata like:
 
@@ -219,11 +219,14 @@ Production callers should default to `candidate_only`. Demo, dry-run, smoke-test
   "real_pr_created": false,
   "stubbed_systems": ["github", "codegen"],
   "verification_status": "passed",
-  "promotion_intent": "audit_only"
+  "promotion_intent": "audit_only",
+  "learning_scope": "harness"
 }
 ```
 
-Real code-change runs can request `auto_promote` only when they include real side effects, a real context update, artifact evidence, a non-placeholder PR URL, and `promotion_intent: "durable_learning"`. PIM stores the final decision in `memory_candidates.evidence.promotion_gate`.
+`learning_scope` is optional and may be `product`, `harness`, or `org`. Product learnings start as pending candidates and can be promoted after matching merged-PR evidence passes validation. Harness/runtime learnings can promote from concrete runtime evidence such as spec drift, rollup failures, retry/close behavior, forbidden-file drift, or orchestration errors. Org-scoped learnings remain manual-only in v1.
+
+Real code-change runs can request `auto_promote` only when they include real side effects, a real context update, artifact evidence, a non-placeholder PR URL, and `promotion_intent: "durable_learning"`. PIM stores initial eligibility in `memory_candidates.evidence.promotion_gate` and second-stage validation in `memory_candidates.evidence.validation_gate`.
 
 ### `@pim/mcp-server`
 

@@ -13,6 +13,7 @@ import { ingestLearnings } from "./ingestion-gateway.js";
 import { queryKnowledge } from "./knowledge-graph.js";
 import { extractIdentifiers, extractKeywords } from "./graph-analysis.js";
 import { indexEvidenceItem } from "./project-search-index.js";
+import { validatePendingAgentSessionCandidatesForProjectEvidence } from "./agent-memory.js";
 
 const AUTO_PROMOTE_CONFIDENCE_MIN = 0.85;
 const SOURCE_HEALTH_PROBE_TIMEOUT_MS = 5_000;
@@ -432,6 +433,13 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
   const candidate = createOrLoadCandidate(evidence);
   if (shouldAutoPromote(evidence) && !hasCurrentContradiction(evidence) && candidate.status !== "promoted") {
     await promoteProjectMemoryCandidate(input.org_id, input.project_id, candidate.id);
+  }
+  if (evidence.source === "github" && evidence.source_type === "merged_pr") {
+    try {
+      await validatePendingAgentSessionCandidatesForProjectEvidence(evidence);
+    } catch (err) {
+      console.error(`[project-memory] agent-session validation failed for evidence ${evidence.id}:`, err);
+    }
   }
   return rowToEvidence(db.prepare("SELECT * FROM project_evidence_items WHERE id = ?").get(id) as unknown as EvidenceRow);
 }
