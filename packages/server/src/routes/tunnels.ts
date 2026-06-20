@@ -6,6 +6,7 @@ import type { Tunnel } from "@pim/shared";
 import { broadcast } from "../ws/index.js";
 import { validateBody } from "../middleware/validation.js";
 import { ingestContextUpdate } from "../services/ingestion.js";
+import { rejectServiceToken } from "../middleware/service-authz.js";
 
 const CreateTunnelSchema = z.object({
   dev_name: z.string().min(1, "dev_name is required"),
@@ -36,6 +37,10 @@ function rowToTunnel(row: TunnelRow): Tunnel {
 }
 
 export default async function tunnelRoutes(app: FastifyInstance) {
+  app.addHook("preHandler", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
+  });
+
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/tunnels", async (req, reply) => {
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {

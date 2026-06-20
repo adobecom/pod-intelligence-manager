@@ -398,14 +398,14 @@ describe("PimClient", () => {
       );
     });
 
-    it("defaults to 2000 max tokens", async () => {
+    it("defaults to 4000 max tokens", async () => {
       mockOk({ nodes: [] });
       const client = makeClient();
 
       await client.getRelevantLearnings();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("maxTokens=2000"),
+        expect.stringContaining("maxTokens=4000"),
         undefined,
       );
     });
@@ -525,7 +525,7 @@ describe("PimClient", () => {
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
       expect(knowledgeUrl).toBe(
-        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&compactHeadingOffset=2",
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=4000&compactHeadingOffset=2",
       );
     });
 
@@ -627,7 +627,7 @@ describe("PimClient", () => {
         .map(([url]) => String(url))
         .find((url) => url.includes("/knowledge/relevant"));
       expect(knowledgeUrl).toBe(
-        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=2000&projectId=project-demo&compactHeadingOffset=2",
+        "http://localhost:4000/api/knowledge/relevant?scopes=frontend&maxTokens=4000&projectId=project-demo&compactHeadingOffset=2",
       );
       expect(ctx.recentUpdates).toEqual([]);
       expect(ctx.projectSearch).toBeUndefined();

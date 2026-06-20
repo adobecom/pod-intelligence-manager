@@ -78,7 +78,7 @@ test("get_project_session_context requests compact heading offset 2", async () =
   assert.ok(knowledgeCall);
   assert.equal(
     knowledgeCall.url,
-    "http://pim.test/api/knowledge/relevant?scopes=frontend&maxTokens=2000&projectId=project-demo&compactHeadingOffset=2",
+    "http://pim.test/api/knowledge/relevant?scopes=frontend&maxTokens=4000&projectId=project-demo&compactHeadingOffset=2",
   );
 });
 

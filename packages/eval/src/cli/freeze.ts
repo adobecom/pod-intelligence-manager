@@ -31,6 +31,7 @@ const EVAL_PIM_BASE_URL =
   process.env.EVAL_PIM_BASE_URL?.replace(/\/+$/, "") ??
   "https://d1ygncl0yqo6sv.cloudfront.net";
 const EVAL_PIM_ORG_SLUG = process.env.EVAL_PIM_ORG_SLUG ?? "adobecom";
+const PIM_SERVICE_TOKEN = process.env.PIM_SERVICE_TOKEN?.trim();
 const USE_LIVE_KG = process.env.USE_OFFLINE_LEARNINGS !== "1";
 const KG_SOURCE = parseKgSource(process.env.EVAL_PIM_KG_SOURCE);
 const KG_CONTRACT_MODE = parseKgContractMode(process.env.EVAL_PIM_KG_CONTRACT_MODE);
@@ -57,11 +58,15 @@ let cachedAuthHeader: string | null = null;
 
 async function getAuthHeader(): Promise<string> {
   if (cachedAuthHeader) return cachedAuthHeader;
+  if (PIM_SERVICE_TOKEN) {
+    cachedAuthHeader = `Bearer ${PIM_SERVICE_TOKEN}`;
+    return cachedAuthHeader;
+  }
   assertSecurePermissions();
   const creds = loadCredentials();
   if (!creds) {
     throw new Error(
-      "USE_OFFLINE_LEARNINGS=0 (default) but no credentials at ~/.pim/credentials.json. Run `pim login` or call MCP `authenticate`, or rerun with USE_OFFLINE_LEARNINGS=1 to use the offline shim.",
+      "USE_OFFLINE_LEARNINGS=0 (default) but no PIM_SERVICE_TOKEN and no credentials at ~/.pim/credentials.json. Run `pim login`, set PIM_SERVICE_TOKEN, or rerun with USE_OFFLINE_LEARNINGS=1 to use the offline shim.",
     );
   }
   const fresh = await ensureFreshToken(creds);
@@ -110,6 +115,11 @@ async function withTemporaryKgContract<T>(fn: () => Promise<T>): Promise<T> {
   if (originalMode === KG_CONTRACT_MODE) {
     console.log(`[freeze] org kg_context_contract already ${KG_CONTRACT_MODE}`);
     return fn();
+  }
+  if (PIM_SERVICE_TOKEN) {
+    throw new Error(
+      "PIM_SERVICE_TOKEN mode cannot PATCH /api/org/config. Set EVAL_PIM_KG_CONTRACT_MODE out of band with human admin auth, or unset EVAL_PIM_KG_CONTRACT_MODE for this freeze.",
+    );
   }
 
   console.log(`[freeze] temporarily setting kg_context_contract ${originalMode} -> ${KG_CONTRACT_MODE}`);

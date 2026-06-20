@@ -5,7 +5,19 @@ import db from "../db/connection.js";
 import type { OrgPodSummary, CrossPodOverlap, ArchivedPod, ArchivedProject, PodArchiveJob } from "@pim/shared";
 import { parseProjectAnatomy } from "../services/project-anatomy-parse.js";
 import { validateBody } from "../middleware/validation.js";
+import {
+  rejectServiceToken,
+  requireAdmin,
+  requireServiceScope,
+} from "../middleware/service-authz.js";
 import { getOrgConfig, setOrgConfig, getOrgTuning, deleteOrgTuning } from "../services/org-settings.js";
+import {
+  createServiceToken,
+  listServiceTokens,
+  revokeServiceToken,
+  ServiceTokenError,
+  SERVICE_TOKEN_SCOPES,
+} from "../services/service-tokens.js";
 import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { broadcastToAll } from "../ws/index.js";
@@ -174,8 +186,22 @@ const OrgConfigBodySchema = z.object({
   kg_context_contract: z.enum(["legacy", "shadow", "task_relevant"]).optional(),
 });
 
+const CreateServiceTokenSchema = z
+  .object({
+    name: z.string().min(1).max(120).transform((s) => s.trim()),
+    scopes: z.array(z.enum(SERVICE_TOKEN_SCOPES)).min(1),
+    project_id: z.string().min(1).optional(),
+    pod_id: z.string().min(1).optional(),
+    expires_in_days: z.number().int().positive().max(365).default(90),
+  })
+  .refine((body) => !(body.project_id && body.pod_id), {
+    message: "A service token cannot be both project-bound and pod-bound",
+    path: ["pod_id"],
+  });
+
 export default async function orgRoutes(app: FastifyInstance) {
-  app.get("/api/org/config", async (req) => {
+  app.get("/api/org/config", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "org-config:read")) return;
     return getOrgConfig(req.org!.org_id);
   });
 
@@ -185,6 +211,7 @@ export default async function orgRoutes(app: FastifyInstance) {
       preHandler: validateBody(OrgConfigBodySchema),
     },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       try {
         return setOrgConfig(req.org!.org_id, req.body);
       } catch (e) {
@@ -194,21 +221,67 @@ export default async function orgRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Body: z.infer<typeof CreateServiceTokenSchema> }>(
+    "/api/org/service-tokens",
+    { preHandler: validateBody(CreateServiceTokenSchema) },
+    async (req, reply) => {
+      if (!requireAdmin(req, reply)) return;
+      const expiresAt = new Date(Date.now() + req.body.expires_in_days * 24 * 60 * 60 * 1000).toISOString();
+      try {
+        reply.code(201);
+        return createServiceToken({
+          orgId: req.org!.org_id,
+          name: req.body.name,
+          scopes: req.body.scopes,
+          projectId: req.body.project_id,
+          podId: req.body.pod_id,
+          expiresAt,
+          createdByUserId: req.userRecord.user_id,
+        });
+      } catch (err) {
+        if (err instanceof ServiceTokenError) {
+          reply.code(err.statusCode);
+          return { error: err.message };
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.get("/api/org/service-tokens", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    return { tokens: listServiceTokens(req.org!.org_id) };
+  });
+
+  app.post<{ Params: { tokenId: string } }>("/api/org/service-tokens/:tokenId/revoke", async (req, reply) => {
+    if (!requireAdmin(req, reply)) return;
+    const revoked = revokeServiceToken(req.org!.org_id, req.params.tokenId);
+    if (!revoked) {
+      reply.code(404);
+      return { error: "Service token not found" };
+    }
+    return { ok: true };
+  });
+
   // Autonomous tuning — read-only for humans; written by runTuningAgent after pod archival
-  app.get("/api/org/tuning", async (req) => {
+  app.get("/api/org/tuning", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return getOrgTuning(req.org!.org_id);
   });
 
-  app.get("/api/org/tuning/history", async (req) => {
+  app.get("/api/org/tuning/history", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return getOrgTuningHistory(req.org!.org_id);
   });
 
-  app.delete("/api/org/tuning", async (req) => {
+  app.delete("/api/org/tuning", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     deleteOrgTuning(req.org!.org_id);
     return getOrgTuning(req.org!.org_id);
   });
 
-  app.get("/api/org/pods", async (req) => {
+  app.get("/api/org/pods", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     // Join against `pods` to pull sprint_start/total_days so day_number reflects real sprint
     // progress (the denormalized org_pod_summaries.day_number is not advanced over time).
     const rows = db.prepare(
@@ -228,16 +301,19 @@ export default async function orgRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get("/api/org/overlaps", async (req) => {
+  app.get("/api/org/overlaps", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return db.prepare("SELECT * FROM cross_pod_overlaps WHERE org_id = ?").all(req.org!.org_id) as unknown as CrossPodOverlap[];
   });
 
-  app.get("/api/org/archived", async (req) => {
+  app.get("/api/org/archived", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const rows = db.prepare("SELECT * FROM archived_pods WHERE org_id = ?").all(req.org!.org_id) as unknown as ArchivedPodRow[];
     return rows.map(normalizeArchivedPod);
   });
 
-  app.get("/api/org/archived-projects", async (req) => {
+  app.get("/api/org/archived-projects", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const rows = db
       .prepare(
         "SELECT project_id, name, description, created_at, anatomy_json, archived_date FROM archived_projects WHERE org_id = ? ORDER BY archived_date DESC",
@@ -280,14 +356,17 @@ export default async function orgRoutes(app: FastifyInstance) {
   };
 
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/archive/status", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return getArchiveStatus(req.params.podId, req.org!.org_id, reply);
   });
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/archive/status", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return getArchiveStatus(req.params.podId, req.org!.org_id, reply);
   });
 
   app.post<{ Params: { podId: string } }>("/api/pods/:podId/archive", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId } = req.params;
     const orgId = req.org!.org_id;
     const key = archiveJobKey(orgId, podId);

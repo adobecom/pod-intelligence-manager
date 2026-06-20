@@ -1038,8 +1038,7 @@ function applySemanticGate(
   );
 
   if (!queryEmbedding) {
-    const annotated = scored.map(annotate);
-    return strictTaskRelevance ? annotated.filter((entry) => entry.directEvidence) : annotated;
+    return scored.map(annotate);
   }
 
   if (strictTaskRelevance) {

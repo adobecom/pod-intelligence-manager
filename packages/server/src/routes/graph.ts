@@ -29,9 +29,19 @@ import {
 } from "../services/knowledge-graph.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
+import {
+  rejectServiceToken,
+  requireProjectBinding,
+  requireServiceScope,
+} from "../middleware/service-authz.js";
 
 function isValidTimestamp(value: string | undefined): boolean {
   return !!value && !Number.isNaN(new Date(value).getTime());
+}
+
+function parsePositiveIntQuery(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? String(fallback), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 const KnowledgeQuerySchema = z.object({
@@ -108,7 +118,8 @@ export default async function graphRoutes(app: FastifyInstance) {
   // ?include_embeddings=true.
   app.get<{ Querystring: { include_embeddings?: string } }>(
     "/api/knowledge/graph",
-    async (req) => {
+    async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const graph = getGraph(req.org!.org_id);
       if (req.query.include_embeddings === "true") return graph;
       return stripEmbeddingsFromGraph(graph);
@@ -116,14 +127,17 @@ export default async function graphRoutes(app: FastifyInstance) {
   );
 
   // Stats summary
-  app.get("/api/knowledge/stats", async (req) => {
+  app.get("/api/knowledge/stats", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     return getStats(req.org!.org_id);
   });
 
   // Token-budgeted query (main agent-facing interface).
   // If `query_text` is provided and `query_embedding` is not, we generate the embedding
   // server-side so callers without Bedrock creds can still get semantic scoring.
-  app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req) => {
+  app.post<{ Body: KnowledgeQueryOptions }>("/api/knowledge/query", { preHandler: validateBody(KnowledgeQuerySchema) }, async (req, reply) => {
+    if (!requireServiceScope(req, reply, "knowledge:read")) return;
+    if (!requireProjectBinding(req, reply, req.body.filters.include_project_id)) return;
     return queryKnowledgeSemantic(req.org!.org_id, {
       ...req.body,
       max_tokens: req.body.max_tokens ?? 2000,
@@ -146,11 +160,13 @@ export default async function graphRoutes(app: FastifyInstance) {
     };
   }>(
     "/api/knowledge/relevant",
-    async (req) => {
+    async (req, reply) => {
+      if (!requireServiceScope(req, reply, "knowledge:read")) return;
       const scopeParam = req.query.scopes ?? req.query.domains ?? "";
       const scopes = scopeParam.split(",").map((s) => s.trim()).filter(Boolean);
-      const maxTokens = parseInt(req.query.maxTokens ?? "2000", 10);
+      const maxTokens = parsePositiveIntQuery(req.query.maxTokens, 4000);
       const projectId = req.query.projectId?.trim() || null;
+      if (!requireProjectBinding(req, reply, projectId)) return;
       const taskQuery = (req.query.taskQuery ?? req.query.externalQuery ?? req.query.query)?.trim();
       const compactHeadingOffset = Number.parseInt(req.query.compactHeadingOffset ?? "", 10);
       return getContractedRelevantLearnings(req.org!.org_id, {
@@ -168,9 +184,10 @@ export default async function graphRoutes(app: FastifyInstance) {
   // Convenience: precedent lookup for conflicts
   app.get<{ Querystring: { conflict?: string; maxTokens?: string } }>(
     "/api/knowledge/precedents",
-    async (req) => {
+    async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const conflict = req.query.conflict ?? "";
-      const maxTokens = parseInt(req.query.maxTokens ?? "1000", 10);
+      const maxTokens = parsePositiveIntQuery(req.query.maxTokens, 1000);
       return getPrecedents(req.org!.org_id, conflict, maxTokens);
     },
   );
@@ -183,6 +200,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     "/api/knowledge/nodes",
     { preHandler: validateBody(AdHocLearningSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const body = req.body;
       const learning: EnhancedPodLearning = {
         type: body.type,
@@ -225,6 +243,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     "/api/knowledge/nodes/:nodeId/curate",
     { preHandler: validateBody(CurationSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const { nodeId } = req.params;
       const { action, edits } = req.body;
       const success = await curateNode(req.org!.org_id, nodeId, action, edits);

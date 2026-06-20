@@ -11,6 +11,7 @@ export function createTables() {
       ims_user_id TEXT UNIQUE,
       email TEXT NOT NULL,
       display_name TEXT,
+      is_service INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       last_login_at TEXT
     );
@@ -32,6 +33,38 @@ export function createTables() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_memberships_user ON memberships(user_id);
+
+    CREATE TABLE IF NOT EXISTS service_principals (
+      service_principal_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(user_id),
+      org_id TEXT NOT NULL REFERENCES orgs(org_id),
+      name TEXT NOT NULL,
+      created_by_user_id TEXT NOT NULL REFERENCES users(user_id),
+      created_at TEXT NOT NULL,
+      disabled_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_service_principals_org ON service_principals(org_id);
+    CREATE INDEX IF NOT EXISTS idx_service_principals_user ON service_principals(user_id);
+
+    CREATE TABLE IF NOT EXISTS service_tokens (
+      token_id TEXT PRIMARY KEY,
+      service_principal_id TEXT NOT NULL REFERENCES service_principals(service_principal_id),
+      token_prefix TEXT NOT NULL,
+      token_hash TEXT NOT NULL,
+      scopes_json TEXT NOT NULL,
+      project_id TEXT,
+      pod_id TEXT,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      last_used_at TEXT,
+      created_at TEXT NOT NULL,
+      created_by_user_id TEXT NOT NULL REFERENCES users(user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_service_tokens_principal ON service_tokens(service_principal_id);
+    CREATE INDEX IF NOT EXISTS idx_service_tokens_project ON service_tokens(project_id) WHERE project_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_service_tokens_pod ON service_tokens(pod_id) WHERE pod_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS org_invites (
       invite_id TEXT PRIMARY KEY,
@@ -557,6 +590,39 @@ export function createTables() {
   `);
 
   // Migration guards for existing databases
+  try { db.exec("ALTER TABLE users ADD COLUMN is_service INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS service_principals (
+        service_principal_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(user_id),
+        org_id TEXT NOT NULL REFERENCES orgs(org_id),
+        name TEXT NOT NULL,
+        created_by_user_id TEXT NOT NULL REFERENCES users(user_id),
+        created_at TEXT NOT NULL,
+        disabled_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_service_principals_org ON service_principals(org_id);
+      CREATE INDEX IF NOT EXISTS idx_service_principals_user ON service_principals(user_id);
+      CREATE TABLE IF NOT EXISTS service_tokens (
+        token_id TEXT PRIMARY KEY,
+        service_principal_id TEXT NOT NULL REFERENCES service_principals(service_principal_id),
+        token_prefix TEXT NOT NULL,
+        token_hash TEXT NOT NULL,
+        scopes_json TEXT NOT NULL,
+        project_id TEXT,
+        pod_id TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        last_used_at TEXT,
+        created_at TEXT NOT NULL,
+        created_by_user_id TEXT NOT NULL REFERENCES users(user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_service_tokens_principal ON service_tokens(service_principal_id);
+      CREATE INDEX IF NOT EXISTS idx_service_tokens_project ON service_tokens(project_id) WHERE project_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_service_tokens_pod ON service_tokens(pod_id) WHERE pod_id IS NOT NULL;
+    `);
+  } catch { /* already exists */ }
   try { db.exec("ALTER TABLE living_docs ADD COLUMN last_regenerated_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE living_docs ADD COLUMN regen_count INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE context_updates ADD COLUMN quality_score REAL NOT NULL DEFAULT 0.0"); } catch { /* already exists */ }

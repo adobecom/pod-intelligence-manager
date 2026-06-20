@@ -3,13 +3,14 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 const serviceMocks = vi.hoisted(() => ({
   queryKnowledgeSemantic: vi.fn(),
+  getPrecedents: vi.fn(),
   getContractedRelevantLearnings: vi.fn(),
 }));
 
 vi.mock("../../services/knowledge-graph.js", () => ({
   curateNode: vi.fn(),
   getGraph: vi.fn().mockReturnValue({ nodes: [], edges: [] }),
-  getPrecedents: vi.fn(),
+  getPrecedents: serviceMocks.getPrecedents,
   getContractedRelevantLearnings: serviceMocks.getContractedRelevantLearnings,
   getStats: vi.fn().mockReturnValue({ total_nodes: 0, by_type: {}, by_confidence: {}, by_domain: {} }),
   queryKnowledgeSemantic: serviceMocks.queryKnowledgeSemantic,
@@ -39,6 +40,7 @@ function emptyQueryResult() {
 beforeEach(async () => {
   vi.clearAllMocks();
   serviceMocks.queryKnowledgeSemantic.mockResolvedValue(emptyQueryResult());
+  serviceMocks.getPrecedents.mockResolvedValue(emptyQueryResult());
   serviceMocks.getContractedRelevantLearnings.mockResolvedValue(emptyQueryResult());
   vi.mocked(ingestLearnings).mockResolvedValue({
     prepared: [],
@@ -97,6 +99,52 @@ describe("knowledge graph public query routes", () => {
       projectId: null,
     });
   });
+
+  it("defaults GET /api/knowledge/relevant to a 4000 token budget", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/knowledge/relevant?scopes=backend",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [, options] = serviceMocks.getContractedRelevantLearnings.mock.calls[0];
+    expect(options).toMatchObject({
+      scopes: ["backend"],
+      maxTokens: 4000,
+      projectId: null,
+    });
+  });
+
+  it.each(["abc", "0", "-50"])(
+    "falls back to 4000 for invalid GET /api/knowledge/relevant maxTokens=%s",
+    async (maxTokens) => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/knowledge/relevant?scopes=backend&maxTokens=${maxTokens}`,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const [, options] = serviceMocks.getContractedRelevantLearnings.mock.calls[0];
+      expect(options).toMatchObject({
+        scopes: ["backend"],
+        maxTokens: 4000,
+        projectId: null,
+      });
+    },
+  );
+
+  it.each(["abc", "0", "-50"])(
+    "falls back to 1000 for invalid GET /api/knowledge/precedents maxTokens=%s",
+    async (maxTokens) => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/knowledge/precedents?conflict=rbac&maxTokens=${maxTokens}`,
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(serviceMocks.getPrecedents).toHaveBeenCalledWith("org-route-test", "rbac", 1000);
+    },
+  );
 
   it("forwards ad-hoc scopes to ingestion", async () => {
     const res = await app.inject({

@@ -537,6 +537,12 @@ describe("agent run memory", () => {
         learning_details: "Code-change agent runs can enter durable memory automatically only when the caller marks the run real, confirms real side effects, attaches context-update evidence, and provides a real PR URL.",
       },
     });
+    insertPodContextUpdate({
+      id: "ctx-high-confidence",
+      type: "progress",
+      summary: "Recorded real auto-promotion context update.",
+      details: "A real context update row anchors the run context_update_id used by the auto-promotion gate.",
+    });
     appendAgentRunEvent(ORG_ID, run!.run_id, {
       event_type: "context_update_submitted",
       summary: "Submitted durable implementation decision",
@@ -566,6 +572,224 @@ describe("agent run memory", () => {
       reasons: [],
     });
     expect(ingestLearnings).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat benign verification-status tokens as final warnings or errors", async () => {
+    vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.85])));
+    const benignStatuses = ["0 errors", "no warnings", "failsafe verified", "0 failures"];
+
+    for (const [index, verificationStatus] of benignStatuses.entries()) {
+      const contextUpdateId = `ctx-benign-verification-${index}`;
+      const session = createAgentSession({
+        orgId: ORG_ID,
+        pod_id: POD_ID,
+        scope: "backend",
+        agent_id: "agent-1",
+        goal: `Benign verification ${index}`,
+        metadata: {
+          ...REAL_AUTO_PROMOTE_METADATA,
+          verification_status: verificationStatus,
+        },
+      });
+      const run = createAgentRun(ORG_ID, session!.session_id, {
+        input_prompt: "finish backend memory",
+        metadata: {
+          learning_summary: `Benign verification status ${index} should allow automatic promotion.`,
+          learning_details: "Verification status text with zero or negated failure counts should not be classified as final warnings or errors when all other promotion evidence is real.",
+        },
+      });
+      insertPodContextUpdate({
+        id: contextUpdateId,
+        type: "progress",
+        summary: `Recorded benign verification ${index}.`,
+        details: "A real context update row anchors the run context_update_id used by the auto-promotion gate.",
+      });
+      appendAgentRunEvent(ORG_ID, run!.run_id, {
+        event_type: "context_update_submitted",
+        payload: { context_update_id: contextUpdateId },
+        summary: "Submitted durable context update",
+      });
+      appendAgentRunEvent(ORG_ID, run!.run_id, {
+        event_type: "file_change",
+        summary: "Updated code with real side effects",
+        artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+      });
+
+      await endAgentRun(ORG_ID, run!.run_id, {
+        status: "completed",
+        context_update_id: contextUpdateId,
+        final_output: "Completed durable memory update with real verification evidence.",
+      });
+
+      const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].status).toBe("auto_promoted");
+      expect(promotionGate(candidates[0])).toEqual({
+        decision: "allowed",
+        policy: "auto_promote",
+        reasons: [],
+      });
+    }
+  });
+
+  it("blocks auto-promotion on explicit verification failure tokens", async () => {
+    vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.85])));
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Verification failure",
+      metadata: {
+        ...REAL_AUTO_PROMOTE_METADATA,
+        verification_status: "failed tests",
+      },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, {
+      input_prompt: "finish backend memory",
+      metadata: {
+        learning_summary: "Explicit verification failure should block auto-promotion.",
+        learning_details: "Agent memory auto-promotion must remain review-gated when final verification status contains an actual failure token.",
+      },
+    });
+    insertPodContextUpdate({
+      id: "ctx-failed-verification",
+      type: "progress",
+      summary: "Recorded failed verification context update.",
+      details: "A real context update row anchors the run context_update_id used by the auto-promotion gate.",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      payload: { context_update_id: "ctx-failed-verification" },
+      summary: "Submitted durable context update",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Updated code with real side effects",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-failed-verification",
+      final_output: "Completed durable memory update with failed verification.",
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(promotionGate(candidates[0]).reasons).toContain("final_state_has_warnings_or_errors");
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("blocks auto-promotion for fake or missing context update ids", async () => {
+    vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.85])));
+    const contextUpdateIds = ["stub-1", "mock-123", "fake", "ctx-missing-row"];
+
+    for (const [index, contextUpdateId] of contextUpdateIds.entries()) {
+      const session = createAgentSession({
+        orgId: ORG_ID,
+        pod_id: POD_ID,
+        scope: "backend",
+        agent_id: "agent-1",
+        goal: `Fake context update ${index}`,
+        metadata: REAL_AUTO_PROMOTE_METADATA,
+      });
+      const run = createAgentRun(ORG_ID, session!.session_id, {
+        input_prompt: "finish backend memory",
+        metadata: {
+          learning_summary: `Fake context update ${index} should block automatic promotion.`,
+          learning_details: "A submitted context-update event is not enough for automatic promotion when the run context_update_id is a placeholder or has no backing context update row.",
+        },
+      });
+      appendAgentRunEvent(ORG_ID, run!.run_id, {
+        event_type: "context_update_submitted",
+        payload: { context_update_id: contextUpdateId },
+        summary: "Submitted fake context update id",
+      });
+      appendAgentRunEvent(ORG_ID, run!.run_id, {
+        event_type: "file_change",
+        summary: "Updated code with real side effects",
+        artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+      });
+
+      await endAgentRun(ORG_ID, run!.run_id, {
+        status: "completed",
+        context_update_id: contextUpdateId,
+        final_output: "Completed durable memory update with fake context evidence.",
+      });
+
+      const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].status).toBe("pending");
+      expect(promotionGate(candidates[0]).reasons).toContain("missing_context_update");
+    }
+
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("continues session rollup when one auto-promotion ingestion fails", async () => {
+    vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.85])));
+    vi.mocked(ingestLearnings).mockRejectedValueOnce(new Error("transient ingest failure"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const session = createAgentSession({
+        orgId: ORG_ID,
+        pod_id: POD_ID,
+        scope: "backend",
+        agent_id: "agent-1",
+        goal: "Continue after promotion failure",
+        metadata: REAL_AUTO_PROMOTE_METADATA,
+      });
+
+      for (const index of [0, 1]) {
+        const contextUpdateId = `ctx-promotion-failure-${index}`;
+        const run = createAgentRun(ORG_ID, session!.session_id, {
+          input_prompt: `finish backend memory ${index}`,
+          metadata: {
+            learning_summary: `Auto-promotion ingestion failure ${index} should not stop session rollup.`,
+            learning_details: "Session rollup should keep created candidates and continue processing later durable seeds when one auto-promotion ingest attempt fails transiently.",
+          },
+        });
+        insertPodContextUpdate({
+          id: contextUpdateId,
+          type: "progress",
+          summary: `Recorded promotion failure context ${index}.`,
+          details: "A real context update row anchors the run context_update_id used by the auto-promotion gate.",
+        });
+        appendAgentRunEvent(ORG_ID, run!.run_id, {
+          event_type: "context_update_submitted",
+          payload: { context_update_id: contextUpdateId },
+          summary: "Submitted durable context update",
+        });
+        appendAgentRunEvent(ORG_ID, run!.run_id, {
+          event_type: "file_change",
+          summary: "Updated code with real side effects",
+          artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+        });
+        await endAgentRun(ORG_ID, run!.run_id, {
+          status: "completed",
+          context_update_id: contextUpdateId,
+          final_output: `Completed durable memory update ${index}.`,
+        });
+      }
+
+      const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+      expect(candidates).toHaveLength(2);
+      expect(candidates.map((candidate) => candidate.summary)).toEqual(expect.arrayContaining([
+        "Auto-promotion ingestion failure 0 should not stop session rollup.",
+        "Auto-promotion ingestion failure 1 should not stop session rollup.",
+      ]));
+      expect(candidates.map((candidate) => candidate.status).sort()).toEqual(["auto_promoted", "pending"]);
+      expect(ingestLearnings).toHaveBeenCalledTimes(2);
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[agent-memory] auto-promote failed"), expect.any(Error));
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("keeps completed-run candidates review-gated without corroborating promotion evidence", async () => {

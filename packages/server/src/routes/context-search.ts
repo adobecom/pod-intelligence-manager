@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { ContextSearchRequest } from "@pim/shared";
 import { searchContext } from "../services/context-search.js";
 import { validateBody } from "../middleware/validation.js";
+import { requireResourceBinding, requireServiceScope } from "../middleware/service-authz.js";
 
 const ContextSourceSchema = z.enum([
   "kg",
@@ -53,7 +54,9 @@ export default async function contextSearchRoutes(app: FastifyInstance) {
   app.post<{ Body: ContextSearchRequest }>(
     "/api/context-search",
     { preHandler: validateBody(ContextSearchRequestSchema) },
-    async (req) => {
+    async (req, reply) => {
+      if (!requireServiceScope(req, reply, "context-search:read")) return;
+      if (!requireResourceBinding(req, reply, { projectId: req.body.project_id, podId: req.body.pod_id })) return;
       // Forward the authenticated caller's email so the orchestrator can
       // fall back to scoping Jira to the user (and their orgs' projects)
       // when the request carries no explicit project/pod/actor scope.

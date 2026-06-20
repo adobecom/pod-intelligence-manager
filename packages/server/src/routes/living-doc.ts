@@ -3,6 +3,7 @@ import { z } from "zod";
 import db from "../db/connection.js";
 import { broadcast } from "../ws/index.js";
 import { validateBody } from "../middleware/validation.js";
+import { rejectServiceToken, requirePodBinding, requireServiceScope } from "../middleware/service-authz.js";
 
 const RecordViewSchema = z.object({
   viewer_id: z.string().min(1, "viewer_id is required"),
@@ -27,6 +28,8 @@ interface ViewRow {
 
 export default async function livingDocRoutes(app: FastifyInstance) {
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc", async (req, reply) => {
+    if (!requireServiceScope(req, reply, "project-context:read")) return;
+    if (!requirePodBinding(req, reply, req.params.podId)) return;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(req.params.podId, req.org!.org_id);
     if (!pod) {
       reply.code(404);
@@ -44,6 +47,7 @@ export default async function livingDocRoutes(app: FastifyInstance) {
     "/api/pods/:podId/living-doc/views",
     { preHandler: validateBody(RecordViewSchema) },
     async (req, reply) => {
+      if (!rejectServiceToken(req, reply)) return;
       const { podId } = req.params;
       const { viewer_id: viewerId } = req.body;
 
@@ -73,6 +77,7 @@ export default async function livingDocRoutes(app: FastifyInstance) {
 
   // Get living doc consumption stats
   app.get<{ Params: { podId: string } }>("/api/pods/:podId/living-doc/stats", async (req, reply) => {
+    if (!rejectServiceToken(req, reply)) return;
     const { podId } = req.params;
     const pod = db.prepare("SELECT pod_id FROM pods WHERE pod_id = ? AND org_id = ?").get(podId, req.org!.org_id);
     if (!pod) {
