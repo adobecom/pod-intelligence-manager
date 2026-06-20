@@ -133,7 +133,6 @@ export type {
   AgentRunKind,
   AgentSideEffectMode,
   AgentPromotionIntent,
-  AgentLearningScope,
   AgentMemoryRollupMetadata,
   AgentSessionStatus,
   AgentRunStatus,

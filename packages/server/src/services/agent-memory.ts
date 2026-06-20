@@ -21,8 +21,6 @@ import type {
   MemoryEntityRef,
   AgentRunKind,
   AgentSideEffectMode,
-  AgentLearningScope,
-  ProjectEvidenceItem,
 } from "@pim/shared";
 import {
   buildRetrievalText,
@@ -41,9 +39,6 @@ const DETERMINISTIC_AGENT_SESSION_MODEL = "deterministic-agent-session-rollup-v1
 const AGENT_SESSION_LLM_PROMPT = "../../../../prompts/agent-session-knowledge-extraction.md";
 const MIN_LEARNING_SUMMARY_LENGTH = 10;
 const MIN_LEARNING_DETAILS_LENGTH = 30;
-const AGENT_LEARNING_SCOPES = ["product", "harness", "org"] as const satisfies readonly AgentLearningScope[];
-const SCOPE_CLASSIFIER_MODEL = "deterministic-memory-scope-v1";
-const VALIDATION_GATE_MODEL = "deterministic-memory-validation-v1";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -188,7 +183,6 @@ interface AgentRunRollupMetadata {
   stubbedSystems: string[];
   verificationStatus?: string;
   promotionIntent?: AgentPromotionIntent;
-  learningScope?: AgentLearningScope;
   learningSummary?: string;
   learningDetails?: string;
   prUrl?: string;
@@ -201,38 +195,6 @@ interface PromotionGateResult {
   allow: boolean;
   policy: AgentMemoryRollupPolicy;
   reasons: string[];
-}
-
-interface ScopeClassificationResult {
-  targetMemoryScope: AgentLearningScope;
-  scopeClassifier: {
-    model: string;
-    decision: AgentLearningScope;
-    reasons: string[];
-    explicit?: boolean;
-  };
-}
-
-interface CandidateValidationContext {
-  evidenceRefs: string[];
-  runs: RunRow[];
-  events: AgentRunEvent[];
-  checkpoints: AgentCheckpoint[];
-  podUpdates: ContextUpdateMemoryRow[];
-  projectUpdates: ContextUpdateMemoryRow[];
-  artifactRefs: Artifact[];
-  text: string;
-}
-
-interface CandidateValidationResult {
-  allow: boolean;
-  trigger: "merged_pr" | "runtime";
-  reasons: string[];
-  matchedPrUrl?: string;
-  mergedEvidenceItemId?: string;
-  targetMemoryScope: AgentLearningScope;
-  scopeClassifier: ScopeClassificationResult["scopeClassifier"];
-  runtimeSignals?: string[];
 }
 
 type ExtractionKind = "deterministic" | "llm";
@@ -360,7 +322,6 @@ function readAgentRunRollupMetadata(run: RunRow, session: SessionRow): AgentRunR
     stubbedSystems: firstStringArrayValue(sources, "stubbed_systems"),
     verificationStatus: firstStringValue(sources, "verification_status"),
     promotionIntent: firstEnumValue<AgentPromotionIntent>(sources, "promotion_intent", ["audit_only", "durable_learning"]),
-    learningScope: firstEnumValue<AgentLearningScope>(sources, "learning_scope", AGENT_LEARNING_SCOPES),
     learningSummary: firstStringValue(sources, "learning_summary"),
     learningDetails: firstStringValue(sources, "learning_details"),
     prUrl: firstStringValueForKeys(sources, ["pr_url", "pull_request_url", "github_pr_url", "merge_request_url"]),
@@ -1541,426 +1502,6 @@ function candidateType(summary: string, details: string): KnowledgeNodeType {
   return "scope_insight";
 }
 
-function classifyTargetMemoryScope(input: {
-  session: SessionRow;
-  run?: RunRow;
-  summary: string;
-  details: string;
-  domains: string[];
-}): ScopeClassificationResult {
-  const sources = input.run ? metadataSources(input.run, input.session) : sessionMetadataSources(input.session);
-  const explicitScope = firstEnumValue<AgentLearningScope>(sources, "learning_scope", AGENT_LEARNING_SCOPES);
-  if (explicitScope) {
-    return {
-      targetMemoryScope: explicitScope,
-      scopeClassifier: {
-        model: SCOPE_CLASSIFIER_MODEL,
-        decision: explicitScope,
-        reasons: ["explicit_learning_scope"],
-        explicit: true,
-      },
-    };
-  }
-
-  const text = `${input.summary}\n${input.details}\n${input.domains.join("\n")}`.toLowerCase();
-  const domainSet = new Set(input.domains.map((domain) => domain.toLowerCase()));
-  const runtimeHarnessSignal = (
-    /\bharness\b/.test(text) ||
-    domainSet.has("harness") ||
-    domainSet.has("runtime") ||
-    domainSet.has("tooling") ||
-    (
-      /\b(?:rollup|agent[-\s]?session|memory candidate|orchestration|tooling|runtime)\b/.test(text) &&
-      /\b(?:spec[-_\s]?change|spec drift|retry behavior|close behavior|close failure|forbidden[-\s]?file drift|orchestration error|rollup failure)\b/.test(text)
-    )
-  );
-  if (runtimeHarnessSignal) {
-    return {
-      targetMemoryScope: "harness",
-      scopeClassifier: {
-        model: SCOPE_CLASSIFIER_MODEL,
-        decision: "harness",
-        reasons: ["runtime_or_harness_terms"],
-      },
-    };
-  }
-
-  return {
-    targetMemoryScope: "product",
-    scopeClassifier: {
-      model: SCOPE_CLASSIFIER_MODEL,
-      decision: "product",
-      reasons: ["default_product_scope"],
-    },
-  };
-}
-
-function candidateEvidenceRefs(candidate: MemoryCandidate): string[] {
-  const extraction = asJsonRecord(candidate.evidence.extraction);
-  return uniqueStrings([
-    ...jsonRecordStringArray(candidate.evidence, "evidence_refs"),
-    ...(extraction ? jsonRecordStringArray(extraction, "evidence_refs") : []),
-  ]);
-}
-
-function artifactRefsFromUnknown(value: unknown): Artifact[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item): Artifact[] => {
-    const record = asJsonRecord(item);
-    if (!record) return [];
-    const type = typeof record.type === "string" && record.type.trim() ? record.type.trim() : "artifact";
-    const path = typeof record.path === "string" && record.path.trim() ? record.path.trim() : undefined;
-    const url = typeof record.url === "string" && record.url.trim() ? record.url.trim() : undefined;
-    return path || url ? [{ type, ...(path ? { path } : {}), ...(url ? { url } : {}) }] : [];
-  });
-}
-
-function candidateRunIds(candidate: MemoryCandidate): string[] {
-  return uniqueStrings([
-    candidate.run_id ?? undefined,
-    jsonRecordString(candidate.evidence, "run_id"),
-    ...jsonRecordStringArray(candidate.evidence, "source_run_ids"),
-  ]);
-}
-
-function rowsByIds<T>(sqlPrefix: string, orgId: string, ids: string[]): T[] {
-  const unique = uniqueStrings(ids);
-  if (unique.length === 0) return [];
-  const placeholders = unique.map(() => "?").join(",");
-  return db.prepare(`${sqlPrefix} (${placeholders})`).all(orgId, ...unique) as T[];
-}
-
-function loadRunRowsByIds(orgId: string, runIds: string[]): RunRow[] {
-  return rowsByIds<RunRow>(
-    "SELECT * FROM agent_runs WHERE org_id = ? AND run_id IN",
-    orgId,
-    runIds,
-  );
-}
-
-function loadEventsForRunIds(orgId: string, runIds: string[]): AgentRunEvent[] {
-  return rowsByIds<EventRow>(
-    "SELECT * FROM agent_run_events WHERE org_id = ? AND run_id IN",
-    orgId,
-    runIds,
-  ).map(toEvent);
-}
-
-function checkpointIdsFromEvidenceRefs(refs: string[]): string[] {
-  return refs.flatMap((ref) => {
-    const match = ref.match(/^checkpoint:([A-Za-z0-9_-]+)/);
-    return match?.[1] ? [match[1]] : [];
-  });
-}
-
-function contextUpdateIdsFromEvidenceRefs(refs: string[]): string[] {
-  return refs.flatMap((ref) => {
-    const match = ref.match(/^(?:context_update|project_context_update):([A-Za-z0-9_-]+)/);
-    return match?.[1] ? [match[1]] : [];
-  });
-}
-
-function loadCheckpointsByIds(orgId: string, checkpointIds: string[]): AgentCheckpoint[] {
-  return rowsByIds<CheckpointRow>(
-    "SELECT * FROM agent_checkpoints WHERE org_id = ? AND checkpoint_id IN",
-    orgId,
-    checkpointIds,
-  ).map(toCheckpoint);
-}
-
-function jsonStringForValidation(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-}
-
-function collectCandidateValidationContext(candidate: MemoryCandidate): CandidateValidationContext {
-  const evidenceRefs = candidateEvidenceRefs(candidate);
-  const runs = loadRunRowsByIds(candidate.org_id, candidateRunIds(candidate));
-  const events = loadEventsForRunIds(candidate.org_id, runs.map((run) => run.run_id));
-  const checkpoints = loadCheckpointsByIds(candidate.org_id, checkpointIdsFromEvidenceRefs(evidenceRefs));
-  const { podUpdates, projectUpdates } = loadContextUpdateRows(
-    candidate.org_id,
-    contextUpdateIdsFromEvidenceRefs(evidenceRefs),
-  );
-  const artifactRefs = uniqueArtifacts([
-    ...artifactRefsFromUnknown(candidate.evidence.artifact_refs),
-    ...events.flatMap((event) => event.artifact_refs),
-    ...checkpoints.flatMap((checkpoint) => checkpoint.artifact_refs),
-    ...artifactsFromRows(...podUpdates, ...projectUpdates),
-  ]);
-  const text = [
-    candidate.summary,
-    candidate.details,
-    candidate.retrieval_text ?? "",
-    jsonStringForValidation(candidate.evidence),
-    ...candidate.entity_refs.flatMap((ref) => [ref.type, ref.key, ref.label ?? "", ref.source ?? ""]),
-    ...runs.flatMap((run) => [
-      run.input_prompt ?? "",
-      run.final_output ?? "",
-      run.error_message ?? "",
-      run.compacted_summary ?? "",
-      run.metadata_json,
-    ]),
-    ...events.flatMap((event) => [
-      event.event_type,
-      event.summary ?? "",
-      jsonStringForValidation(event.payload),
-    ]),
-    ...checkpoints.flatMap((checkpoint) => [
-      checkpoint.summary ?? "",
-      jsonStringForValidation(checkpoint.snapshot),
-    ]),
-    ...podUpdates.flatMap((update) => [update.type, update.scope, update.summary, update.details, update.status, update.source ?? ""]),
-    ...projectUpdates.flatMap((update) => [update.type, update.scope, update.summary, update.details, update.status, update.source ?? ""]),
-    ...artifactRefs.flatMap((artifact) => [artifact.type, artifact.path ?? "", artifact.url ?? ""]),
-  ].filter(Boolean).join("\n");
-  return { evidenceRefs, runs, events, checkpoints, podUpdates, projectUpdates, artifactRefs, text };
-}
-
-function canonicalReviewUrl(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  try {
-    const url = new URL(raw.trim());
-    url.hash = "";
-    url.search = "";
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    return `${url.protocol}//${url.hostname.toLowerCase()}${url.pathname}`;
-  } catch {
-    return undefined;
-  }
-}
-
-function extractUrls(text: string): string[] {
-  return uniqueStrings(text.match(/https?:\/\/[^\s"'<>),]+/g) ?? []);
-}
-
-function matchingPrUrl(candidate: MemoryCandidate, context: CandidateValidationContext, mergedPrUrl: string | undefined): string | undefined {
-  const expected = canonicalReviewUrl(mergedPrUrl);
-  if (!expected) return undefined;
-  const urls = uniqueStrings([
-    ...extractUrls(context.text),
-    ...context.artifactRefs.map((artifact) => artifact.url),
-  ]);
-  return urls.find((url) => canonicalReviewUrl(url) === expected);
-}
-
-function hasPrOrContextUpdateEvidence(
-  context: CandidateValidationContext,
-  matchedPrUrl: string | undefined,
-): boolean {
-  if (matchedPrUrl) return true;
-  if (context.evidenceRefs.some((ref) => /^(?:context_update|project_context_update):/.test(ref))) return true;
-  return context.podUpdates.length > 0 || context.projectUpdates.length > 0;
-}
-
-function isRawCheckpointOrSpecDump(candidate: MemoryCandidate, context: CandidateValidationContext): boolean {
-  const checkpointOnly = context.evidenceRefs.length > 0
-    && context.evidenceRefs.every((ref) => ref.startsWith("checkpoint:"));
-  if (checkpointOnly) return true;
-  const details = candidate.details.trim();
-  if (/^[{\[]/.test(details) && /"(?:snapshot|spec|durable_learning|durable_learnings|plan)"/i.test(details)) return true;
-  return /\braw\s+(?:planner\s+)?checkpoint\b/i.test(`${candidate.summary}\n${candidate.details}`);
-}
-
-function hasForbiddenFileDrift(context: CandidateValidationContext): boolean {
-  if (context.artifactRefs.some((artifact) => /\bforbidden\b/i.test(artifact.path ?? "") || /\bforbidden\b/i.test(artifact.url ?? ""))) {
-    return true;
-  }
-  return /\bforbidden[-_\s]?file(?:s)?\b/i.test(context.text)
-    || /\bforbidden_file(?:_touched|s)?\b/i.test(context.text);
-}
-
-function hasVerificationWarningsOrErrors(context: CandidateValidationContext): boolean {
-  if (/\bfinal_state_has_warnings_or_errors\b/i.test(context.text)) return true;
-  for (const run of context.runs) {
-    if (hasFinalWarningsOrErrors(run, readAgentRunRollupMetadata(run, {
-      session_id: run.session_id,
-      org_id: run.org_id,
-      project_id: run.project_id,
-      pod_id: run.pod_id,
-      scope: run.scope,
-      agent_id: run.agent_id,
-      status: "active",
-      goal: null,
-      current_task: null,
-      working_state_json: "{}",
-      compacted_summary: null,
-      last_compacted_event_rowid: 0,
-      metadata_json: "{}",
-      created_at: run.started_at,
-      updated_at: run.started_at,
-      ended_at: null,
-    }))) return true;
-  }
-  return context.events.some((event) => event.event_type === "error" || event.event_type === "run_failed");
-}
-
-function isDemoOrAuditContext(context: CandidateValidationContext): boolean {
-  if (/\b(?:demo_run|dry_run|audit_only|promotion_intent_not_durable_learning)\b/i.test(context.text)) return true;
-  return context.runs.some((run) => {
-    const metadata = parseJson<JsonRecord>(run.metadata_json, {});
-    return metadata.run_kind === "demo"
-      || metadata.run_kind === "dry_run"
-      || metadata.promotion_intent === "audit_only";
-  });
-}
-
-function hasExplicitNegativeEvidence(context: CandidateValidationContext): boolean {
-  const text = context.text.toLowerCase();
-  if (/\b(?:failed verification|verification failed|ci failure|ci failed|test failure|tests failed|revert(?:ed)?|rejected pr review|review rejected|incident|postmortem)\b/.test(text)) {
-    return true;
-  }
-  if (/\b(?:prevent(?:s|ed|ing)?|fix(?:es|ed|ing)?|guard(?:s|ed|ing)? against|eliminat(?:es|ed|ing)?)\b[\s\S]{0,140}\b(?:anti[-_\s]?pattern|regression|risk|failure|bug|drift)\b/.test(text)) {
-    return true;
-  }
-  return /\b(?:anti[-_\s]?pattern|regression|risk|failure|bug|drift)\b[\s\S]{0,140}\b(?:prevent(?:s|ed|ing)?|fix(?:es|ed|ing)?|guard(?:s|ed|ing)? against|eliminat(?:es|ed|ing)?)\b/.test(text);
-}
-
-function concreteRuntimeEvidenceSignals(context: CandidateValidationContext): string[] {
-  const signals = new Set<string>();
-  if ([...context.podUpdates, ...context.projectUpdates].some((update) => update.type === "spec_change")) {
-    signals.add("spec_change_evidence");
-  }
-  if (context.events.some((event) => event.event_type === "error" || event.event_type === "run_failed")) {
-    signals.add("runtime_error_event");
-  }
-  const text = context.text.toLowerCase();
-  const checks: Array<[string, RegExp]> = [
-    ["spec_drift", /\b(?:spec[-_\s]?change|spec drift|specification drift)\b/],
-    ["rollup_failure", /\brollup\s+(?:fail(?:ed|ure|ing)?|error)\b/],
-    ["retry_behavior", /\bretry\s+(?:behavior|handling|path|logic|attempt|attempts)\b/],
-    ["close_behavior", /\bclose\s+(?:behavior|failure|failed|path|agent session|session)\b/],
-    ["forbidden_file_drift", /\bforbidden[-_\s]?file(?:s)?\s+(?:drift|changed|touched|mismatch)\b/],
-    ["orchestration_error", /\borchestration\s+(?:error|fail(?:ed|ure|ing)?|degraded)\b/],
-  ];
-  for (const [signal, pattern] of checks) {
-    if (pattern.test(text)) signals.add(signal);
-  }
-  return [...signals];
-}
-
-function scopeClassificationForCandidate(candidate: MemoryCandidate): ScopeClassificationResult {
-  const stored = candidate.evidence.target_memory_scope;
-  const classifier = asJsonRecord(candidate.evidence.scope_classifier);
-  if (isOneOf(stored, AGENT_LEARNING_SCOPES)) {
-    return {
-      targetMemoryScope: stored,
-      scopeClassifier: {
-        model: typeof classifier?.model === "string" ? classifier.model : SCOPE_CLASSIFIER_MODEL,
-        decision: stored,
-        reasons: jsonRecordStringArray(classifier ?? {}, "reasons"),
-        ...(classifier?.explicit === true ? { explicit: true } : {}),
-      },
-    };
-  }
-  const domains = candidate.domains.length > 0 ? candidate.domains : ["agent-session"];
-  const textResult = classifyTargetMemoryScope({
-    session: {
-      session_id: candidate.session_id ?? "unknown",
-      org_id: candidate.org_id,
-      project_id: candidate.project_id ?? null,
-      pod_id: candidate.pod_id ?? null,
-      scope: domains[0] ?? null,
-      agent_id: "unknown",
-      status: "active",
-      goal: null,
-      current_task: null,
-      working_state_json: "{}",
-      compacted_summary: null,
-      last_compacted_event_rowid: 0,
-      metadata_json: "{}",
-      created_at: candidate.created_at,
-      updated_at: candidate.created_at,
-      ended_at: null,
-    },
-    summary: candidate.summary,
-    details: candidate.details,
-    domains,
-  });
-  return textResult;
-}
-
-function evaluateAgentCandidateValidation(input: {
-  candidate: MemoryCandidate;
-  context: CandidateValidationContext;
-  trigger: "merged_pr" | "runtime";
-  projectEvidence?: ProjectEvidenceItem;
-}): CandidateValidationResult {
-  const scope = scopeClassificationForCandidate(input.candidate);
-  const reasons = new Set<string>();
-  const runtimeSignals = concreteRuntimeEvidenceSignals(input.context);
-  const matchedPrUrl = input.projectEvidence
-    ? matchingPrUrl(input.candidate, input.context, input.projectEvidence.source_url)
-    : undefined;
-  const isMergedPr = input.projectEvidence?.source === "github" && input.projectEvidence.source_type === "merged_pr";
-
-  if (scope.targetMemoryScope === "org") {
-    reasons.add("org_scope_manual_only");
-  } else if (scope.targetMemoryScope === "product") {
-    if (input.trigger !== "merged_pr" || !isMergedPr) reasons.add("requires_merged_pr_evidence");
-    if (input.candidate.confidence_score < AUTO_PROMOTE_CONFIDENCE_MIN) reasons.add("low_confidence");
-    if (!matchedPrUrl) reasons.add("missing_matching_pr_url");
-    if (!hasPrOrContextUpdateEvidence(input.context, matchedPrUrl)) reasons.add("missing_pr_or_context_update_evidence");
-    if (isRawCheckpointOrSpecDump(input.candidate, input.context)) reasons.add("raw_checkpoint_or_spec_dump");
-    if (hasForbiddenFileDrift(input.context)) reasons.add("forbidden_file_touched");
-    if (isDemoOrAuditContext(input.context)) reasons.add("demo_or_audit_product");
-
-    if (input.candidate.type === "anti_pattern") {
-      if (!hasExplicitNegativeEvidence(input.context)) reasons.add("missing_explicit_negative_evidence");
-    } else if (input.candidate.type === "pattern" || input.candidate.type === "decision" || input.candidate.type === "scope_insight") {
-      if (hasVerificationWarningsOrErrors(input.context)) reasons.add("verification_warnings_or_errors");
-    } else {
-      reasons.add("unsupported_product_memory_type");
-    }
-  } else if (scope.targetMemoryScope === "harness") {
-    if (runtimeSignals.length === 0) reasons.add("missing_concrete_runtime_evidence");
-    if (input.candidate.type === "pattern" || input.candidate.type === "decision" || input.candidate.type === "scope_insight") {
-      if (input.candidate.confidence_score < AUTO_PROMOTE_CONFIDENCE_MIN) reasons.add("low_confidence");
-    } else if (input.candidate.type !== "anti_pattern") {
-      reasons.add("unsupported_harness_memory_type");
-    }
-  }
-
-  return {
-    allow: reasons.size === 0,
-    trigger: input.trigger,
-    reasons: [...reasons],
-    ...(matchedPrUrl ? { matchedPrUrl } : {}),
-    ...(input.projectEvidence ? { mergedEvidenceItemId: input.projectEvidence.id } : {}),
-    targetMemoryScope: scope.targetMemoryScope,
-    scopeClassifier: scope.scopeClassifier,
-    ...(runtimeSignals.length > 0 ? { runtimeSignals } : {}),
-  };
-}
-
-function writeCandidateValidationEvidence(candidate: MemoryCandidate, validation: CandidateValidationResult): MemoryCandidate {
-  const now = new Date().toISOString();
-  const evidence = {
-    ...candidate.evidence,
-    target_memory_scope: validation.targetMemoryScope,
-    scope_classifier: validation.scopeClassifier,
-    validation_gate: {
-      model: VALIDATION_GATE_MODEL,
-      trigger: validation.trigger,
-      decision: validation.allow ? "allowed" : "blocked",
-      reasons: validation.reasons,
-      evaluated_at: now,
-      ...(validation.runtimeSignals ? { runtime_signals: validation.runtimeSignals } : {}),
-    },
-    ...(validation.matchedPrUrl ? { matched_pr_url: validation.matchedPrUrl } : {}),
-    ...(validation.mergedEvidenceItemId ? { merged_evidence_item_id: validation.mergedEvidenceItemId } : {}),
-  };
-  db.prepare("UPDATE memory_candidates SET evidence_json = ? WHERE org_id = ? AND id = ?").run(
-    JSON.stringify(evidence),
-    candidate.org_id,
-    candidate.id,
-  );
-  return getMemoryCandidate(candidate.org_id, candidate.id) ?? { ...candidate, evidence };
-}
-
 function hasArtifactEvidence(events: AgentRunEvent[], artifactRefs: Artifact[]): boolean {
   return artifactRefs.length > 0 || events.some((e) => e.event_type === "file_change");
 }
@@ -2325,89 +1866,6 @@ export function rejectMemoryCandidate(orgId: string, candidateId: string): Memor
   return getMemoryCandidate(orgId, candidateId);
 }
 
-async function validatePendingAgentSessionCandidate(input: {
-  candidate: MemoryCandidate;
-  trigger: "merged_pr" | "runtime";
-  projectEvidence?: ProjectEvidenceItem;
-}): Promise<MemoryCandidate> {
-  const context = collectCandidateValidationContext(input.candidate);
-  const validation = evaluateAgentCandidateValidation({
-    candidate: input.candidate,
-    context,
-    trigger: input.trigger,
-    projectEvidence: input.projectEvidence,
-  });
-  const updated = writeCandidateValidationEvidence(input.candidate, validation);
-  if (!validation.allow) return updated;
-  try {
-    return await promoteCandidate(updated, true);
-  } catch (err) {
-    console.error(`[agent-memory] validation auto-promote failed for ${input.candidate.id}:`, err);
-    return updated;
-  }
-}
-
-export async function validatePendingAgentSessionCandidatesForProjectEvidence(
-  evidence: ProjectEvidenceItem,
-): Promise<MemoryCandidate[]> {
-  if (evidence.source !== "github" || evidence.source_type !== "merged_pr") return [];
-  const rows = db
-    .prepare(
-      `SELECT * FROM memory_candidates
-       WHERE org_id = ?
-         AND project_id = ?
-         AND source_type = 'agent_session'
-         AND status = 'pending'
-       ORDER BY created_at ASC, id ASC`,
-    )
-    .all(evidence.org_id, evidence.project_id) as unknown as CandidateRow[];
-  const candidates = rows.map(toCandidate);
-  const updated: MemoryCandidate[] = [];
-  for (const candidate of candidates) {
-    const context = collectCandidateValidationContext(candidate);
-    if (!matchingPrUrl(candidate, context, evidence.source_url)) continue;
-    const validation = evaluateAgentCandidateValidation({
-      candidate,
-      context,
-      trigger: "merged_pr",
-      projectEvidence: evidence,
-    });
-    const withEvidence = writeCandidateValidationEvidence(candidate, validation);
-    if (!validation.allow) {
-      updated.push(withEvidence);
-      continue;
-    }
-    try {
-      updated.push(await promoteCandidate(withEvidence, true));
-    } catch (err) {
-      console.error(`[agent-memory] merged PR validation auto-promote failed for ${candidate.id}:`, err);
-      updated.push(withEvidence);
-    }
-  }
-  return updated;
-}
-
-async function validatePendingHarnessCandidatesForRuntime(orgId: string, sessionId: string): Promise<MemoryCandidate[]> {
-  const rows = db
-    .prepare(
-      `SELECT * FROM memory_candidates
-       WHERE org_id = ?
-         AND session_id = ?
-         AND source_type = 'agent_session'
-         AND status = 'pending'
-       ORDER BY created_at ASC, id ASC`,
-    )
-    .all(orgId, sessionId) as unknown as CandidateRow[];
-  const updated: MemoryCandidate[] = [];
-  for (const row of rows) {
-    const candidate = toCandidate(row);
-    const scope = scopeClassificationForCandidate(candidate);
-    if (scope.targetMemoryScope !== "harness") continue;
-    updated.push(await validatePendingAgentSessionCandidate({ candidate, trigger: "runtime" }));
-  }
-  return updated;
-}
-
 export async function rollupAgentRun(orgId: string, runId: string): Promise<MemoryCandidate | null> {
   const run = getRunRow(orgId, runId);
   if (!run) return null;
@@ -2460,13 +1918,6 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
   const candidateId = id("mc");
   const now = new Date().toISOString();
   const domains = [...new Set([run.scope, run.project_id, "agent-run"].filter((v): v is string => !!v))];
-  const scopeClassification = classifyTargetMemoryScope({
-    session,
-    run,
-    summary: text.summary,
-    details: text.details,
-    domains,
-  });
   const draftCandidate: MemoryCandidate = {
     id: candidateId,
     org_id: orgId,
@@ -2503,22 +1954,11 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
     run_id: run.run_id,
     event_count: events.length,
     context_update_id: run.context_update_id,
-    artifact_refs: artifactRefs,
-    pr_url: findPrUrl(rollupMetadata, artifactRefs, events),
     evidence_confidence: evidenceConfidence,
-    target_memory_scope: scopeClassification.targetMemoryScope,
-    scope_classifier: scopeClassification.scopeClassifier,
     promotion_gate: {
       decision: promotionGate.allow ? "allowed" : "blocked",
       policy: promotionGate.policy,
       reasons: promotionGate.reasons,
-    },
-    validation_gate: {
-      model: VALIDATION_GATE_MODEL,
-      trigger: "initial_rollup",
-      decision: "blocked",
-      reasons: ["awaiting_validation_evidence"],
-      evaluated_at: now,
     },
   };
   const candidate = withImmediateTransaction(() => {
@@ -2667,13 +2107,6 @@ function createOrLoadAgentSessionCandidate(input: {
     input.session.project_id,
     "agent-session",
   ]);
-  const scopeClassification = classifyTargetMemoryScope({
-    session: input.session,
-    run: primaryRun,
-    summary: input.seed.summary,
-    details: input.seed.details,
-    domains,
-  });
   const retrievalText = buildRetrievalText({
     kind: "memory_candidate",
     summary: input.seed.summary,
@@ -2731,11 +2164,7 @@ function createOrLoadAgentSessionCandidate(input: {
     session_id: input.session.session_id,
     run_id: primaryRun?.run_id ?? null,
     source_run_ids: input.seed.sourceRunIds,
-    artifact_refs: artifactRefs,
-    pr_url: primaryRun ? findPrUrl(readAgentRunRollupMetadata(primaryRun, input.session), artifactRefs, runEvents) : undefined,
     evidence_confidence: input.seed.confidenceScore,
-    target_memory_scope: scopeClassification.targetMemoryScope,
-    scope_classifier: scopeClassification.scopeClassifier,
     extraction: {
       kind: input.seed.extractionKind,
       model: input.seed.extractionModel,
@@ -2747,13 +2176,6 @@ function createOrLoadAgentSessionCandidate(input: {
       decision: promotionGate.allow ? "allowed" : "blocked",
       policy: promotionGate.policy,
       reasons: promotionGate.reasons,
-    },
-    validation_gate: {
-      model: VALIDATION_GATE_MODEL,
-      trigger: "initial_rollup",
-      decision: "blocked",
-      reasons: ["awaiting_validation_evidence"],
-      evaluated_at: now,
     },
   };
 
@@ -2909,14 +2331,25 @@ export async function rollupAgentSession(orgId: string, sessionId: string): Prom
       sessionPolicy,
     });
     if (!candidate || candidate.status === "rejected" || rolledIds.has(candidate.id)) continue;
+    if (candidate.status === "pending") {
+      const gate = asJsonRecord(candidate.evidence.promotion_gate);
+      if (gate?.decision === "allowed") {
+        try {
+          const promoted = await promoteCandidate(candidate, true);
+          rolled.push(promoted);
+          rolledIds.add(promoted.id);
+        } catch (err) {
+          console.error(`[agent-memory] auto-promote failed for ${candidate.id}:`, err);
+          rolled.push(candidate);
+          rolledIds.add(candidate.id);
+        }
+        continue;
+      }
+    }
     rolled.push(candidate);
     rolledIds.add(candidate.id);
   }
-  const runtimeValidated = await validatePendingHarnessCandidatesForRuntime(orgId, sessionId);
-  if (runtimeValidated.length === 0) return rolled;
-  const byId = new Map(rolled.map((candidate) => [candidate.id, candidate]));
-  for (const candidate of runtimeValidated) byId.set(candidate.id, candidate);
-  return [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  return rolled;
 }
 
 export function closeAgentSession(orgId: string, sessionId: string): AgentSession | null {

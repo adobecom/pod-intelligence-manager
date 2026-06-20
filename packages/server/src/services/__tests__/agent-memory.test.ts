@@ -63,7 +63,6 @@ import {
   rollupAgentSession,
   updateAgentSessionWorkingState,
 } from "../agent-memory.js";
-import { recordProjectEvidence } from "../project-memory.js";
 import { ingestLearnings } from "../ingestion-gateway.js";
 import { persistMemoryEntities, recordTemporalRelationshipsForUpdate } from "../memory-enrichment.js";
 import { callLLMJSON, isLLMAvailable } from "../../pim/llm.js";
@@ -77,10 +76,6 @@ function promotionGate(candidate: { evidence: Record<string, unknown> }) {
   return candidate.evidence.promotion_gate as { decision: string; policy: string; reasons: string[] };
 }
 
-function validationGate(candidate: { evidence: Record<string, unknown> }) {
-  return candidate.evidence.validation_gate as { decision: string; trigger: string; reasons: string[]; runtime_signals?: string[] };
-}
-
 const REAL_AUTO_PROMOTE_METADATA = {
   rollup_policy: "auto_promote",
   run_kind: "real",
@@ -91,73 +86,6 @@ const REAL_AUTO_PROMOTE_METADATA = {
   promotion_intent: "durable_learning",
   pr_url: "https://github.com/acme/pim/pull/123",
 };
-
-async function recordMergedPr(prUrl = REAL_AUTO_PROMOTE_METADATA.pr_url, confidenceScore = 0.7) {
-  return recordProjectEvidence({
-    org_id: ORG_ID,
-    project_id: PROJECT_ID,
-    source: "github",
-    source_type: "merged_pr",
-    source_id: `acme/pim#${prUrl.split("/").pop() ?? "123"}`,
-    source_url: prUrl,
-    source_title: `Merged ${prUrl}`,
-    summary: "Merged agent memory PR",
-    body: "Merged implementation evidence for agent-session memory validation.",
-    occurred_at: "2026-06-01T00:00:00.000Z",
-    confidence_score: confidenceScore,
-  });
-}
-
-async function createPrBackedSessionCandidate(input: {
-  summary: string;
-  details: string;
-  prUrl?: string;
-  artifactPath?: string;
-  confidence?: number;
-  sessionMetadata?: Record<string, unknown>;
-  runMetadata?: Record<string, unknown>;
-}) {
-  vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, input.confidence ?? 0.85]]));
-  const prUrl = input.prUrl ?? REAL_AUTO_PROMOTE_METADATA.pr_url;
-  const session = createAgentSession({
-    orgId: ORG_ID,
-    pod_id: POD_ID,
-    scope: "backend",
-    agent_id: "agent-1",
-    goal: "Create PR-backed candidate",
-    metadata: {
-      ...REAL_AUTO_PROMOTE_METADATA,
-      pr_url: prUrl,
-      ...(input.sessionMetadata ?? {}),
-    },
-  });
-  const run = createAgentRun(ORG_ID, session!.session_id, {
-    input_prompt: "finish PR-backed memory",
-    metadata: {
-      learning_summary: input.summary,
-      learning_details: input.details,
-      ...(input.runMetadata ?? {}),
-    },
-  });
-  appendAgentRunEvent(ORG_ID, run!.run_id, {
-    event_type: "file_change",
-    summary: "Attached PR and file evidence",
-    artifact_refs: [
-      { type: "github_pr", url: prUrl },
-      { type: "file", path: input.artifactPath ?? "packages/server/src/services/agent-memory.ts" },
-    ],
-  });
-  await endAgentRun(ORG_ID, run!.run_id, {
-    status: "completed",
-    final_output: input.details,
-  });
-  await rollupAgentSession(ORG_ID, session!.session_id);
-  return {
-    session: session!,
-    run: run!,
-    candidate: listMemoryCandidates(ORG_ID, { session_id: session!.session_id })[0],
-  };
-}
 
 function resetDb() {
   testDb.exec(`
@@ -590,7 +518,7 @@ describe("agent run memory", () => {
     expect(callLLMJSON).not.toHaveBeenCalled();
   });
 
-  it("promotes high-confidence product candidates after matching PR merge evidence", async () => {
+  it("auto-promotes high-confidence completed-run memory candidates", async () => {
     vi.mocked(isLLMAvailable).mockReturnValue(true);
     vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.85]]));
     vi.mocked(callLLMJSON).mockResolvedValueOnce({ learnings: [] });
@@ -632,192 +560,17 @@ describe("agent run memory", () => {
     });
     await rollupAgentSession(ORG_ID, session!.session_id);
 
-    let candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
     expect(candidates).toHaveLength(1);
-    expect(candidates[0].status).toBe("pending");
+    expect(candidates[0].status).toBe("auto_promoted");
     expect(candidates[0].confidence_score).toBeGreaterThanOrEqual(0.85);
-    expect(candidates[0].promoted_node_id).toBeNull();
+    expect(candidates[0].promoted_node_id).toBe("kn-agent-run");
     expect(candidates[0].summary).toBe("Agent-memory auto-promotion requires explicit real-run metadata and PR evidence.");
     expect(promotionGate(candidates[0])).toEqual({
       decision: "allowed",
       policy: "auto_promote",
       reasons: [],
     });
-    expect(candidates[0].evidence.target_memory_scope).toBe("product");
-    expect(ingestLearnings).not.toHaveBeenCalled();
-
-    await recordMergedPr();
-
-    candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
-    expect(candidates[0].status).toBe("auto_promoted");
-    expect(candidates[0].promoted_node_id).toBe("kn-agent-run");
-    expect(candidates[0].evidence.matched_pr_url).toBe(REAL_AUTO_PROMOTE_METADATA.pr_url);
-    expect(validationGate(candidates[0])).toMatchObject({
-      decision: "allowed",
-      trigger: "merged_pr",
-      reasons: [],
-    });
-    expect(ingestLearnings).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps product candidates pending for open or unmerged PR evidence", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Implemented PR merge validation for product memory.",
-      details: "Product memory candidates should wait for actual merged PR evidence instead of promoting from open pull request artifacts.",
-    });
-
-    await recordProjectEvidence({
-      org_id: ORG_ID,
-      project_id: PROJECT_ID,
-      source: "github",
-      source_type: "open_pr",
-      source_id: "acme/pim#123-open",
-      source_url: REAL_AUTO_PROMOTE_METADATA.pr_url,
-      source_title: "Open PR #123",
-      summary: "Open PR for memory validation",
-      body: "The PR is still open and is not merge validation evidence.",
-      occurred_at: "2026-06-01T00:00:00.000Z",
-      confidence_score: 0.95,
-    });
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].status).toBe("pending");
-    expect(validationGate(candidates[0])).toMatchObject({
-      decision: "blocked",
-      trigger: "initial_rollup",
-    });
-    expect(ingestLearnings).not.toHaveBeenCalled();
-  });
-
-  it("keeps raw checkpoint-only candidates pending after matching PR merge evidence", async () => {
-    vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.85]]));
-    const session = createAgentSession({
-      orgId: ORG_ID,
-      pod_id: POD_ID,
-      scope: "backend",
-      agent_id: "agent-1",
-      goal: "Checkpoint-only promotion block",
-      metadata: REAL_AUTO_PROMOTE_METADATA,
-    });
-    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "checkpoint only" });
-    createAgentCheckpoint(ORG_ID, session!.session_id, {
-      run_id: run!.run_id,
-      snapshot: {
-        durable_learning: {
-          summary: "Implemented checkpoint-only memory validation.",
-          details: `Raw planner checkpoint for ${REAL_AUTO_PROMOTE_METADATA.pr_url} should not become product memory without non-checkpoint evidence.`,
-        },
-      },
-      summary: "Raw planner checkpoint spec dump",
-      artifact_refs: [{ type: "github_pr", url: REAL_AUTO_PROMOTE_METADATA.pr_url }],
-    });
-    await endAgentRun(ORG_ID, run!.run_id, {
-      status: "completed",
-      final_output: "Completed checkpoint-only workflow.",
-    });
-    await rollupAgentSession(ORG_ID, session!.session_id);
-
-    await recordMergedPr();
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
-    expect(candidates[0].status).toBe("pending");
-    expect(validationGate(candidates[0]).reasons).toContain("raw_checkpoint_or_spec_dump");
-    expect(ingestLearnings).not.toHaveBeenCalled();
-  });
-
-  it("keeps product candidates pending when forbidden files were touched", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Implemented product memory validation with file guard.",
-      details: "Product implementation candidates should not auto-promote when evidence shows forbidden files were touched.",
-      artifactPath: "forbidden/product-contract.md",
-    });
-
-    await recordMergedPr();
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].status).toBe("pending");
-    expect(validationGate(candidates[0]).reasons).toContain("forbidden_file_touched");
-    expect(ingestLearnings).not.toHaveBeenCalled();
-  });
-
-  it("does not promote product anti-patterns from merge evidence alone", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Avoid cache invalidation assumptions in product memory.",
-      details: "This candidate describes a risky implementation pattern that needs stronger negative evidence before durable promotion.",
-    });
-
-    await recordMergedPr();
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].type).toBe("anti_pattern");
-    expect(candidates[0].status).toBe("pending");
-    expect(validationGate(candidates[0]).reasons).toContain("missing_explicit_negative_evidence");
-    expect(ingestLearnings).not.toHaveBeenCalled();
-  });
-
-  it("promotes product anti-patterns with explicit prevention evidence", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Avoid cache invalidation assumptions in product memory.",
-      details: "Merged PR evidence fixes this anti-pattern by preventing stale cache regressions during answer citation refresh.",
-    });
-
-    await recordMergedPr();
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].type).toBe("anti_pattern");
-    expect(candidates[0].status).toBe("auto_promoted");
-    expect(validationGate(candidates[0]).reasons).toEqual([]);
-    expect(ingestLearnings).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps demo or audit product candidates pending even after matching PR merge evidence", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Implemented demo product memory validation.",
-      details: "Demo product candidates remain review-only even when they mention matching PR evidence.",
-      sessionMetadata: {
-        rollup_policy: "candidate_only",
-        run_kind: "demo",
-        side_effect_mode: "stubbed",
-        promotion_intent: "audit_only",
-        learning_scope: "product",
-      },
-    });
-
-    await recordMergedPr();
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].status).toBe("pending");
-    expect(validationGate(candidates[0]).reasons).toContain("demo_or_audit_product");
-    expect(ingestLearnings).not.toHaveBeenCalled();
-  });
-
-  it("promotes harness runtime anti-patterns from concrete runtime evidence", async () => {
-    const { session } = await createPrBackedSessionCandidate({
-      summary: "Avoid forbidden-file drift in harness rollups.",
-      details: "A spec_change runtime signal showed forbidden-file drift when harness retry behavior touched blocked files during an orchestration error.",
-      sessionMetadata: {
-        rollup_policy: "candidate_only",
-        run_kind: "demo",
-        side_effect_mode: "stubbed",
-        promotion_intent: "audit_only",
-        learning_scope: "harness",
-      },
-    });
-
-    const candidates = listMemoryCandidates(ORG_ID, { session_id: session.session_id });
-    expect(candidates[0].type).toBe("anti_pattern");
-    expect(candidates[0].status).toBe("auto_promoted");
-    expect(candidates[0].evidence.target_memory_scope).toBe("harness");
-    expect(validationGate(candidates[0])).toMatchObject({
-      decision: "allowed",
-      trigger: "runtime",
-    });
-    expect(validationGate(candidates[0]).runtime_signals).toEqual(expect.arrayContaining([
-      "spec_drift",
-      "retry_behavior",
-      "forbidden_file_drift",
-      "orchestration_error",
-    ]));
     expect(ingestLearnings).toHaveBeenCalledTimes(1);
   });
 
@@ -868,24 +621,15 @@ describe("agent run memory", () => {
         final_output: "Completed durable memory update with real verification evidence.",
       });
 
-      let candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+      const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
 
       expect(candidates).toHaveLength(1);
-      expect(candidates[0].status).toBe("pending");
+      expect(candidates[0].status).toBe("auto_promoted");
       expect(promotionGate(candidates[0])).toEqual({
         decision: "allowed",
         policy: "auto_promote",
         reasons: [],
       });
-
-      await recordMergedPr(`https://github.com/acme/pim/pull/${200 + index}`);
-      candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
-      expect(candidates[0].status).toBe("pending");
-
-      await recordMergedPr();
-      candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
-      expect(candidates[0].status).toBe("auto_promoted");
-      expect(validationGate(candidates[0]).reasons).toEqual([]);
     }
   });
 
@@ -987,7 +731,7 @@ describe("agent run memory", () => {
     expect(ingestLearnings).not.toHaveBeenCalled();
   });
 
-  it("continues merged-PR validation when one auto-promotion ingestion fails", async () => {
+  it("continues session rollup when one auto-promotion ingestion fails", async () => {
     vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.85])));
     vi.mocked(ingestLearnings).mockRejectedValueOnce(new Error("transient ingest failure"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -1036,20 +780,13 @@ describe("agent run memory", () => {
       const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
 
       expect(candidates).toHaveLength(2);
-      expect(candidates.map((candidate) => candidate.status)).toEqual(["pending", "pending"]);
-      expect(ingestLearnings).not.toHaveBeenCalled();
-
-      await recordMergedPr();
-      const validated = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
-
-      expect(validated).toHaveLength(2);
       expect(candidates.map((candidate) => candidate.summary)).toEqual(expect.arrayContaining([
         "Auto-promotion ingestion failure 0 should not stop session rollup.",
         "Auto-promotion ingestion failure 1 should not stop session rollup.",
       ]));
-      expect(validated.map((candidate) => candidate.status).sort()).toEqual(["auto_promoted", "pending"]);
+      expect(candidates.map((candidate) => candidate.status).sort()).toEqual(["auto_promoted", "pending"]);
       expect(ingestLearnings).toHaveBeenCalledTimes(2);
-      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[agent-memory] merged PR validation auto-promote failed"), expect.any(Error));
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("[agent-memory] auto-promote failed"), expect.any(Error));
     } finally {
       consoleError.mockRestore();
     }

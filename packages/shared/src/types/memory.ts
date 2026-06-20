@@ -69,7 +69,6 @@ export type AgentMemoryRollupPolicy = "none" | "candidate_only" | "auto_promote"
 export type AgentRunKind = "real" | "demo" | "dry_run";
 export type AgentSideEffectMode = "real" | "stubbed" | "mixed";
 export type AgentPromotionIntent = "audit_only" | "durable_learning";
-export type AgentLearningScope = "product" | "harness" | "org";
 
 export interface AgentMemoryRollupMetadata {
   rollup_policy?: AgentMemoryRollupPolicy;
@@ -79,7 +78,6 @@ export interface AgentMemoryRollupMetadata {
   stubbed_systems?: string[];
   verification_status?: string;
   promotion_intent?: AgentPromotionIntent;
-  learning_scope?: AgentLearningScope;
   learning_summary?: string;
   learning_details?: string;
   test_kind?: string;
