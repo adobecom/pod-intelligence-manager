@@ -87,6 +87,8 @@ export class KnowledgeQueryValidationError extends Error {
 type InternalKnowledgeQueryOptions = KnowledgeQueryOptions & {
   /** Eval-only oracle hints. Public REST schemas intentionally strip this field. */
   required_node_ids?: string[];
+  /** Internal compact-context mode: avoid broad scoped recall unless task evidence is direct. */
+  strict_task_relevance?: boolean;
 };
 
 // --- Index helpers ---
@@ -351,6 +353,9 @@ const LOW_SIGNAL_QUERY_KEYWORDS = new Set([
 const RARE_KEYWORD_RECALL_MAX_TERMS = 3;
 const RARE_KEYWORD_RECALL_MAX_ABSOLUTE_MATCHES = 3;
 const RARE_KEYWORD_RECALL_MAX_GRAPH_SHARE = 0.02;
+const GENERIC_TASK_IDENTIFIER_MAX_LENGTH = 3;
+const WEAK_SEMANTIC_SIGNAL_THRESHOLD = 0.45;
+const GENERIC_IDENTIFIER_SUPPORT_MIN_KEYWORD_HITS = 2;
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
   return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN));
@@ -636,14 +641,24 @@ function mergeQueryIdentifiers(filters: KnowledgeQueryOptions["filters"], queryT
 
 interface QuerySignalPlan {
   strongIdentifiers: string[];
+  genericIdentifiers: string[];
   rareKeywords: string[];
   recallIds: Set<string>;
   forceLexicalRecall: boolean;
 }
 
-function shouldForceLexicalRecall(keywords: string[], strongIdentifiers: string[]): boolean {
-  if (strongIdentifiers.length > 0) {
-    return strongIdentifiers.length <= 3 && keywords.length <= 8;
+function isGenericTaskIdentifier(identifier: string): boolean {
+  const normalized = identifier.toLowerCase().trim();
+  return (
+    normalized.length >= 2 &&
+    normalized.length <= GENERIC_TASK_IDENTIFIER_MAX_LENGTH &&
+    /^[a-z][a-z0-9]*$/.test(normalized)
+  );
+}
+
+function shouldForceLexicalRecall(keywords: string[], identifiers: string[]): boolean {
+  if (identifiers.length > 0) {
+    return identifiers.length <= 3 && keywords.length <= 8;
   }
   return keywords.length > 0 && keywords.length <= RARE_KEYWORD_RECALL_MAX_TERMS;
 }
@@ -652,6 +667,7 @@ function rareQueryKeywords(
   state: OrgGraphState,
   keywords: string[],
   strongIdentifiers: string[],
+  genericIdentifiers: string[],
   forceLexicalRecall: boolean,
 ): string[] {
   if (!forceLexicalRecall) return [];
@@ -659,6 +675,7 @@ function rareQueryKeywords(
   if (highSignalKeywords.length === 0 || highSignalKeywords.length > RARE_KEYWORD_RECALL_MAX_TERMS) return [];
 
   const strongIdentifierSet = new Set(strongIdentifiers);
+  const genericIdentifierSet = new Set(genericIdentifiers);
   const graphSize = Math.max(1, state.graph.nodes.length);
   const maxMatches = Math.max(
     RARE_KEYWORD_RECALL_MAX_ABSOLUTE_MATCHES,
@@ -666,6 +683,7 @@ function rareQueryKeywords(
   );
 
   return uniqueStrings(highSignalKeywords).filter((keyword) => {
+    if (genericIdentifierSet.has(keyword)) return false;
     if (strongIdentifierSet.has(keyword)) return true;
     const matches = state.keywordIndex.get(keyword);
     return !!matches && matches.size > 0 && matches.size <= maxMatches;
@@ -677,12 +695,14 @@ function buildQuerySignalPlan(
   keywords: string[],
   identifiers: string[],
 ): QuerySignalPlan {
-  const strongIdentifiers = uniqueStrings(identifiers);
-  const forceLexicalRecall = shouldForceLexicalRecall(keywords, strongIdentifiers);
-  const rareKeywords = rareQueryKeywords(state, keywords, strongIdentifiers, forceLexicalRecall);
+  const queryIdentifiers = uniqueStrings(identifiers);
+  const strongIdentifiers = queryIdentifiers.filter((identifier) => !isGenericTaskIdentifier(identifier));
+  const genericIdentifiers = queryIdentifiers.filter(isGenericTaskIdentifier);
+  const forceLexicalRecall = shouldForceLexicalRecall(keywords, queryIdentifiers);
+  const rareKeywords = rareQueryKeywords(state, keywords, strongIdentifiers, genericIdentifiers, forceLexicalRecall);
   const recallIds = new Set<string>();
 
-  for (const identifier of strongIdentifiers) {
+  for (const identifier of queryIdentifiers) {
     for (const id of state.identifierIndex.get(identifier) ?? []) recallIds.add(id);
     for (const id of state.keywordIndex.get(identifier) ?? []) recallIds.add(id);
   }
@@ -690,7 +710,7 @@ function buildQuerySignalPlan(
     for (const id of state.keywordIndex.get(keyword) ?? []) recallIds.add(id);
   }
 
-  return { strongIdentifiers, rareKeywords, recallIds, forceLexicalRecall };
+  return { strongIdentifiers, genericIdentifiers, rareKeywords, recallIds, forceLexicalRecall };
 }
 
 function hasExactShortKeywordMatch(nodeKeywords: Set<string> | undefined, keywords: string[]): boolean {
@@ -800,10 +820,16 @@ type ScoredNode = {
   querySimilarity?: number;
   exactShortKeywordMatch: boolean;
   keywordHits: number;
+  nonGenericKeywordHits: number;
   identifierHits: number;
+  strongIdentifierHits: number;
+  genericIdentifierHits: number;
+  rareKeywordHits: number;
   lexicalRecallHits: number;
   score: number;
   graphExpanded?: boolean;
+  semanticRelevance?: boolean;
+  directEvidence?: boolean;
 };
 
 function identifierMatchScore(identifierHits: number): number {
@@ -838,6 +864,9 @@ function scoreCandidates(
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
 ): ScoredNode[] {
   const scoringKeywords = highSignalKeywordsForScoring(keywords);
+  const genericIdentifierSet = new Set(querySignals.genericIdentifiers);
+  const nonGenericScoringKeywords = scoringKeywords.filter((keyword) => !genericIdentifierSet.has(keyword));
+  const lexicalRecallIdentifiers = [...querySignals.strongIdentifiers, ...querySignals.genericIdentifiers];
   return candidates.map((node) => {
     const precomputedKeywords = state.nodeKeywords.get(node.id);
     const precomputedIdentifiers = state.nodeIdentifiers.get(node.id);
@@ -846,8 +875,11 @@ function scoreCandidates(
         ? cosineSimilarity(queryEmbedding, node.embedding)
         : undefined;
     const identifierHits = countIdentifierMatches(precomputedIdentifiers, identifiers);
+    const strongIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.strongIdentifiers);
+    const genericIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.genericIdentifiers);
     const keywordHits = countKeywordMatches(precomputedKeywords, scoringKeywords);
-    const lexicalIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.strongIdentifiers);
+    const nonGenericKeywordHits = countKeywordMatches(precomputedKeywords, nonGenericScoringKeywords);
+    const lexicalIdentifierHits = countIdentifierMatches(precomputedIdentifiers, lexicalRecallIdentifiers);
     const rareKeywordHits = countKeywordMatches(precomputedKeywords, querySignals.rareKeywords);
     const lexicalRecall = querySignals.forceLexicalRecall && querySignals.recallIds.has(node.id);
     const lexicalRecallHits = lexicalRecall ? Math.max(1, lexicalIdentifierHits, rareKeywordHits) : 0;
@@ -857,7 +889,11 @@ function scoreCandidates(
       querySimilarity,
       exactShortKeywordMatch: hasExactShortKeywordMatch(precomputedKeywords, scoringKeywords),
       keywordHits,
+      nonGenericKeywordHits,
       identifierHits,
+      strongIdentifierHits,
+      genericIdentifierHits,
+      rareKeywordHits,
       lexicalRecallHits,
       score: scoreRelevance(
         node,
@@ -924,6 +960,64 @@ function pinRequiredScoredNodes(
   return [...boosted, ...pinned];
 }
 
+function hasSemanticEvidence(scored: ScoredNode, minQuerySimilarity: number): boolean {
+  return scored.querySimilarity !== undefined && scored.querySimilarity >= minQuerySimilarity;
+}
+
+function hasExactShortKeywordEvidence(
+  scored: ScoredNode,
+  scoringKeywords: string[],
+  querySignals: QuerySignalPlan,
+): boolean {
+  if (!scored.exactShortKeywordMatch) return false;
+  const genericIdentifierSet = new Set(querySignals.genericIdentifiers);
+  if (scoringKeywords.some((keyword) => !genericIdentifierSet.has(keyword))) return true;
+  return scored.strongIdentifierHits > 0 || scored.rareKeywordHits > 0;
+}
+
+function hasStrongKeywordOverlapEvidence(scored: ScoredNode, scoringKeywordCount: number): boolean {
+  if (scoringKeywordCount === 0 || scored.keywordHits === 0) return false;
+  if (scoringKeywordCount <= 2) {
+    return scored.exactShortKeywordMatch && scored.nonGenericKeywordHits > 0;
+  }
+  if (scoringKeywordCount > 8) {
+    return scored.keywordHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS + 1 ||
+      (scored.keywordHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS && (scored.querySimilarity ?? 0) >= 0.25);
+  }
+  return scored.keywordHits >= KEYWORD_OVERLAP_GATE_MIN_HITS &&
+    scored.keywordHits / scoringKeywordCount >= KEYWORD_OVERLAP_GATE_RATIO;
+}
+
+function hasSupportedGenericIdentifierEvidence(scored: ScoredNode): boolean {
+  if (scored.genericIdentifierHits === 0) return false;
+  return (
+    scored.rareKeywordHits > 0 ||
+    (scored.querySimilarity ?? 0) >= WEAK_SEMANTIC_SIGNAL_THRESHOLD ||
+    scored.nonGenericKeywordHits >= GENERIC_IDENTIFIER_SUPPORT_MIN_KEYWORD_HITS
+  );
+}
+
+function hasDirectTaskEvidence(
+  scored: ScoredNode,
+  scoringKeywords: string[],
+  querySignals: QuerySignalPlan,
+): boolean {
+  if (scored.strongIdentifierHits > 0) return true;
+  if (hasSupportedGenericIdentifierEvidence(scored)) return true;
+  if (scored.lexicalRecallHits > 0 && scored.rareKeywordHits > 0) return true;
+  if (hasExactShortKeywordEvidence(scored, scoringKeywords, querySignals)) return true;
+  return hasStrongKeywordOverlapEvidence(scored, scoringKeywords.length);
+}
+
+function withTaskRelevanceEvidence(
+  scored: ScoredNode,
+  directEvidence: boolean,
+  semanticRelevance: boolean,
+): ScoredNode {
+  if (scored.directEvidence === directEvidence && scored.semanticRelevance === semanticRelevance) return scored;
+  return { ...scored, directEvidence, semanticRelevance };
+}
+
 function applySemanticGate(
   scored: ScoredNode[],
   state: OrgGraphState,
@@ -931,12 +1025,28 @@ function applySemanticGate(
   querySignals: QuerySignalPlan,
   queryEmbedding: number[] | null | undefined,
   minQuerySimilarity: number,
+  strictTaskRelevance = false,
 ): ScoredNode[] {
-  if (!queryEmbedding) return scored;
   const scoringKeywords = highSignalKeywordsForScoring(keywords);
   const hasFilteredScoringKeywords =
     scoringKeywords.length !== keywords.length ||
     scoringKeywords.some((keyword, index) => keyword !== keywords[index]);
+  const annotate = (entry: ScoredNode): ScoredNode => withTaskRelevanceEvidence(
+    entry,
+    hasDirectTaskEvidence(entry, scoringKeywords, querySignals),
+    hasSemanticEvidence(entry, minQuerySimilarity),
+  );
+
+  if (!queryEmbedding) {
+    const annotated = scored.map(annotate);
+    return strictTaskRelevance ? annotated.filter((entry) => entry.directEvidence) : annotated;
+  }
+
+  if (strictTaskRelevance) {
+    return scored
+      .map(annotate)
+      .filter((entry) => entry.directEvidence || entry.semanticRelevance);
+  }
 
   const gated = scored.filter(({ node, querySimilarity, identifierHits, lexicalRecallHits }) =>
     lexicalRecallHits > 0 ||
@@ -969,10 +1079,11 @@ function applySemanticGate(
           Math.ceil(scoringKeywords.length * KEYWORD_OVERLAP_GATE_RATIO),
         );
       })
+      .map(annotate)
       .sort((a, b) => b.keywordHits - a.keywordHits || b.score - a.score);
   }
 
-  return gated;
+  return gated.map(annotate);
 }
 
 function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
@@ -1122,10 +1233,16 @@ function expandWithGraphNeighbors(
       node: neighbor,
       exactShortKeywordMatch: false,
       keywordHits: 0,
+      nonGenericKeywordHits: 0,
       identifierHits: 0,
+      strongIdentifierHits: 0,
+      genericIdentifierHits: 0,
+      rareKeywordHits: 0,
       lexicalRecallHits: 0,
       score: graphScore,
       graphExpanded: true,
+      semanticRelevance: false,
+      directEvidence: false,
     };
     byId.set(neighbor.id, expanded);
     added++;
@@ -1147,8 +1264,10 @@ function recordRetrievals(state: OrgGraphState, nodes: KnowledgeNode[]): void {
   state.retrievalTelemetryDirty = true;
 }
 
-function nodeStrength(node: KnowledgeNode): KnowledgeRetrievalExplanation["strength"] {
+function nodeStrength(scored: ScoredNode): KnowledgeRetrievalExplanation["strength"] {
+  const node = scored.node;
   if (node.type === "anti_pattern") return "avoid";
+  if (!scored.semanticRelevance && !scored.directEvidence) return "related";
   if (node.type === "decision" || node.type === "resolved_conflict") return "must_follow";
   if (node.type === "pattern" && node.confidence_score >= 0.85) return "must_follow";
   return "related";
@@ -1177,7 +1296,7 @@ function explanationForScoredNode(
   const topicsSnapshot = nodeTopics(node);
   return {
     node_id: node.id,
-    strength: nodeStrength(node),
+    strength: nodeStrength(scored),
     matched_scopes: intersection(scopesSnapshot, scopes),
     matched_topics: intersection(topicsSnapshot, topics.length > 0 ? topics : mergeScoringKeywords(filters)),
     ...(scored.querySimilarity !== undefined ? { semantic_score: scored.querySimilarity } : {}),
@@ -1309,7 +1428,7 @@ function serializeCompactKgContext(
   lines.push("");
   lines.push(compactHeading(
     2,
-    options.possibleConstraints ? "Possible KG constraints" : "High-confidence KG constraints",
+    options.possibleConstraints ? "Possible KG constraints" : "Task-matched KG constraints",
     headingOffset,
   ));
 
@@ -1356,6 +1475,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     include_explanations = false,
     record_retrievals = true,
     required_node_ids,
+    strict_task_relevance = false,
   } = options;
   const filters = normalizeQueryFilters(rawFilters);
 
@@ -1457,9 +1577,17 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     graphTuning,
   );
 
-  if (query_embedding) {
+  if (query_embedding || (strict_task_relevance && !!query_text?.trim())) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
-    const gated = applySemanticGate(scored, state, keywords, querySignals, query_embedding, minQuerySimilarity);
+    const gated = applySemanticGate(
+      scored,
+      state,
+      keywords,
+      querySignals,
+      query_embedding,
+      minQuerySimilarity,
+      strict_task_relevance,
+    );
     const scoringKeywords = highSignalKeywordsForScoring(keywords);
     const filteredRecallHasLexicalSignal = scored.some((entry) => {
       if (entry.exactShortKeywordMatch || entry.identifierHits > 0) return true;
@@ -1467,6 +1595,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
       return entry.keywordHits >= Math.max(2, Math.ceil(scoringKeywords.length * 0.25));
     });
     const shouldUseFilteredCandidatesAsRecallFallback =
+      !strict_task_relevance &&
       gated.length === 0 &&
       scored.length > 0 &&
       !!query_text?.trim() &&
@@ -1492,7 +1621,8 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
   );
 
   const shouldExpand =
-    expand_graph ?? Boolean(query_text?.trim() || query_mode === "why_changed" || query_mode === "history" || query_mode === "as_of");
+    !strict_task_relevance &&
+    (expand_graph ?? Boolean(query_text?.trim() || query_mode === "why_changed" || query_mode === "history" || query_mode === "as_of"));
   if (shouldExpand) {
     scored = expandWithGraphNeighbors(scored, state, query_mode, as_of, filters);
   }
@@ -1635,6 +1765,7 @@ async function getTaskRelevantLearnings(
       record_retrievals: recordRetrievals,
       required_node_ids: requiredNodeIds,
       query_embedding: taskQueryEmbedding,
+      strict_task_relevance: true,
     });
   }
 

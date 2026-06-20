@@ -495,11 +495,18 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
         confidence_score: 0.9,
       },
     ]);
+    const decision = getGraph(orgId).nodes.find((n) => n.summary.startsWith("Use webhook signatures"))!;
+    const antiPattern = getGraph(orgId).nodes.find((n) => n.summary.startsWith("Avoid unsigned"))!;
+    const unrelated = getGraph(orgId).nodes.find((n) => n.summary.startsWith("Cache static"))!;
+    decision.embedding = [0, 1, 0];
+    antiPattern.embedding = [0, 1, 0];
+    unrelated.embedding = [1, 0, 0];
     orgSettingsState.kgContextContract = "task_relevant";
 
     const result = await getContractedRelevantLearnings(orgId, {
       scopes: ["backend"],
       taskQuery: "payment webhook callback signature verification",
+      taskQueryEmbedding: [0, 1, 0],
       maxTokens: 2000,
     });
 
@@ -509,6 +516,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(result.nodes.length).toBeLessThanOrEqual(5);
     expect(result.nodes.map((n) => n.summary)).not.toContain("Cache static assets at the CDN edge");
     expect(result.compact_context).toContain("PIM KG Compact Context");
+    expect(result.compact_context).toContain("Task-matched KG constraints");
     expect(result.compact_context).toContain("task prompt API/input/output shape is authoritative");
     expect(result.compact_context).toContain("payment webhook callback signature verification");
     expect(result.compact_context).toContain("Use webhook signatures for payment callbacks");
@@ -518,6 +526,198 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(result.explanations?.length).toBe(result.nodes.length);
     expect(result.explanations?.[0].node_id).toBe(result.nodes[0].id);
     expect(result.explanations?.some((e) => e.strength === "avoid")).toBe(true);
+  });
+
+  it("does not restore broad frontend project candidates in strict task-relevant mode", async () => {
+    const orgId = nextOrgId("kg-strict-broad");
+    initializeKnowledgeGraph(orgId);
+    await addLearningsToGraph(
+      orgId,
+      [
+        {
+          type: "decision",
+          summary: "EMC uses React Spectrum for frontend layouts",
+          details: "Broad frontend project guidance should not be task context without direct evidence.",
+          domains: ["frontend"],
+          confidence: "extracted",
+          confidence_score: 0.92,
+        },
+      ],
+      "pod-frontend",
+      "Frontend Pod",
+      { project_id: "proj-emc", project_name: "EMC" },
+    );
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["frontend"],
+      projectId: "proj-emc",
+      taskQuery: "mobile checkout animation storyboard",
+      taskQueryEmbedding: [0, 1, 0],
+      maxTokens: 2000,
+    });
+
+    expect(result.context_contract?.returned_mode).toBe("task_relevant");
+    expect(result.context_contract?.possible_constraints).toBeUndefined();
+    expect(result.nodes).toHaveLength(0);
+    expect(result.total_matching).toBe(0);
+    expect(result.compact_context).toBeUndefined();
+  });
+
+  it("does not treat a generic acronym-only task query as direct evidence", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "EMC frontend route shell layout pattern",
+        details: "EMC pages share global shell navigation and layout conventions.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["frontend"],
+      taskQuery: "EMC",
+      taskQueryEmbedding: [0, 1, 0],
+      maxTokens: 2000,
+    });
+
+    expect(result.nodes).toHaveLength(0);
+    expect(result.total_matching).toBe(0);
+  });
+
+  it("allows a generic acronym when paired with rare lexical evidence", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "EMC devtokenmode bootstrap",
+        details: "EMC standalone auth exposes devtokenmode only on approved local hosts.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "EMC frontend route shell layout pattern",
+        details: "Generic layout guidance without the rare token.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) node.embedding = [1, 0, 0];
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["frontend"],
+      taskQuery: "EMC devtokenmode",
+      taskQueryEmbedding: [0, 1, 0],
+      maxTokens: 2000,
+    });
+
+    expect(result.nodes.map((n) => n.summary)).toEqual(["EMC devtokenmode bootstrap"]);
+  });
+
+  it("allows a generic acronym when paired with strong keyword overlap", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "pattern",
+        summary: "EMC registration locale overlay resolver",
+        details: "Registration locale overlay resolver uses localized labels and placeholders.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+      {
+        type: "pattern",
+        summary: "EMC frontend route shell layout pattern",
+        details: "Generic route layout guidance.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.9,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) node.embedding = [1, 0, 0];
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["frontend"],
+      taskQuery: "EMC registration locale overlay resolver",
+      taskQueryEmbedding: [0, 1, 0],
+      maxTokens: 2000,
+    });
+
+    expect(result.nodes[0]?.summary).toBe("EMC registration locale overlay resolver");
+    expect(result.nodes.map((n) => n.summary)).not.toContain("EMC frontend route shell layout pattern");
+  });
+
+  it.each([
+    ["Jira key", "MWPW-198157", "MWPW-198157 dev token regression"],
+    ["PR ref", "adobecom/event-libs#156", "Load RSVP config from adobecom/event-libs#156"],
+    ["file path", "/web-src/src/utils/dataFilters.ts", "Filter PUT payloads in /web-src/src/utils/dataFilters.ts"],
+    ["endpoint path", "GET /events/{eventId}", "GET /events/{eventId} supplies modificationTime"],
+    ["code symbol", "useHasPermission", "useHasPermission gates event write actions"],
+    ["package name", "@adobe/event-libs", "Load RSVP config from @adobe/event-libs"],
+  ])("allows strong identifier evidence for %s", async (_label, taskQuery, summary) => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary,
+        details: `${taskQuery} is direct task evidence even when semantic similarity is weak.`,
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+      {
+        type: "decision",
+        summary: "EMC frontend route shell layout pattern",
+        details: "Generic layout guidance should not outrank direct identifiers.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+    ]);
+    for (const node of getGraph(orgId).nodes) node.embedding = [1, 0, 0];
+    orgSettingsState.kgContextContract = "task_relevant";
+
+    const result = await getContractedRelevantLearnings(orgId, {
+      scopes: ["frontend"],
+      taskQuery,
+      taskQueryEmbedding: [0, 1, 0],
+      maxTokens: 2000,
+    });
+
+    expect(result.nodes[0]?.summary).toBe(summary);
+    expect(result.explanations?.[0].strength).toBe("must_follow");
+  });
+
+  it("does not label weak generic lexical matches as must_follow", async () => {
+    const orgId = await seedGraph([
+      {
+        type: "decision",
+        summary: "EMC frontend route shell layout pattern",
+        details: "EMC pages share global shell navigation and layout conventions.",
+        domains: ["frontend"],
+        confidence: "extracted",
+        confidence_score: 0.92,
+      },
+    ]);
+    getGraph(orgId).nodes[0].embedding = [1, 0, 0];
+
+    const result = queryKnowledge(orgId, {
+      filters: { domains: ["frontend"] },
+      query_text: "EMC",
+      query_embedding: [0, 1, 0],
+      max_tokens: 2000,
+      include_explanations: true,
+    });
+
+    expect(result.nodes).toHaveLength(1);
+    expect(result.explanations?.[0].strength).toBe("related");
   });
 
   it("clips an overlong first compact signal instead of dropping the signals line", async () => {

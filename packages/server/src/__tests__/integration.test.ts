@@ -368,7 +368,10 @@ describe("Integration: API endpoints", () => {
     const endRun = await app.inject({
       method: "PATCH",
       url: `/api/agent-runs/${run.run_id}/end`,
-      payload: { status: "completed", final_output: "Completed no-body action coverage for memory candidates." },
+      payload: {
+        status: "completed",
+        final_output: "Durable learning: No-body agent-session rollup requests should accept an empty application/json body and still return explicit durable candidates.",
+      },
     });
     expect(endRun.statusCode).toBe(200);
 

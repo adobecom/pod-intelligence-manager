@@ -94,6 +94,7 @@ export function extractIdentifiers(text: string): Set<string> {
   const patterns = [
     /\b[A-Z][A-Z0-9]+-\d+\b/g,
     /\b(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g,
+    /\B@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/g,
     /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
     /(?:^|\s)\/[A-Za-z0-9_./:{}-]+/g,
     /\b[A-Za-z][A-Za-z0-9_-]*:[A-Za-z*][A-Za-z0-9_-]*\b/g,

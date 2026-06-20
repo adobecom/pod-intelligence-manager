@@ -197,6 +197,34 @@ const conflicts = await pim.getConflicts();
 const updates = await pim.getUpdates();
 ```
 
+#### Agent Memory Rollup Metadata
+
+Agent sessions and runs accept a free-form `metadata` object. PIM reads rollup metadata from run metadata first, then session metadata, then session `working_state`.
+
+`rollup_policy` controls automatic candidate and KG promotion behavior:
+
+| Policy | Behavior |
+|--------|----------|
+| `none` | Do not create a memory candidate |
+| `candidate_only` | Create/keep a pending candidate, but do not auto-promote |
+| `auto_promote` | Request auto-promotion eligibility; PIM still applies its promotion gate |
+
+Production callers should default to `candidate_only`. Demo, dry-run, smoke-test, and stubbed-side-effect runs should send metadata like:
+
+```json
+{
+  "rollup_policy": "candidate_only",
+  "run_kind": "demo",
+  "side_effect_mode": "stubbed",
+  "real_pr_created": false,
+  "stubbed_systems": ["github", "codegen"],
+  "verification_status": "passed",
+  "promotion_intent": "audit_only"
+}
+```
+
+Real code-change runs can request `auto_promote` only when they include real side effects, a real context update, artifact evidence, a non-placeholder PR URL, and `promotion_intent: "durable_learning"`. PIM stores the final decision in `memory_candidates.evidence.promotion_gate`.
+
 ### `@pim/mcp-server`
 
 MCP (Model Context Protocol) server that exposes PIM data to Claude.ai. When connected, Claude can render an interactive pod dashboard as an artifact in the side panel.

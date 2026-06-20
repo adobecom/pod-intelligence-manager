@@ -33,6 +33,20 @@ vi.mock("../ingestion-gateway.js", () => ({
   })),
 }));
 
+vi.mock("../../pim/llm.js", () => ({
+  isLLMAvailable: vi.fn(() => false),
+  MODELS: {
+    fast: "claude-haiku-test",
+    smart: "claude-sonnet-test",
+  },
+  callLLM: vi.fn(),
+  callLLMJSON: vi.fn(async () => null),
+}));
+
+vi.mock("../../pim/agents/knowledge-extraction.js", () => ({
+  classifyDecisionDurability: vi.fn(async (items: unknown[]) => new Map(items.map((_, index) => [index, 0.7]))),
+}));
+
 import { createTables } from "../../db/schema.js";
 import {
   AgentMemorySequenceError,
@@ -46,14 +60,32 @@ import {
   listMemoryCandidates,
   promoteMemoryCandidate,
   rejectMemoryCandidate,
+  rollupAgentSession,
   updateAgentSessionWorkingState,
 } from "../agent-memory.js";
 import { ingestLearnings } from "../ingestion-gateway.js";
 import { persistMemoryEntities, recordTemporalRelationshipsForUpdate } from "../memory-enrichment.js";
+import { callLLMJSON, isLLMAvailable } from "../../pim/llm.js";
+import { classifyDecisionDurability } from "../../pim/agents/knowledge-extraction.js";
 
 const ORG_ID = "org_agent_memory";
 const PROJECT_ID = "project-agent-memory";
 const POD_ID = "pod-agent-memory";
+
+function promotionGate(candidate: { evidence: Record<string, unknown> }) {
+  return candidate.evidence.promotion_gate as { decision: string; policy: string; reasons: string[] };
+}
+
+const REAL_AUTO_PROMOTE_METADATA = {
+  rollup_policy: "auto_promote",
+  run_kind: "real",
+  side_effect_mode: "real",
+  real_pr_created: true,
+  stubbed_systems: [],
+  verification_status: "passed",
+  promotion_intent: "durable_learning",
+  pr_url: "https://github.com/acme/pim/pull/123",
+};
 
 function resetDb() {
   testDb.exec(`
@@ -111,8 +143,38 @@ function seedWorkspace() {
     .run(POD_ID, "# Pod: Agent Memory Pod\n\nCurrent status.", now, ORG_ID);
 }
 
+function insertPodContextUpdate(input: {
+  id: string;
+  agent_id?: string;
+  type: "decision" | "spec_change" | "progress" | "blocker" | "question";
+  scope?: string;
+  summary: string;
+  details: string;
+}) {
+  const now = new Date().toISOString();
+  testDb.prepare(
+    `INSERT INTO context_updates
+       (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json, status,
+        blocks_json, blocked_by_json, needs_input_from_json, org_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 'completed', '[]', '[]', '[]', ?)`,
+  ).run(
+    input.id,
+    input.agent_id ?? "agent-1",
+    now,
+    POD_ID,
+    input.type,
+    input.scope ?? "backend",
+    input.summary,
+    input.details,
+    ORG_ID,
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(isLLMAvailable).mockReturnValue(false);
+  vi.mocked(callLLMJSON).mockResolvedValue(null);
+  vi.mocked(classifyDecisionDurability).mockImplementation(async (items) => new Map(items.map((_, index) => [index, 0.7])));
   resetDb();
   seedWorkspace();
 });
@@ -255,7 +317,13 @@ describe("agent run memory", () => {
       agent_id: "agent-1",
       goal: "Ship rollup",
     });
-    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish backend memory" });
+    const run = createAgentRun(ORG_ID, session!.session_id, {
+      input_prompt: "finish backend memory",
+      metadata: {
+        learning_summary: "AgentSession memory routes need append-only event evidence.",
+        learning_details: "AgentSession memory routes should preserve append-only events and checkpoint resume context so future rollups can reconstruct durable decisions from stored evidence.",
+      },
+    });
     appendAgentRunEvent(ORG_ID, run!.run_id, {
       event_type: "file_change",
       summary: "Added agent session routes and service",
@@ -266,6 +334,7 @@ describe("agent run memory", () => {
       status: "completed",
       final_output: "Implemented AgentSession memory routes with append-only events and checkpoint resume context.",
     });
+    await rollupAgentSession(ORG_ID, session!.session_id);
 
     const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
     expect(candidates).toHaveLength(1);
@@ -273,6 +342,12 @@ describe("agent run memory", () => {
     expect(candidates[0].confidence_score).toBe(0.7);
     expect(candidates[0].promoted_node_id).toBeNull();
     expect(candidates[0].retrieval_text).toContain("AgentSession");
+    expect(promotionGate(candidates[0])).toEqual({
+      decision: "blocked",
+      policy: "candidate_only",
+      reasons: ["policy_candidate_only"],
+    });
+    expect(candidates[0].source_type).toBe("agent_session");
     expect(ingestLearnings).not.toHaveBeenCalled();
 
     const promoted = await promoteMemoryCandidate(ORG_ID, candidates[0].id);
@@ -281,15 +356,187 @@ describe("agent run memory", () => {
     expect(ingestLearnings).toHaveBeenCalledTimes(1);
   });
 
+  it("extracts an explicit durable context decision and scores it with the Haiku classifier", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.85]]));
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({ learnings: [] });
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Roll up context decision",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "submit durable context" });
+    insertPodContextUpdate({
+      id: "ctx-durable-decision",
+      type: "decision",
+      summary: "Use session-level rollup for agent memory extraction.",
+      details: "Agent memory extraction should run from the stored session packet because final run evidence, context updates, and artifacts can arrive after the run end call.",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      payload: { context_update_id: "ctx-durable-decision" },
+      summary: "Submitted durable context decision",
+    });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-durable-decision",
+      final_output: "Completed context update submission.",
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].type).toBe("decision");
+    expect(candidates[0].confidence_score).toBe(0.85);
+    expect(candidates[0].evidence.extraction).toMatchObject({
+      kind: "deterministic",
+      durability: "high",
+      confidence_label: "high",
+      evidence_refs: ["context_update:ctx-durable-decision"],
+    });
+  });
+
+  it("drops deterministic seeds classified as junk", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.3]]));
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({ learnings: [] });
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Drop junk",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "submit local cleanup" });
+    insertPodContextUpdate({
+      id: "ctx-junk-decision",
+      type: "decision",
+      summary: "Rename local temp variable in memory test.",
+      details: "Renamed a local temporary variable in the memory test to match nearby naming; this does not affect future architecture or workflow.",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      payload: { context_update_id: "ctx-junk-decision" },
+      summary: "Submitted local cleanup decision",
+    });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-junk-decision",
+      final_output: "Completed cleanup.",
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(0);
+    expect(listMemoryCandidates(ORG_ID, { session_id: session!.session_id })).toHaveLength(0);
+  });
+
+  it("creates multiple candidates from LLM session extraction without harness-provided summaries", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({
+      learnings: [
+        {
+          type: "pattern",
+          domain: ["backend"],
+          summary: "Checkpoint evidence should carry spec decisions into memory.",
+          details: "When the harness stores spec decisions in checkpoints, session rollup can preserve those decisions even if the final run output is only a workflow summary.",
+          confidence: "high",
+          evidence_refs: ["checkpoint:acp-llm-spec", "run:ar-llm-primary"],
+        },
+        {
+          type: "anti_pattern",
+          domain: "qa",
+          summary: "Do not promote run status as durable memory.",
+          details: "Agent-session extraction should reject status-only events such as completed or approved unless supporting evidence describes a reusable technical lesson.",
+          confidence: "medium",
+          evidence_refs: ["event:are-llm-status"],
+        },
+      ],
+    });
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "LLM extract from session packet",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish with checkpoints" });
+    testDb.prepare("UPDATE agent_runs SET run_id = ? WHERE run_id = ?").run("ar-llm-primary", run!.run_id);
+    createAgentCheckpoint(ORG_ID, session!.session_id, {
+      run_id: "ar-llm-primary",
+      snapshot: { note: "Session packet owns durable extraction evidence." },
+      summary: "Stored packet evidence",
+    });
+    testDb.prepare("UPDATE agent_checkpoints SET checkpoint_id = ? WHERE session_id = ?").run("acp-llm-spec", session!.session_id);
+    appendAgentRunEvent(ORG_ID, "ar-llm-primary", {
+      event_type: "model_output",
+      summary: "Status event the LLM must interpret with surrounding evidence",
+    });
+    testDb.prepare("UPDATE agent_run_events SET id = ? WHERE run_id = ?").run("are-llm-status", "ar-llm-primary");
+    await endAgentRun(ORG_ID, "ar-llm-primary", {
+      status: "completed",
+      final_output: "Completed workflow.",
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(2);
+    expect(candidates.map((candidate) => candidate.summary)).toEqual(expect.arrayContaining([
+      "Checkpoint evidence should carry spec decisions into memory.",
+      "Do not promote run status as durable memory.",
+    ]));
+    expect(candidates.map((candidate) => candidate.confidence_score)).toEqual(expect.arrayContaining([0.85, 0.6]));
+    expect(candidates.every((candidate) => candidate.evidence.extraction && (candidate.evidence.extraction as { kind?: string }).kind === "llm")).toBe(true);
+  });
+
+  it("falls back to deterministic session extraction when the LLM is unavailable", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Offline rollup",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, {
+      input_prompt: "offline",
+      metadata: {
+        learning_summary: "Offline session rollup keeps deterministic learning summaries.",
+        learning_details: "When Bedrock is unavailable, agent-session rollup should still create pending candidates from explicit learning metadata without calling LLM extraction.",
+      },
+    });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed offline rollup.",
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].evidence.extraction).toMatchObject({ kind: "deterministic" });
+    expect(callLLMJSON).not.toHaveBeenCalled();
+  });
+
   it("auto-promotes high-confidence completed-run memory candidates", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.85]]));
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({ learnings: [] });
     const session = createAgentSession({
       orgId: ORG_ID,
       pod_id: POD_ID,
       scope: "backend",
       agent_id: "agent-1",
       goal: "Ship high confidence rollup",
+      metadata: REAL_AUTO_PROMOTE_METADATA,
     });
-    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish backend memory" });
+    const run = createAgentRun(ORG_ID, session!.session_id, {
+      input_prompt: "finish backend memory",
+      metadata: {
+        learning_summary: "Agent-memory auto-promotion requires explicit real-run metadata and PR evidence.",
+        learning_details: "Code-change agent runs can enter durable memory automatically only when the caller marks the run real, confirms real side effects, attaches context-update evidence, and provides a real PR URL.",
+      },
+    });
     appendAgentRunEvent(ORG_ID, run!.run_id, {
       event_type: "context_update_submitted",
       summary: "Submitted durable implementation decision",
@@ -305,12 +552,19 @@ describe("agent run memory", () => {
       context_update_id: "ctx-high-confidence",
       final_output: "Implemented durable agent memory rollup with explicit context update evidence and route coverage.",
     });
+    await rollupAgentSession(ORG_ID, session!.session_id);
 
     const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
     expect(candidates).toHaveLength(1);
     expect(candidates[0].status).toBe("auto_promoted");
     expect(candidates[0].confidence_score).toBeGreaterThanOrEqual(0.85);
     expect(candidates[0].promoted_node_id).toBe("kn-agent-run");
+    expect(candidates[0].summary).toBe("Agent-memory auto-promotion requires explicit real-run metadata and PR evidence.");
+    expect(promotionGate(candidates[0])).toEqual({
+      decision: "allowed",
+      policy: "auto_promote",
+      reasons: [],
+    });
     expect(ingestLearnings).toHaveBeenCalledTimes(1);
   });
 
@@ -327,14 +581,451 @@ describe("agent run memory", () => {
     await endAgentRun(ORG_ID, run!.run_id, {
       status: "completed",
       context_update_id: "ctx-without-event",
-      final_output: "Implemented a durable backend memory change.",
+      final_output: "Durable learning: Backend memory changes need a submitted context-update event before they can be trusted for automatic promotion.",
     });
+    await rollupAgentSession(ORG_ID, session!.session_id);
 
     const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
     expect(candidates).toHaveLength(1);
     expect(candidates[0].status).toBe("pending");
     expect(candidates[0].confidence_score).toBe(0.7);
+    expect(promotionGate(candidates[0]).reasons).toContain("policy_candidate_only");
     expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("keeps demo runs as candidates with auditable blocked gate reasons", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Demo smoke",
+      metadata: {
+        rollup_policy: "candidate_only",
+        run_kind: "demo",
+        side_effect_mode: "stubbed",
+        real_pr_created: false,
+        stubbed_systems: ["github", "codegen"],
+        verification_status: "passed",
+        promotion_intent: "audit_only",
+        pr_url: "https://example.invalid/acme/pim/pull/1",
+      },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "demo backend memory" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Stubbed demo file change",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Durable learning: Demo smoke rollups should remain review-only when GitHub or codegen side effects are stubbed.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(promotionGate(candidates[0]).reasons).toEqual(expect.arrayContaining([
+      "policy_candidate_only",
+      "demo_run",
+      "stubbed_side_effects",
+      "stubbed_systems_present",
+      "real_pr_not_confirmed",
+      "promotion_intent_not_durable_learning",
+      "placeholder_pr_url",
+    ]));
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("keeps smoke tests reported as dry runs out of auto-promotion", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "qa",
+      agent_id: "agent-qa",
+      goal: "Smoke test",
+      metadata: {
+        rollup_policy: "candidate_only",
+        run_kind: "dry_run",
+        side_effect_mode: "real",
+        test_kind: "smoke",
+        verification_status: "passed",
+      },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "smoke test memory rollup" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "model_output",
+      summary: "Smoke test passed",
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Durable learning: Smoke-test rollups should create review candidates but stay out of auto-promotion when marked dry_run.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(promotionGate(candidates[0]).reasons).toEqual(expect.arrayContaining(["policy_candidate_only", "dry_run"]));
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("blocks stubbed PR runs that request auto-promotion", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Stubbed PR run",
+      metadata: {
+        ...REAL_AUTO_PROMOTE_METADATA,
+        side_effect_mode: "stubbed",
+        real_pr_created: false,
+        stubbed_systems: ["github"],
+        promotion_intent: "audit_only",
+        pr_url: "https://example.invalid/acme/pim/pull/123",
+      },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "stubbed pr" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      summary: "Submitted context update for stubbed PR",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Stubbed PR touched service",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-stubbed-pr",
+      final_output: "Durable learning: Stubbed PR workflows must not auto-promote durable memory even when they emit file-change evidence.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(promotionGate(candidates[0]).reasons).toEqual(expect.arrayContaining([
+      "stubbed_side_effects",
+      "stubbed_systems_present",
+      "real_pr_not_confirmed",
+      "promotion_intent_not_durable_learning",
+      "placeholder_pr_url",
+    ]));
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("keeps candidate_only runs pending even when all auto-promotion evidence is present", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    vi.mocked(classifyDecisionDurability).mockResolvedValueOnce(new Map([[0, 0.85]]));
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({ learnings: [] });
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Candidate-only real run",
+      metadata: {
+        ...REAL_AUTO_PROMOTE_METADATA,
+        rollup_policy: "candidate_only",
+      },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "candidate only" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      summary: "Submitted durable context update",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Updated code with real side effects",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-candidate-only",
+      final_output: "Durable learning: Candidate-only rollup policy keeps even production-quality agent-session learnings pending for review.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].status).toBe("pending");
+    expect(candidates[0].confidence_score).toBe(0.85);
+    expect(promotionGate(candidates[0])).toEqual({
+      decision: "blocked",
+      policy: "candidate_only",
+      reasons: ["policy_candidate_only"],
+    });
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("does not create candidates when rollup_policy is none", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "No rollup",
+      metadata: { rollup_policy: "none" },
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "do not roll up" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Temporary local change",
+      artifact_refs: [{ type: "file", path: "tmp/demo.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Temporary run should not create durable memory candidates.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(listMemoryCandidates(ORG_ID, { session_id: session!.session_id })).toHaveLength(0);
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("does not extract generic workflow-status summaries as deterministic durable memory", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Generic status",
+      metadata: REAL_AUTO_PROMOTE_METADATA,
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "status only" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "context_update_submitted",
+      summary: "Submitted merge approval status",
+    });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "file_change",
+      summary: "Code review status artifact",
+      artifact_refs: [{ type: "file", path: "packages/server/src/services/agent-memory.ts" }],
+    });
+
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      context_update_id: "ctx-status-only",
+      final_output: "outcome: merge_approved",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const candidates = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+    expect(candidates).toHaveLength(0);
+    expect(ingestLearnings).not.toHaveBeenCalled();
+  });
+
+  it("keeps repeated session rollup idempotent", async () => {
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Idempotent rollup",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "finish once" });
+    appendAgentRunEvent(ORG_ID, run!.run_id, {
+      event_type: "model_output",
+      summary: "Implemented idempotent candidate creation",
+    });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Durable learning: Session rollup candidates use stable content hashes so repeated rollups do not create duplicates.",
+    });
+    const first = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    const rolled = await rollupAgentSession(ORG_ID, session!.session_id);
+    const second = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+
+    expect(first).toHaveLength(1);
+    expect(rolled).toHaveLength(1);
+    expect(rolled[0].id).toBe(first[0].id);
+    expect(second.map((candidate) => candidate.id)).toEqual([first[0].id]);
+  });
+
+  it("re-rolls after rejection while skipping the exact rejected learning", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Retry rejected rollup",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "extract retry learnings" });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed retry rollup workflow.",
+    });
+    const rejectedLearning = {
+      type: "decision",
+      domain: "backend",
+      summary: "Keep rejected rollup decisions out of retry results.",
+      details: "Rejected agent-session rollup content should remain rejected when the same content is extracted again during a later rollup.",
+      confidence: "high",
+      evidence_refs: [`run:${run!.run_id}`],
+    };
+    const newLearning = {
+      type: "pattern",
+      domain: "backend",
+      summary: "Retry rollup can capture new session learnings.",
+      details: "When a later extraction finds a distinct learning, agent-session rollup should create a fresh pending candidate even if older content was rejected.",
+      confidence: "medium",
+      evidence_refs: [`run:${run!.run_id}`],
+    };
+    vi.mocked(callLLMJSON)
+      .mockResolvedValueOnce({ learnings: [rejectedLearning] })
+      .mockResolvedValueOnce({ learnings: [rejectedLearning, newLearning] });
+    const first = await rollupAgentSession(ORG_ID, session!.session_id);
+    rejectMemoryCandidate(ORG_ID, first[0].id);
+
+    const retried = await rollupAgentSession(ORG_ID, session!.session_id);
+    const all = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+
+    expect(first).toHaveLength(1);
+    expect(retried.map((candidate) => candidate.summary)).toEqual(["Retry rollup can capture new session learnings."]);
+    expect(all).toHaveLength(2);
+    expect(all.find((candidate) => candidate.summary === rejectedLearning.summary)?.status).toBe("rejected");
+    expect(all.find((candidate) => candidate.summary === newLearning.summary)?.status).toBe("pending");
+    expect(callLLMJSON).toHaveBeenCalledTimes(2);
+  });
+
+  it("reconciles new session learnings when active candidates already exist", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Reconcile active rollup",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "extract additional learnings" });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed active reconciliation workflow.",
+    });
+    const existingLearning = {
+      type: "decision",
+      domain: "backend",
+      summary: "Active rollup candidates stay idempotent across retries.",
+      details: "Existing pending agent-session candidates should be reused when the same learning is extracted during a later rollup.",
+      confidence: "high",
+      evidence_refs: [`run:${run!.run_id}`],
+    };
+    const additionalLearning = {
+      type: "scope_insight",
+      domain: "backend",
+      summary: "Active rollup retries can add newly found scope insights.",
+      details: "A later session extraction should append a distinct candidate instead of returning early because another active candidate already exists.",
+      confidence: "medium",
+      evidence_refs: [`run:${run!.run_id}`],
+    };
+    vi.mocked(callLLMJSON)
+      .mockResolvedValueOnce({ learnings: [existingLearning] })
+      .mockResolvedValueOnce({ learnings: [existingLearning, additionalLearning] });
+
+    const first = await rollupAgentSession(ORG_ID, session!.session_id);
+    const reconciled = await rollupAgentSession(ORG_ID, session!.session_id);
+    const all = listMemoryCandidates(ORG_ID, { session_id: session!.session_id });
+
+    expect(first).toHaveLength(1);
+    expect(reconciled.map((candidate) => candidate.summary)).toEqual(expect.arrayContaining([
+      "Active rollup candidates stay idempotent across retries.",
+      "Active rollup retries can add newly found scope insights.",
+    ]));
+    expect(reconciled).toHaveLength(2);
+    expect(all).toHaveLength(2);
+    expect(callLLMJSON).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps field-boundary-distinct session learnings from colliding", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Preserve field boundaries",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "extract boundary learnings" });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed boundary extraction workflow.",
+    });
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({
+      learnings: [
+        {
+          type: "decision",
+          domain: "backend",
+          summary: "Redis session boundary",
+          details: "not Postgres for durable storage because review candidates need replay.",
+          confidence: "high",
+          evidence_refs: [`run:${run!.run_id}`],
+        },
+        {
+          type: "decision",
+          domain: "backend",
+          summary: "Redis session boundary not",
+          details: "Postgres for durable storage because review candidates need replay.",
+          confidence: "high",
+          evidence_refs: [`run:${run!.run_id}`],
+        },
+      ],
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(2);
+    expect(new Set(candidates.map((candidate) => candidate.source_id)).size).toBe(2);
+  });
+
+  it("keeps punctuation-distinct session learnings from colliding", async () => {
+    vi.mocked(isLLMAvailable).mockReturnValue(true);
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "Preserve punctuation",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, { input_prompt: "extract punctuation learnings" });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed punctuation extraction workflow.",
+    });
+    vi.mocked(callLLMJSON).mockResolvedValueOnce({
+      learnings: [
+        {
+          type: "decision",
+          domain: "backend",
+          summary: "Use Redis. (not Postgres)",
+          details: "Durable memory storage choices must preserve punctuation-sensitive meaning across extracted session candidates.",
+          confidence: "high",
+          evidence_refs: [`run:${run!.run_id}`],
+        },
+        {
+          type: "decision",
+          domain: "backend",
+          summary: "Use Redis not Postgres!",
+          details: "Durable memory storage choices must preserve punctuation-sensitive meaning across extracted session candidates.",
+          confidence: "high",
+          evidence_refs: [`run:${run!.run_id}`],
+        },
+      ],
+    });
+
+    const candidates = await rollupAgentSession(ORG_ID, session!.session_id);
+
+    expect(candidates).toHaveLength(2);
+    expect(new Set(candidates.map((candidate) => candidate.source_id)).size).toBe(2);
   });
 
   it("rejecting a promoted candidate leaves the audit status promoted", async () => {
@@ -349,8 +1040,9 @@ describe("agent run memory", () => {
     appendAgentRunEvent(ORG_ID, run!.run_id, { event_type: "model_output", summary: "Durable result" });
     await endAgentRun(ORG_ID, run!.run_id, {
       status: "completed",
-      final_output: "Implemented a durable result for project memory.",
+      final_output: "Durable learning: Project memory candidates should preserve promoted audit status when a later reject request is made.",
     });
+    await rollupAgentSession(ORG_ID, session!.session_id);
     const candidate = listMemoryCandidates(ORG_ID, { session_id: session!.session_id })[0];
     await promoteMemoryCandidate(ORG_ID, candidate.id);
 
@@ -358,6 +1050,44 @@ describe("agent run memory", () => {
 
     expect(rejected?.status).toBe("promoted");
     expect(rejected?.promoted_node_id).toBe("kn-agent-run");
+  });
+
+  it("keeps a candidate pending when KG ingestion returns no node id", async () => {
+    vi.mocked(ingestLearnings).mockResolvedValueOnce({
+      nodesAdded: 0,
+      edgesAdded: 0,
+      nodeIds: [],
+      droppedCount: 1,
+    });
+    const session = createAgentSession({
+      orgId: ORG_ID,
+      pod_id: POD_ID,
+      scope: "backend",
+      agent_id: "agent-1",
+      goal: "No node id",
+    });
+    const run = createAgentRun(ORG_ID, session!.session_id, {
+      input_prompt: "finish memory",
+      metadata: {
+        learning_summary: "Promotion requires KG ingestion to return a concrete node id.",
+        learning_details: "Memory candidates must remain pending when the knowledge graph gateway drops or deduplicates the learning without returning a promoted node id.",
+      },
+    });
+    await endAgentRun(ORG_ID, run!.run_id, {
+      status: "completed",
+      final_output: "Completed promotion check.",
+    });
+    await rollupAgentSession(ORG_ID, session!.session_id);
+    const candidate = listMemoryCandidates(ORG_ID, { session_id: session!.session_id })[0];
+
+    const promoted = await promoteMemoryCandidate(ORG_ID, candidate.id);
+
+    expect(promoted?.status).toBe("pending");
+    expect(promoted?.promoted_node_id).toBeNull();
+    expect(promoted?.evidence.promotion_error).toMatchObject({
+      code: "kg_ingestion_returned_no_node_id",
+      dropped_count: 1,
+    });
   });
 
   it("does not append events to completed runs", async () => {
