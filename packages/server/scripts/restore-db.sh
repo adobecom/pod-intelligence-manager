@@ -32,6 +32,19 @@ die()  { echo "[restore][FATAL] $*" >&2; exit 1; }
 soft() { if [ "$REQUIRE" = "true" ]; then die "$1 (PIM_REQUIRE_RESTORE=true)"; fi; log "$1; starting with a fresh DB"; exit 0; }
 count_orgs() { sqlite3 "$1" "SELECT count(*) FROM orgs" 2>/dev/null || echo 0; }
 
+# Restore into a sibling file so a failed import or validation can never leave a
+# populated DB_PATH that a systemd retry would mistake for a completed restore.
+# Keeping the staging file beside DB_PATH also makes the final rename atomic.
+STAGED_DB="${DB_PATH}.restore"
+cleanup() {
+    rm -f /tmp/restore.sql.gz /tmp/restore.sql /tmp/manifest.txt
+    if [ -n "${STAGED_DB:-}" ]; then
+        rm -f "$STAGED_DB" "${STAGED_DB}-wal" "${STAGED_DB}-shm"
+    fi
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
 # Idempotent: never touch an already-populated volume.
 existing=$(count_orgs "$DB_PATH")
 if [ "${existing:-0}" -gt 0 ] 2>/dev/null; then
@@ -63,14 +76,13 @@ if [ -n "${PIM_RESTORE_SHA256:-}" ]; then
 fi
 
 gunzip -f /tmp/restore.sql.gz || die "gunzip failed"
-rm -f "$DB_PATH"
-sqlite3 "$DB_PATH" < /tmp/restore.sql || die "sqlite import failed"
-rm -f /tmp/restore.sql
+rm -f "$STAGED_DB" "${STAGED_DB}-wal" "${STAGED_DB}-shm"
+sqlite3 -bail "$STAGED_DB" < /tmp/restore.sql || die "sqlite import failed"
 
-ic=$(sqlite3 "$DB_PATH" "PRAGMA integrity_check" 2>/dev/null || echo error)
+ic=$(sqlite3 "$STAGED_DB" "PRAGMA integrity_check" 2>/dev/null || echo error)
 [ "$ic" = "ok" ] || die "integrity_check failed: $ic"
 
-orgs=$(count_orgs "$DB_PATH")
+orgs=$(count_orgs "$STAGED_DB")
 [ "${orgs:-0}" -gt 0 ] 2>/dev/null || die "restored DB has 0 orgs"
 log "restored orgs=$orgs, integrity ok"
 
@@ -82,11 +94,17 @@ if [ -n "${PIM_RESTORE_MANIFEST_KEY:-}" ]; then
     while IFS='=' read -r tbl want; do
         [ -n "${tbl:-}" ] || continue
         case "$tbl" in \#*) continue ;; esac
-        got=$(sqlite3 "$DB_PATH" "SELECT count(*) FROM \"$tbl\"" 2>/dev/null || echo ERR)
+        got=$(sqlite3 "$STAGED_DB" "SELECT count(*) FROM \"$tbl\"" 2>/dev/null || echo ERR)
         [ "$got" = "$want" ] || die "manifest mismatch: $tbl got=$got want=$want"
     done < /tmp/manifest.txt
     rm -f /tmp/manifest.txt
     log "manifest gate passed"
 fi
 
-log "restore complete"
+# All gates passed. Remove stale SQLite sidecars from an empty/failed predecessor,
+# then atomically publish the validated DB. Clear STAGED_DB so the EXIT trap does
+# not remove the file after it has become DB_PATH.
+rm -f "${DB_PATH}-wal" "${DB_PATH}-shm"
+mv -f "$STAGED_DB" "$DB_PATH" || die "failed to publish validated DB"
+STAGED_DB=""
+log "restore complete (validated DB published atomically)"

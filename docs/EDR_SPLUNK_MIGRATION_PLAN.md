@@ -63,7 +63,7 @@ window for correctness. That trade is intended.
 - Removed the hand-rolled `falcon-sensor` user-data block (IF makes it redundant).
 
 `packages/server/scripts/restore-db.sh` (new) + `entrypoint.sh`:
-- Restore-on-boot, **fail-closed**. Restores `PIM_RESTORE_KEY` (exact) or the latest backup; optional sha256 + manifest gate; `PRAGMA integrity_check` and non-empty (orgs>0) gates. On any failure it exits non-zero → the server never starts → health never returns 200. **Fresh-env escape:** clean start only when there is genuinely no backup AND `PIM_REQUIRE_RESTORE` is not `true`. Idempotent on populated volumes. **NOT yet shipped** (needs image build + push).
+- Restore-on-boot, **fail-closed**. Restores `PIM_RESTORE_KEY` (exact) or the latest backup into a sibling staging DB; optional sha256 + manifest gate; `PRAGMA integrity_check` and non-empty (orgs>0) gates. Only after every gate passes is the staged DB atomically renamed to `DB_PATH`, so a failed restore cannot be mistaken for a populated DB on retry. On any failure it exits non-zero → the server never starts → health never returns 200. **Fresh-env escape:** clean start only when there is genuinely no backup AND `PIM_REQUIRE_RESTORE` is not `true`. Idempotent on populated volumes. **NOT yet shipped** (needs image build + push).
 
 ## Safeguards completed
 
