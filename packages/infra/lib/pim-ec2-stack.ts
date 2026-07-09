@@ -177,7 +177,10 @@ export class PimEc2Stack extends cdk.Stack {
     );
 
     kgBucket.grantReadWrite(ec2Role);
-    backupsBucket.grantWrite(ec2Role);
+    // Read + write: cron uploads hourly backups here, and entrypoint.sh restores
+    // the latest backup from here on a fresh instance (restore_db_if_empty).
+    // Write-only would make restore-on-boot fail with AccessDenied on GetObject.
+    backupsBucket.grantReadWrite(ec2Role);
     uiBucket.grantRead(ec2Role);
     logGroup.grantWrite(ec2Role);
     ecrRepo.grantPull(ec2Role);
@@ -193,7 +196,15 @@ export class PimEc2Stack extends cdk.Stack {
     // User data: install Docker, mount EBS, run container as systemd unit
     // ──────────────────────────────────────
 
-    const containerImage = `${ecrRepo.repositoryUri}:latest`;
+    // Pin the server image by digest for deterministic rolls/rollback when provided
+    // (`-c serverImageDigest=sha256:...`); otherwise track :latest. Build+push
+    // first, capture the digest, then deploy pinned. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+    const serverImageDigest = this.node.tryGetContext("serverImageDigest") as
+      | string
+      | undefined;
+    const containerImage = serverImageDigest
+      ? `${ecrRepo.repositoryUri}@${serverImageDigest}`
+      : `${ecrRepo.repositoryUri}:latest`;
     const awslogsGroup = logGroup.logGroupName;
 
     const userData = ec2.UserData.forLinux();
@@ -203,6 +214,14 @@ export class PimEc2Stack extends cdk.Stack {
       "dnf install -y docker cronie",
       "systemctl enable --now docker",
       "systemctl enable --now crond",
+
+      // Security agents (CrowdStrike Falcon EDR + Splunk Universal Forwarder for
+      // Security Splunk) are NOT installed here. The host boots from an Adobe Image
+      // Factory AL2023 base image (see machineImage below) that bakes in and
+      // auto-configures both: Falcon resolves the correct CID/tags from this AWS
+      // account, and the Splunk UF is pre-configured via the Honeydew deployment
+      // server. IF images are tested for EDR/Splunk/Hubble before release.
+      // See docs/EDR_INSTALL_RUNBOOK.md.
 
       // Mount the secondary EBS volume at /data. Device name is /dev/sdb at attach
       // time but surfaces as /dev/nvme1n1 on Nitro instances. Detect either way.
@@ -244,6 +263,9 @@ export class PimEc2Stack extends cdk.Stack {
       `  -e KG_S3_BUCKET=${kgBucket.bucketName} \\`,
       `  -e KG_S3_PREFIX=knowledge-graph \\`,
       `  -e PIM_BACKUPS_BUCKET=${backupsBucket.bucketName} \\`,
+      // Stateful host: refuse to start empty. entrypoint restore-db.sh restores the
+      // DB from S3 on a fresh volume and fails closed if it can't (see that script).
+      `  -e PIM_REQUIRE_RESTORE=true \\`,
       `  -e DB_PATH=/data/pim.db \\`,
       `  -e KG_DATA_DIR=/data/knowledge-graph \\`,
       `  -e CORS_ORIGIN=* \\`,
@@ -270,7 +292,20 @@ export class PimEc2Stack extends cdk.Stack {
 
     const launchTemplate = new ec2.LaunchTemplate(this, "ServerLaunchTemplate", {
       instanceType,
-      machineImage: ec2.MachineImage.latestAmazonLinux2023(),
+      // Adobe Image Factory AL2023 base image (flavor IF_Amazon-Linux-2023_aws),
+      // which bakes in + auto-configures the required security agents: CrowdStrike
+      // Falcon EDR (CID/tags resolved from this AWS account) and the Splunk
+      // Universal Forwarder for Security Splunk. IF images are validated for
+      // EDR/Splunk/Hubble before release, so no in-userData agent install is needed.
+      //
+      // Pinned to an exact AMI for a deterministic migration + rollback (previously
+      // MachineImage.lookup, which re-resolves the newest match at synth time and is
+      // nondeterministic). Bump deliberately after validating a newer IF release.
+      // Only us-west-2 is mapped; add the prod region's shared AMI id before
+      // deploying the production stack there. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+      machineImage: ec2.MachineImage.genericLinux({
+        "us-west-2": "ami-06afdfc08e9b14b7e", // IF_Amazon-Linux-2023_aws_2.0.0, Falcon 7.23
+      }),
       role: ec2Role,
       securityGroup: ec2Sg,
       userData,
