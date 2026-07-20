@@ -80,8 +80,8 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 - \`disconnect_tunnel(pod_id, tunnel_id)\` — manually disconnect a tunnel. Idle tunnels are NOT auto-disconnected — only heartbeat failure disconnects them.
 
 ### Knowledge Graph
-- \`query_knowledge(domains?, types?, include_project_id?, text_search?, query_text?, max_tokens?, ...)\`
-  Token-budgeted search across org learnings (decisions, patterns, anti-patterns, resolved conflicts, scope insights). IMPORTANT: always pass \`include_project_id\` when the caller has a known project — without it, nodes from all projects are returned. \`query_text\` uses semantic (embedding) scoring; \`text_search\` is a substring filter.
+- \`query_knowledge(scopes?, types?, include_project_id?, text_search?, query_text?, limit?, expand_graph?, include_explanations?, ...)\`
+  Token-budgeted search across org learnings (decisions, patterns, anti-patterns, resolved conflicts, scope insights). IMPORTANT: always pass \`include_project_id\` when the caller has a known project — without it, nodes from all projects are returned. \`query_text\` uses hybrid semantic + lexical scoring; \`text_search\` is a word-level candidate filter. Disable \`expand_graph\` for a direct task candidate list and request \`include_explanations\` when auditing rank evidence.
 - \`curate_knowledge_node(node_id, action, edits?)\` — approve, reject, or edit a knowledge node. Human curation improves quality for future pods.
 
 ### External Context Search

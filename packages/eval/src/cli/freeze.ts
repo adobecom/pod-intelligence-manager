@@ -14,10 +14,16 @@ import {
   assertSecurePermissions,
 } from "@pim/shared/auth";
 import type { FixtureLearnings, LivingDocSection, SessionContextFixture } from "../arms/types.js";
-import type { Task } from "../tasks/types.js";
 import { ALL_TASKS } from "../tasks/index.js";
 import { applyAssignmentsToAll } from "../tasks/stratification.js";
 import { getCuratedLearnings } from "./curated-learnings.js";
+import {
+  assertKgContractSourceCompatibility,
+  assertRequestedTaskRelevantContract,
+  assertRetrievalSourceSupportsAsOf,
+  buildExplicitKnowledgeQueryRequest,
+  fetchRequiredTaskLearnings,
+} from "./freeze-retrieval.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const FIXTURES_DIR = join(dirname(__filename), "..", "..", "fixtures", "session-contexts");
@@ -35,6 +41,7 @@ const PIM_SERVICE_TOKEN = process.env.PIM_SERVICE_TOKEN?.trim();
 const USE_LIVE_KG = process.env.USE_OFFLINE_LEARNINGS !== "1";
 const KG_SOURCE = parseKgSource(process.env.EVAL_PIM_KG_SOURCE);
 const KG_CONTRACT_MODE = parseKgContractMode(process.env.EVAL_PIM_KG_CONTRACT_MODE);
+assertKgContractSourceCompatibility(KG_SOURCE, KG_CONTRACT_MODE);
 
 interface OrgConfig {
   scopes: Array<{ id: string; label: string }>;
@@ -132,9 +139,14 @@ async function withTemporaryKgContract<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function fetchLiveLearnings(podId: string, queryText?: string): Promise<FixtureLearnings> {
+async function fetchLiveLearnings(
+  podId: string,
+  queryText?: string,
+  asOf?: string,
+): Promise<FixtureLearnings> {
   // `query` preserves the historical fixture shape with details. `relevant`
   // uses the same contract-aware path as the SDK / pod-agent context bundle.
+  assertRetrievalSourceSupportsAsOf(KG_SOURCE, asOf, podId);
   const pod = demoPods[podId];
   const scopes = Array.from(new Set((pod?.areas ?? []).map((a) => a.scope)));
   const domains = scopes.length > 0 ? scopes : ["frontend", "backend"];
@@ -161,6 +173,7 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
     }
     const body = (await res.json()) as {
       nodes: Array<{
+        id?: string;
         type: string;
         summary: string;
         details?: string;
@@ -172,9 +185,17 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
       total_matching: number;
       truncated: boolean;
       context_contract?: FixtureLearnings["context_contract"];
+      explanations?: FixtureLearnings["explanations"];
+      retrieval_diagnostics?: FixtureLearnings["retrieval_diagnostics"];
     };
+    assertRequestedTaskRelevantContract(body, {
+      requestedMode: KG_CONTRACT_MODE,
+      taskQuery: queryText,
+      podId,
+    });
     return {
       nodes: body.nodes.map((n) => ({
+        id: n.id,
         type: n.type,
         summary: n.summary,
         details: n.details ?? "",
@@ -187,6 +208,8 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
       truncated: body.truncated,
       retrieval_source: "context-contract",
       ...(body.context_contract ? { context_contract: body.context_contract } : {}),
+      ...(body.explanations ? { explanations: body.explanations } : {}),
+      ...(body.retrieval_diagnostics ? { retrieval_diagnostics: body.retrieval_diagnostics } : {}),
     };
   }
 
@@ -197,15 +220,7 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
       Authorization: auth,
       "X-Pim-Org": EVAL_PIM_ORG_SLUG,
     },
-    body: JSON.stringify({
-      filters: {
-        domains,
-        ...(projectId ? { include_project_id: projectId } : {}),
-      },
-      max_tokens: 4000,
-      include_details: true,
-      ...(queryText?.trim() ? { query_text: queryText.trim() } : {}),
-    }),
+    body: JSON.stringify(buildExplicitKnowledgeQueryRequest(domains, projectId, queryText, asOf)),
   });
   if (!res.ok) {
     throw new Error(
@@ -214,6 +229,7 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
   }
   const body = (await res.json()) as {
     nodes: Array<{
+      id?: string;
       type: string;
       summary: string;
       details: string;
@@ -224,9 +240,12 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
     }>;
     total_matching: number;
     truncated: boolean;
+    explanations?: FixtureLearnings["explanations"];
+    retrieval_diagnostics?: FixtureLearnings["retrieval_diagnostics"];
   };
   return {
     nodes: body.nodes.map((n) => ({
+      id: n.id,
       type: n.type,
       summary: n.summary,
       details: n.details,
@@ -238,25 +257,9 @@ async function fetchLiveLearnings(podId: string, queryText?: string): Promise<Fi
     total_matching: body.total_matching,
     truncated: body.truncated,
     retrieval_source: "knowledge-query",
+    ...(body.explanations ? { explanations: body.explanations } : {}),
+    ...(body.retrieval_diagnostics ? { retrieval_diagnostics: body.retrieval_diagnostics } : {}),
   };
-}
-
-function compactForKgQuery(text: string): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, 3500);
-}
-
-function buildTaskKgQuery(task: Task): string {
-  const promptWithoutCode = task.prompt
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/\n# Output[\s\S]*$/i, "\n")
-    .replace(/\n# Current source[\s\S]*$/i, "\n");
-  const parts = [
-    `Task: ${task.id}`,
-    task.tags?.length ? `Tags: ${task.tags.join(", ")}` : "",
-    task.expectedSignals?.length ? `Expected signals: ${task.expectedSignals.join(", ")}` : "",
-    promptWithoutCode,
-  ];
-  return compactForKgQuery(parts.filter(Boolean).join("\n"));
 }
 
 function latestIso(...values: Array<string | null | undefined>): string {
@@ -364,21 +367,15 @@ async function main(): Promise<void> {
     const taskRelevantLearnings: Record<string, FixtureLearnings> = {};
     const podTasks = runnableTasks.filter((t) => t.podId === podId);
     for (const task of podTasks) {
-      const taskQuery = buildTaskKgQuery(task);
       if (USE_LIVE_KG) {
-        try {
-          const taskLearnings = await fetchLiveLearnings(podId, taskQuery);
-          taskRelevantLearnings[task.id] = taskLearnings;
-          const contract = taskLearnings.context_contract
-            ? ` contract=${taskLearnings.context_contract.mode}/${taskLearnings.context_contract.returned_mode}`
-            : "";
-          console.log(
-            `[freeze]   task learnings for ${task.id}: ${taskLearnings.nodes.length} (matching ${taskLearnings.total_matching})${contract}`,
-          );
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`[freeze]   task KG fetch failed for ${task.id} (${msg}) — using pod-level fallback`);
-        }
+        const taskLearnings = await fetchRequiredTaskLearnings(podId, task, fetchLiveLearnings);
+        taskRelevantLearnings[task.id] = taskLearnings;
+        const contract = taskLearnings.context_contract
+          ? ` contract=${taskLearnings.context_contract.mode}/${taskLearnings.context_contract.returned_mode}`
+          : "";
+        console.log(
+          `[freeze]   task learnings for ${task.id}: ${taskLearnings.nodes.length} (matching ${taskLearnings.total_matching})${contract}`,
+        );
       } else {
         taskRelevantLearnings[task.id] = {
           ...getCuratedLearnings(podId),

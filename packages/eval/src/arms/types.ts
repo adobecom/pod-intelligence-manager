@@ -73,6 +73,8 @@ export interface LivingDocSection {
 
 export interface FixtureLearnings {
   nodes: Array<{
+    /** Knowledge-node id, present on live freezes and optional on legacy/offline fixtures. */
+    id?: string;
     type: string;
     summary: string;
     details: string;
@@ -95,6 +97,56 @@ export interface FixtureLearnings {
     task_query_used: boolean;
     possible_constraints?: boolean;
     note?: string;
+  };
+  /** Server-side ranking evidence retained for retrieval audits. */
+  explanations?: Array<{
+    node_id: string;
+    strength: "must_follow" | "avoid" | "related";
+    matched_scopes: string[];
+    matched_topics: string[];
+    semantic_score?: number;
+    graph_expanded?: boolean;
+    score?: number;
+    score_components?: {
+      base_relevance: number;
+      identifier_match: number;
+      direct_evidence: number;
+      lexical_recall: number;
+      lexical_specificity: number;
+      source_authority: number;
+      retrieval_tier: number;
+      graph_expansion?: number;
+    };
+    evidence?: {
+      keyword_hits: number;
+      non_generic_keyword_hits: number;
+      identifier_hits: number;
+      strong_identifier_hits: number;
+      generic_identifier_hits: number;
+      rare_keyword_hits: number;
+      lexical_recall_hits: number;
+      idf_weighted_coverage: number;
+      summary_coverage: number;
+      phrase_match: number;
+      exact_short_keyword_match: boolean;
+      direct_evidence?: boolean;
+      semantic_relevance?: boolean;
+      recall_candidate?: boolean;
+    };
+  }>;
+  /** Response-level mode, embedding coverage, and degradation metadata. */
+  retrieval_diagnostics?: {
+    mode: "scope_only" | "lexical" | "hybrid";
+    degraded: boolean;
+    semantic_query_requested: boolean;
+    query_embedding_available: boolean;
+    embedding_coverage: number;
+    candidate_count: number;
+    matched_count: number;
+    returned_count: number;
+    degradation_reasons?: Array<
+      "query_embedding_unavailable" | "candidate_embeddings_unavailable" | "partial_embedding_coverage"
+    >;
   };
 }
 

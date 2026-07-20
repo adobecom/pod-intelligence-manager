@@ -64,6 +64,21 @@ afterEach(async () => {
 });
 
 describe("knowledge graph public query routes", () => {
+  it("rejects an empty query embedding instead of treating it as semantic input", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/knowledge/query",
+      payload: {
+        filters: {},
+        query_text: "queue retry",
+        query_embedding: [],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(serviceMocks.queryKnowledgeSemantic).not.toHaveBeenCalled();
+  });
+
   it("strips eval-only required_node_ids from POST /api/knowledge/query", async () => {
     const res = await app.inject({
       method: "POST",

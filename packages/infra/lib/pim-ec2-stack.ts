@@ -177,7 +177,10 @@ export class PimEc2Stack extends cdk.Stack {
     );
 
     kgBucket.grantReadWrite(ec2Role);
-    backupsBucket.grantWrite(ec2Role);
+    // Read + write: cron uploads hourly backups here, and entrypoint.sh restores
+    // the latest backup from here on a fresh instance (restore_db_if_empty).
+    // Write-only would make restore-on-boot fail with AccessDenied on GetObject.
+    backupsBucket.grantReadWrite(ec2Role);
     uiBucket.grantRead(ec2Role);
     logGroup.grantWrite(ec2Role);
     ecrRepo.grantPull(ec2Role);
@@ -193,7 +196,15 @@ export class PimEc2Stack extends cdk.Stack {
     // User data: install Docker, mount EBS, run container as systemd unit
     // ──────────────────────────────────────
 
-    const containerImage = `${ecrRepo.repositoryUri}:latest`;
+    // Pin the server image by digest for deterministic rolls/rollback when provided
+    // (`-c serverImageDigest=sha256:...`); otherwise track :latest. Build+push
+    // first, capture the digest, then deploy pinned. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+    const serverImageDigest = this.node.tryGetContext("serverImageDigest") as
+      | string
+      | undefined;
+    const containerImage = serverImageDigest
+      ? `${ecrRepo.repositoryUri}@${serverImageDigest}`
+      : `${ecrRepo.repositoryUri}:latest`;
     const awslogsGroup = logGroup.logGroupName;
 
     const userData = ec2.UserData.forLinux();
@@ -201,24 +212,62 @@ export class PimEc2Stack extends cdk.Stack {
       "set -eu",
       "dnf update -y",
       "dnf install -y docker cronie",
+
+      // The IF CIS nftables baseline keeps its forward base chain at policy drop.
+      // Docker's separate base chain accepting a packet is not terminal across
+      // nftables base chains, so explicitly allow Docker bridge traffic here while
+      // retaining the IF default-deny policy for all other forwarded traffic.
+      // Load the live rules before Docker starts; the include persists them across
+      // reboot and is the Image Factory documented Docker/Compose integration.
+      "install -d -m 0755 /etc/nftables",
+      "cat > /etc/nftables/pim-docker.rules <<'NFT_EOF'",
+      'add rule inet filter forward oifname "br-*" counter accept comment "PIM Docker user bridge"',
+      'add rule inet filter forward iifname "br-*" counter accept comment "PIM Docker user bridge"',
+      'add rule inet filter forward oifname "docker0" counter accept comment "PIM Docker default bridge"',
+      'add rule inet filter forward iifname "docker0" counter accept comment "PIM Docker default bridge"',
+      "NFT_EOF",
+      `if ! grep -Fq 'include "/etc/nftables/pim-docker.rules"' /etc/sysconfig/nftables.conf; then`,
+      `  echo 'include "/etc/nftables/pim-docker.rules"' >> /etc/sysconfig/nftables.conf`,
+      "fi",
+      `if ! nft -a list chain inet filter forward | grep -Fq 'PIM Docker default bridge'; then`,
+      "  nft -f /etc/nftables/pim-docker.rules",
+      "fi",
       "systemctl enable --now docker",
       "systemctl enable --now crond",
 
-      // Mount the secondary EBS volume at /data. Device name is /dev/sdb at attach
-      // time but surfaces as /dev/nvme1n1 on Nitro instances. Detect either way.
+      // Security agents (CrowdStrike Falcon EDR + Splunk Universal Forwarder for
+      // Security Splunk) are NOT installed here. The host boots from an Adobe Image
+      // Factory AL2023 base image (see machineImage below) that bakes in and
+      // auto-configures both: Falcon resolves the correct CID/tags from this AWS
+      // account, and the Splunk UF is pre-configured via the Honeydew deployment
+      // server. IF images are tested for EDR/Splunk/Hubble before release.
+      // See docs/EDR_INSTALL_RUNBOOK.md.
+
+      // Mount the secondary EBS volume at /data. IF images also contain an xvdk
+      // scratch volume, so never assume nvme1n1 is /dev/sdb. Resolve the original
+      // EBS device mapping via ebsnvme-id and persist the filesystem by UUID so an
+      // NVMe enumeration change on reboot cannot mount the wrong volume.
       'DATA_DEV=""',
-      "for CANDIDATE in /dev/nvme1n1 /dev/sdb /dev/xvdb; do",
-      '  if [ -b "$CANDIDATE" ]; then DATA_DEV="$CANDIDATE"; break; fi',
+      "for ATTEMPT in $(seq 1 60); do",
+      "  for CANDIDATE in /dev/nvme*n1 /dev/sdb /dev/xvdb; do",
+      '    [ -b "$CANDIDATE" ] || continue',
+      '    MAPPED=""',
+      '    if [ -x /sbin/ebsnvme-id ]; then MAPPED=$(/sbin/ebsnvme-id -u "$CANDIDATE" 2>/dev/null || true); fi',
+      '    case "$MAPPED:$CANDIDATE" in *sdb*|*xvdb*) DATA_DEV="$CANDIDATE"; break 2 ;; esac',
+      "  done",
+      "  sleep 2",
       "done",
-      'if [ -n "$DATA_DEV" ]; then',
-      '  if ! blkid "$DATA_DEV" >/dev/null 2>&1; then',
-      '    mkfs -t ext4 "$DATA_DEV"',
-      "  fi",
-      "  mkdir -p /data",
-      '  echo "$DATA_DEV /data ext4 defaults,nofail 0 2" >> /etc/fstab',
-      "  mount /data || true",
-      "  mkdir -p /data/knowledge-graph",
+      '[ -n "$DATA_DEV" ] || { echo "Unable to locate /dev/sdb data volume" >&2; exit 1; }',
+      'if ! blkid "$DATA_DEV" >/dev/null 2>&1; then',
+      '  mkfs -t ext4 "$DATA_DEV"',
       "fi",
+      "mkdir -p /data",
+      'DATA_UUID=$(blkid -s UUID -o value "$DATA_DEV")',
+      'if ! grep -Fq "UUID=$DATA_UUID /data " /etc/fstab; then',
+      '  echo "UUID=$DATA_UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab',
+      "fi",
+      "mount /data",
+      "mkdir -p /data/knowledge-graph",
 
       // ECR login
       `aws ecr get-login-password --region ${this.region} | docker login --username AWS --password-stdin ${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
@@ -230,6 +279,7 @@ export class PimEc2Stack extends cdk.Stack {
       "Description=PIM Server",
       "Requires=docker.service",
       "After=docker.service",
+      "RequiresMountsFor=/data",
       "",
       "[Service]",
       "Restart=always",
@@ -244,6 +294,9 @@ export class PimEc2Stack extends cdk.Stack {
       `  -e KG_S3_BUCKET=${kgBucket.bucketName} \\`,
       `  -e KG_S3_PREFIX=knowledge-graph \\`,
       `  -e PIM_BACKUPS_BUCKET=${backupsBucket.bucketName} \\`,
+      // Stateful host: refuse to start empty. entrypoint restore-db.sh restores the
+      // DB from S3 on a fresh volume and fails closed if it can't (see that script).
+      `  -e PIM_REQUIRE_RESTORE=true \\`,
       `  -e DB_PATH=/data/pim.db \\`,
       `  -e KG_DATA_DIR=/data/knowledge-graph \\`,
       `  -e CORS_ORIGIN=* \\`,
@@ -270,10 +323,27 @@ export class PimEc2Stack extends cdk.Stack {
 
     const launchTemplate = new ec2.LaunchTemplate(this, "ServerLaunchTemplate", {
       instanceType,
-      machineImage: ec2.MachineImage.latestAmazonLinux2023(),
+      // Adobe Image Factory AL2023 base image (flavor IF_Amazon-Linux-2023_aws),
+      // which bakes in + auto-configures the required security agents: CrowdStrike
+      // Falcon EDR (CID/tags resolved from this AWS account) and the Splunk
+      // Universal Forwarder for Security Splunk. IF images are validated for
+      // EDR/Splunk/Hubble before release, so no in-userData agent install is needed.
+      //
+      // Pinned to an exact AMI for a deterministic migration + rollback (previously
+      // MachineImage.lookup, which re-resolves the newest match at synth time and is
+      // nondeterministic). Bump deliberately after validating a newer IF release.
+      // Only us-west-2 is mapped; add the prod region's shared AMI id before
+      // deploying the production stack there. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+      machineImage: ec2.MachineImage.genericLinux({
+        "us-west-2": "ami-06afdfc08e9b14b7e", // IF_Amazon-Linux-2023_aws_2.0.0, Falcon 7.23
+      }),
       role: ec2Role,
       securityGroup: ec2Sg,
       userData,
+      // Containers add one network hop when calling IMDS. Require IMDSv2 while
+      // allowing its token/credential response to cross the Docker bridge.
+      requireImdsv2: true,
+      httpPutResponseHopLimit: 2,
       // Public subnet => need a public IP for outbound (ECR pull, Bedrock, S3, SSM) without a NAT gateway
       associatePublicIpAddress: true,
       blockDevices: [

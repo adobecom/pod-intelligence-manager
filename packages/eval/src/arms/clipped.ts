@@ -1,7 +1,7 @@
 import type { Arm, ArmBuildInputs, SessionContextFixture } from "./types.js";
 import type { Task } from "../tasks/types.js";
 import type { PromptSegments } from "../runners/types.js";
-import { filterFixtureByAsOf, serializeContext } from "./pim-full.js";
+import { filterFixtureByAsOf, serializeContextWithReservedKg } from "./pim-full.js";
 import { HALF_BUDGET_CHARS, clip } from "./budget.js";
 
 const SYSTEM_CODE = [
@@ -34,7 +34,7 @@ export const pimClippedArm: Arm = {
     const filtered = task.asOf ? filterFixtureByAsOf(fixture, task.asOf) : fixture;
     return {
       system: task.type === "code" ? SYSTEM_CODE : SYSTEM_CONTENT,
-      pimContext: clip(serializeContext(filtered), HALF_BUDGET_CHARS),
+      pimContext: serializeContextWithReservedKg(filtered, task.id, HALF_BUDGET_CHARS),
       userTask: `## Task\n${task.prompt}`,
     };
   },

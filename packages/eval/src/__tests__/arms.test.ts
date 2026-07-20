@@ -2,8 +2,17 @@ import { describe, it, expect } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { controlArm, kgCompactArm, kgOnlyArm, pimFullArm } from "../arms/index.js";
-import type { SessionContextFixture } from "../arms/types.js";
+import {
+  controlArm,
+  kgCompactArm,
+  kgOnlyArm,
+  licPimCombinedArm,
+  pimClippedArm,
+  pimFullArm,
+  serenaPimCombinedArm,
+} from "../arms/index.js";
+import type { LicContextFixture, SessionContextFixture } from "../arms/types.js";
+import type { SerenaContextFixture } from "../serena/types.js";
 import { rbacPermissionResolution } from "../tasks/diagnostics/code-gen/rbac-permission-resolution.js";
 import { rbacDecisionRationale } from "../tasks/diagnostics/content-gen/rbac-decision-rationale.js";
 import {
@@ -122,6 +131,43 @@ describe("arms", () => {
     expect(segments.pimContext).toContain(taskScopedSummary);
     expect(segments.pimContext).not.toContain(podFallbackSummary);
     expect(segments.pimContext).toContain("KG retrieval scope: task");
+  });
+
+  it("matched-budget PIM slices reserve room for task KG learnings in a real fixture", async () => {
+    const task = futureEventModeratorPutContract;
+    const fixture = await loadFixture(task.podId);
+    const expectedSummary = fixture.payload.taskRelevantLearnings?.[task.id]?.nodes[0]?.summary;
+    expect(expectedSummary).toBeTruthy();
+
+    const lic: LicContextFixture = { taskId: task.id, renderedBlock: "lic context" };
+    const serena: SerenaContextFixture = {
+      taskId: task.id,
+      generatedAt: "2026-06-01T00:00:00Z",
+      serenaVersion: "test",
+      backend: "language-server",
+      mcpCommand: [],
+      projectPath: "/tmp/project",
+      indexSource: { kind: "head", repo: "test" },
+      toolAllowlist: [],
+      toolDenylist: [],
+      configHash: "test",
+      recipe: [],
+      seed: { symbols: [], source: "none" },
+      calls: [],
+      renderedBlock: "serena context",
+      renderedBlockHash: "test",
+    };
+    const contexts = [
+      pimClippedArm.build(task, fixture).pimContext ?? "",
+      licPimCombinedArm.buildWithInputs!(task, { pim: fixture, lic, serena: null }).pimContext ?? "",
+      serenaPimCombinedArm.buildWithInputs!(task, { pim: fixture, lic: null, serena }).pimContext ?? "",
+    ];
+
+    expect(contexts[0].length).toBeLessThanOrEqual(2000);
+    for (const context of contexts) {
+      expect(context).toContain("KG retrieval scope: task");
+      expect(context).toContain(expectedSummary);
+    }
   });
 
   it("contract-card mode extracts the moderator PUT fallback contract", async () => {

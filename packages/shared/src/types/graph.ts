@@ -159,6 +159,7 @@ export interface KnowledgeQueryFilters {
 
 export interface KnowledgeQueryOptions {
   filters: KnowledgeQueryFilters;
+  /** Budget for returned node summary/detail content and edges; response metadata and optional explanations are additional. */
   max_tokens?: number;
   include_details?: boolean;
   include_edges?: boolean;
@@ -181,7 +182,7 @@ export interface KnowledgeQueryOptions {
   as_of?: string;
   /** Defaults true for text/temporal queries; false disables one-hop graph expansion. */
   expand_graph?: boolean;
-  /** Include compact retrieval explanations for each returned node. */
+  /** Include retrieval explanations for each returned node. Diagnostic payload is outside max_tokens. */
   include_explanations?: boolean;
   /** Internal/shadow-mode switch: false avoids counting candidate-only retrievals as delivered context. */
   record_retrievals?: boolean;
@@ -194,6 +195,64 @@ export interface KnowledgeRetrievalExplanation {
   matched_topics: string[];
   semantic_score?: number;
   graph_expanded?: boolean;
+  /** Final score used for ordering this node. Present only when explanations are requested. */
+  score?: number;
+  /** Additive score terms, exposed for retrieval debugging without changing ranking behavior. */
+  score_components?: {
+    base_relevance: number;
+    semantic_match: number;
+    identifier_match: number;
+    direct_evidence: number;
+    lexical_recall: number;
+    lexical_specificity: number;
+    source_authority: number;
+    retrieval_tier: number;
+    graph_expansion?: number;
+    /** Eval-only boost used to keep an explicitly required node in the result set. */
+    required_pin?: number;
+  };
+  /** Observable evidence counts and gates that contributed to retrieval. */
+  evidence?: {
+    keyword_hits: number;
+    non_generic_keyword_hits: number;
+    identifier_hits: number;
+    strong_identifier_hits: number;
+    generic_identifier_hits: number;
+    rare_keyword_hits: number;
+    lexical_recall_hits: number;
+    idf_weighted_coverage: number;
+    summary_coverage: number;
+    phrase_match: number;
+    /** Query-order match between a guarded short identifier and supporting task language. */
+    ordered_generic_identifier_match: boolean;
+    exact_short_keyword_match: boolean;
+    direct_evidence?: boolean;
+    semantic_relevance?: boolean;
+    /** Eval-only signal explaining why the final score includes a required-pin boost. */
+    required_pin?: boolean;
+    /** Moderate hybrid evidence retained in the bounded candidate tail for recall. */
+    recall_candidate?: boolean;
+  };
+}
+
+export type KnowledgeRetrievalMode = "scope_only" | "lexical" | "hybrid";
+
+export type KnowledgeRetrievalDegradationReason =
+  | "query_embedding_unavailable"
+  | "candidate_embeddings_unavailable"
+  | "partial_embedding_coverage";
+
+/** Additive query diagnostics; older producers and frozen fixtures may omit this block. */
+export interface KnowledgeRetrievalDiagnostics {
+  mode: KnowledgeRetrievalMode;
+  degraded: boolean;
+  semantic_query_requested: boolean;
+  query_embedding_available: boolean;
+  embedding_coverage: number;
+  candidate_count: number;
+  matched_count: number;
+  returned_count: number;
+  degradation_reasons?: KnowledgeRetrievalDegradationReason[];
 }
 
 export interface KnowledgeContextContractInfo {
@@ -213,6 +272,7 @@ export interface KnowledgeQueryResult {
   query_mode?: TemporalQueryMode;
   as_of?: string;
   explanations?: KnowledgeRetrievalExplanation[];
+  retrieval_diagnostics?: KnowledgeRetrievalDiagnostics;
   context_contract?: KnowledgeContextContractInfo;
   /** Prompt-ready summary-only KG context for task-query retrieval. */
   compact_context?: string;

@@ -82,6 +82,48 @@ test("get_project_session_context requests compact heading offset 2", async () =
   );
 });
 
+test("get_project_session_context delivers compact KG context without debug payload bloat", async () => {
+  installFetch((url, init) => {
+    if (url.includes("/api/knowledge/relevant")) {
+      return jsonResponse({
+        nodes: Array.from({ length: 8 }, (_, index) => ({
+          id: `kg-${index + 1}`,
+          type: "pattern",
+          summary: `Learning ${index + 1}`,
+          details: "large details that should not enter the session prompt",
+          source_pod_name: "Seed Pod",
+          confidence_score: 0.9,
+        })),
+        edges: [{ source: "kg-1", target: "kg-2", type: "relates_to" }],
+        explanations: [{ node_id: "kg-1", score_components: { very: "large" } }],
+        compact_context: "# PIM KG Compact Context\n- Learning 1\n- Learning 2\n- Learning 3",
+        compact_context_node_count: 3,
+        total_matching: 20,
+        token_estimate: 600,
+        truncated: true,
+        retrieval_diagnostics: { mode: "hybrid", returned_count: 8 },
+      });
+    }
+    return baseApiHandler(url, init);
+  });
+  const tools = registerToolHandlers();
+
+  const result = await tools.get("get_project_session_context")!({
+    project_id: "project-demo",
+    agent_id: "agent-fe",
+    scope: "frontend",
+  });
+
+  const body = parseToolResult(result);
+  const learnings = body.relevant_learnings as Record<string, unknown>;
+  assert.equal(learnings.candidate_node_count, 8);
+  assert.equal((learnings.nodes as unknown[]).length, 3);
+  assert.equal(learnings.explanations, undefined);
+  assert.deepEqual(learnings.edges, []);
+  assert.match(String(learnings.compact_context), /Learning 1/);
+  assert.ok(Number(learnings.delivered_token_estimate) < Number(learnings.token_estimate));
+});
+
 test("get_project_session_context includes task-ranked project search when task query is supplied", async () => {
   const calls = installFetch((url, init) => {
     if (url.endsWith("/api/projects/project-demo/search")) {

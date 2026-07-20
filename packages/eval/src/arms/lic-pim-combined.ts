@@ -1,7 +1,7 @@
 import type { Arm, ArmBuildInputs, LicContextFixture, SessionContextFixture } from "./types.js";
 import type { Task } from "../tasks/types.js";
 import type { PromptSegments } from "../runners/types.js";
-import { filterFixtureByAsOf, serializeContext } from "./pim-full.js";
+import { filterFixtureByAsOf, serializeContextWithReservedKg } from "./pim-full.js";
 import { HALF_BUDGET_CHARS, clip } from "./budget.js";
 
 const SYSTEM_CODE = [
@@ -25,8 +25,8 @@ const SYSTEM_CONTENT = [
   "Treat the user task as authoritative if retrieved code context conflicts with the requested output shape.",
 ].join("\n");
 
-function buildCombinedContext(pim: SessionContextFixture, lic: LicContextFixture): string {
-  const pimBlock = clip(serializeContext(pim), HALF_BUDGET_CHARS);
+function buildCombinedContext(pim: SessionContextFixture, lic: LicContextFixture, taskId: string): string {
+  const pimBlock = serializeContextWithReservedKg(pim, taskId, HALF_BUDGET_CHARS);
   const licBlock = clip(lic.renderedBlock, HALF_BUDGET_CHARS);
   return [
     "=== PIM Session Context ===",
@@ -71,7 +71,7 @@ export const licPimCombinedArm: Arm = {
     const system = task.type === "code" ? SYSTEM_CODE : SYSTEM_CONTENT;
     return {
       system,
-      pimContext: buildCombinedContext(filtered, lic),
+      pimContext: buildCombinedContext(filtered, lic, task.id),
       userTask: `## Task\n${task.prompt}`,
     };
   },

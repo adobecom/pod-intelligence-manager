@@ -54,7 +54,7 @@ describe("queryKnowledgeSemantic input handling", () => {
     expect(embeddingMock.generateEmbedding).toHaveBeenCalledWith("webhook authentication");
   });
 
-  it("keeps scoped task context when strict task relevance has no query embedding", async () => {
+  it("drops unrelated scope-only context during an embedding outage but keeps direct lexical matches", async () => {
     const orgId = "kg-semantic-outage";
     initializeKnowledgeGraph(orgId);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -66,7 +66,7 @@ describe("queryKnowledgeSemantic input handling", () => {
           {
             type: "pattern",
             summary: "Backend queue retry policy",
-            details: "Retry jobs with capped exponential backoff.",
+            details: "Retry queue jobs with capped exponential backoff.",
             domains: ["backend"],
             confidence: "extracted",
             confidence_score: 0.9,
@@ -87,17 +87,14 @@ describe("queryKnowledgeSemantic input handling", () => {
 
       const result = await getRelevantLearningsForContractMode(orgId, "task_relevant", {
         scopes: ["backend"],
-        taskQuery: "mobile sign-in regression",
+        taskQuery: "queue retry backoff",
         maxTokens: 2000,
       });
 
-      expect(embeddingMock.generateEmbedding).toHaveBeenCalledWith("mobile sign-in regression");
+      expect(embeddingMock.generateEmbedding).toHaveBeenCalledWith("queue retry backoff");
       expect(result.context_contract?.returned_mode).toBe("task_relevant");
       expect(result.context_contract?.task_query_used).toBe(true);
-      expect(result.nodes.map((node) => node.summary).sort()).toEqual([
-        "Backend queue retry policy",
-        "Backend worker concurrency limit",
-      ]);
+      expect(result.nodes.map((node) => node.summary)).toEqual(["Backend queue retry policy"]);
     } finally {
       warnSpy.mockRestore();
     }

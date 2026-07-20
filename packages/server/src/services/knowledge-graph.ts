@@ -16,6 +16,7 @@ import type {
   KnowledgeQueryOptions,
   KnowledgeQueryResult,
   KnowledgeRetrievalExplanation,
+  KnowledgeRetrievalDiagnostics,
   KnowledgeStats,
   KnowledgeNodeType,
   ConfidenceLevel,
@@ -312,6 +313,9 @@ const DEFAULT_CONFIDENCE_MIN = 0.7;
 const DEFAULT_QUERY_MAX_TOKENS = 2000;
 const DEFAULT_COMPACT_CONTEXT_TOP_N = 3;
 const DEFAULT_COMPACT_CONTEXT_MAX_CHARS = 1_000;
+/** Retrieval depth is intentionally separate from the compact prompt-context depth. */
+const DEFAULT_TASK_RELEVANT_CANDIDATE_LIMIT = 15;
+const DEFAULT_TASK_RELEVANT_MAX_TOKENS = 2_000;
 /** Minimum share of query keywords that must appear on a node to bypass the cosine gate. */
 const KEYWORD_OVERLAP_GATE_RATIO = 0.5;
 /** Minimum absolute keyword hits (when the query has many terms). */
@@ -356,6 +360,22 @@ const RARE_KEYWORD_RECALL_MAX_GRAPH_SHARE = 0.02;
 const GENERIC_TASK_IDENTIFIER_MAX_LENGTH = 3;
 const WEAK_SEMANTIC_SIGNAL_THRESHOLD = 0.45;
 const GENERIC_IDENTIFIER_SUPPORT_MIN_KEYWORD_HITS = 2;
+const TASK_RECALL_TAIL_MIN_SIMILARITY = 0.27;
+const WEAK_HYBRID_AGREEMENT_BONUS = 0.045;
+
+function hasUsableEmbedding(value: number[] | null | undefined): value is number[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function hasCompatibleEmbeddings(
+  queryEmbedding: number[] | null | undefined,
+  nodeEmbedding: number[] | null | undefined,
+): queryEmbedding is number[] {
+  return hasUsableEmbedding(queryEmbedding) &&
+    hasUsableEmbedding(nodeEmbedding) &&
+    queryEmbedding.length === nodeEmbedding.length;
+}
+
 function estimateNodeTokens(node: KnowledgeNode, includeDetails: boolean): number {
   const chars = node.summary.length + (includeDetails ? node.details.length : 0);
   return Math.max(1, Math.ceil(chars / CHARS_PER_TOKEN));
@@ -826,22 +846,175 @@ type ScoredNode = {
   genericIdentifierHits: number;
   rareKeywordHits: number;
   lexicalRecallHits: number;
+  idfWeightedCoverage: number;
+  summaryCoverage: number;
+  phraseMatch: number;
+  orderedGenericIdentifierMatch: boolean;
   score: number;
+  scoreComponents: NonNullable<KnowledgeRetrievalExplanation["score_components"]>;
   graphExpanded?: boolean;
   semanticRelevance?: boolean;
   directEvidence?: boolean;
+  recallCandidate?: boolean;
+  requiredPin?: boolean;
 };
+
+interface LexicalSpecificity {
+  idfWeightedCoverage: number;
+  summaryCoverage: number;
+  phraseMatch: number;
+  orderedGenericIdentifierMatch: boolean;
+  score: number;
+}
+
+function normalizedPhraseText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Preserve query order while admitting guarded identifiers that keyword extraction drops. */
+function orderedSpecificityTerms(queryText: string | undefined): string[] {
+  if (!queryText?.trim()) return [];
+  const identifierTerms = new Set(
+    [...extractRetrievalIdentifiers(queryText)]
+      .flatMap((identifier) => normalizedPhraseText(identifier).split(" "))
+      .filter(Boolean),
+  );
+  return uniqueStrings(
+    normalizedPhraseText(queryText)
+      .split(" ")
+      .filter((term) => isHighSignalQueryKeyword(term) || identifierTerms.has(term)),
+  );
+}
+
+function longestQueryPhraseMatch(queryText: string | undefined, node: KnowledgeNode): number {
+  if (!queryText?.trim()) return 0;
+  const terms = highSignalKeywordsForScoring(queryKeywordsFromText(queryText));
+  if (terms.length < 2) return 0;
+  const summary = normalizedPhraseText(node.summary);
+  const fullText = normalizedPhraseText(`${node.summary} ${node.details} ${node.retrieval_text ?? ""}`);
+  const maxLength = Math.min(5, terms.length);
+  for (let length = maxLength; length >= 2; length--) {
+    for (let offset = 0; offset <= terms.length - length; offset++) {
+      const phrase = normalizedPhraseText(terms.slice(offset, offset + length).join(" "));
+      // A two-word phrase is useful but common; reserve the full boost for
+      // longer contiguous task language so incidental pairs do not dominate.
+      if (summary.includes(phrase)) return Math.min(1, (length - 1) * 0.25);
+      if (fullText.includes(phrase)) return Math.min(0.8, 0.15 + (length - 2) * 0.2);
+    }
+  }
+  return 0;
+}
+
+function hasOrderedGenericIdentifierContext(
+  queryText: string | undefined,
+  node: KnowledgeNode,
+  genericIdentifiers: string[],
+): boolean {
+  if (!queryText?.trim() || genericIdentifiers.length === 0) return false;
+  const genericSet = new Set(genericIdentifiers);
+  const terms = orderedSpecificityTerms(queryText);
+  // This signal protects concise identifier-qualified lookups. On long task
+  // prose, incidental adjacent pairs must not become a broad rank boost.
+  if (terms.length < 2 || terms.length > 4) return false;
+  const summary = normalizedPhraseText(node.summary);
+  const fullText = normalizedPhraseText(`${node.summary} ${node.details} ${node.retrieval_text ?? ""}`);
+
+  for (let index = 0; index < terms.length - 1; index++) {
+    const left = terms[index];
+    const right = terms[index + 1];
+    const hasGenericIdentifier = genericSet.has(left) || genericSet.has(right);
+    const hasSupportingTerm = !genericSet.has(left) || !genericSet.has(right);
+    if (!hasGenericIdentifier || !hasSupportingTerm) continue;
+    const phrase = `${left} ${right}`;
+    if (summary.includes(phrase) || fullText.includes(phrase)) return true;
+  }
+  return false;
+}
+
+/**
+ * IDF-weighted query coverage plus field/phrase boosts. This is deliberately
+ * bounded and additive: embeddings remain the primary semantic signal, while
+ * distinctive exact language can outrank broad, high-confidence guidance.
+ */
+function lexicalSpecificity(
+  node: KnowledgeNode,
+  state: OrgGraphState,
+  keywords: string[],
+  queryText: string | undefined,
+  genericIdentifiers: string[],
+): LexicalSpecificity {
+  const uniqueKeywords = uniqueStrings(keywords);
+  const orderedGenericIdentifierMatch = hasOrderedGenericIdentifierContext(
+    queryText,
+    node,
+    genericIdentifiers,
+  );
+  const phraseMatch = Math.max(
+    longestQueryPhraseMatch(queryText, node),
+    orderedGenericIdentifierMatch ? 0.25 : 0,
+  );
+  if (uniqueKeywords.length === 0) {
+    return {
+      idfWeightedCoverage: 0,
+      summaryCoverage: 0,
+      phraseMatch,
+      orderedGenericIdentifierMatch,
+      score: phraseMatch * 0.14,
+    };
+  }
+  const graphSize = Math.max(1, state.graph.nodes.length);
+  const nodeKeywords = state.nodeKeywords.get(node.id) ?? new Set<string>();
+  const summaryKeywords = extractKeywords(node.summary);
+  let totalWeight = 0;
+  let matchedWeight = 0;
+  let summaryWeight = 0;
+  for (const keyword of uniqueKeywords) {
+    const documentFrequency = state.keywordIndex.get(keyword)?.size ?? 0;
+    const idf = Math.log(1 + (graphSize + 1) / (documentFrequency + 1));
+    totalWeight += idf;
+    if (!nodeKeywords.has(keyword)) continue;
+    matchedWeight += idf;
+    if (summaryKeywords.has(keyword)) summaryWeight += idf;
+  }
+  const idfWeightedCoverage = totalWeight > 0 ? matchedWeight / totalWeight : 0;
+  const summaryCoverage = totalWeight > 0 ? summaryWeight / totalWeight : 0;
+  return {
+    idfWeightedCoverage,
+    summaryCoverage,
+    phraseMatch,
+    orderedGenericIdentifierMatch,
+    score: idfWeightedCoverage * 0.24 + summaryCoverage * 0.12 + phraseMatch * 0.14,
+  };
+}
 
 function identifierMatchScore(identifierHits: number): number {
   if (identifierHits <= 0) return 0;
-  return Math.min(identifierHits, 2) * 0.18 + Math.max(0, identifierHits - 2) * 0.05;
+  // One exact identifier is already a strong signal. Additional identifiers
+  // have diminishing value so long/noisy queries cannot dominate merely by
+  // colliding with several common symbols.
+  return 0.22 + Math.min(identifierHits - 1, 2) * 0.09 + Math.max(0, identifierHits - 3) * 0.03;
+}
+
+function semanticMatchScore(querySimilarity: number | undefined): number {
+  return (querySimilarity ?? 0) >= 0.75 ? 0.08 : 0;
 }
 
 function directEvidenceBonus(querySimilarity: number | undefined, keywordHits: number, identifierHits: number): number {
   let bonus = 0;
-  if ((querySimilarity ?? 0) >= 0.75) bonus += 0.08;
   if (identifierHits > 0 && keywordHits >= 4 && (querySimilarity ?? 0) >= 0.4) bonus += 0.2;
-  if (identifierHits === 0 && keywordHits >= 4 && (querySimilarity ?? 0) >= 0.25) bonus += 0.12;
+  if (identifierHits === 0 && keywordHits >= 4 && (querySimilarity ?? 0) >= 0.25) {
+    bonus += 0.12;
+  } else if (
+    identifierHits === 0 &&
+    keywordHits >= 3 &&
+    (querySimilarity ?? 0) >= TASK_RECALL_TAIL_MIN_SIMILARITY
+  ) {
+    bonus += WEAK_HYBRID_AGREEMENT_BONUS;
+  }
   return bonus;
 }
 
@@ -859,6 +1032,7 @@ function scoreCandidates(
   keywords: string[],
   identifiers: string[],
   querySignals: QuerySignalPlan,
+  queryText: string | undefined,
   queryEmbedding: number[] | null | undefined,
   hubIds: Set<string>,
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
@@ -870,10 +1044,9 @@ function scoreCandidates(
   return candidates.map((node) => {
     const precomputedKeywords = state.nodeKeywords.get(node.id);
     const precomputedIdentifiers = state.nodeIdentifiers.get(node.id);
-    const querySimilarity =
-      queryEmbedding && node.embedding
-        ? cosineSimilarity(queryEmbedding, node.embedding)
-        : undefined;
+    const querySimilarity = hasCompatibleEmbeddings(queryEmbedding, node.embedding)
+      ? cosineSimilarity(queryEmbedding, node.embedding!)
+      : undefined;
     const identifierHits = countIdentifierMatches(precomputedIdentifiers, identifiers);
     const strongIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.strongIdentifiers);
     const genericIdentifierHits = countIdentifierMatches(precomputedIdentifiers, querySignals.genericIdentifiers);
@@ -883,7 +1056,37 @@ function scoreCandidates(
     const rareKeywordHits = countKeywordMatches(precomputedKeywords, querySignals.rareKeywords);
     const lexicalRecall = querySignals.forceLexicalRecall && querySignals.recallIds.has(node.id);
     const lexicalRecallHits = lexicalRecall ? Math.max(1, lexicalIdentifierHits, rareKeywordHits) : 0;
-    const scoringIdentifierHits = identifierHits + countHttpContractMethodMatches(precomputedKeywords, scoringKeywords, identifiers);
+    const specificity = lexicalSpecificity(
+      node,
+      state,
+      scoringKeywords,
+      queryText,
+      querySignals.genericIdentifiers,
+    );
+    const genericIdentifierSupported =
+      specificity.orderedGenericIdentifierMatch ||
+      rareKeywordHits > 0 ||
+      (querySimilarity ?? 0) >= WEAK_SEMANTIC_SIGNAL_THRESHOLD ||
+      nonGenericKeywordHits >= GENERIC_IDENTIFIER_SUPPORT_MIN_KEYWORD_HITS;
+    const scoringIdentifierHits =
+      strongIdentifierHits +
+      (genericIdentifierSupported ? genericIdentifierHits : 0) +
+      countHttpContractMethodMatches(precomputedKeywords, scoringKeywords, identifiers);
+    const scoreComponents: ScoredNode["scoreComponents"] = {
+      base_relevance: scoreRelevance(
+        node,
+        { scopes, keywords: scoringKeywords, querySimilarity, precomputedKeywords },
+        hubIds,
+        graphTuning,
+      ),
+      semantic_match: semanticMatchScore(querySimilarity),
+      identifier_match: identifierMatchScore(scoringIdentifierHits),
+      direct_evidence: directEvidenceBonus(querySimilarity, keywordHits, scoringIdentifierHits),
+      lexical_recall: lexicalRecallScore(lexicalIdentifierHits, rareKeywordHits, lexicalRecall),
+      lexical_specificity: specificity.score,
+      source_authority: sourceAuthorityScore(node),
+      retrieval_tier: retrievalTierScore(node),
+    };
     return {
       node,
       querySimilarity,
@@ -895,17 +1098,20 @@ function scoreCandidates(
       genericIdentifierHits,
       rareKeywordHits,
       lexicalRecallHits,
-      score: scoreRelevance(
-        node,
-        { scopes, keywords: scoringKeywords, querySimilarity, precomputedKeywords },
-        hubIds,
-        graphTuning,
-      ) +
-        identifierMatchScore(scoringIdentifierHits) +
-        directEvidenceBonus(querySimilarity, keywordHits, scoringIdentifierHits) +
-        lexicalRecallScore(lexicalIdentifierHits, rareKeywordHits, lexicalRecall) +
-        sourceAuthorityScore(node) +
-        retrievalTierScore(node),
+      idfWeightedCoverage: specificity.idfWeightedCoverage,
+      summaryCoverage: specificity.summaryCoverage,
+      phraseMatch: specificity.phraseMatch,
+      orderedGenericIdentifierMatch: specificity.orderedGenericIdentifierMatch,
+      score:
+        scoreComponents.base_relevance +
+        scoreComponents.semantic_match +
+        scoreComponents.identifier_match +
+        scoreComponents.direct_evidence +
+        scoreComponents.lexical_recall +
+        scoreComponents.lexical_specificity +
+        scoreComponents.source_authority +
+        scoreComponents.retrieval_tier,
+      scoreComponents,
     };
   });
 }
@@ -928,6 +1134,62 @@ function passesScalarQueryFilters(
   return visibleForQueryMode(node, state, mode, asOf, filters);
 }
 
+function hasAnyValue(values: readonly string[], allowed: readonly string[]): boolean {
+  const allowedSet = new Set(allowed);
+  return values.some((value) => allowedSet.has(value));
+}
+
+/** Apply the indexed dimensions to graph-expanded or explicitly pinned nodes too. */
+function passesIndexedQueryFilters(
+  node: KnowledgeNode,
+  filters: KnowledgeQueryOptions["filters"],
+  state: OrgGraphState,
+): boolean {
+  const scopeFilters = filters.scopes?.length ? filters.scopes : filters.domains;
+  if (scopeFilters?.length && !hasAnyValue(nodeScopes(node), scopeFilters)) return false;
+  if (filters.topics?.length && !hasAnyValue(nodeTopics(node), filters.topics)) return false;
+  if (filters.types?.length && !filters.types.includes(node.type)) return false;
+  if (filters.source_pod_ids?.length && !filters.source_pod_ids.includes(node.source_pod_id)) return false;
+
+  if (filters.text_search) {
+    const queryKeywords = extractKeywords(filters.text_search);
+    const queryIdentifiers = extractRetrievalIdentifiers(filters.text_search);
+    if (queryKeywords.size > 0 || queryIdentifiers.size > 0) {
+      const indexedKeywords = state.nodeKeywords.get(node.id) ?? new Set<string>();
+      const indexedIdentifiers = state.nodeIdentifiers.get(node.id) ?? new Set<string>();
+      const keywordMatch = [...queryKeywords].some((keyword) => indexedKeywords.has(keyword));
+      const identifierMatch = [...queryIdentifiers].some((identifier) => indexedIdentifiers.has(identifier));
+      if (!keywordMatch && !identifierMatch) return false;
+    }
+  }
+  return true;
+}
+
+function passesAllQueryFilters(
+  node: KnowledgeNode,
+  filters: KnowledgeQueryOptions["filters"],
+  mode: NonNullable<KnowledgeQueryOptions["query_mode"]>,
+  asOf: string | undefined,
+  state: OrgGraphState,
+): boolean {
+  return passesIndexedQueryFilters(node, filters, state) &&
+    passesScalarQueryFilters(node, filters, mode, asOf, state);
+}
+
+function withRequiredPin(entry: ScoredNode): ScoredNode {
+  const finalScore = Math.max(entry.score, 10);
+  const requiredPin = finalScore - entry.score;
+  return {
+    ...entry,
+    score: finalScore,
+    scoreComponents: {
+      ...entry.scoreComponents,
+      required_pin: (entry.scoreComponents.required_pin ?? 0) + requiredPin,
+    },
+    requiredPin: true,
+  };
+}
+
 function pinRequiredScoredNodes(
   scored: ScoredNode[],
   state: OrgGraphState,
@@ -939,6 +1201,7 @@ function pinRequiredScoredNodes(
   keywords: string[],
   identifiers: string[],
   querySignals: QuerySignalPlan,
+  queryText: string | undefined,
   queryEmbedding: number[] | null | undefined,
   hubIds: Set<string>,
   graphTuning: ReturnType<typeof getOrgTuning>["graphScoring"],
@@ -947,16 +1210,26 @@ function pinRequiredScoredNodes(
   const byId = new Map(scored.map((entry) => [entry.node.id, entry]));
   const requiredSet = new Set(requiredNodeIds);
   const boosted = scored.map((entry) =>
-    requiredSet.has(entry.node.id) ? { ...entry, score: Math.max(entry.score, 10) } : entry,
+    requiredSet.has(entry.node.id) ? withRequiredPin(entry) : entry,
   );
   const missingRequired = [...requiredSet]
     .filter((id) => !byId.has(id))
     .map((id) => state.nodeById.get(id))
     .filter((node): node is KnowledgeNode => !!node)
-    .filter((node) => passesScalarQueryFilters(node, filters, mode, asOf, state));
+    .filter((node) => passesAllQueryFilters(node, filters, mode, asOf, state));
   if (missingRequired.length === 0) return boosted;
-  const pinned = scoreCandidates(missingRequired, state, scopes, keywords, identifiers, querySignals, queryEmbedding, hubIds, graphTuning)
-    .map((entry) => ({ ...entry, score: Math.max(entry.score, 10) }));
+  const pinned = scoreCandidates(
+    missingRequired,
+    state,
+    scopes,
+    keywords,
+    identifiers,
+    querySignals,
+    queryText,
+    queryEmbedding,
+    hubIds,
+    graphTuning,
+  ).map(withRequiredPin);
   return [...boosted, ...pinned];
 }
 
@@ -982,7 +1255,8 @@ function hasStrongKeywordOverlapEvidence(scored: ScoredNode, scoringKeywordCount
   }
   if (scoringKeywordCount > 8) {
     return scored.keywordHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS + 1 ||
-      (scored.keywordHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS && (scored.querySimilarity ?? 0) >= 0.25);
+      (scored.keywordHits >= KEYWORD_OVERLAP_GATE_STRONG_ABSOLUTE_HITS && (scored.querySimilarity ?? 0) >= 0.25) ||
+      (scored.keywordHits >= 3 && (scored.querySimilarity ?? 0) >= TASK_RECALL_TAIL_MIN_SIMILARITY);
   }
   return scored.keywordHits >= KEYWORD_OVERLAP_GATE_MIN_HITS &&
     scored.keywordHits / scoringKeywordCount >= KEYWORD_OVERLAP_GATE_RATIO;
@@ -991,6 +1265,7 @@ function hasStrongKeywordOverlapEvidence(scored: ScoredNode, scoringKeywordCount
 function hasSupportedGenericIdentifierEvidence(scored: ScoredNode): boolean {
   if (scored.genericIdentifierHits === 0) return false;
   return (
+    scored.orderedGenericIdentifierMatch ||
     scored.rareKeywordHits > 0 ||
     (scored.querySimilarity ?? 0) >= WEAK_SEMANTIC_SIGNAL_THRESHOLD ||
     scored.nonGenericKeywordHits >= GENERIC_IDENTIFIER_SUPPORT_MIN_KEYWORD_HITS
@@ -1037,14 +1312,27 @@ function applySemanticGate(
     hasSemanticEvidence(entry, minQuerySimilarity),
   );
 
-  if (!queryEmbedding) {
-    return scored.map(annotate);
+  if (!hasUsableEmbedding(queryEmbedding)) {
+    // An embedding outage must degrade to lexical retrieval, not to a broad
+    // scope-only dump. This applies to both direct queries and the strict task
+    // contract; callers can still issue an intentional scope-only query by
+    // omitting query_text entirely.
+    return scored.map(annotate).filter((entry) => entry.directEvidence);
   }
 
   if (strictTaskRelevance) {
     return scored
       .map(annotate)
-      .filter((entry) => entry.directEvidence || entry.semanticRelevance);
+      .filter((entry) =>
+        entry.directEvidence ||
+        entry.semanticRelevance ||
+        (entry.querySimilarity ?? 0) >= TASK_RECALL_TAIL_MIN_SIMILARITY,
+      )
+      .map((entry) =>
+        entry.directEvidence || entry.semanticRelevance
+          ? entry
+          : { ...entry, recallCandidate: true },
+      );
   }
 
   const gated = scored.filter(({ node, querySimilarity, identifierHits, lexicalRecallHits }) =>
@@ -1083,38 +1371,6 @@ function applySemanticGate(
   }
 
   return gated.map(annotate);
-}
-
-function hasHardCandidateFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
-  return !!(
-    filters.scopes?.length ||
-    filters.topics?.length ||
-    filters.types?.length ||
-    filters.source_pod_ids?.length ||
-    filters.source_project_ids?.length ||
-    filters.include_project_id ||
-    filters.confidence_min !== undefined ||
-    filters.curated_only ||
-    filters.text_search?.trim()
-  );
-}
-
-function hasAuthoritativeNonScopeFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
-  return !!(
-    filters.topics?.length ||
-    filters.types?.length ||
-    filters.source_pod_ids?.length ||
-    filters.source_project_ids?.length ||
-    filters.include_project_id ||
-    filters.confidence_min !== undefined ||
-    filters.curated_only ||
-    filters.text_search?.trim() ||
-    filters.retrieval_tiers?.length
-  );
-}
-
-function isExplicitScopeOnlyFilter(filters: KnowledgeQueryOptions["filters"]): boolean {
-  return !!filters.scopes?.length && !filters.domains?.length && !hasAuthoritativeNonScopeFilter(filters);
 }
 
 function timestampMs(value?: string): number {
@@ -1220,14 +1476,25 @@ function expandWithGraphNeighbors(
     if (byId.has(neighborId)) continue;
     const neighbor = state.nodeById.get(neighborId);
     if (!neighbor) continue;
-    if (!passesScalarQueryFilters(neighbor, filters, mode, asOf, state)) continue;
+    if (!passesAllQueryFilters(neighbor, filters, mode, asOf, state)) continue;
     const seed = seedById.get(seedSide)!;
     const edgeWeight = edge.weight ?? 0;
+    const graphExpansionScore = seed.score * 0.35 + Math.min(1, edgeWeight) * 0.08;
+    const scoreComponents: ScoredNode["scoreComponents"] = {
+      base_relevance: 0,
+      semantic_match: 0,
+      identifier_match: 0,
+      direct_evidence: 0,
+      lexical_recall: 0,
+      lexical_specificity: 0,
+      source_authority: sourceAuthorityScore(neighbor),
+      retrieval_tier: retrievalTierScore(neighbor),
+      graph_expansion: graphExpansionScore,
+    };
     const graphScore =
-      seed.score * 0.35 +
-      Math.min(1, edgeWeight) * 0.08 +
-      sourceAuthorityScore(neighbor) +
-      retrievalTierScore(neighbor);
+      graphExpansionScore +
+      scoreComponents.source_authority +
+      scoreComponents.retrieval_tier;
     const expanded: ScoredNode = {
       node: neighbor,
       exactShortKeywordMatch: false,
@@ -1238,7 +1505,12 @@ function expandWithGraphNeighbors(
       genericIdentifierHits: 0,
       rareKeywordHits: 0,
       lexicalRecallHits: 0,
+      idfWeightedCoverage: 0,
+      summaryCoverage: 0,
+      phraseMatch: 0,
+      orderedGenericIdentifierMatch: false,
       score: graphScore,
+      scoreComponents,
       graphExpanded: true,
       semanticRelevance: false,
       directEvidence: false,
@@ -1287,6 +1559,7 @@ function sameTags(a: string[], b: string[]): boolean {
 function explanationForScoredNode(
   scored: ScoredNode,
   filters: KnowledgeQueryOptions["filters"],
+  queryText?: string,
 ): KnowledgeRetrievalExplanation {
   const scopes = filters.scopes ?? filters.domains ?? [];
   const topics = filters.topics ?? [];
@@ -1297,9 +1570,74 @@ function explanationForScoredNode(
     node_id: node.id,
     strength: nodeStrength(scored),
     matched_scopes: intersection(scopesSnapshot, scopes),
-    matched_topics: intersection(topicsSnapshot, topics.length > 0 ? topics : mergeScoringKeywords(filters)),
+    matched_topics: intersection(topicsSnapshot, topics.length > 0 ? topics : mergeScoringKeywords(filters, queryText)),
     ...(scored.querySimilarity !== undefined ? { semantic_score: scored.querySimilarity } : {}),
     ...(scored.graphExpanded !== undefined ? { graph_expanded: scored.graphExpanded } : {}),
+    score: scored.score,
+    score_components: scored.scoreComponents,
+    evidence: {
+      keyword_hits: scored.keywordHits,
+      non_generic_keyword_hits: scored.nonGenericKeywordHits,
+      identifier_hits: scored.identifierHits,
+      strong_identifier_hits: scored.strongIdentifierHits,
+      generic_identifier_hits: scored.genericIdentifierHits,
+      rare_keyword_hits: scored.rareKeywordHits,
+      lexical_recall_hits: scored.lexicalRecallHits,
+      idf_weighted_coverage: scored.idfWeightedCoverage,
+      summary_coverage: scored.summaryCoverage,
+      phrase_match: scored.phraseMatch,
+      ordered_generic_identifier_match: scored.orderedGenericIdentifierMatch,
+      exact_short_keyword_match: scored.exactShortKeywordMatch,
+      ...(scored.directEvidence !== undefined ? { direct_evidence: scored.directEvidence } : {}),
+      ...(scored.semanticRelevance !== undefined ? { semantic_relevance: scored.semanticRelevance } : {}),
+      ...(scored.recallCandidate !== undefined ? { recall_candidate: scored.recallCandidate } : {}),
+      ...(scored.requiredPin ? { required_pin: true } : {}),
+    },
+  };
+}
+
+function retrievalDiagnostics(
+  candidates: KnowledgeNode[],
+  filters: KnowledgeQueryOptions["filters"],
+  queryText: string | undefined,
+  queryEmbedding: number[] | null | undefined,
+  matchedCount: number,
+  returnedCount: number,
+): KnowledgeRetrievalDiagnostics {
+  const queryEmbeddingDimensions = Array.isArray(queryEmbedding) ? queryEmbedding.length : 0;
+  const hasQueryEmbedding = queryEmbeddingDimensions > 0;
+  const semanticQueryRequested = Boolean(queryText?.trim()) || hasQueryEmbedding;
+  const lexicalQueryPresent = Boolean(
+    queryText?.trim() || filters.text_search?.trim() || filters.keywords?.length,
+  );
+  const compatibleEmbeddingCount = candidates.filter((node) =>
+    hasQueryEmbedding
+      ? hasCompatibleEmbeddings(queryEmbedding, node.embedding)
+      : hasUsableEmbedding(node.embedding)
+  ).length;
+  const embeddingCoverage = candidates.length > 0 ? compatibleEmbeddingCount / candidates.length : 0;
+  const reasons: NonNullable<KnowledgeRetrievalDiagnostics["degradation_reasons"]> = [];
+  if (semanticQueryRequested && !hasQueryEmbedding) reasons.push("query_embedding_unavailable");
+  if (hasQueryEmbedding && candidates.length > 0 && compatibleEmbeddingCount === 0) {
+    reasons.push("candidate_embeddings_unavailable");
+  } else if (hasQueryEmbedding && compatibleEmbeddingCount > 0 && compatibleEmbeddingCount < candidates.length) {
+    reasons.push("partial_embedding_coverage");
+  }
+  const mode: KnowledgeRetrievalDiagnostics["mode"] = !lexicalQueryPresent && !hasQueryEmbedding
+    ? "scope_only"
+    : hasQueryEmbedding && (candidates.length === 0 || compatibleEmbeddingCount > 0)
+      ? "hybrid"
+      : "lexical";
+  return {
+    mode,
+    degraded: reasons.length > 0,
+    semantic_query_requested: semanticQueryRequested,
+    query_embedding_available: hasQueryEmbedding,
+    embedding_coverage: embeddingCoverage,
+    candidate_count: candidates.length,
+    matched_count: matchedCount,
+    returned_count: returnedCount,
+    ...(reasons.length > 0 ? { degradation_reasons: reasons } : {}),
   };
 }
 
@@ -1571,12 +1909,13 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     keywords,
     identifiers,
     querySignals,
+    query_text,
     query_embedding,
     hubIds,
     graphTuning,
   );
 
-  if (query_embedding || (strict_task_relevance && !!query_text?.trim())) {
+  if (hasUsableEmbedding(query_embedding) || !!query_text?.trim()) {
     const minQuerySimilarity = graphTuning.minQuerySimilarity ?? 0.75;
     const gated = applySemanticGate(
       scored,
@@ -1587,20 +1926,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
       minQuerySimilarity,
       strict_task_relevance,
     );
-    const scoringKeywords = highSignalKeywordsForScoring(keywords);
-    const filteredRecallHasLexicalSignal = scored.some((entry) => {
-      if (entry.exactShortKeywordMatch || entry.identifierHits > 0) return true;
-      if (scoringKeywords.length <= 2) return entry.keywordHits === scoringKeywords.length && scoringKeywords.length > 0;
-      return entry.keywordHits >= Math.max(2, Math.ceil(scoringKeywords.length * 0.25));
-    });
-    const shouldUseFilteredCandidatesAsRecallFallback =
-      !strict_task_relevance &&
-      gated.length === 0 &&
-      scored.length > 0 &&
-      !!query_text?.trim() &&
-      hasHardCandidateFilter(filters) &&
-      (hasAuthoritativeNonScopeFilter(filters) || filteredRecallHasLexicalSignal || isExplicitScopeOnlyFilter(filters));
-    scored = shouldUseFilteredCandidatesAsRecallFallback ? scored : gated;
+    scored = gated;
   }
 
   scored = pinRequiredScoredNodes(
@@ -1614,6 +1940,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     keywords,
     identifiers,
     querySignals,
+    query_text,
     query_embedding,
     hubIds,
     graphTuning,
@@ -1627,7 +1954,13 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
   }
 
   const totalMatching = scored.length;
-  scored.sort((a, b) => b.score - a.score);
+  scored.sort((a, b) =>
+    b.score - a.score ||
+    b.strongIdentifierHits - a.strongIdentifierHits ||
+    b.phraseMatch - a.phraseMatch ||
+    b.idfWeightedCoverage - a.idfWeightedCoverage ||
+    a.node.id.localeCompare(b.node.id),
+  );
 
   // Step 3: Apply token budget and/or limit
   const resultNodes: KnowledgeNode[] = [];
@@ -1641,7 +1974,7 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
     if (resultNodes.length >= effectiveLimit) break;
 
     const nodeTokens = estimateNodeTokens(node, include_details);
-    if (tokenCount + nodeTokens > tokenBudget) break;
+    if (tokenCount + nodeTokens > tokenBudget) continue;
 
     tokenCount += nodeTokens;
 
@@ -1653,27 +1986,40 @@ export function queryKnowledge(orgId: string, options: InternalKnowledgeQueryOpt
 
   // Step 4: Include edges if requested
   let resultEdges: KnowledgeEdge[] = [];
+  let edgesTruncated = false;
   if (include_edges || query_mode === "why_changed") {
     const nodeIds = new Set(resultNodes.map((n) => n.id));
-    resultEdges = graph.edges.filter(
+    const matchingEdges = graph.edges.filter(
       (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
     );
+    const remainingEdgeBudget = Math.max(0, tokenBudget - tokenCount);
+    resultEdges = matchingEdges.slice(0, Math.floor(remainingEdgeBudget / TOKENS_PER_EDGE));
+    edgesTruncated = resultEdges.length < matchingEdges.length;
     tokenCount += resultEdges.length * TOKENS_PER_EDGE;
   }
 
   const explanations = include_explanations
-    ? resultScored.map((entry) => explanationForScoredNode(entry, filters))
+    ? resultScored.map((entry) => explanationForScoredNode(entry, filters, query_text))
     : undefined;
+  const diagnostics = retrievalDiagnostics(
+    candidates,
+    filters,
+    query_text,
+    query_embedding,
+    totalMatching,
+    resultNodes.length,
+  );
 
   return {
     nodes: resultNodes,
     edges: resultEdges,
     total_matching: totalMatching,
     token_estimate: tokenCount,
-    truncated: resultNodes.length < totalMatching,
+    truncated: resultNodes.length < totalMatching || edgesTruncated,
     query_mode,
     as_of,
     ...(explanations ? { explanations } : {}),
+    retrieval_diagnostics: diagnostics,
   };
 }
 
@@ -1756,10 +2102,13 @@ async function getTaskRelevantLearnings(
     return queryKnowledgeSemantic(orgId, {
       filters,
       query_text: taskQuery.trim(),
-      max_tokens: Math.min(maxTokens, 1200),
+      max_tokens: Math.min(maxTokens, DEFAULT_TASK_RELEVANT_MAX_TOKENS),
       include_details: false,
-      limit: 5,
-      expand_graph: true,
+      limit: positiveIntFromEnv("PIM_KG_TASK_RELEVANT_CANDIDATE_LIMIT", DEFAULT_TASK_RELEVANT_CANDIDATE_LIMIT),
+      // Candidate retrieval remains direct and explainable. Graph neighbors are
+      // available to explicit callers, but should not displace task matches in
+      // the compact context contract.
+      expand_graph: false,
       include_explanations: true,
       record_retrievals: recordRetrievals,
       required_node_ids: requiredNodeIds,
@@ -1768,13 +2117,12 @@ async function getTaskRelevantLearnings(
     });
   }
 
-  const broadQuery = scopes.length > 0
-    ? `current constraints decisions patterns anti-patterns for ${scopes.join(" ")}`
-    : "current constraints decisions patterns anti-patterns";
-
-  return queryKnowledgeSemantic(orgId, {
+  // No task query means the caller explicitly requested a tiny scope-level
+  // constraints block. Do not manufacture semantic intent: during an embedding
+  // outage that synthetic text would either leak unrelated nodes or eliminate
+  // all broad context depending on the fallback policy.
+  return queryKnowledge(orgId, {
     filters,
-    query_text: broadQuery,
     max_tokens: Math.min(maxTokens, 500),
     include_details: false,
     limit: 3,
