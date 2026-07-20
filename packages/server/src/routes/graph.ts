@@ -64,7 +64,7 @@ const KnowledgeQuerySchema = z.object({
   include_details: z.boolean().optional(),
   include_edges: z.boolean().optional(),
   limit: z.number().int().positive().optional(),
-  query_embedding: z.array(z.number()).nullable().optional(),
+  query_embedding: z.array(z.number()).min(1, "query_embedding must contain at least one value").nullable().optional(),
   query_text: z.string().min(1).optional(),
   include_embeddings: z.boolean().optional(),
   query_mode: z.enum(["current", "history", "as_of", "why_changed"]).optional(),

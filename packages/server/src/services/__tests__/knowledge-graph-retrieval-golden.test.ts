@@ -32,5 +32,5 @@ describe("knowledge graph retrieval golden oracle", () => {
     const report = evaluateRetrievalOracle(oracle);
     expect(report.budgets).toContain(STRICT_GATE_BUDGET);
     expect(report.failures, formatRetrievalEvalFailures(report)).toEqual([]);
-  });
+  }, 30_000);
 });

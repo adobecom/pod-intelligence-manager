@@ -2,11 +2,12 @@ import { describe, it, expect } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pimFullArm } from "../arms/index.js";
+import { licPimCombinedArm, pimFullArm, serenaPimCombinedArm } from "../arms/index.js";
 import { filterFixtureByAsOf } from "../arms/pim-full.js";
 import { pimClippedArm, licClippedArm } from "../arms/clipped.js";
 import type { EvalRow } from "../report.js";
 import type { SessionContextFixture, LicContextFixture } from "../arms/types.js";
+import type { SerenaContextFixture } from "../serena/types.js";
 import type { Task } from "../tasks/types.js";
 import { EMPTY_USAGE } from "../runners/types.js";
 import { extractUnifiedDiff } from "../judges/patch.js";
@@ -32,11 +33,25 @@ function fixtureWithTimestamps(): SessionContextFixture {
       ],
       relevantLearnings: {
         nodes: [
-          { type: "pattern", summary: "old learning", details: "", domains: [], confidence_score: 0.9 },
-          { type: "pattern", summary: "future learning", details: "", domains: [], confidence_score: 0.9, created_at: "2026-05-01T00:00:00Z" },
+          { id: "kn-old", type: "pattern", summary: "old learning", details: "", domains: [], confidence_score: 0.9 },
+          { id: "kn-future", type: "pattern", summary: "future learning", details: "", domains: [], confidence_score: 0.9, created_at: "2026-05-01T00:00:00Z" },
         ],
         total_matching: 2,
         truncated: false,
+        explanations: [
+          { node_id: "kn-old", strength: "related", matched_scopes: [], matched_topics: [] },
+          { node_id: "kn-future", strength: "must_follow", matched_scopes: [], matched_topics: [] },
+        ],
+        retrieval_diagnostics: {
+          mode: "hybrid",
+          degraded: false,
+          semantic_query_requested: true,
+          query_embedding_available: true,
+          embedding_coverage: 1,
+          candidate_count: 12,
+          matched_count: 8,
+          returned_count: 2,
+        },
       },
       recentUpdates: [
         { agent_id: "a", timestamp: "2026-03-01T00:00:00Z", type: "progress", summary: "old update", details: "", status: "ok" },
@@ -49,6 +64,63 @@ function fixtureWithTimestamps(): SessionContextFixture {
 const contentTask = (over: Partial<Task> = {}): Task =>
   ({ id: "t1", type: "content", podId: "pod-x", prompt: "do the thing", asOf: ASOF, ...over }) as Task;
 
+function fixtureWithTaskLearnings(): SessionContextFixture {
+  const fixture = fixtureWithTimestamps();
+  return {
+    ...fixture,
+    payload: {
+      ...fixture.payload,
+      livingDocMarkdown: "short doc",
+      conflicts: [],
+      relevantLearnings: {
+        nodes: [{
+          type: "pattern",
+          summary: "broad pod fallback learning",
+          details: "",
+          domains: ["frontend"],
+          confidence_score: 0.9,
+        }],
+        total_matching: 1,
+        truncated: false,
+      },
+      taskRelevantLearnings: {
+        t1: {
+          nodes: [{
+            type: "decision",
+            summary: "task-specific learning",
+            details: "",
+            domains: ["frontend"],
+            confidence_score: 0.95,
+          }],
+          total_matching: 1,
+          truncated: false,
+        },
+      },
+      recentUpdates: [],
+    },
+  };
+}
+
+function minimalSerenaFixture(): SerenaContextFixture {
+  return {
+    taskId: "t1",
+    generatedAt: "2026-01-01T00:00:00Z",
+    serenaVersion: "test",
+    backend: "language-server",
+    mcpCommand: [],
+    projectPath: "/tmp/project",
+    indexSource: { kind: "head", repo: "test" },
+    toolAllowlist: [],
+    toolDenylist: [],
+    configHash: "test",
+    recipe: [],
+    seed: { symbols: [], source: "none" },
+    calls: [],
+    renderedBlock: "serena context",
+    renderedBlockHash: "test",
+  };
+}
+
 describe("filterFixtureByAsOf (#3 temporal scoping)", () => {
   it("drops post-asOf updates, timestamped conflicts and learnings; keeps untimestamped; stamps asOf", () => {
     const out = filterFixtureByAsOf(fixtureWithTimestamps(), ASOF);
@@ -56,7 +128,11 @@ describe("filterFixtureByAsOf (#3 temporal scoping)", () => {
     expect(out.payload.recentUpdates.map((u) => u.summary)).toEqual(["old update"]);
     expect(out.payload.conflicts.map((c) => c.id)).toEqual(["C-1"]); // untimestamped passes through
     expect(out.payload.relevantLearnings.nodes.map((n) => n.summary)).toEqual(["old learning"]);
-    expect(out.payload.relevantLearnings.total_matching).toBe(1);
+    expect(out.payload.relevantLearnings.explanations?.map((e) => e.node_id)).toEqual(["kn-old"]);
+    expect(out.payload.relevantLearnings.total_matching).toBe(2);
+    expect(out.payload.relevantLearnings.retrieval_diagnostics).toEqual(
+      fixtureWithTimestamps().payload.relevantLearnings.retrieval_diagnostics,
+    );
   });
 
   it("pim-full applies the asOf cutoff and shows the point-in-time line", () => {
@@ -79,6 +155,29 @@ describe("matched-budget clipped arms (#10)", () => {
   it("pim-clipped still applies the asOf cutoff", () => {
     const ctx = pimClippedArm.build(contentTask(), fixtureWithTimestamps()).pimContext ?? "";
     expect(ctx).not.toContain("future update");
+  });
+
+  it("pim-clipped uses the task-scoped KG block", () => {
+    const ctx = pimClippedArm.build(contentTask(), fixtureWithTaskLearnings()).pimContext ?? "";
+    expect(ctx).toContain("task-specific learning");
+    expect(ctx).not.toContain("broad pod fallback learning");
+  });
+
+  it("budget-split combined arms use the task-scoped KG block", () => {
+    const pim = fixtureWithTaskLearnings();
+    const task = contentTask();
+    const lic: LicContextFixture = { taskId: "t1", renderedBlock: "lic context" };
+    const licCtx = licPimCombinedArm.buildWithInputs!(task, { pim, lic, serena: null }).pimContext ?? "";
+    const serenaCtx = serenaPimCombinedArm.buildWithInputs!(task, {
+      pim,
+      lic: null,
+      serena: minimalSerenaFixture(),
+    }).pimContext ?? "";
+
+    for (const ctx of [licCtx, serenaCtx]) {
+      expect(ctx).toContain("task-specific learning");
+      expect(ctx).not.toContain("broad pod fallback learning");
+    }
   });
 });
 

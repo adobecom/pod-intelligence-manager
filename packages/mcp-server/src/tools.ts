@@ -26,6 +26,65 @@ const isKgOrgLintFinding = (finding: unknown): finding is { type: "kg_org_contra
   finding !== null &&
   (finding as { type?: unknown }).type === "kg_org_contradiction";
 
+interface SessionKnowledgeNode {
+  id?: unknown;
+  type?: unknown;
+  summary?: unknown;
+  source_pod_name?: unknown;
+  confidence_score?: unknown;
+}
+
+/**
+ * Session-context tools are prompt-delivery surfaces, not retrieval-debug APIs.
+ * Keep the server's compact context and a tiny compatibility node list, while
+ * leaving full candidates/explanations available through query_knowledge.
+ */
+function compactKnowledgeForSession(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return value;
+
+  const result = value as Record<string, unknown>;
+  const candidates = Array.isArray(result.nodes) ? result.nodes as SessionKnowledgeNode[] : [];
+  const configuredCount = typeof result.compact_context_node_count === "number"
+    ? Math.max(0, Math.trunc(result.compact_context_node_count))
+    : Math.min(3, candidates.length);
+  const nodes = candidates.slice(0, configuredCount).map((node) => ({
+    ...(typeof node.id === "string" ? { id: node.id } : {}),
+    ...(typeof node.type === "string" ? { type: node.type } : {}),
+    ...(typeof node.summary === "string" ? { summary: node.summary.slice(0, 300) } : {}),
+    ...(typeof node.source_pod_name === "string" ? { source_pod_name: node.source_pod_name } : {}),
+    ...(typeof node.confidence_score === "number" ? { confidence_score: node.confidence_score } : {}),
+  }));
+  const compactContext = typeof result.compact_context === "string"
+    ? result.compact_context
+    : undefined;
+  const deliveredTokenEstimate = Math.max(
+    1,
+    Math.ceil(JSON.stringify({ nodes, compact_context: compactContext }).length / 4),
+  );
+
+  return {
+    nodes,
+    edges: [],
+    candidate_node_count: candidates.length,
+    delivered_token_estimate: deliveredTokenEstimate,
+    ...(typeof result.total_matching === "number" ? { total_matching: result.total_matching } : {}),
+    // Preserve the backend's node-content estimate under its established name.
+    ...(typeof result.token_estimate === "number" ? { token_estimate: result.token_estimate } : {}),
+    ...(typeof result.truncated === "boolean" ? { truncated: result.truncated } : {}),
+    delivery_truncated: candidates.length > nodes.length,
+    ...(compactContext !== undefined ? { compact_context: compactContext } : {}),
+    ...(typeof result.compact_context_node_count === "number"
+      ? { compact_context_node_count: result.compact_context_node_count }
+      : {}),
+    ...(result.query_mode !== undefined ? { query_mode: result.query_mode } : {}),
+    ...(result.as_of !== undefined ? { as_of: result.as_of } : {}),
+    ...(result.retrieval_diagnostics !== undefined
+      ? { retrieval_diagnostics: result.retrieval_diagnostics }
+      : {}),
+    ...(result.context_contract !== undefined ? { context_contract: result.context_contract } : {}),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Zod schemas (reusable fragments)                                  */
 /* ------------------------------------------------------------------ */
@@ -382,7 +441,7 @@ export function registerTools(server: McpServer) {
       pod_id: PodId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
-      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 4000)"),
+      learnings_max_tokens: z.number().optional().describe("Backend node-content budget for relevant learnings (default 4000); session delivery is compacted separately."),
       recent_updates_limit: z.number().optional().describe("Max recent context updates to return (default 20)"),
       task_query: z
         .string()
@@ -404,7 +463,7 @@ export function registerTools(server: McpServer) {
       const taskQuery = (task_query ?? external_query)?.trim();
       const queryParam = taskQuery ? `&taskQuery=${encodeURIComponent(taskQuery)}` : "";
 
-      const [living_doc_markdown, conflicts, relevant_learnings, context_updates, external_context, lint_findings, ingestion_queue] =
+      const [living_doc_markdown, conflicts, raw_relevant_learnings, context_updates, external_context, lint_findings, ingestion_queue] =
         await Promise.all([
           apiFetchText(`/api/pods/${pod_id}/living-doc`),
           apiFetch(`/api/pods/${pod_id}/conflicts`),
@@ -424,6 +483,7 @@ export function registerTools(server: McpServer) {
       const open_kg_lint = Array.isArray(lint_findings)
         ? lint_findings.filter(isKgOrgLintFinding)
         : [];
+      const relevant_learnings = compactKnowledgeForSession(raw_relevant_learnings);
 
       return json({
         pulled_at: new Date().toISOString(),
@@ -480,7 +540,7 @@ export function registerTools(server: McpServer) {
       project_id: ProjectId,
       agent_id: z.string().describe("Stable id for this agent or developer (echoed in response for tracing)"),
       scope: Scope,
-      learnings_max_tokens: z.number().optional().describe("Token budget for relevant learnings (default 4000)"),
+      learnings_max_tokens: z.number().optional().describe("Backend node-content budget for relevant learnings (default 4000); session delivery is compacted separately."),
       recent_updates_limit: z.number().optional().describe("Max task-ranked project/pod update hits to return when task_query is provided (default 20)"),
       task_query: z
         .string()
@@ -506,7 +566,7 @@ export function registerTools(server: McpServer) {
       const taskQuery = (task_query ?? external_query)?.trim();
       const queryParam = taskQuery ? `&taskQuery=${encodeURIComponent(taskQuery)}` : "";
 
-      const [relevant_learnings, project_search_result, external_context] = await Promise.all([
+      const [raw_relevant_learnings, project_search_result, external_context] = await Promise.all([
         apiFetch(`/api/knowledge/relevant?scopes=${scopes}&maxTokens=${maxTok}${projectParam}${queryParam}&compactHeadingOffset=2`),
         taskQuery
           ? apiPost(`/api/projects/${encodeURIComponent(project_id)}/search`, {
@@ -526,6 +586,8 @@ export function registerTools(server: McpServer) {
           ? apiPost("/api/context-search", { query: taskQuery, project_id }).catch(() => null)
           : Promise.resolve(null),
       ]);
+
+      const relevant_learnings = compactKnowledgeForSession(raw_relevant_learnings);
 
       return json({
         pulled_at: new Date().toISOString(),
@@ -714,21 +776,39 @@ export function registerTools(server: McpServer) {
         .describe(
           "Free-text semantic query (e.g. 'oauth token refresh strategy'). The server embeds it, ranks by cosine similarity, and falls back to keyword overlap when embeddings are weak or missing. Prefer this over text_search for concept-level lookups.",
         ),
-      max_tokens: z.number().optional().describe("Token budget for results (default 2000)"),
+      max_tokens: z.number().optional().describe("Token budget for node summaries/details and edges (default 2000); optional explanations add diagnostic response overhead."),
       include_details: z
         .boolean()
         .optional()
         .describe("Include full node details. Defaults to false, matching REST; true increases token_estimate."),
       limit: z.number().optional().describe("Max number of nodes to return"),
+      expand_graph: z
+        .boolean()
+        .optional()
+        .describe("Include one-hop graph neighbors. Disable for a direct, task-specific candidate list."),
+      include_explanations: z
+        .boolean()
+        .optional()
+        .describe("Return score components, lexical/identifier evidence, and semantic match explanations. Use for audits; this diagnostic payload is outside max_tokens."),
     },
     async (args) => {
-      const { max_tokens, include_details, limit, query_text, ...filters } = args;
+      const {
+        max_tokens,
+        include_details,
+        limit,
+        query_text,
+        expand_graph,
+        include_explanations,
+        ...filters
+      } = args;
       const result = await apiPost("/api/knowledge/query", {
         filters,
         max_tokens: max_tokens ?? 2000,
         ...(include_details !== undefined ? { include_details } : {}),
         limit,
         ...(query_text ? { query_text } : {}),
+        ...(expand_graph !== undefined ? { expand_graph } : {}),
+        ...(include_explanations !== undefined ? { include_explanations } : {}),
       });
       return json(result);
     },

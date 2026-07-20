@@ -212,6 +212,26 @@ export class PimEc2Stack extends cdk.Stack {
       "set -eu",
       "dnf update -y",
       "dnf install -y docker cronie",
+
+      // The IF CIS nftables baseline keeps its forward base chain at policy drop.
+      // Docker's separate base chain accepting a packet is not terminal across
+      // nftables base chains, so explicitly allow Docker bridge traffic here while
+      // retaining the IF default-deny policy for all other forwarded traffic.
+      // Load the live rules before Docker starts; the include persists them across
+      // reboot and is the Image Factory documented Docker/Compose integration.
+      "install -d -m 0755 /etc/nftables",
+      "cat > /etc/nftables/pim-docker.rules <<'NFT_EOF'",
+      'add rule inet filter forward oifname "br-*" counter accept comment "PIM Docker user bridge"',
+      'add rule inet filter forward iifname "br-*" counter accept comment "PIM Docker user bridge"',
+      'add rule inet filter forward oifname "docker0" counter accept comment "PIM Docker default bridge"',
+      'add rule inet filter forward iifname "docker0" counter accept comment "PIM Docker default bridge"',
+      "NFT_EOF",
+      `if ! grep -Fq 'include "/etc/nftables/pim-docker.rules"' /etc/sysconfig/nftables.conf; then`,
+      `  echo 'include "/etc/nftables/pim-docker.rules"' >> /etc/sysconfig/nftables.conf`,
+      "fi",
+      `if ! nft -a list chain inet filter forward | grep -Fq 'PIM Docker default bridge'; then`,
+      "  nft -f /etc/nftables/pim-docker.rules",
+      "fi",
       "systemctl enable --now docker",
       "systemctl enable --now crond",
 
@@ -223,21 +243,31 @@ export class PimEc2Stack extends cdk.Stack {
       // server. IF images are tested for EDR/Splunk/Hubble before release.
       // See docs/EDR_INSTALL_RUNBOOK.md.
 
-      // Mount the secondary EBS volume at /data. Device name is /dev/sdb at attach
-      // time but surfaces as /dev/nvme1n1 on Nitro instances. Detect either way.
+      // Mount the secondary EBS volume at /data. IF images also contain an xvdk
+      // scratch volume, so never assume nvme1n1 is /dev/sdb. Resolve the original
+      // EBS device mapping via ebsnvme-id and persist the filesystem by UUID so an
+      // NVMe enumeration change on reboot cannot mount the wrong volume.
       'DATA_DEV=""',
-      "for CANDIDATE in /dev/nvme1n1 /dev/sdb /dev/xvdb; do",
-      '  if [ -b "$CANDIDATE" ]; then DATA_DEV="$CANDIDATE"; break; fi',
+      "for ATTEMPT in $(seq 1 60); do",
+      "  for CANDIDATE in /dev/nvme*n1 /dev/sdb /dev/xvdb; do",
+      '    [ -b "$CANDIDATE" ] || continue',
+      '    MAPPED=""',
+      '    if [ -x /sbin/ebsnvme-id ]; then MAPPED=$(/sbin/ebsnvme-id -u "$CANDIDATE" 2>/dev/null || true); fi',
+      '    case "$MAPPED:$CANDIDATE" in *sdb*|*xvdb*) DATA_DEV="$CANDIDATE"; break 2 ;; esac',
+      "  done",
+      "  sleep 2",
       "done",
-      'if [ -n "$DATA_DEV" ]; then',
-      '  if ! blkid "$DATA_DEV" >/dev/null 2>&1; then',
-      '    mkfs -t ext4 "$DATA_DEV"',
-      "  fi",
-      "  mkdir -p /data",
-      '  echo "$DATA_DEV /data ext4 defaults,nofail 0 2" >> /etc/fstab',
-      "  mount /data || true",
-      "  mkdir -p /data/knowledge-graph",
+      '[ -n "$DATA_DEV" ] || { echo "Unable to locate /dev/sdb data volume" >&2; exit 1; }',
+      'if ! blkid "$DATA_DEV" >/dev/null 2>&1; then',
+      '  mkfs -t ext4 "$DATA_DEV"',
       "fi",
+      "mkdir -p /data",
+      'DATA_UUID=$(blkid -s UUID -o value "$DATA_DEV")',
+      'if ! grep -Fq "UUID=$DATA_UUID /data " /etc/fstab; then',
+      '  echo "UUID=$DATA_UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab',
+      "fi",
+      "mount /data",
+      "mkdir -p /data/knowledge-graph",
 
       // ECR login
       `aws ecr get-login-password --region ${this.region} | docker login --username AWS --password-stdin ${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
@@ -249,6 +279,7 @@ export class PimEc2Stack extends cdk.Stack {
       "Description=PIM Server",
       "Requires=docker.service",
       "After=docker.service",
+      "RequiresMountsFor=/data",
       "",
       "[Service]",
       "Restart=always",
@@ -309,6 +340,10 @@ export class PimEc2Stack extends cdk.Stack {
       role: ec2Role,
       securityGroup: ec2Sg,
       userData,
+      // Containers add one network hop when calling IMDS. Require IMDSv2 while
+      // allowing its token/credential response to cross the Docker bridge.
+      requireImdsv2: true,
+      httpPutResponseHopLimit: 2,
       // Public subnet => need a public IP for outbound (ECR pull, Bedrock, S3, SSM) without a NAT gateway
       associatePublicIpAddress: true,
       blockDevices: [

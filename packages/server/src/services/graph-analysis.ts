@@ -93,6 +93,7 @@ export function extractIdentifiers(text: string): Set<string> {
   const identifiers = new Set<string>();
   const patterns = [
     /\b[A-Z][A-Z0-9]+-\d+\b/g,
+    /\b[A-Z][A-Z0-9]\b/g,
     /\b(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g,
     /\B@[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b/g,
     /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./:{}-]+/g,
@@ -116,7 +117,12 @@ export function extractIdentifiers(text: string): Set<string> {
       if (STOP_WORDS.has(cleaned)) continue;
       if (BARE_HTTP_VERB_IDENTIFIERS.has(cleaned)) continue;
       if (isLowSignalIdentifier(cleaned)) continue;
-      if (cleaned.length > 2) identifiers.add(cleaned);
+      // Two-character all-caps codes (for example "P1" or "UI") are common in
+      // project vocabulary. Keep them as identifiers, but not as ordinary
+      // keywords: the query-time ranker still requires supporting lexical or
+      // semantic evidence before treating a short code as task evidence.
+      const shortUppercaseCode = /^[A-Z][A-Z0-9]$/.test(match.trim());
+      if (cleaned.length > 2 || shortUppercaseCode) identifiers.add(cleaned);
     }
   }
   return identifiers;

@@ -2,7 +2,7 @@ import type { Arm, ArmBuildInputs, SessionContextFixture } from "./types.js";
 import type { SerenaContextFixture } from "../serena/types.js";
 import type { Task } from "../tasks/types.js";
 import type { PromptSegments } from "../runners/types.js";
-import { filterFixtureByAsOf, serializeContext } from "./pim-full.js";
+import { filterFixtureByAsOf, serializeContextWithReservedKg } from "./pim-full.js";
 import { HALF_BUDGET_CHARS, clip } from "./budget.js";
 
 const SYSTEM_CODE = [
@@ -26,8 +26,8 @@ const SYSTEM_CONTENT = [
   "Treat the user task as authoritative if retrieved code context conflicts with the requested output shape.",
 ].join("\n");
 
-function buildCombinedContext(pim: SessionContextFixture, serena: SerenaContextFixture): string {
-  const pimBlock = clip(serializeContext(pim), HALF_BUDGET_CHARS);
+function buildCombinedContext(pim: SessionContextFixture, serena: SerenaContextFixture, taskId: string): string {
+  const pimBlock = serializeContextWithReservedKg(pim, taskId, HALF_BUDGET_CHARS);
   const serenaBlock = clip(serena.renderedBlock, HALF_BUDGET_CHARS);
   return [
     "=== PIM Session Context ===",
@@ -68,7 +68,7 @@ export const serenaPimCombinedArm: Arm = {
     const filtered = task.asOf ? filterFixtureByAsOf(pim, task.asOf) : pim;
     return {
       system: task.type === "code" ? SYSTEM_CODE : SYSTEM_CONTENT,
-      pimContext: buildCombinedContext(filtered, serena),
+      pimContext: buildCombinedContext(filtered, serena, task.id),
       userTask: `## Task\n${task.prompt}`,
     };
   },

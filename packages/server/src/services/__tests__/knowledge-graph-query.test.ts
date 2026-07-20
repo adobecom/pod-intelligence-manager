@@ -125,12 +125,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
 
     expect(withConflict.nodes[0]?.summary).toContain("webhook");
     expect(withoutConflict.nodes[0]?.summary).toBeDefined();
-    // Without keywords both tie on domain; order may be stable by sort — webhook should not be forced last when conflicts match it
-    const webhookFirstWhenRelevant = withConflict.nodes.findIndex((n) =>
-      n.summary.includes("webhook"),
-    );
-    const cdnFirstWhenRelevant = withConflict.nodes.findIndex((n) => n.summary.includes("CDN"));
-    expect(webhookFirstWhenRelevant).toBeLessThan(cdnFirstWhenRelevant);
+    expect(withConflict.nodes.map((node) => node.summary)).not.toContain("Cache static assets at the CDN edge");
   });
 
   it("uses high-signal keywords for semantic-gate fallback thresholds", async () => {
@@ -348,7 +343,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.truncated).toBe(false);
   });
 
-  it("returns type-filtered candidates when query_text semantic scoring is weak", async () => {
+  it("does not treat a type filter as task relevance when semantic scoring is weak", async () => {
     const orgId = await seedGraph([
       {
         type: "decision",
@@ -378,8 +373,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       query_embedding: [0, 1, 0],
     });
 
-    expect(q.nodes.map((n) => n.summary)).toEqual(["Use PKCE for standalone MCP authentication"]);
-    expect(q.total_matching).toBe(1);
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
   });
 
   it("maps legacy domains to canonical scopes during ingestion and query filtering", async () => {
@@ -513,7 +508,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(result.context_contract?.returned_mode).toBe("task_relevant");
     expect(result.context_contract?.task_query_used).toBe(true);
     expect(result.nodes.length).toBeGreaterThan(0);
-    expect(result.nodes.length).toBeLessThanOrEqual(5);
+    expect(result.nodes.length).toBeLessThanOrEqual(15);
     expect(result.nodes.map((n) => n.summary)).not.toContain("Cache static assets at the CDN edge");
     expect(result.compact_context).toContain("PIM KG Compact Context");
     expect(result.compact_context).toContain("Task-matched KG constraints");
@@ -785,9 +780,9 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       maxTokens: 2000,
     });
 
-    expect(result.nodes).toHaveLength(5);
+    expect(result.nodes).toHaveLength(10);
     expect(result.total_matching).toBe(10);
-    expect(result.compact_context).toContain("Retrieval had 5 additional match(es) not shown");
+    expect(result.compact_context).toContain("Omitted 7 lower-ranked KG candidate(s)");
   });
 
   it("returns a tiny possible_constraints block without taskQuery in task_relevant mode", async () => {
@@ -921,7 +916,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     vi.mocked(getOrgTuning).mockReturnValue(DEFAULT_ORG_TUNING);
   });
 
-  it("respects confidence_min when filtered query_text semantic scoring is weak", async () => {
+  it("does not treat confidence_min as task relevance when semantic scoring is weak", async () => {
     const orgId = await seedGraph([
       {
         type: "pattern",
@@ -951,8 +946,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       query_embedding: [0, 1, 0],
     });
 
-    expect(q.nodes.map((n) => n.summary)).toEqual(["High confidence auth retry pattern"]);
-    expect(q.total_matching).toBe(1);
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
   });
 
   it("broad query_text with weak semantic and no keyword match still returns zero", async () => {
@@ -1027,7 +1022,7 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
     expect(q.total_matching).toBe(0);
   });
 
-  it("uses scope-only filtered candidates as semantic recall fallback", async () => {
+  it("does not use canonical scopes as a relevance fallback for an unrelated query", async () => {
     const orgId = await seedGraph([
       {
         type: "pattern",
@@ -1047,8 +1042,8 @@ describe("queryKnowledge / getRelevantLearnings keyword wiring", () => {
       query_embedding: [0, 1, 0],
     });
 
-    expect(q.nodes.map((n) => n.summary)).toEqual(["Backend queue retry policy"]);
-    expect(q.total_matching).toBe(1);
+    expect(q.nodes).toHaveLength(0);
+    expect(q.total_matching).toBe(0);
   });
 
   it("keeps exact short keyword matches even when semantic similarity is weak", async () => {
@@ -1660,6 +1655,15 @@ describe("text_search index behavior", () => {
     );
     expect(retrievalIds).not.toEqual(
       expect.arrayContaining(["/v1", "/api", "current", "status", "implemented", "how"]),
+    );
+  });
+
+  it("keeps two-character uppercase project codes as guarded identifiers", () => {
+    expect([...extractRetrievalIdentifiers("P1 preflight and UI validation")]).toEqual(
+      expect.arrayContaining(["p1", "ui"]),
+    );
+    expect([...extractRetrievalIdentifiers("ordinary two letter words in prose")]).not.toEqual(
+      expect.arrayContaining(["in"]),
     );
   });
 

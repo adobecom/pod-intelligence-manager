@@ -72,6 +72,9 @@ export interface NodeRetrievalDiagnostics {
   keywordHits: number;
   identifierHits: number;
   confidence: number;
+  score?: number;
+  scoreComponents?: NonNullable<KnowledgeQueryResult["explanations"]>[number]["score_components"];
+  evidence?: NonNullable<KnowledgeQueryResult["explanations"]>[number]["evidence"];
   supersededBy?: string;
 }
 
@@ -249,11 +252,13 @@ function diagnosticsForNodes(
   graph: KnowledgeGraph,
   testCase: RetrievalOracleCase,
   returnedIds: string[],
+  result: KnowledgeQueryResult,
 ): NodeRetrievalDiagnostics[] {
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const ranks = rankMap(returnedIds);
   const queryKeywords = extractKeywords(testCase.queryText);
   const queryIdentifiers = extractRetrievalIdentifiers(testCase.queryText);
+  const explanationById = new Map((result.explanations ?? []).map((explanation) => [explanation.node_id, explanation]));
   const diagnosticIds = [
     ...testCase.mustIncludeNodeIds,
     ...(testCase.shouldIncludeNodeIds ?? []),
@@ -269,6 +274,7 @@ function diagnosticsForNodes(
     const node = nodeById.get(id);
     if (!node) continue;
     const text = nodeText(node);
+    const explanation = explanationById.get(id);
     diagnostics.push({
       nodeId: id,
       summary: node.summary,
@@ -281,6 +287,9 @@ function diagnosticsForNodes(
       keywordHits: setIntersectionCount(queryKeywords, extractKeywords(text)),
       identifierHits: setIntersectionCount(queryIdentifiers, extractRetrievalIdentifiers(text)),
       confidence: node.confidence_score,
+      ...(explanation?.score !== undefined ? { score: explanation.score } : {}),
+      ...(explanation?.score_components ? { scoreComponents: explanation.score_components } : {}),
+      ...(explanation?.evidence ? { evidence: explanation.evidence } : {}),
       ...(node.superseded_by ? { supersededBy: node.superseded_by } : {}),
     });
   }
@@ -314,7 +323,7 @@ function evaluateQueryResultAtBudget(
     requiredWithinBudgetIds,
     edgeTypeCounts: edgeTypeCounts(oracle.graph, returnedIds),
     metrics: computeMetrics(returnedIds, testCase.mustIncludeNodeIds, shouldIncludeNodeIds),
-    diagnostics: diagnosticsForNodes(oracle.graph, testCase, returnedIds),
+    diagnostics: diagnosticsForNodes(oracle.graph, testCase, returnedIds, result),
   };
 }
 
@@ -328,6 +337,7 @@ function evaluateCaseAtBudget(
     filters: testCase.filters,
     max_tokens: budget,
     include_details: true,
+    include_explanations: true,
     query_text: testCase.queryText,
     query_embedding: testCase.queryEmbedding,
   });
@@ -715,6 +725,8 @@ export function renderRetrievalEvalMarkdown(report: RetrievalEvalReport): string
   lines.push(`Cases: ${report.caseCount}`);
   lines.push(`Failures: ${report.failures.length}`);
   lines.push("");
+  lines.push("Metrics below evaluate the ranked candidate list returned by retrieval. Recall@3 is the proxy for the default three-node compact context; prompt serialization and character clipping are tested separately.");
+  lines.push("");
   lines.push("## Aggregate Metrics");
   lines.push("");
   lines.push("| budget | Recall@1 | Recall@3 | Recall@5 | Recall@10 | Recall@budget | MRR | Precision@3 | Precision@5 | Precision@10 | mean returned | mean tokens |");
@@ -760,6 +772,8 @@ export function renderContractComparisonMarkdown(report: ContractComparisonRepor
   lines.push(`Oracle generated: ${report.oracleGeneratedAt}`);
   lines.push(`Org: \`${report.orgId}\``);
   lines.push(`Cases: ${report.caseCount}`);
+  lines.push("");
+  lines.push("Quality metrics cover the ranked candidate list returned by each contract. Recall@3 is the default compact-context proxy; this comparison does not claim that every lower-ranked candidate is delivered in the compact prompt.");
   lines.push("");
   lines.push("Deltas are `task_relevant - legacy`; positive quality deltas favor `task_relevant`, negative token/returned deltas mean it is more compact.");
   lines.push("");
