@@ -203,6 +203,10 @@ function seedWorkspace() {
       "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .run(PROJECT_ID, "Agent Memory Project", null, now, "{}", ORG_ID, "user-agent");
+  testDb.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ?").run(
+    JSON.stringify({ github: { repos: ["acme/pim"] } }),
+    PROJECT_ID,
+  );
   testDb
     .prepare(
       `INSERT INTO pods
@@ -243,6 +247,7 @@ function insertPodContextUpdate(input: {
 }
 
 beforeEach(() => {
+  process.env.PROJECT_GITHUB_VISIBLE_REPOS = "acme/pim";
   vi.clearAllMocks();
   vi.mocked(isLLMAvailable).mockReturnValue(false);
   vi.mocked(callLLMJSON).mockResolvedValue(null);

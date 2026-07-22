@@ -105,7 +105,7 @@ All six follow the same contract — `async function search<Source>(opts) → {s
 
 ### Confluence
 - **File:** `packages/server/src/integrations/confluence.ts`
-- **Env:** `CONFLUENCE_BASE_URL`, `CONFLUENCE_TOKEN`. `CONFLUENCE_EMAIL` defaults to `JIRA_EMAIL` since Adobe's Jira + Wiki share an IDP.
+- **Env:** `CONFLUENCE_BASE_URL`, `CONFLUENCE_TOKEN`. `CONFLUENCE_EMAIL` defaults to `JIRA_EMAIL` since Adobe's Jira + Wiki share an IDP. Project-scoped indexing/search additionally requires an operator-reviewed comma-separated `CONFLUENCE_PROJECT_VISIBLE_SPACE_KEYS` or `CONFLUENCE_PROJECT_VISIBLE_PAGE_IDS` allowlist. Every listed scope must be visible to the full PIM project audience; direct and inherited page restrictions are still checked dynamically.
 - **Flavor detection:** same rule as Jira.
 - **CQL:** `text ~ "{query}" AND lastmodified >= "{YYYY-MM-DD}"`. **Absolute dates only** — on-prem Confluence Server rejects the `"-90d"` relative syntax that Cloud accepts.
 - **Hit shape:** `title: page title`, `url: base + _links.webui`, snippet from `body.view.value` with tags stripped.

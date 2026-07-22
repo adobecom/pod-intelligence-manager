@@ -305,10 +305,14 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   }, GRAPH_SYNTHESIS_INTERVAL_MS);
 
   // Scheduled incremental project-search refresh.
-  // Each tick: enumerate active+configured projects, live-pull deltas, fold into index.
+  // Run once at startup so existing configured-but-empty projects do not wait a
+  // full interval for their first backfill, then continue on the normal cadence.
   // Projects are spread across the interval with per-project jitter to avoid API bursts.
   // Gated by PROJECT_SEARCH_REFRESH_ENABLED (default on).
   if (PROJECT_SEARCH_REFRESH_ENABLED) {
+    void runProjectSearchRefreshTick(0, app.log, PROJECT_SEARCH_REFRESH_WINDOW_DAYS).catch((e) => {
+      app.log.error(e, "Initial project search refresh tick failed");
+    });
     setInterval(() => {
       void (async () => {
         try {

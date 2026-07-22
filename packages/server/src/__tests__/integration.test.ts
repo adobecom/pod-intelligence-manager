@@ -45,6 +45,7 @@ vi.mock("../services/knowledge-graph.js", () => ({
     edges: [],
   }),
   getPrecedents: vi.fn().mockResolvedValue({ nodes: [] }),
+  retractProjectEvidenceKnowledgeNodes: vi.fn(() => []),
 }));
 
 // Mock Slack (external service)
@@ -910,7 +911,7 @@ describe("Integration: API endpoints", () => {
       url: `/api/projects/${projectId}/memory-candidates/${projectCandidates[0].id}/promote`,
       headers: { "content-type": "application/json" },
     });
-    expect(promote.statusCode).toBe(200);
+    expect(promote.statusCode).toBe(404);
     const reject = await app.inject({
       method: "POST",
       url: `/api/projects/${projectId}/memory-candidates/${projectCandidates[0].id}/reject`,
@@ -924,7 +925,7 @@ describe("Integration: API endpoints", () => {
       payload: { query: "What decision was made about SQLite?" },
     });
     expect(answer.statusCode).toBe(200);
-    expect((answer.json() as { sources_used: string[]; citations: unknown[] }).sources_used).toContain("project_evidence");
+    expect((answer.json() as { sources_used: string[]; citations: unknown[] }).sources_used).toContain("project_updates");
     expect((answer.json() as { citations: unknown[] }).citations.length).toBeGreaterThan(0);
   });
 

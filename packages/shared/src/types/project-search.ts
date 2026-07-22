@@ -62,6 +62,14 @@ export interface ProjectSearchDocument {
   metadata: Record<string, unknown>;
   permissions: Record<string, unknown>;
   freshness_state: ProjectSearchFreshness;
+  source_instance?: string;
+  native_id?: string;
+  source_version?: string;
+  visibility?: import("./project.js").ProjectEvidenceVisibility;
+  visibility_version?: string;
+  redaction_version?: string;
+  normalized_content_hash?: string;
+  source_updated_at?: string;
 }
 
 /** One searchable text chunk belonging to a document. */
@@ -245,6 +253,8 @@ export interface ProjectSearchResponse {
   embedding_coverage: number;
   retrieval_mode: "lexical" | "hybrid";
   total_documents: number;
+  /** Operational status for each project-bound source at query time. */
+  source_health: import("./project.js").ProjectSourceHealth[];
   generated_at: string;
 }
 

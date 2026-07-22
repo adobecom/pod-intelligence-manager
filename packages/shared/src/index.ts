@@ -15,7 +15,10 @@ export type {
   ProjectAnatomyInternalSlot,
   ProjectAnatomyExternalTeam,
   ProjectEvidenceSource,
+  ProjectEvidenceVisibility,
   ProjectEvidenceItem,
+  ProjectSourceChangeEvidence,
+  ProjectSourceChange,
   ProjectMemoryCandidateStatus,
   ProjectMemoryCandidate,
   ProjectIngestionCursor,
@@ -26,6 +29,9 @@ export type {
   ProjectAnswerUnavailableSource,
   ProjectAnswerResponse,
   ProjectSourceHealth,
+  ProjectSourceHealthSource,
+  ProjectSourceCapabilities,
+  ProjectSourceSyncState,
 } from "./types/project.js";
 
 export { EMPTY_PROJECT_ANATOMY } from "./types/project.js";

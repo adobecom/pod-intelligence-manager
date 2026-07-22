@@ -127,6 +127,21 @@ export function saveGraph(orgId: string, graph: KnowledgeGraph): void {
   }
 }
 
+/** Destructive scrub helper: remove local historical graph snapshots after a
+ * canonical rewrite. `graph-latest.json` is retained as the sanitized active
+ * graph; remote mirrors/backups are handled by the deployment runbook. */
+export function purgeLocalGraphHistory(orgId: string): number {
+  const dir = orgDir(orgId);
+  if (!fs.existsSync(dir)) return 0;
+  let removed = 0;
+  for (const file of fs.readdirSync(dir)) {
+    if (!VERSION_FILE_RE.test(file)) continue;
+    fs.unlinkSync(path.join(dir, file));
+    removed++;
+  }
+  return removed;
+}
+
 export function getGraphVersion(orgId: string): number {
   const graph = loadGraph(orgId);
   return graph?.version ?? 0;

@@ -33,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
+  delete process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS;
   vi.restoreAllMocks();
 });
 
@@ -111,6 +112,35 @@ describe("searchJira fail-closed scope guard", () => {
     expect(body.jql).toContain('project in ("MWPW", "DOTCOM")');
     expect(body.jql).toContain('fixVersion in ("T3-26.16")');
     expect(body.jql).toContain('assignee = "rea01581@adobe.com"');
+  });
+
+  it("keeps every configured Jira binding as a conjunctive live-search scope", async () => {
+    process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "MWPW";
+    const res = await searchJira(
+      baseOpts({
+        project_id: "project-test",
+        project_resources: {
+          jira: {
+            project_keys: ["MWPW"],
+            team: "Strata",
+            components: ["Project Search"],
+            epics: ["MWPW-900"],
+            issue_keys: ["MWPW-123"],
+            fix_versions: ["T3-26.16"],
+          },
+        },
+      }),
+    );
+
+    expect(res.missing).toBeUndefined();
+    const body = JSON.parse((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body) as { jql: string };
+    expect(body.jql).toContain('project in ("MWPW")');
+    expect(body.jql).toContain('"Team" = "Strata"');
+    expect(body.jql).toContain('component in ("Project Search")');
+    expect(body.jql).toContain('("Epic Link" in ("MWPW-900") OR parent in ("MWPW-900"))');
+    expect(body.jql).toContain('issuekey in ("MWPW-123")');
+    expect(body.jql).toContain('fixVersion in ("T3-26.16")');
+    expect(body.jql).toMatch(/project in .* AND "Team" .* AND component in .* AND \("Epic Link" .* AND issuekey in .* AND fixVersion in/);
   });
 
   it("still returns the creds-missing reason when JIRA_TOKEN is unset (refuse only when authenticated)", async () => {

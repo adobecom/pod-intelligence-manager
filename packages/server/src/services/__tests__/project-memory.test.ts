@@ -26,6 +26,7 @@ vi.mock("../knowledge-graph.js", () => ({
     token_estimate: 0,
     truncated: false,
   })),
+  retractProjectEvidenceKnowledgeNodes: vi.fn(() => []),
 }));
 
 import { createTables } from "../../db/schema.js";
@@ -36,6 +37,7 @@ import {
   getProjectSourceHealthLive,
   listProjectMemoryCandidates,
   pollProjectSources,
+  promoteProjectMemoryCandidate,
   recordProjectEvidence,
 } from "../project-memory.js";
 import { answerProjectQuestion } from "../project-answers.js";
@@ -57,6 +59,9 @@ function seedProject() {
     JSON.stringify({
       aliases: ["MAlpha"],
       glossary: [{ term: "PAF", definition: "Project answer flow", aliases: ["answers"] }],
+      github: { repos: ["adobe/app"] },
+      jira: { project_keys: ["MWPW"] },
+      slack: { channels: ["T_MEMORY:C_MEMORY"] },
     }),
     ORG_ID,
     creator.user_id,
@@ -83,6 +88,9 @@ beforeEach(() => {
   delete process.env.JIRA_BASE_URL;
   delete process.env.JIRA_TOKEN;
   delete process.env.JIRA_EMAIL;
+  process.env.PROJECT_SLACK_SEARCH_ENABLED = "1";
+  process.env.PROJECT_GITHUB_VISIBLE_REPOS = "adobe/app";
+  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "MWPW";
   testDb.exec(`
     PRAGMA foreign_keys = OFF;
     DROP TABLE IF EXISTS memory_relationships;
@@ -163,9 +171,34 @@ describe("project working memory promotion", () => {
       summary: "Thread about answer routing",
       body: "Slack discussion should not auto-promote.",
       occurred_at: "2026-05-03T00:00:00.000Z",
+      source_instance: "T_MEMORY",
+      native_id: "C_MEMORY:1746259200.000000",
+      metadata: { workspace_id: "T_MEMORY", channel_id: "C_MEMORY", thread_ts: "1746259200.000000" },
       confidence_score: 0.95,
     });
 
+    expect(addLearningsToGraph).not.toHaveBeenCalled();
+    expect(listProjectMemoryCandidates(ORG_ID, PROJECT_ID)?.[0].status).toBe("pending");
+  });
+
+  it("rejects manual promotion when evidence is marked non-promotable", async () => {
+    await recordProjectEvidence({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "github",
+      source_type: "issue",
+      source_id: "adobe/app#123",
+      source_title: "Architecture notes",
+      summary: "Architecture notes",
+      body: "A working note that must remain evidence-only.",
+      occurred_at: "2026-05-03T00:00:00.000Z",
+      confidence_score: 0.99,
+      promotable: false,
+    });
+
+    const candidate = listProjectMemoryCandidates(ORG_ID, PROJECT_ID)?.[0];
+    expect(candidate).toBeDefined();
+    await expect(promoteProjectMemoryCandidate(ORG_ID, PROJECT_ID, candidate!.id)).resolves.toBeNull();
     expect(addLearningsToGraph).not.toHaveBeenCalled();
     expect(listProjectMemoryCandidates(ORG_ID, PROJECT_ID)?.[0].status).toBe("pending");
   });
@@ -246,6 +279,7 @@ describe("project source health", () => {
 
     expect(healthFor(health, "github")?.credential_state).toBe("invalid_credentials");
     expect(healthFor(health, "github")?.message).toContain("GitHub 401");
+    expect(healthFor(health, "github")?.message).not.toContain("bad credentials");
   });
 
   it("reports Jira TLS trust failures as unreachable", async () => {
@@ -287,6 +321,22 @@ describe("project source health", () => {
 });
 
 describe("project source polling", () => {
+  it("does not echo an upstream response body in poll failures", async () => {
+    setProjectResources({ jira: { project_keys: ["MWPW"] } });
+    process.env.JIRA_BASE_URL = "https://jira.example.com";
+    process.env.JIRA_TOKEN = "token";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      "password=upstream-secret-must-not-leak",
+      { status: 500 },
+    )));
+
+    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+    const jira = result?.results.find((entry) => entry.source === "jira");
+
+    expect(jira?.missing).toBe("jira_source_poll_failed");
+    expect(JSON.stringify(result)).not.toContain("upstream-secret-must-not-leak");
+  });
+
   it("ingests deeply nested Jira ADF descriptions without failing the Jira poll", async () => {
     setProjectResources({ jira: { project_keys: ["MWPW"] } });
     process.env.JIRA_BASE_URL = "https://jira.example.com";
@@ -324,7 +374,7 @@ describe("project source polling", () => {
     ).toMatchObject({ c: 1 });
   });
 
-  it("fetches latest Jira issues first and leaves the cursor unchanged when capped", async () => {
+  it("resumes Jira pagination after the per-run cap and advances the high-water mark only when complete", async () => {
     setProjectResources({ jira: { project_keys: ["MWPW"] } });
     process.env.JIRA_BASE_URL = "https://jira.example.com";
     process.env.JIRA_TOKEN = "token";
@@ -359,11 +409,12 @@ describe("project source polling", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } });
     }));
 
-    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+    const first = await pollProjectSources(ORG_ID, PROJECT_ID);
 
-    expect(result?.results.find((r) => r.source === "jira" && r.ingested > 0)?.ingested).toBe(500);
-    expect(requests[0].jql).toContain("ORDER BY updated DESC, key DESC");
-    expect(requests.map((r) => r.startAt)).toEqual([0, 50, 100, 150, 200, 250, 300, 350, 400, 450]);
+    expect(first?.results.find((r) => r.source === "jira" && r.ingested > 0)?.ingested).toBe(500);
+    const firstIncrementalRequests = requests.filter((request) => request.jql.includes("ORDER BY updated DESC, key DESC"));
+    expect(firstIncrementalRequests[0].jql).toContain("updated >=");
+    expect(firstIncrementalRequests.map((r) => r.startAt)).toEqual([0, 50, 100, 150, 200, 250, 300, 350, 400, 450]);
     expect(
       testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-550"),
     ).toMatchObject({ c: 1 });
@@ -371,6 +422,122 @@ describe("project source polling", () => {
       testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-1"),
     ).toMatchObject({ c: 0 });
     expect(getProjectCursor(ORG_ID, PROJECT_ID, "jira", "issues")).toBeNull();
+    expect(JSON.parse(getProjectCursor(ORG_ID, PROJECT_ID, "jira", "issues:page:v1") ?? "null")).toMatchObject({
+      version: 1,
+      start_at: 500,
+      newest: updatedAt(550),
+    });
+
+    const second = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(second?.results.find((r) => r.source === "jira" && r.ingested > 0)?.ingested).toBe(50);
+    expect(requests.filter((request) => request.jql.includes("ORDER BY updated DESC, key DESC")).at(-1)?.startAt).toBe(500);
+    expect(
+      testDb.prepare("SELECT COUNT(*) AS c FROM project_evidence_items WHERE source_id = ?").get("MWPW-1"),
+    ).toMatchObject({ c: 1 });
+    expect(getProjectCursor(ORG_ID, PROJECT_ID, "jira", "issues:page:v1")).toBeNull();
+    expect(getProjectCursor(ORG_ID, PROJECT_ID, "jira", "issues")).toBe(updatedAt(550));
+  });
+
+  it("reconciles Jira issues that were deleted or moved outside the bound scope", async () => {
+    setProjectResources({ jira: { project_keys: ["MWPW"], components: ["Project Search"] } });
+    process.env.JIRA_BASE_URL = "https://jira.example.com";
+    process.env.JIRA_TOKEN = "token";
+    for (const key of ["MWPW-1", "MWPW-2"]) {
+      await recordProjectEvidence({
+        org_id: ORG_ID,
+        project_id: PROJECT_ID,
+        source: "jira",
+        source_type: "active_issue",
+        source_id: key,
+        source_url: `https://jira.example.com/browse/${key}`,
+        source_title: `${key}: scoped issue`,
+        summary: "Scoped issue",
+        body: "Project Search component",
+        metadata: { components: ["Project Search"] },
+        confidence_score: 0.6,
+      });
+    }
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { jql?: string };
+      const issues = body.jql?.includes("ORDER BY key ASC") ? [{ key: "MWPW-1" }] : [];
+      return new Response(JSON.stringify({ total: issues.length, issues }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(result?.results.find((entry) => entry.source === "jira")?.deleted).toBe(1);
+    expect(testDb.prepare(
+      "SELECT source_id FROM project_evidence_items WHERE source = 'jira' ORDER BY source_id",
+    ).all()).toEqual([{ source_id: "MWPW-1" }]);
+    expect(testDb.prepare(
+      "SELECT COUNT(*) AS count FROM project_search_documents WHERE source = 'jira' AND source_id = 'MWPW-1'",
+    ).get()).toMatchObject({ count: 1 });
+    expect(testDb.prepare(
+      "SELECT COUNT(*) AS count FROM project_search_documents WHERE source = 'jira' AND source_id = 'MWPW-2'",
+    ).get()).toMatchObject({ count: 0 });
+  });
+
+  it("bounds GitHub reconciliation, resumes it, and deletes only after a complete scan", async () => {
+    setProjectResources({ github: { repos: ["adobe/app"] } });
+    process.env.GH_TOKEN = "token";
+    for (const number of [1, 999]) {
+      await recordProjectEvidence({
+        org_id: ORG_ID,
+        project_id: PROJECT_ID,
+        source: "github",
+        source_type: "issue",
+        source_id: `adobe/app#${number}`,
+        source_url: `https://github.com/adobe/app/issues/${number}`,
+        source_title: `Issue #${number}`,
+        summary: `Issue ${number}`,
+        body: "GitHub issue",
+        metadata: { repo: "adobe/app", number },
+        confidence_score: 0.6,
+      });
+    }
+    const upstream = Array.from({ length: 500 }, (_, index) => ({ number: index + 1 }));
+    vi.stubGlobal("fetch", vi.fn(async (rawUrl: string) => {
+      const url = new URL(rawUrl);
+      if (url.pathname.endsWith("/issues") && url.searchParams.get("sort") === "created") {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const start = (page - 1) * 100;
+        return new Response(JSON.stringify(upstream.slice(start, start + 100)), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+
+    const first = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(first?.results.find((entry) => entry.source === "github")?.deleted).toBeUndefined();
+    expect(testDb.prepare(
+      "SELECT COUNT(*) AS count FROM project_evidence_items WHERE source = 'github' AND source_id = 'adobe/app#999'",
+    ).get()).toMatchObject({ count: 1 });
+    expect(JSON.parse(getProjectCursor(
+      ORG_ID,
+      PROJECT_ID,
+      "github",
+      "repo:adobe/app:reconciliation:v1",
+    ) ?? "null")).toMatchObject({ next_page: 6 });
+
+    const second = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(second?.results.find((entry) => entry.source === "github")?.deleted).toBe(1);
+    expect(testDb.prepare(
+      "SELECT source_id FROM project_evidence_items WHERE source = 'github' ORDER BY source_id",
+    ).all()).toEqual([{ source_id: "adobe/app#1" }]);
+    expect(getProjectCursor(
+      ORG_ID,
+      PROJECT_ID,
+      "github",
+      "repo:adobe/app:reconciliation:v1",
+    )).toBeNull();
   });
 
   it("keeps undated Jira release occurred_at stable across polls and returns one Jira result", async () => {
@@ -429,7 +596,7 @@ describe("Project Answers", () => {
       confidence_score: 0.9,
     });
 
-    const answer = answerProjectQuestion(ORG_ID, PROJECT_ID, "What is the PAF status?");
+    const answer = await answerProjectQuestion(ORG_ID, PROJECT_ID, "What is the PAF status?");
     expect(answer?.intent).toBe("status");
     expect(answer?.sources_used).toContain("project_evidence");
     expect(answer?.citations[0].title).toContain("Project answer flow");

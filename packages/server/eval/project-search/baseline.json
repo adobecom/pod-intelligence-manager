@@ -1,0 +1,1268 @@
+{
+  "schema_version": 1,
+  "fixture_version": "2026-07-19.v1",
+  "review_status": "candidate_requires_human_review",
+  "generated_at": "2026-07-20T03:48:16.453Z",
+  "environment": {
+    "database": "temporary_sqlite",
+    "retrieval_mode": "lexical",
+    "fts_enabled": false,
+    "embeddings_enabled": false,
+    "synthesis_enabled": false,
+    "graph_expansion_enabled": false,
+    "kg_overlay_enabled": false,
+    "live_fallback_enabled": false,
+    "slack_ingestion_read_enabled": true,
+    "confluence_ingestion_read_enabled": true,
+    "confluence_source_instance": "eval.invalid",
+    "confluence_project_visible_space_keys": [
+      "SRCH"
+    ],
+    "corpus_documents": 25
+  },
+  "aggregate": {
+    "query_count": 25,
+    "recall_at_10": 0.75,
+    "ndcg_at_10": 0.63343,
+    "mrr_at_10": 0.681159,
+    "citation_correctness_at_10": 0.96,
+    "latency_ms": {
+      "p50": 1.975,
+      "p95": 2.98
+    }
+  },
+  "by_stratum": {
+    "exact_identifier": {
+      "query_count": 5,
+      "recall_at_10": 1,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "citation_correctness_at_10": 1
+    },
+    "paraphrase": {
+      "query_count": 5,
+      "recall_at_10": 0.683333,
+      "ndcg_at_10": 0.564063,
+      "mrr_at_10": 0.575,
+      "citation_correctness_at_10": 1
+    },
+    "current_status": {
+      "query_count": 5,
+      "recall_at_10": 0.566667,
+      "ndcg_at_10": 0.452766,
+      "mrr_at_10": 0.568571,
+      "citation_correctness_at_10": 1
+    },
+    "slack_thread": {
+      "query_count": 5,
+      "recall_at_10": 0.6,
+      "ndcg_at_10": 0.259503,
+      "mrr_at_10": 0.362222,
+      "citation_correctness_at_10": 0.8
+    },
+    "confluence_doc": {
+      "query_count": 5,
+      "recall_at_10": 0.9,
+      "ndcg_at_10": 0.89082,
+      "mrr_at_10": 0.9,
+      "citation_correctness_at_10": 1
+    }
+  },
+  "queries": [
+    {
+      "id": "q-exact-01",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        }
+      ]
+    },
+    {
+      "id": "q-exact-02",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        }
+      ]
+    },
+    {
+      "id": "q-exact-03",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "git:acme/search:7f3c9a1",
+          "url": "https://eval.invalid/git/acme/search/commit/7f3c9a1"
+        }
+      ]
+    },
+    {
+      "id": "q-exact-04",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        }
+      ]
+    },
+    {
+      "id": "q-exact-05",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        },
+        {
+          "source_id": "git:acme/search:c01a7bd",
+          "url": "https://eval.invalid/git/acme/search/commit/c01a7bd"
+        },
+        {
+          "source_id": "pod-update:connectors:2024-01-24",
+          "url": "https://eval.invalid/pim/pod-updates/connectors-2024-01-24"
+        }
+      ]
+    },
+    {
+      "id": "q-paraphrase-01",
+      "metrics": {
+        "recall_at_10": 0.666667,
+        "ndcg_at_10": 0.764252,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-paraphrase-02",
+      "metrics": {
+        "recall_at_10": 0.75,
+        "ndcg_at_10": 0.523626,
+        "mrr_at_10": 0.5,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-paraphrase-03",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.339009,
+        "mrr_at_10": 0.25,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-paraphrase-04",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.193426,
+        "mrr_at_10": 0.125,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        },
+        {
+          "source_id": "slack:C-release:1705748400.000200",
+          "url": "https://eval.invalid/slack/archives/C-release/p1705748400000200"
+        }
+      ]
+    },
+    {
+      "id": "q-paraphrase-05",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-release:1705748400.000200",
+          "url": "https://eval.invalid/slack/archives/C-release/p1705748400000200"
+        },
+        {
+          "source_id": "git:acme/search:b82d4e6",
+          "url": "https://eval.invalid/git/acme/search/commit/b82d4e6"
+        }
+      ]
+    },
+    {
+      "id": "q-status-01",
+      "metrics": {
+        "recall_at_10": 0.333333,
+        "ndcg_at_10": 0.14654,
+        "mrr_at_10": 0.5,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-status-02",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.787155,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        }
+      ]
+    },
+    {
+      "id": "q-status-03",
+      "metrics": {
+        "recall_at_10": 0.666667,
+        "ndcg_at_10": 0.705083,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        },
+        {
+          "source_id": "git:acme/search:b82d4e6",
+          "url": "https://eval.invalid/git/acme/search/commit/b82d4e6"
+        },
+        {
+          "source_id": "pod-update:retrieval:2024-01-18",
+          "url": "https://eval.invalid/pim/pod-updates/retrieval-2024-01-18"
+        },
+        {
+          "source_id": "project-update:search:2024-01-22",
+          "url": "https://eval.invalid/pim/project-updates/search-2024-01-22"
+        }
+      ]
+    },
+    {
+      "id": "q-status-04",
+      "metrics": {
+        "recall_at_10": 0.333333,
+        "ndcg_at_10": 0.227245,
+        "mrr_at_10": 0.2,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-status-05",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 0.397809,
+        "mrr_at_10": 0.142857,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        },
+        {
+          "source_id": "slack:C-release:1705748400.000200",
+          "url": "https://eval.invalid/slack/archives/C-release/p1705748400000200"
+        },
+        {
+          "source_id": "git:acme/search:c01a7bd",
+          "url": "https://eval.invalid/git/acme/search/commit/c01a7bd"
+        },
+        {
+          "source_id": "pod-update:connectors:2024-01-24",
+          "url": "https://eval.invalid/pim/pod-updates/connectors-2024-01-24"
+        },
+        {
+          "source_id": "project-update:search:2024-01-15",
+          "url": "https://eval.invalid/pim/project-updates/search-2024-01-15"
+        }
+      ]
+    },
+    {
+      "id": "q-slack-01",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.236957,
+        "mrr_at_10": 0.111111,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        }
+      ]
+    },
+    {
+      "id": "q-slack-02",
+      "metrics": {
+        "recall_at_10": 0,
+        "ndcg_at_10": 0,
+        "mrr_at_10": 0,
+        "citation_correctness_at_10": 0
+      },
+      "top_10": [
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-173",
+          "url": "https://eval.invalid/jira/browse/ACME-173"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        }
+      ]
+    },
+    {
+      "id": "q-slack-03",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 0.410896,
+        "mrr_at_10": 0.2,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        },
+        {
+          "source_id": "slack:C-release:1706007600.000500",
+          "url": "https://eval.invalid/slack/archives/C-release/p1706007600000500"
+        },
+        {
+          "source_id": "slack:C-release:1705748400.000200",
+          "url": "https://eval.invalid/slack/archives/C-release/p1705748400000200"
+        }
+      ]
+    },
+    {
+      "id": "q-slack-04",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.212845,
+        "mrr_at_10": 0.5,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-slack-05",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 0.436819,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "slack:C-release:1706007600.000500",
+          "url": "https://eval.invalid/slack/archives/C-release/p1706007600000500"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705662000.000100",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        }
+      ]
+    },
+    {
+      "id": "q-confluence-01",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 0.907322,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        }
+      ]
+    },
+    {
+      "id": "q-confluence-02",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 0.629459,
+        "mrr_at_10": 0.5,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        },
+        {
+          "source_id": "pod-update:retrieval:2024-01-18",
+          "url": "https://eval.invalid/pim/pod-updates/retrieval-2024-01-18"
+        }
+      ]
+    },
+    {
+      "id": "q-confluence-03",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705834800.000300",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300"
+        },
+        {
+          "source_id": "slack:C-eng-search:1705921200.000400",
+          "url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400"
+        },
+        {
+          "source_id": "git:acme/search:c01a7bd",
+          "url": "https://eval.invalid/git/acme/search/commit/c01a7bd"
+        }
+      ]
+    },
+    {
+      "id": "q-confluence-04",
+      "metrics": {
+        "recall_at_10": 0.5,
+        "ndcg_at_10": 0.917319,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "confluence:SRCH:9001",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#427",
+          "url": "https://eval.invalid/github/acme/search/issues/427"
+        }
+      ]
+    },
+    {
+      "id": "q-confluence-05",
+      "metrics": {
+        "recall_at_10": 1,
+        "ndcg_at_10": 1,
+        "mrr_at_10": 1,
+        "citation_correctness_at_10": 1
+      },
+      "top_10": [
+        {
+          "source_id": "confluence:SRCH:9002",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002"
+        },
+        {
+          "source_id": "confluence:SRCH:9003",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003"
+        },
+        {
+          "source_id": "confluence:SRCH:9004",
+          "url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        },
+        {
+          "source_id": "ACME-155",
+          "url": "https://eval.invalid/jira/browse/ACME-155"
+        },
+        {
+          "source_id": "ACME-233",
+          "url": "https://eval.invalid/jira/browse/ACME-233"
+        },
+        {
+          "source_id": "ACME-142",
+          "url": "https://eval.invalid/jira/browse/ACME-142"
+        },
+        {
+          "source_id": "ACME-201",
+          "url": "https://eval.invalid/jira/browse/ACME-201"
+        },
+        {
+          "source_id": "acme/search#418",
+          "url": "https://eval.invalid/github/acme/search/pull/418"
+        },
+        {
+          "source_id": "acme/search#431",
+          "url": "https://eval.invalid/github/acme/search/pull/431"
+        },
+        {
+          "source_id": "acme/search#445",
+          "url": "https://eval.invalid/github/acme/search/issues/445"
+        }
+      ]
+    }
+  ]
+}

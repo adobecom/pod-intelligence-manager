@@ -21,6 +21,7 @@ vi.mock("../knowledge-graph.js", () => ({
     .fn()
     .mockReturnValue({ nodes: [], truncated: false, total_matching: 0, token_estimate: 0, edges: [] }),
   getPrecedents: vi.fn().mockReturnValue({ nodes: [] }),
+  queryKnowledge: vi.fn(() => ({ nodes: [], edges: [], total_matching: 0, token_estimate: 0, truncated: false })),
 }));
 
 vi.mock("../../pim/llm.js", () => ({
@@ -84,6 +85,7 @@ import { searchConfluence } from "../../integrations/confluence.js";
 import { searchFluffyjaws } from "../../integrations/fluffyjaws.js";
 import { searchKG } from "../../integrations/kg.js";
 import { callLLM } from "../../pim/llm.js";
+import { indexProjectDocument } from "../project-search-index.js";
 
 const TEST_ORG_ID = "org-test";
 let userEmail: string;
@@ -99,6 +101,7 @@ beforeAll(() => {
   ]) {
     delete process.env[k];
   }
+  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "MWPW";
 
   const creator = upsertUserByIms({ email: "creator@adobe.com", display_name: "Creator" });
   const u1 = upsertUserByIms({ email: "rea01581@adobe.com", display_name: "Rayyan Khan" });
@@ -134,6 +137,33 @@ beforeEach(() => {
 });
 
 describe("searchContext per-integration opts", () => {
+  it("delegates current actor-free project searches to indexed retrieval", async () => {
+    indexProjectDocument({
+      org_id: TEST_ORG_ID,
+      project_id: "proj_acme",
+      source: "jira",
+      source_type: "issue",
+      source_id: "MWPW-9001",
+      title: "Indexed delegation marker",
+      body: "delegationneedle is available only in the project index",
+      visibility: "project_visible",
+    });
+
+    const result = await searchContext(
+      {
+        query: "delegationneedle",
+        project_id: "proj_acme",
+        sources: ["jira"],
+        synthesize: false,
+        use_cache: false,
+      },
+      TEST_ORG_ID,
+    );
+
+    expect(result.hits[0]).toMatchObject({ source: "jira", title: "Indexed delegation marker" });
+    expect(vi.mocked(searchJira)).not.toHaveBeenCalled();
+  });
+
   it("when IMS fallback fires, only Jira receives the actor; other sources stay broad", async () => {
     await searchContext(
       { query: "milo block init", synthesize: false, use_cache: false },

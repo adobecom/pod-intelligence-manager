@@ -10,8 +10,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "retrieval-eval": "tsx scripts/kg-retrieval-eval.ts",
+    "project-search-eval": "node --import tsx scripts/project-search-eval.ts",
+    "test:project-search-eval": "vitest run --config eval/project-search/vitest.config.ts",
+    "typecheck:project-search-eval": "tsc --project tsconfig.project-search-eval.json --noEmit",
     "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts",
-    "seed-project-search": "tsx src/scripts/seed-project-search.ts"
+    "seed-project-search": "tsx src/scripts/seed-project-search.ts",
+    "scrub-project-search": "tsx src/scripts/scrub-project-search.ts"
   },
   "dependencies": {
     "@pim/shared": "workspace:*",

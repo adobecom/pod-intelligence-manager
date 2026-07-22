@@ -640,9 +640,16 @@ export function registerTools(server: McpServer) {
       project_id: ProjectId,
       query: z.string().describe("Natural-language question or an exact identifier (Jira key, PR #, file path)"),
       sources: z
-        .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update"]))
+        .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update", "kg"]))
         .optional()
         .describe("Restrict the search to these sources"),
+      entity_types: z
+        .array(z.enum([
+          "ticket", "pr", "commit", "file", "symbol", "person",
+          "doc", "feature", "decision", "risk", "blocker",
+        ]))
+        .optional()
+        .describe("Restrict candidates to documents connected to these entity types"),
       time_window_days: z.number().int().positive().optional().describe("Only artifacts updated within this many days"),
       include_kg: z.boolean().optional().describe("Attach a small project-scoped KG overlay (default true)"),
       include_mind_map: z
@@ -658,6 +665,10 @@ export function registerTools(server: McpServer) {
         .boolean()
         .optional()
         .describe("Return a plain-language, cited summary answer (summary_md) over KG evidence plus artifact hits — readable for non-technical stakeholders. Default false."),
+      use_live: z
+        .boolean()
+        .optional()
+        .describe("Opt into the separately gated live fallback when the index has no candidates (default false)"),
     },
     async ({ project_id, ...body }) => {
       const result = await apiPost(`/api/projects/${project_id}/search`, body);

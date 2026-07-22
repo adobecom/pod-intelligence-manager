@@ -16,7 +16,7 @@ describe("scanForSecrets", () => {
 
   it("detects JWT tokens", () => {
     const result = scanForSecrets(
-      "token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0"
+      "token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl",
     );
     expect(result.clean).toBe(false);
     expect(result.findings).toContain("JWT Token");
@@ -32,7 +32,9 @@ describe("scanForSecrets", () => {
   });
 
   it("detects PEM private keys", () => {
-    const result = scanForSecrets("-----BEGIN RSA PRIVATE KEY-----");
+    const result = scanForSecrets(
+      "-----BEGIN RSA PRIVATE KEY-----\nZmFrZS1wcml2YXRlLWtleQ==\n-----END RSA PRIVATE KEY-----",
+    );
     expect(result.clean).toBe(false);
     expect(result.findings).toContain("PEM Private Key");
   });

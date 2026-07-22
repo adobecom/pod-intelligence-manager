@@ -1,0 +1,344 @@
+{
+  "fixture_version": "2026-07-19.v1",
+  "review_status": "candidate_requires_human_review",
+  "qrels": {
+    "q-exact-01": [
+      {
+        "source_id": "ACME-142",
+        "relevance": 3,
+        "rationale": "The Jira artifact has the exact requested issue key and is the canonical record.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-exact-02": [
+      {
+        "source_id": "acme/search#418",
+        "relevance": 3,
+        "rationale": "The pull request has the exact repository and pull-request identifier.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-exact-03": [
+      {
+        "source_id": "git:acme/search:7f3c9a1",
+        "relevance": 3,
+        "rationale": "The commit artifact has the exact requested short hash.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-exact-04": [
+      {
+        "source_id": "slack:C-eng-search:1705662000.000100",
+        "relevance": 3,
+        "rationale": "The Slack artifact has the exact stable thread source identifier.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-exact-05": [
+      {
+        "source_id": "confluence:SRCH:9003",
+        "relevance": 3,
+        "rationale": "The Confluence artifact has the exact space and page source identifier.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-paraphrase-01": [
+      {
+        "source_id": "confluence:SRCH:9001",
+        "relevance": 3,
+        "rationale": "The architecture page directly explains how lexical and semantic candidates are blended.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "acme/search#418",
+        "relevance": 3,
+        "rationale": "The pull request directly implements reciprocal rank fusion for keyword and vector results.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "git:acme/search:7f3c9a1",
+        "relevance": 1,
+        "rationale": "The commit supplies related deterministic tie-breaking detail but not the semantic blend itself.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-paraphrase-02": [
+      {
+        "source_id": "confluence:SRCH:9003",
+        "relevance": 3,
+        "rationale": "The visibility model directly defines which connector evidence may be returned.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "acme/search#427",
+        "relevance": 3,
+        "rationale": "The issue directly describes the stale-access bug and the query-time mitigation.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "ACME-142",
+        "relevance": 2,
+        "rationale": "The Jira issue provides substantial supporting evidence about authorization cache invalidation.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "slack:C-eng-search:1705834800.000300",
+        "relevance": 2,
+        "rationale": "The Slack thread records the reproduction and agreed visibility filtering mitigation.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-paraphrase-03": [
+      {
+        "source_id": "acme/search#431",
+        "relevance": 3,
+        "rationale": "The pull request directly explains committed watermarks and idempotent replay after a crash.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "pod-update:connectors:2024-01-24",
+        "relevance": 2,
+        "rationale": "The connector update confirms that durable cursor resume is deployed.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-paraphrase-04": [
+      {
+        "source_id": "slack:C-eng-search:1705662000.000100",
+        "relevance": 3,
+        "rationale": "The Slack thread directly records the decision to preserve hyphenated Jira keys.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "git:acme/search:b82d4e6",
+        "relevance": 3,
+        "rationale": "The commit directly implements identifier-aware Slack normalization.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-paraphrase-05": [
+      {
+        "source_id": "ACME-233",
+        "relevance": 3,
+        "rationale": "The Jira issue directly specifies bounded typo correction after an ordinary-word zero-result query.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-status-01": [
+      {
+        "source_id": "project-update:search:2024-01-15",
+        "relevance": 3,
+        "rationale": "The project update directly states the 35 percent cohort and both pause conditions.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "slack:C-release:1705748400.000200",
+        "relevance": 3,
+        "rationale": "The release thread is the decision record for holding at 35 percent.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "ACME-155",
+        "relevance": 2,
+        "rationale": "The Jira issue provides substantial context for the security gate blocking expansion.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-status-02": [
+      {
+        "source_id": "ACME-173",
+        "relevance": 3,
+        "rationale": "The canonical issue says the backfill is 82 percent complete and not finished.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "pod-update:connectors:2024-01-24",
+        "relevance": 2,
+        "rationale": "The later connector checkpoint repeats the 82 percent status and remaining UTF-8 cleanup.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-status-03": [
+      {
+        "source_id": "project-update:search:2024-01-22",
+        "relevance": 3,
+        "rationale": "The project update directly identifies Security Platform approval as the sole remaining blocker.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "ACME-155",
+        "relevance": 3,
+        "rationale": "The launch-readiness issue is the canonical tracker for the blocking sign-off.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "slack:C-release:1705748400.000200",
+        "relevance": 2,
+        "rationale": "The release discussion corroborates the security gate and rollout pause.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-status-04": [
+      {
+        "source_id": "acme/search#445",
+        "relevance": 3,
+        "rationale": "The monitoring issue directly reports the restored 445 ms P95 after mitigation.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "pod-update:retrieval:2024-01-18",
+        "relevance": 3,
+        "rationale": "The retrieval checkpoint reports P95 of 445 ms and the ongoing monitoring state.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "project-update:search:2024-01-15",
+        "relevance": 1,
+        "rationale": "The project update gives the related sub-500-ms gate but not the latest measurement.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-status-05": [
+      {
+        "source_id": "git:acme/search:c01a7bd",
+        "relevance": 3,
+        "rationale": "The commit states that the Confluence ACL guard shipped and is enabled.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "pod-update:connectors:2024-01-24",
+        "relevance": 3,
+        "rationale": "The connector checkpoint independently confirms the sync shipped and is enabled.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-slack-01": [
+      {
+        "source_id": "slack:C-eng-search:1705662000.000100",
+        "relevance": 3,
+        "rationale": "This is the requested Slack decision thread about treating Jira keys as one token.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "git:acme/search:b82d4e6",
+        "relevance": 2,
+        "rationale": "The implementation commit materially supports the thread decision.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-slack-02": [
+      {
+        "source_id": "slack:C-release:1705748400.000200",
+        "relevance": 3,
+        "rationale": "This is the requested release-channel conversation that fixed the cohort at 35 percent.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "project-update:search:2024-01-15",
+        "relevance": 2,
+        "rationale": "The project update corroborates the decision but is not the requested conversation.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-slack-03": [
+      {
+        "source_id": "slack:C-eng-search:1705834800.000300",
+        "relevance": 3,
+        "rationale": "The requested Slack thread names the reproducer and records the agreed mitigation.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "acme/search#427",
+        "relevance": 2,
+        "rationale": "The linked issue materially supports the mitigation but is not the requested thread.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-slack-04": [
+      {
+        "source_id": "slack:C-eng-search:1705921200.000400",
+        "relevance": 3,
+        "rationale": "The requested search-channel thread records the title-only relevance decision.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "confluence:SRCH:9002",
+        "relevance": 2,
+        "rationale": "The rubric codifies the Slack decision but is not the conversation itself.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-slack-05": [
+      {
+        "source_id": "slack:C-release:1706007600.000500",
+        "relevance": 3,
+        "rationale": "The requested release-channel thread records the 10:00 UTC approval window.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "confluence:SRCH:9004",
+        "relevance": 1,
+        "rationale": "The runbook references the recorded release window but does not state the time.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-confluence-01": [
+      {
+        "source_id": "confluence:SRCH:9001",
+        "relevance": 3,
+        "rationale": "The requested architecture page directly explains RRF and the k=60 constant.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "acme/search#418",
+        "relevance": 2,
+        "rationale": "The pull request implements the design but is not the requested documentation page.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-confluence-02": [
+      {
+        "source_id": "confluence:SRCH:9002",
+        "relevance": 3,
+        "rationale": "The evaluation rubric directly documents relevance grades 0 through 3.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "slack:C-eng-search:1705921200.000400",
+        "relevance": 1,
+        "rationale": "The Slack thread discusses one grading constraint but not the complete scale.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-confluence-03": [
+      {
+        "source_id": "confluence:SRCH:9003",
+        "relevance": 3,
+        "rationale": "The ACL and visibility page directly defines all three requested visibility states.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-confluence-04": [
+      {
+        "source_id": "confluence:SRCH:9004",
+        "relevance": 3,
+        "rationale": "The rollout and rollback runbook directly contains the requested checklist.",
+        "review_status": "candidate_requires_human_review"
+      },
+      {
+        "source_id": "slack:C-release:1706007600.000500",
+        "relevance": 1,
+        "rationale": "The release thread points operators to the checklist but does not enumerate it.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ],
+    "q-confluence-05": [
+      {
+        "source_id": "confluence:SRCH:9002",
+        "relevance": 3,
+        "rationale": "The evaluation rubric directly defines citation correctness using source identifiers and URLs.",
+        "review_status": "candidate_requires_human_review"
+      }
+    ]
+  }
+}

@@ -2340,6 +2340,42 @@ export async function getPrecedents(
 
 // --- Curation ---
 
+/** Removes KG nodes whose content was derived from project evidence that has
+ * crossed a source-boundary deletion. This is intentionally synchronous so a
+ * resource unbind cannot commit while a derived node remains queryable. */
+export function retractProjectEvidenceKnowledgeNodes(
+  orgId: string,
+  projectId: string,
+  nodeIds: readonly string[],
+): string[] {
+  if (nodeIds.length === 0) return [];
+  const requested = new Set(nodeIds);
+  const state = getOrgState(orgId);
+  const removed: string[] = [];
+  for (let index = state.graph.nodes.length - 1; index >= 0; index--) {
+    const node = state.graph.nodes[index];
+    if (!requested.has(node.id)
+      || node.source_project_id !== projectId
+      || node.ingestion_provenance?.kind !== "project_evidence") continue;
+    _removeNodeFromIndexes(node, state);
+    state.graph.nodes.splice(index, 1);
+    removed.push(node.id);
+  }
+  if (removed.length === 0) return [];
+  const removedIds = new Set(removed);
+  state.graph.edges = state.graph.edges.filter((edge) =>
+    !removedIds.has(edge.source) && !removedIds.has(edge.target));
+  for (const node of state.graph.nodes) {
+    if (node.superseded_by && removedIds.has(node.superseded_by)) delete node.superseded_by;
+  }
+  state.graph.version++;
+  state.graph.updated_at = new Date().toISOString();
+  state.graph.communities = detectCommunities(state.graph);
+  state.hubIds = new Set(identifyHubs(state.graph));
+  persistGraph(orgId, state);
+  return removed;
+}
+
 export async function curateNode(
   orgId: string,
   nodeId: string,

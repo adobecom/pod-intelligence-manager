@@ -7,7 +7,7 @@
 # We install all deps (including tsx) in the builder, ship a copy as-is.
 
 # ---------- Build / install stage ----------
-FROM --platform=linux/amd64 node:22-alpine AS build
+FROM --platform=linux/amd64 node:24-alpine AS build
 
 WORKDIR /repo
 
@@ -21,7 +21,7 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 
 # ---------- Runtime stage ----------
-FROM --platform=linux/amd64 node:22-alpine AS runtime
+FROM --platform=linux/amd64 node:24-alpine AS runtime
 
 WORKDIR /app
 

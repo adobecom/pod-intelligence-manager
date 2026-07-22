@@ -170,13 +170,15 @@ export function registerProjectCommands(program: Command) {
     .description("Search a project's indexed artifacts (hybrid lexical + semantic)")
     .argument("<projectId>", "Project ID")
     .argument("<query...>", "Search query or exact identifier (Jira key, PR #, file path)")
-    .option("--sources <list>", "Comma-separated sources (jira,github,confluence,slack,git,project_update,pod_update)")
+    .option("--sources <list>", "Comma-separated sources (jira,github,confluence,slack,git,project_update,pod_update,kg)")
+    .option("--entity-types <list>", "Comma-separated entity types (ticket,pr,commit,file,symbol,person,doc,feature,decision,risk,blocker)")
     .option("--days <n>", "Only artifacts updated within this many days", (v) => parseInt(v, 10))
     .option("--max <n>", "Max hits to return", (v) => parseInt(v, 10))
     .option("--mind-map", "Include an entity/edge mind-map neighborhood")
     .option("--answer", "Include a plain-language synthesized answer over the hits")
     .option("--no-graph", "Disable bounded graph expansion")
     .option("--no-kg", "Skip the project-scoped KG overlay")
+    .option("--live", "Allow the separately gated live fallback when the index has no candidates")
     .option("--json", "Print the raw JSON response")
     .action(async (projectId: string, queryParts: string[], opts) => {
       const base = getBaseUrl(program);
@@ -184,12 +186,15 @@ export function registerProjectCommands(program: Command) {
       const body: Record<string, unknown> = { query };
       const sources = parseList(opts.sources);
       if (sources) body.sources = sources;
+      const entityTypes = parseList(opts.entityTypes);
+      if (entityTypes) body.entity_types = entityTypes;
       if (opts.days) body.time_window_days = opts.days;
       if (opts.max) body.max_hits = opts.max;
       if (opts.mindMap) body.include_mind_map = true;
       if (opts.answer) body.synthesize = true;
       if (opts.graph === false) body.graph_expansion = false;
       if (opts.kg === false) body.include_kg = false;
+      if (opts.live) body.use_live = true;
 
       const res = await fetchJSON<ProjectSearchResponse>(`${base}/api/projects/${projectId}/search`, {
         method: "POST",

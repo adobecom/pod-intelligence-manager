@@ -53,11 +53,13 @@ import { upsertUserByIms } from "../users.js";
 import { createOrg } from "../orgs.js";
 import { embedProjectSearchChunks, indexProjectDocument } from "../project-search-index.js";
 import { searchProject } from "../project-search.js";
+import { generateEmbedding } from "../embeddings.js";
 
 const ORG_ID = "org_sem";
 const PROJECT_ID = "project-sem";
 
 beforeEach(() => {
+  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "EMC,SEM";
   vi.clearAllMocks();
   testDb.exec(`
     PRAGMA foreign_keys = OFF;
@@ -78,7 +80,18 @@ beforeEach(() => {
   createOrg({ orgId: ORG_ID, slug: "sem", name: "Sem", creatorUserId: creator.user_id });
   testDb
     .prepare("INSERT INTO projects (project_id, name, description, created_at, resources_json, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(PROJECT_ID, "Sem", null, new Date().toISOString(), "{}", ORG_ID, creator.user_id);
+    .run(
+      PROJECT_ID,
+      "Sem",
+      null,
+      new Date().toISOString(),
+      JSON.stringify({
+        jira: { project_keys: ["EMC", "SEM"] },
+        slack: { channels: ["T_SEM:C_SEM"] },
+      }),
+      ORG_ID,
+      creator.user_id,
+    );
 });
 
 describe("indexed project search — semantic path", () => {
@@ -110,5 +123,97 @@ describe("indexed project search — semantic path", () => {
     expect(first).toBeGreaterThanOrEqual(1);
     const second = await embedProjectSearchChunks(ORG_ID, PROJECT_ID);
     expect(second).toBe(0);
+  });
+
+  it("redacts query credentials before the embedding boundary", async () => {
+    const secret = "embedding-secret-must-not-leak";
+    await searchProject(ORG_ID, PROJECT_ID, {
+      query: `access control token="${secret}"`,
+    });
+
+    const queryInput = vi.mocked(generateEmbedding).mock.calls.at(-1)?.[0] ?? "";
+    expect(queryInput).not.toContain(secret);
+    expect(queryInput).toContain("[REDACTED:Generic Secret]");
+  });
+
+  it("rejects restricted direct-index writes and never embeds legacy restricted chunks", async () => {
+    expect(() => indexProjectDocument({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "project_update",
+      source_type: "decision",
+      source_id: "restricted-direct-write",
+      title: "Restricted decision",
+      body: "restricted-model-boundary-marker",
+      visibility: "restricted",
+    })).toThrow("visibility is not eligible for persistence");
+    expect(testDb.prepare(
+      "SELECT COUNT(*) AS count FROM project_search_documents WHERE source_id = 'restricted-direct-write'",
+    ).get()).toMatchObject({ count: 0 });
+
+    const now = new Date().toISOString();
+    testDb.prepare(
+      `INSERT INTO project_search_documents
+         (id, org_id, project_id, source, source_type, source_id, title, ingested_at, updated_at,
+          content_hash, metadata_json, permissions_json, visibility)
+       VALUES ('legacy-restricted-doc', ?, ?, 'project_update', 'decision', 'legacy-restricted',
+               'Legacy restricted', ?, ?, 'legacy-restricted-hash', '{}', '{}', 'restricted')`,
+    ).run(ORG_ID, PROJECT_ID, now, now);
+    testDb.prepare(
+      `INSERT INTO project_search_chunks
+         (id, document_id, org_id, project_id, chunk_index, chunk_kind, text, retrieval_text,
+          token_estimate, created_at)
+       VALUES ('legacy-restricted-chunk', 'legacy-restricted-doc', ?, ?, 0, 'body',
+               'restricted-model-boundary-marker', 'restricted-model-boundary-marker', 4, ?)`,
+    ).run(ORG_ID, PROJECT_ID, now);
+    vi.mocked(generateEmbedding).mockClear();
+
+    expect(await embedProjectSearchChunks(ORG_ID, PROJECT_ID)).toBe(0);
+    expect(generateEmbedding).not.toHaveBeenCalled();
+  });
+
+  it("applies source eligibility before the semantic candidate cap", async () => {
+    for (let i = 0; i < 201; i++) {
+      indexProjectDocument({
+        org_id: ORG_ID,
+        project_id: PROJECT_ID,
+        source: "slack",
+        source_type: "thread",
+        source_id: `sem-thread-${i}`,
+        title: `Excluded discussion ${i}`,
+        body: "Neutral words only.",
+        occurred_at: new Date().toISOString(),
+      });
+    }
+    indexProjectDocument({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "jira",
+      source_type: "issue",
+      source_id: "SEM-77",
+      title: "Allowed semantic task",
+      body: "Another neutral description.",
+      occurred_at: new Date().toISOString(),
+    });
+
+    const exactQueryVector = JSON.stringify([0, 0, 0, 0, 0, 0, 0, 0, Math.SQRT1_2, Math.SQRT1_2]);
+    const weakerAllowedVector = JSON.stringify([0, 0, 0, 0, 0, 0, 0, 0, 1, 0]);
+    testDb.prepare(
+      `UPDATE project_search_chunks SET embedding_json = ?
+       WHERE document_id IN (SELECT id FROM project_search_documents WHERE source = 'slack')`,
+    ).run(exactQueryVector);
+    testDb.prepare(
+      `UPDATE project_search_chunks SET embedding_json = ?
+       WHERE document_id IN (SELECT id FROM project_search_documents WHERE source = 'jira')`,
+    ).run(weakerAllowedVector);
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, {
+      query: "access control",
+      sources: ["jira"],
+    });
+
+    expect(res!.hits.map((hit) => hit.source_id)).toContain("SEM-77");
+    expect(res!.hits.every((hit) => hit.source === "jira")).toBe(true);
+    expect(res!.hits[0].matched.semantic).toBe(true);
   });
 });

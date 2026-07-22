@@ -4,8 +4,8 @@
  * Scheduled incremental refresh for the project search index.
  *
  * Mechanism:
- *   1. Enumerate "active + configured" projects — those with resources_json set
- *      and evidence/update activity within a trailing window (default 30 d).
+ *   1. Enumerate every project with at least one configured connector. Newly
+ *      configured projects must be eligible before they have any evidence.
  *   2. For each project, in order:
  *        a. pollProjectSources    — live API delta pull → project_evidence_items (cursor-based)
  *        b. backfillProjectSearch — fold DB rows → index (content-hash dedup, cheap for no-ops)
@@ -49,64 +49,47 @@ export interface RefreshResult {
   index_documents?: number;
   index_chunks?: number;
   chunks_embedded?: number;
+  source_errors?: Array<{ source: string; error: string }>;
 }
 
 // ── Enumerator ───────────────────────────────────────────────────────────────
 
 /**
- * Returns projects that:
- *   - have resources_json configured (IS NOT NULL and not empty `{}`)
- *   - have had evidence or context-update activity within `windowDays`
- *
- * This avoids polling dormant or unconfigured projects.
+ * Returns every project that has at least one concrete connector binding.
+ * `windowDays` remains in the signature for API compatibility; freshness is a
+ * connector concern, not an admission requirement for the scheduler.
  */
 export function listActiveProjectsForRefresh(windowDays = 30): ProjectRef[] {
-  const since = new Date(Date.now() - windowDays * 86_400_000).toISOString();
-
-  // Projects with recent evidence activity
-  const evidenceActive = db
+  void windowDays;
+  const rows = db
     .prepare(
-      `SELECT DISTINCT p.org_id, p.project_id
+      `SELECT p.org_id, p.project_id, p.resources_json
        FROM projects p
        WHERE p.resources_json IS NOT NULL
-         AND p.resources_json != '{}'
-         AND p.org_id IS NOT NULL
-         AND EXISTS (
-           SELECT 1 FROM project_evidence_items ei
-           WHERE ei.org_id = p.org_id
-             AND ei.project_id = p.project_id
-             AND ei.ingested_at >= ?
-         )`,
+         AND p.org_id IS NOT NULL`,
     )
-    .all(since) as unknown as ProjectRef[];
+    .all() as unknown as Array<ProjectRef & { resources_json: string }>;
 
-  // Projects with recent context-update activity (may not have evidence yet)
-  const contextActive = db
-    .prepare(
-      `SELECT DISTINCT p.org_id, p.project_id
-       FROM projects p
-       WHERE p.resources_json IS NOT NULL
-         AND p.resources_json != '{}'
-         AND p.org_id IS NOT NULL
-         AND EXISTS (
-           SELECT 1 FROM project_context_updates cu
-           WHERE cu.project_id = p.project_id
-             AND cu.timestamp >= ?
-         )`,
-    )
-    .all(since) as unknown as ProjectRef[];
-
-  // Merge + deduplicate by (org_id, project_id)
-  const seen = new Set<string>();
-  const result: ProjectRef[] = [];
-  for (const row of [...evidenceActive, ...contextActive]) {
-    const key = `${row.org_id}|${row.project_id}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(row);
+  const configured = (raw: string): boolean => {
+    try {
+      const value = JSON.parse(raw) as Record<string, unknown>;
+      for (const source of ["jira", "github", "slack", "confluence", "git"]) {
+        const config = value[source];
+        if (!config || typeof config !== "object") continue;
+        for (const entry of Object.values(config as Record<string, unknown>)) {
+          if (Array.isArray(entry) && entry.length > 0) return true;
+          if (typeof entry === "string" && entry.trim()) return true;
+        }
+      }
+      return false;
+    } catch {
+      return false;
     }
-  }
-  return result;
+  };
+
+  return rows
+    .filter((row) => configured(row.resources_json))
+    .map(({ org_id, project_id }) => ({ org_id, project_id }));
 }
 
 // ── Watermark helpers ────────────────────────────────────────────────────────
@@ -153,6 +136,9 @@ export async function refreshProjectSearch(orgId: string, projectId: string): Pr
     // Step 1: live delta pull → project_evidence_items (cursor-incremental per source)
     const pollResult = await pollProjectSources(orgId, projectId);
     const pollIngested = pollResult?.results.reduce((s, r) => s + (r.ingested ?? 0), 0) ?? 0;
+    const sourceErrors = (pollResult?.results ?? [])
+      .filter((result) => !!result.missing)
+      .map((result) => ({ source: result.source, error: "source_refresh_failed" }));
 
     // Step 2: fold DB rows → project search index (content-hash dedup)
     const backfillResult = backfillProjectSearch(orgId, projectId);
@@ -167,28 +153,68 @@ export async function refreshProjectSearch(orgId: string, projectId: string): Pr
     // Step 5: refresh hub/community annotations + entity graph
     annotateProjectGraph(orgId, projectId);
 
-    // Step 6: advance watermark
-    setLastRefreshAt(orgId, projectId);
+    // Step 6: advance the aggregate watermark only when every configured
+    // source succeeded. Source-specific attempts/successes are tracked by the
+    // connector state and must not be hidden by a partial refresh.
+    if (sourceErrors.length === 0) setLastRefreshAt(orgId, projectId);
 
     return {
       org_id: orgId,
       project_id: projectId,
-      ok: true,
+      ok: sourceErrors.length === 0,
+      ...(sourceErrors.length > 0
+        ? { error: `Source refresh failed: ${sourceErrors.map((item) => item.source).join(", ")}`, source_errors: sourceErrors }
+        : {}),
       duration_ms: Date.now() - t0,
       poll_ingested: pollIngested,
       index_documents: backfillResult.documents,
       index_chunks: backfillResult.chunks,
       chunks_embedded: chunksEmbedded,
     };
-  } catch (err) {
+  } catch {
     return {
       org_id: orgId,
       project_id: projectId,
       ok: false,
-      error: (err as Error).message,
+      error: "project_refresh_failed",
       duration_ms: Date.now() - t0,
     };
   }
+}
+
+// Resource mutations can happen faster than a connector round-trip. Coalesce
+// immediate refresh requests per project while preserving a retry after the
+// current run settles.
+interface ScheduledRefresh {
+  rerunRequested: boolean;
+}
+
+const scheduledRefreshes = new Map<string, ScheduledRefresh>();
+
+export function scheduleProjectSearchRefresh(orgId: string, projectId: string): void {
+  const key = `${orgId}\0${projectId}`;
+  const existing = scheduledRefreshes.get(key);
+  if (existing) {
+    // A resource mutation that lands during connector I/O must not be lost.
+    // Coalesce any number of overlapping requests into one trailing refresh.
+    existing.rerunRequested = true;
+    return;
+  }
+  const scheduled: ScheduledRefresh = { rerunRequested: false };
+  void Promise.resolve()
+    .then(() => refreshProjectSearch(orgId, projectId))
+      .catch(() => ({
+        org_id: orgId,
+        project_id: projectId,
+        ok: false,
+        error: "project_refresh_failed",
+        duration_ms: 0,
+      }))
+      .finally(() => {
+        scheduledRefreshes.delete(key);
+        if (scheduled.rerunRequested) scheduleProjectSearchRefresh(orgId, projectId);
+      });
+  scheduledRefreshes.set(key, scheduled);
 }
 
 // ── Scheduler entry point ────────────────────────────────────────────────────

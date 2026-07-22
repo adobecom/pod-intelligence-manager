@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eval.invalid/schemas/project-search-baseline-v1.json",
+  "title": "PIM deterministic project-search baseline",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_version",
+    "review_status",
+    "generated_at",
+    "environment",
+    "aggregate",
+    "by_stratum",
+    "queries"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "fixture_version": { "type": "string", "minLength": 1 },
+    "review_status": { "const": "candidate_requires_human_review" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "database",
+        "retrieval_mode",
+        "fts_enabled",
+        "embeddings_enabled",
+        "synthesis_enabled",
+        "graph_expansion_enabled",
+        "kg_overlay_enabled",
+        "live_fallback_enabled",
+        "slack_ingestion_read_enabled",
+        "confluence_ingestion_read_enabled",
+        "confluence_source_instance",
+        "confluence_project_visible_space_keys",
+        "corpus_documents"
+      ],
+      "properties": {
+        "database": { "const": "temporary_sqlite" },
+        "retrieval_mode": { "const": "lexical" },
+        "fts_enabled": { "const": false },
+        "embeddings_enabled": { "const": false },
+        "synthesis_enabled": { "const": false },
+        "graph_expansion_enabled": { "const": false },
+        "kg_overlay_enabled": { "const": false },
+        "live_fallback_enabled": { "const": false },
+        "slack_ingestion_read_enabled": { "const": true },
+        "confluence_ingestion_read_enabled": { "const": true },
+        "confluence_source_instance": { "const": "eval.invalid" },
+        "confluence_project_visible_space_keys": {
+          "type": "array",
+          "const": ["SRCH"]
+        },
+        "corpus_documents": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "aggregate": { "$ref": "#/$defs/aggregateMetrics" },
+    "by_stratum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exact_identifier",
+        "paraphrase",
+        "current_status",
+        "slack_thread",
+        "confluence_doc"
+      ],
+      "properties": {
+        "exact_identifier": { "$ref": "#/$defs/metrics" },
+        "paraphrase": { "$ref": "#/$defs/metrics" },
+        "current_status": { "$ref": "#/$defs/metrics" },
+        "slack_thread": { "$ref": "#/$defs/metrics" },
+        "confluence_doc": { "$ref": "#/$defs/metrics" }
+      }
+    },
+    "queries": {
+      "type": "array",
+      "minItems": 25,
+      "maxItems": 25,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "metrics", "top_10"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "metrics": { "$ref": "#/$defs/rankingMetrics" },
+          "top_10": {
+            "type": "array",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_id"],
+              "properties": {
+                "source_id": { "type": "string", "minLength": 1 },
+                "url": { "type": "string", "format": "uri" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "rankingMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recall_at_10",
+        "ndcg_at_10",
+        "mrr_at_10",
+        "citation_correctness_at_10"
+      ],
+      "properties": {
+        "recall_at_10": { "$ref": "#/$defs/unitInterval" },
+        "ndcg_at_10": { "$ref": "#/$defs/unitInterval" },
+        "mrr_at_10": { "$ref": "#/$defs/unitInterval" },
+        "citation_correctness_at_10": { "$ref": "#/$defs/unitInterval" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_count",
+        "recall_at_10",
+        "ndcg_at_10",
+        "mrr_at_10",
+        "citation_correctness_at_10"
+      ],
+      "properties": {
+        "query_count": { "type": "integer", "minimum": 0 },
+        "recall_at_10": { "$ref": "#/$defs/unitInterval" },
+        "ndcg_at_10": { "$ref": "#/$defs/unitInterval" },
+        "mrr_at_10": { "$ref": "#/$defs/unitInterval" },
+        "citation_correctness_at_10": { "$ref": "#/$defs/unitInterval" }
+      }
+    },
+    "aggregateMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_count",
+        "recall_at_10",
+        "ndcg_at_10",
+        "mrr_at_10",
+        "citation_correctness_at_10",
+        "latency_ms"
+      ],
+      "properties": {
+        "query_count": { "type": "integer", "minimum": 0 },
+        "recall_at_10": { "$ref": "#/$defs/unitInterval" },
+        "ndcg_at_10": { "$ref": "#/$defs/unitInterval" },
+        "mrr_at_10": { "$ref": "#/$defs/unitInterval" },
+        "citation_correctness_at_10": { "$ref": "#/$defs/unitInterval" },
+        "latency_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p50", "p95"],
+          "properties": {
+            "p50": { "type": "number", "minimum": 0 },
+            "p95": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "unitInterval": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

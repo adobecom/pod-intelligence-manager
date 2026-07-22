@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src",
+    "eval/project-search/metrics.ts",
+    "eval/project-search/metrics.test.ts",
+    "scripts/project-search-eval.ts"
+  ]
+}

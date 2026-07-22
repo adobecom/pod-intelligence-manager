@@ -1,5 +1,9 @@
 import type { ContextSearchActor, SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
+import {
+  hasGithubProjectVisibilityPolicy,
+  universallyVisibleGithubRepos,
+} from "../services/project-resource-bindings.js";
 
 function stripPersonTokens(query: string, actor?: ContextSearchActor): string {
   if (!actor) return query;
@@ -46,7 +50,9 @@ function orgScope(): string {
 }
 
 function repoScope(opts: IntegrationSearchOpts): string {
-  const repos = opts.project_resources?.github?.repos ?? [];
+  const repos = opts.project_id && opts.project_resources
+    ? universallyVisibleGithubRepos(opts.project_resources)
+    : opts.project_resources?.github?.repos ?? [];
   return repos.map((r) => `repo:${r}`).join(" ");
 }
 
@@ -54,6 +60,13 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   const token = process.env.GH_TOKEN;
   if (!token) {
     return { source: "github", documents: [], missing: "GH_TOKEN not set" };
+  }
+  const projectRepos = opts.project_resources?.github?.repos ?? [];
+  if (opts.project_id && projectRepos.length === 0) {
+    return { source: "github", documents: [], missing: "No GitHub repositories are bound to this project" };
+  }
+  if (opts.project_id && opts.project_resources && !hasGithubProjectVisibilityPolicy(opts.project_resources)) {
+    return { source: "github", documents: [], missing: "GitHub project visibility policy is not configured" };
   }
 
   // Prefer project-configured repos over the env org scope. If neither is
@@ -115,7 +128,13 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   const errors: string[] = [];
 
   if (codeRes.status === "fulfilled" && codeRes.value.ok) {
-    const data = (await codeRes.value.json()) as SearchResponse<CodeItem>;
+    let data: SearchResponse<CodeItem>;
+    try {
+      data = (await codeRes.value.json()) as SearchResponse<CodeItem>;
+    } catch {
+      data = {};
+      errors.push("code invalid_json");
+    }
     for (const item of data.items ?? []) {
       const fragment = item.text_matches?.[0]?.fragment ?? item.path ?? "";
       documents.push({
@@ -131,10 +150,9 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
       });
     }
   } else if (codeRes.status === "fulfilled") {
-    const body = (await codeRes.value.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ");
-    errors.push(`code ${codeRes.value.status}: ${body}`);
+    errors.push(`code http_${codeRes.value.status}`);
   } else {
-    errors.push(`code ${codeRes.reason?.message ?? codeRes.reason}`);
+    errors.push("code request_failed");
   }
 
   async function collectIssues(
@@ -142,7 +160,13 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
     label: "prs" | "issues",
   ): Promise<void> {
     if (res.status === "fulfilled" && res.value.ok) {
-      const data = (await res.value.json()) as SearchResponse<IssueItem>;
+      let data: SearchResponse<IssueItem>;
+      try {
+        data = (await res.value.json()) as SearchResponse<IssueItem>;
+      } catch {
+        data = {};
+        errors.push(`${label} invalid_json`);
+      }
       for (const item of data.items ?? []) {
         documents.push({
           org_id: opts.org_id,
@@ -160,10 +184,9 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
         });
       }
     } else if (res.status === "fulfilled") {
-      const body = (await res.value.text().catch(() => "")).slice(0, 300).replace(/\s+/g, " ");
-      errors.push(`${label} ${res.value.status}: ${body}`);
+      errors.push(`${label} http_${res.value.status}`);
     } else {
-      errors.push(`${label} ${res.reason?.message ?? res.reason}`);
+      errors.push(`${label} request_failed`);
     }
   }
   await Promise.all([collectIssues(prRes, "prs"), collectIssues(issueRes, "issues")]);

@@ -18,6 +18,7 @@ import path from "node:path";
 import db, { withTransaction } from "../db/connection.js";
 import type {
   ProjectEvidenceItem,
+  ProjectEvidenceVisibility,
   ProjectResources,
   ProjectSearchChunkKind,
   ProjectSearchEdgeType,
@@ -29,12 +30,26 @@ import type {
 import { embeddingTextHash, generateEmbedding, isEmbeddingAvailable } from "./embeddings.js";
 import { extractIdentifiers } from "./graph-analysis.js";
 import { queryKnowledge } from "./knowledge-graph.js";
+import {
+  normalizeProjectIndexContent,
+  ProjectEvidenceNormalizationError,
+} from "./project-evidence-normalization.js";
+import {
+  connectorBindingVersion,
+  isAllowedProjectGitPath,
+  projectResourceEligibilitySql,
+  sanitizeProjectResources,
+} from "./project-resource-bindings.js";
 
 const EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0";
 const MAX_CHUNKS_PER_DOC = 24;
 const CHUNK_TARGET_CHARS = 1000;
 const CHUNK_OVERLAP_CHARS = 120;
 const KEY_SEPARATOR = "\\0";
+
+function stableSearchId(prefix: string, ...parts: string[]): string {
+  return `${prefix}-${crypto.createHash("sha256").update(parts.join(KEY_SEPARATOR)).digest("hex").slice(0, 24)}`;
+}
 // Embeddings run as a bounded concurrent pool (Titan v2's on-demand quota is well
 // above 1 req/sec). Tune via env without a code change; backs off on throttling.
 const EMBED_CONCURRENCY = Math.max(1, parseInt(process.env.PROJECT_SEARCH_EMBED_CONCURRENCY ?? "6", 10) || 6);
@@ -61,6 +76,16 @@ export interface IndexDocumentInput {
   metadata?: Record<string, unknown>;
   permissions?: Record<string, unknown>;
   freshness_state?: ProjectSearchFreshness;
+  source_instance?: string;
+  native_id?: string;
+  source_version?: string;
+  visibility?: ProjectEvidenceVisibility;
+  visibility_version?: string;
+  redaction_version?: string;
+  normalized_content_hash?: string;
+  source_updated_at?: string;
+  /** Disabled for sources whose claims cannot yet be reconciled safely. */
+  graph_enabled?: boolean;
 }
 
 export interface IndexDocumentResult {
@@ -99,6 +124,7 @@ function tokenEstimate(text: string): number {
 }
 
 function contentHash(input: IndexDocumentInput): string {
+  if (input.normalized_content_hash) return input.normalized_content_hash;
   const parts = [
     input.title,
     input.status ?? "",
@@ -142,6 +168,30 @@ function windowText(body: string): string[] {
   return windows.filter(Boolean);
 }
 
+/** Slack threads remain one citeable document, but each message window carries
+ * its own permalink. This preserves message-level citations even when one
+ * reply is longer than the generic chunk target. */
+function slackThreadWindows(body: string): string[] {
+  const marker = "\nThread:\n";
+  const markerIndex = body.indexOf(marker);
+  if (markerIndex < 0) return windowText(body);
+  const preamble = body.slice(0, markerIndex).trim();
+  const thread = body.slice(markerIndex + marker.length).trim();
+  const blocks = thread.split(/\n\n(?=\[[^\]]+\]\s+<@)/).filter(Boolean);
+  const windows = preamble ? windowText(preamble) : [];
+  for (const block of blocks) {
+    const match = block.match(/(?:^|\n)Permalink:\s+(https:\/\/[^\s]+)/i);
+    const permalink = match?.[1];
+    const content = permalink
+      ? block.replace(/(?:^|\n)Permalink:\s+https:\/\/[^\s]+/i, "").trim()
+      : block.trim();
+    for (const window of windowText(content)) {
+      windows.push(permalink ? `${window}\nPermalink: ${permalink}` : window);
+    }
+  }
+  return windows.filter(Boolean);
+}
+
 function buildChunks(input: IndexDocumentInput): ChunkDescriptor[] {
   const title = input.title.replace(/\s+/g, " ").trim();
   const chunks: ChunkDescriptor[] = [];
@@ -149,7 +199,9 @@ function buildChunks(input: IndexDocumentInput): ChunkDescriptor[] {
   // Title is always its own chunk — short, high-signal, always embeddable.
   if (title) chunks.push({ kind: "title", text: title, retrieval_text: title });
 
-  const bodyWindows = windowText(input.body ?? "");
+  const bodyWindows = input.source === "slack" && input.source_type === "thread"
+    ? slackThreadWindows(input.body ?? "")
+    : windowText(input.body ?? "");
   const isCode = input.source === "git" || input.source_type === "default_branch_commit";
   for (const w of bodyWindows) {
     chunks.push({
@@ -385,7 +437,7 @@ function upsertEntity(orgId: string, projectId: string, documentId: string, e: E
     ).run(e.label, now, sourceDocumentId, metadataJson, metadataJson, existing.id);
     return existing.id;
   }
-  const id = `pse-${crypto.randomUUID().slice(0, 8)}`;
+  const id = stableSearchId("pse", orgId, projectId, e.entity_type, e.entity_key);
   db.prepare(
     `INSERT INTO project_search_entities
        (id, org_id, project_id, entity_type, entity_key, label, aliases_json, source_document_id, metadata_json, first_seen_at, last_seen_at)
@@ -411,7 +463,7 @@ function persistGraph(
     const sourceId = idByKey.get(`${edge.source_type}:${edge.source_key}`);
     const targetId = idByKey.get(`${edge.target_type}:${edge.target_key}`);
     if (!sourceId || !targetId || sourceId === targetId) continue;
-    const id = `psg-${crypto.randomUUID().slice(0, 8)}`;
+    const id = stableSearchId("psg", orgId, projectId, sourceId, targetId, edge.edge_type);
     db.prepare(
       `INSERT INTO project_search_edges
          (id, org_id, project_id, source_entity_id, target_entity_id, edge_type, evidence_document_id, confidence_score, created_at)
@@ -425,6 +477,22 @@ function persistGraph(
   return { entities: graph.entities.length, edges: edgeCount };
 }
 
+/** Remove graph rows attributable to one document. Used to enforce the
+ * Slack/Confluence retrieval-only invariant even for legacy indexed rows. */
+function removeDocumentGraph(documentId: string): void {
+  db.prepare("DELETE FROM project_search_edges WHERE evidence_document_id = ?").run(documentId);
+  db.prepare("DELETE FROM project_search_entities WHERE source_document_id = ?").run(documentId);
+  db.prepare(
+    `DELETE FROM project_search_entities
+     WHERE source_document_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM project_search_edges e
+         WHERE e.source_entity_id = project_search_entities.id
+            OR e.target_entity_id = project_search_entities.id
+       )`,
+  ).run();
+}
+
 function upsertDirectEdge(
   orgId: string,
   projectId: string,
@@ -436,7 +504,7 @@ function upsertDirectEdge(
   now: string,
 ): void {
   if (sourceEntityId === targetEntityId) return;
-  const id = `psg-${crypto.randomUUID().slice(0, 8)}`;
+  const id = stableSearchId("psg", orgId, projectId, sourceEntityId, targetEntityId, edgeType);
   db.prepare(
     `INSERT INTO project_search_edges
        (id, org_id, project_id, source_entity_id, target_entity_id, edge_type, evidence_document_id, confidence_score, created_at)
@@ -461,9 +529,31 @@ interface DocRow {
  * entities/edges. Returns `reused: true` when the content hash was unchanged
  * and nothing needed rewriting.
  */
-export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentResult {
-  const hash = contentHash(input);
-  const now = new Date().toISOString();
+export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumentResult {
+  const bindingSource = rawInput.source === "github"
+    || rawInput.source === "jira"
+    || rawInput.source === "slack"
+    || rawInput.source === "confluence"
+    || rawInput.source === "git"
+    ? rawInput.source
+    : null;
+  const bindingVersion = bindingSource
+    ? connectorBindingVersion(loadProjectResources(rawInput.org_id, rawInput.project_id), bindingSource)
+    : null;
+  if (bindingSource && !bindingVersion) {
+    throw new ProjectEvidenceNormalizationError(
+      "resource_binding",
+      `Project search source has no eligible current project binding: ${bindingSource}`,
+    );
+  }
+  const scopedInput = bindingVersion && typeof rawInput.metadata?.resource_binding_version !== "string"
+    ? {
+        ...rawInput,
+        metadata: { ...(rawInput.metadata ?? {}), resource_binding_version: bindingVersion },
+      }
+    : rawInput;
+  const input = { ...scopedInput, ...normalizeProjectIndexContent(scopedInput) } as IndexDocumentInput;
+  input.graph_enabled = rawInput.graph_enabled ?? (input.source !== "slack" && input.source !== "confluence");
   const ftsAvailable = isProjectSearchFtsAvailable();
 
   const existing = db
@@ -472,7 +562,30 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
     )
     .get(input.org_id, input.project_id, input.source, input.source_id) as DocRow | undefined;
 
-  const documentId = existing?.id ?? `psd-${crypto.randomUUID().slice(0, 8)}`;
+  if (input.visibility !== "project_visible") {
+    if (existing) {
+      withTransaction(() => {
+        if (ftsAvailable) db.prepare("DELETE FROM project_search_fts WHERE document_id = ?").run(existing.id);
+        removeDocumentGraph(existing.id);
+        db.prepare("DELETE FROM project_search_documents WHERE id = ?").run(existing.id);
+      });
+    }
+    throw new ProjectEvidenceNormalizationError(
+      "visibility",
+      `Project search document visibility is not eligible for persistence: ${input.visibility}`,
+    );
+  }
+
+  const hash = contentHash(input);
+  const now = new Date().toISOString();
+
+  const documentId = existing?.id ?? stableSearchId(
+    "psd",
+    input.org_id,
+    input.project_id,
+    input.source,
+    input.source_id,
+  );
 
   return withTransaction(() => {
     // Always refresh document metadata (title/status/freshness can change cheaply).
@@ -480,7 +593,9 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
       db.prepare(
         `UPDATE project_search_documents SET
            source_type = ?, source_url = ?, title = ?, author = ?, status = ?, occurred_at = ?,
-           updated_at = ?, content_hash = ?, metadata_json = ?, permissions_json = ?, freshness_state = ?
+           updated_at = ?, content_hash = ?, metadata_json = ?, permissions_json = ?, freshness_state = ?,
+           source_instance = ?, native_id = ?, source_version = ?, visibility = ?, visibility_version = ?,
+           redaction_version = ?, normalized_content_hash = ?, source_updated_at = ?, graph_enabled = ?
          WHERE id = ?`,
       ).run(
         input.source_type,
@@ -494,14 +609,25 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
         JSON.stringify(input.metadata ?? {}),
         JSON.stringify(input.permissions ?? {}),
         input.freshness_state ?? "fresh",
+        input.source_instance ?? "legacy",
+        input.native_id ?? input.source_id,
+        input.source_version ?? null,
+        input.visibility ?? "project_visible",
+        input.visibility_version ?? "1",
+        input.redaction_version ?? "legacy",
+        input.normalized_content_hash ?? hash,
+        input.source_updated_at ?? null,
+        input.graph_enabled ? 1 : 0,
         documentId,
       );
     } else {
       db.prepare(
         `INSERT INTO project_search_documents
            (id, org_id, project_id, source, source_type, source_id, source_url, title, author, status,
-            occurred_at, ingested_at, updated_at, content_hash, metadata_json, permissions_json, freshness_state)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            occurred_at, ingested_at, updated_at, content_hash, metadata_json, permissions_json, freshness_state,
+            source_instance, native_id, source_version, visibility, visibility_version, redaction_version,
+            normalized_content_hash, source_updated_at, graph_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         documentId,
         input.org_id,
@@ -520,8 +646,19 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
         JSON.stringify(input.metadata ?? {}),
         JSON.stringify(input.permissions ?? {}),
         input.freshness_state ?? "fresh",
+        input.source_instance ?? "legacy",
+        input.native_id ?? input.source_id,
+        input.source_version ?? null,
+        input.visibility ?? "project_visible",
+        input.visibility_version ?? "1",
+        input.redaction_version ?? "legacy",
+        input.normalized_content_hash ?? hash,
+        input.source_updated_at ?? null,
+        input.graph_enabled ? 1 : 0,
       );
     }
+
+    if (!input.graph_enabled) removeDocumentGraph(documentId);
 
     // Content unchanged → keep existing chunks/embeddings/graph.
     if (existing && existing.content_hash === hash) {
@@ -545,7 +682,7 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
       : null;
 
     chunks.forEach((chunk, index) => {
-      const chunkId = `psc-${crypto.randomUUID().slice(0, 8)}`;
+      const chunkId = stableSearchId("psc", documentId, String(index), chunk.kind);
       insertChunk.run(
         chunkId,
         documentId,
@@ -561,7 +698,7 @@ export function indexProjectDocument(input: IndexDocumentInput): IndexDocumentRe
       insertFts?.run(chunkId, documentId, input.org_id, input.project_id, input.title, chunk.retrieval_text);
     });
 
-    persistGraph(input.org_id, input.project_id, documentId, extractGraph(input), now);
+    if (input.graph_enabled) persistGraph(input.org_id, input.project_id, documentId, extractGraph(input), now);
 
     return { document_id: documentId, chunks: chunks.length, reused: false };
   });
@@ -604,7 +741,7 @@ interface ImportSpecifier {
 function parseResources(raw: string | null | undefined): ProjectResources {
   if (!raw) return {};
   try {
-    return JSON.parse(raw) as ProjectResources;
+    return sanitizeProjectResources(JSON.parse(raw) as ProjectResources);
   } catch {
     return {};
   }
@@ -628,9 +765,9 @@ function gitOutput(repoPath: string, args: string[], maxBuffer = 16 * 1024 * 102
 
 function canonicalGitRepoPath(repoPath: string): string | null {
   try {
-    if (!repoPath || !fs.existsSync(repoPath)) return null;
+    if (!repoPath || !fs.existsSync(repoPath) || !isAllowedProjectGitPath(repoPath)) return null;
     const root = gitOutput(repoPath, ["rev-parse", "--show-toplevel"]).trim();
-    return root ? path.resolve(root) : null;
+    return root && isAllowedProjectGitPath(root) ? fs.realpathSync.native(root) : null;
   } catch {
     return null;
   }
@@ -708,9 +845,14 @@ function readIndexableFile(repoPath: string, relPath: string): string | null {
   const abs = path.resolve(repoPath, relPath);
   if (!abs.startsWith(`${repoPath}${path.sep}`)) return null;
   try {
-    const stat = fs.statSync(abs);
+    // Never dereference a tracked symlink: its target can move outside the
+    // admitted repository even while the Git path itself remains in scope.
+    if (fs.lstatSync(abs).isSymbolicLink()) return null;
+    const canonical = fs.realpathSync.native(abs);
+    if (!canonical.startsWith(`${repoPath}${path.sep}`)) return null;
+    const stat = fs.statSync(canonical);
     if (!stat.isFile() || stat.size > MAX_INDEXED_FILE_BYTES) return null;
-    const content = fs.readFileSync(abs, "utf8");
+    const content = fs.readFileSync(canonical, "utf8");
     if (content.includes("\0")) return null;
     return content;
   } catch {
@@ -1085,6 +1227,16 @@ export function documentInputFromEvidence(evidence: ProjectEvidenceItem): IndexD
     occurred_at: evidence.occurred_at,
     body: evidence.body || evidence.summary,
     metadata: meta,
+    permissions: { visibility: evidence.visibility ?? "project_visible" },
+    source_instance: evidence.source_instance,
+    native_id: evidence.native_id,
+    source_version: evidence.source_version,
+    visibility: evidence.visibility ?? "project_visible",
+    visibility_version: evidence.visibility_version,
+    redaction_version: evidence.redaction_version,
+    normalized_content_hash: evidence.normalized_content_hash,
+    source_updated_at: evidence.source_updated_at,
+    graph_enabled: evidence.source !== "slack" && evidence.source !== "confluence",
   };
 }
 
@@ -1117,6 +1269,14 @@ interface EvidenceBackfillRow {
   metadata_json: string;
   confidence_score: number;
   promotable: number;
+  source_instance: string;
+  native_id: string | null;
+  source_version: string | null;
+  visibility: ProjectEvidenceVisibility | null;
+  visibility_version: string | null;
+  redaction_version: string | null;
+  normalized_content_hash: string | null;
+  source_updated_at: string | null;
 }
 
 interface UpdateBackfillRow {
@@ -1161,8 +1321,11 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
   const evidence = db
     .prepare(
       `SELECT id, org_id, project_id, source, source_type, source_id, source_url, source_title,
-              summary, body, author, occurred_at, metadata_json, confidence_score, promotable
-       FROM project_evidence_items WHERE org_id = ? AND project_id = ?`,
+              summary, body, author, occurred_at, metadata_json, confidence_score, promotable,
+              source_instance, native_id, source_version, visibility, visibility_version, redaction_version,
+              normalized_content_hash, source_updated_at
+       FROM project_evidence_items
+       WHERE org_id = ? AND project_id = ? AND visibility = 'project_visible'`,
     )
     .all(orgId, projectId) as unknown as EvidenceBackfillRow[];
   for (const row of evidence) {
@@ -1184,6 +1347,14 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
         metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
         confidence_score: row.confidence_score,
         promotable: row.promotable === 1,
+        source_instance: row.source_instance,
+        native_id: row.native_id ?? row.source_id,
+        ...(row.source_version ? { source_version: row.source_version } : {}),
+        visibility: row.visibility ?? "unknown",
+        visibility_version: row.visibility_version ?? "1",
+        redaction_version: row.redaction_version ?? "legacy",
+        ...(row.normalized_content_hash ? { normalized_content_hash: row.normalized_content_hash } : {}),
+        ...(row.source_updated_at ? { source_updated_at: row.source_updated_at } : {}),
       }),
     );
   }
@@ -1363,14 +1534,19 @@ interface EmbedChunkRow {
  */
 export async function embedProjectSearchChunks(orgId: string, projectId: string, limit = 5000): Promise<number> {
   if (!isEmbeddingAvailable()) return 0;
+  const eligibility = projectResourceEligibilitySql("d", loadProjectResources(orgId, projectId));
   const rows = db
     .prepare(
-      `SELECT id, text, retrieval_text, embedding_text_hash
-       FROM project_search_chunks
-       WHERE org_id = ? AND project_id = ?
-       ORDER BY created_at ASC`,
+      `SELECT c.id, c.text, c.retrieval_text, c.embedding_text_hash
+       FROM project_search_chunks c
+       JOIN project_search_documents d ON d.id = c.document_id
+       WHERE c.org_id = ? AND c.project_id = ?
+         AND d.visibility = 'project_visible'
+         AND d.freshness_state != 'deleted'
+         AND ${eligibility.sql}
+       ORDER BY c.created_at ASC`,
     )
-    .all(orgId, projectId) as unknown as EmbedChunkRow[];
+    .all(orgId, projectId, ...eligibility.params) as unknown as EmbedChunkRow[];
 
   const update = db.prepare(
     "UPDATE project_search_chunks SET embedding_json = ?, embedding_model = ?, embedding_text_hash = ? WHERE id = ?",

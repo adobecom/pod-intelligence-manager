@@ -2,10 +2,19 @@
 
 const SECRET_PATTERNS = [
   { name: "AWS Access Key", pattern: /AKIA[0-9A-Z]{16}/ },
-  { name: "JWT Token", pattern: /eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+/ },
+  { name: "AWS Secret Key", pattern: /aws_secret_access_key\s*[:=]\s*["']?[A-Za-z0-9/+=]{32,}["']?/i },
+  { name: "JWT Token", pattern: /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/ },
   { name: "Connection String", pattern: /(postgres|mysql|mongodb|redis):\/\/[^\s"']+/ },
-  { name: "PEM Private Key", pattern: /-----BEGIN[A-Z ]*PRIVATE KEY-----/ },
+  {
+    name: "PEM Private Key",
+    pattern: /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/,
+  },
+  { name: "Slack Token", pattern: /xox[baprs]-[A-Za-z0-9-]{10,}/ },
+  { name: "GitHub Token", pattern: /(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})/ },
+  { name: "OpenAI Key", pattern: /sk-[A-Za-z0-9_-]{20,}/ },
+  { name: "Bearer Token", pattern: /\bBearer\s+[A-Za-z0-9._~+\/-]{12,}/i },
   { name: "Generic Secret", pattern: /(secret|password|token|api[_-]?key)\s*[:=]\s*['"][^'"]{8,}['"]/i },
+  { name: "Generic Secret", pattern: /(secret|password|token|api[_-]?key)\s*[:=]\s*[^\s,'";]{8,}/i },
 ];
 
 export interface SecretScanResult {
