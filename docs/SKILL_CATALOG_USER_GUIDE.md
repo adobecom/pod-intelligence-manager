@@ -143,6 +143,8 @@ MCP project context resolves in this order: explicit `project_id`,
 omit `base_commit_sha` to use the selected source's newest ready default-branch
 snapshot. Mimir pull-request checks, CI, and replay should continue to send
 their explicit source and exact base SHA.
+If the assistant asks which catalog to use, choose the source configured by your
+team, such as `mimir-main`.
 
 ## Building an IP-restricted catalog locally
 
