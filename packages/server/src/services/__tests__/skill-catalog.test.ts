@@ -862,6 +862,40 @@ describe("deterministic skill conflicts", () => {
     );
   });
 
+  it("uses the newest ready default-branch snapshot when no SHA is supplied", async () => {
+    const source = await readyCatalog();
+    const outcome = await validateSkillConflicts({
+      orgId: ORG_A,
+      sourceId: source.sourceId,
+      candidates: [
+        {
+          candidateId: "latest-default",
+          name: "Different",
+          proposedPath: "projects/alpha/skills/review.md",
+          targetNamespace: "project:alpha",
+          body: "# Different\n\nDifferent behavior.",
+        },
+      ],
+    });
+
+    expect(outcome).toMatchObject({
+      status: "ready",
+      response: {
+        catalog: {
+          commitSha: COMMIT_A,
+          snapshotState: "entries_ready",
+        },
+        results: [
+          {
+            candidateId: "latest-default",
+            status: "conflict_found",
+            conflicts: [{ kind: "exact_path" }],
+          },
+        ],
+      },
+    });
+  });
+
   it("rebuilds a stale matcher snapshot before returning a verdict", async () => {
     const source = await readyCatalog();
     testDb

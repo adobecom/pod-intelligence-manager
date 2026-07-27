@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
 import test, { beforeEach } from "node:test";
+import { execFileSync } from "node:child_process";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { z, type ZodRawShape } from "zod";
 
 process.env.PIM_API_URL = "http://pim.test";
@@ -84,6 +92,7 @@ function validCandidate() {
 
 beforeEach(() => {
   process.env.PIM_ORG_SLUG = "adobecom";
+  delete process.env.PIM_PROJECT_ID;
   api._resetOrgSelectionForTests();
 });
 
@@ -103,6 +112,14 @@ test("registers bounded skill schemas without the stale intent phase", () => {
   const conflictSchema = z.object(conflicts.schema);
   const catalogSchema = z.object(catalog.schema);
 
+  assert.doesNotThrow(() =>
+    searchSchema.parse({
+      query: "Review pull requests",
+    }));
+  assert.doesNotThrow(() =>
+    conflictSchema.parse({
+      candidates: [validCandidate()],
+    }));
   assert.throws(() =>
     searchSchema.parse({
       source_id: "mimir-main",
@@ -181,6 +198,79 @@ test("search_skills maps MCP names to the advisory search API", async () => {
   assert.equal(calls.filter((call) => call.url.endsWith("/api/skill-search")).length, 1);
 });
 
+test("search_skills sends inferred project context without guessing a source", async () => {
+  process.env.PIM_PROJECT_ID = "project-from-env";
+  const calls = installFetch((url, init) => {
+    assert.equal(url, "http://pim.test/api/skill-search");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      projectId: "project-from-env",
+      query: "Review pull requests",
+    });
+    return jsonResponse({
+      status: "ready",
+      catalog: {
+        sourceId: "mimir-main",
+        selectionMode: "project",
+        commitSha: FULL_SHA,
+        snapshotState: "search_ready",
+      },
+      results: [],
+    });
+  });
+  const tool = registerToolHandlers().get("search_skills")!;
+
+  const result = parseToolResult(await tool.handler({
+    query: "Review pull requests",
+  }));
+
+  assert.equal((result.catalog as { selectionMode: string }).selectionMode, "project");
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/skill-search")).length, 1);
+});
+
+test("explicit MCP project context takes precedence over PIM_PROJECT_ID", async () => {
+  process.env.PIM_PROJECT_ID = "project-from-env";
+  installFetch((_url, init) => {
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      projectId: "project-explicit",
+      query: "Review pull requests",
+    });
+    return jsonResponse({ status: "unavailable", results: [] });
+  });
+  const tool = registerToolHandlers().get("search_skills")!;
+
+  await tool.handler({
+    project_id: "project-explicit",
+    query: "Review pull requests",
+  });
+});
+
+test("MCP reads projectId from the repository .pim.json after the environment", async () => {
+  const originalCwd = process.cwd();
+  const tempRoot = mkdtempSync(path.join(os.tmpdir(), "pim-mcp-project-"));
+  try {
+    execFileSync("git", ["init", "--quiet", tempRoot]);
+    writeFileSync(
+      path.join(tempRoot, ".pim.json"),
+      JSON.stringify({ projectId: "project-from-repo" }),
+      "utf8",
+    );
+    process.chdir(tempRoot);
+    installFetch((_url, init) => {
+      assert.deepEqual(JSON.parse(String(init?.body)), {
+        projectId: "project-from-repo",
+        query: "Review pull requests",
+      });
+      return jsonResponse({ status: "unavailable", results: [] });
+    });
+    const tool = registerToolHandlers().get("search_skills")!;
+
+    await tool.handler({ query: "Review pull requests" });
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("search_skills preserves unavailable as a non-verdict", async () => {
   installFetch((url) => {
     assert.equal(url, "http://pim.test/api/skill-search");
@@ -250,6 +340,55 @@ test("check_skill_conflicts maps final candidates and preserves facts", async ()
     { path: "shared/skills/reviewer.md", similarity: 0.7 },
   ]);
   assert.equal(calls.filter((call) => call.url.endsWith("/api/skill-conflicts")).length, 1);
+});
+
+test("check_skill_conflicts normally sends project context and candidates without source or SHA", async () => {
+  process.env.PIM_PROJECT_ID = "project-doodlebug";
+  installFetch((url, init) => {
+    assert.equal(url, "http://pim.test/api/skill-conflicts");
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    assert.equal(body.projectId, "project-doodlebug");
+    assert.equal("sourceId" in body, false);
+    assert.equal("baseCommitSha" in body, false);
+    assert.deepEqual(body.candidates, [
+      {
+        candidateId: "candidate-1",
+        name: "Pull Request Review",
+        description: "Reviews pull requests for correctness and security.",
+        proposedPath: "projects/example/skills/pr-review.md",
+        targetNamespace: "project:example",
+        body: "# Pull Request Review\n\nReview the proposed changes.",
+        replacesPath: "projects/example/skills/old-review.md",
+      },
+    ]);
+    return jsonResponse({
+      catalog: {
+        sourceId: "mimir-main",
+        selectionMode: "project",
+        commitSha: FULL_SHA,
+        snapshotState: "entries_ready",
+      },
+      matcherVersion: "v1",
+      results: [
+        {
+          candidateId: "candidate-1",
+          status: "clear",
+          conflicts: [],
+          related: [],
+        },
+      ],
+    });
+  });
+  const tool = registerToolHandlers().get("check_skill_conflicts")!;
+
+  const result = parseToolResult(await tool.handler({
+    candidates: [validCandidate()],
+  }));
+
+  assert.equal(
+    (result.catalog as { selectionMode: string }).selectionMode,
+    "project",
+  );
 });
 
 test("check_skill_conflicts returns a 202 catalog_building body for retry", async () => {

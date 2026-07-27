@@ -309,6 +309,15 @@ export function ProjectDashboard() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<ProjectMemoryCandidate[]>([]);
   const [candidateBusy, setCandidateBusy] = useState<Set<string>>(new Set());
+  const [catalogConfig, setCatalogConfig] =
+    useState<api.SkillCatalogConfiguration | null>(null);
+  const [catalogOverrideDraft, setCatalogOverrideDraft] = useState<
+    string | null
+  >(null);
+  const [catalogConfigError, setCatalogConfigError] = useState<string | null>(
+    null,
+  );
+  const [savingCatalogConfig, setSavingCatalogConfig] = useState(false);
 
   useEffect(() => {
     if (!project) return;
@@ -325,6 +334,33 @@ export function ProjectDashboard() {
   useEffect(() => {
     if (!project) return;
     void loadProjectMemory(project.project_id);
+  }, [project?.project_id]);
+
+  useEffect(() => {
+    if (!project) return;
+    let cancelled = false;
+    void api
+      .getSkillCatalogConfiguration(project.project_id)
+      .then((configuration) => {
+        if (cancelled) return;
+        setCatalogConfig(configuration);
+        setCatalogOverrideDraft(
+          configuration.selection.projectOverrideSourceId,
+        );
+        setCatalogConfigError(null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCatalogConfigError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load skill catalog configuration",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [project?.project_id]);
 
   if (!project) return null;
@@ -429,6 +465,29 @@ export function ProjectDashboard() {
     }
   }
 
+  async function handleSaveCatalogOverride() {
+    setCatalogConfigError(null);
+    setSavingCatalogConfig(true);
+    try {
+      const configuration = await api.putProjectSkillCatalogSource(
+        projectId,
+        catalogOverrideDraft,
+      );
+      setCatalogConfig(configuration);
+      setCatalogOverrideDraft(
+        configuration.selection.projectOverrideSourceId,
+      );
+    } catch (err) {
+      setCatalogConfigError(
+        err instanceof Error
+          ? err.message
+          : "Failed to save skill catalog configuration",
+      );
+    } finally {
+      setSavingCatalogConfig(false);
+    }
+  }
+
   return (
     <div className={column}>
       <div className={style({ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" })}>
@@ -461,6 +520,91 @@ export function ProjectDashboard() {
       <Text styles={style({ font: "body-2xs", color: "neutral-subdued" })}>
         Created {project.created_at}
       </Text>
+
+      <div className={section}>
+        <Heading level={3} styles={style({ marginY: 0 })}>
+          Skill Catalog
+        </Heading>
+        <Text styles={style({ font: "body-sm", color: "neutral-subdued", marginBottom: 12 })}>
+          Choose a catalog for this project, or inherit the organization default. Agents can then search and check final skill candidates without sending a source ID or commit SHA.
+        </Text>
+        {catalogConfigError && (
+          <InlineAlert variant="negative">
+            <Content>{catalogConfigError}</Content>
+          </InlineAlert>
+        )}
+        {catalogConfig && (
+          <div className={style({ display: "flex", flexDirection: "column", gap: 12 })}>
+            <div className={row}>
+              <Picker
+                label="Project catalog"
+                selectedKey={catalogOverrideDraft ?? "org-default"}
+                onSelectionChange={(key) => {
+                  setCatalogOverrideDraft(
+                    key === "org-default" ? null : String(key),
+                  );
+                }}
+              >
+                <PickerItem id="org-default">Use org default</PickerItem>
+                {catalogConfig.sources.map((source) => (
+                    <PickerItem key={source.sourceId} id={source.sourceId}>
+                      {source.displayName} ({source.repository.owner}/{source.repository.repo})
+                      {source.enabled ? "" : " · polling disabled"}
+                    </PickerItem>
+                  ))}
+              </Picker>
+              <Button
+                variant="accent"
+                onPress={handleSaveCatalogOverride}
+                isPending={savingCatalogConfig}
+                isDisabled={
+                  catalogOverrideDraft ===
+                  catalogConfig.selection.projectOverrideSourceId
+                }
+              >
+                Save project catalog
+              </Button>
+            </div>
+            {catalogConfig.selection.effectiveSource ? (
+              <div className={summaryCard}>
+                <div className={compactRow}>
+                  <Text styles={style({ fontWeight: "bold" })}>
+                    {catalogConfig.selection.effectiveSource.displayName}
+                  </Text>
+                  <Badge size="S" variant="informative">
+                    {catalogConfig.selection.mode === "project"
+                      ? "Project override"
+                      : "Org default"}
+                  </Badge>
+                  <Badge size="S" variant="neutral">
+                    Sync: {catalogConfig.selection.effectiveSource.syncStatus}
+                  </Badge>
+                  {!catalogConfig.selection.effectiveSource.enabled && (
+                    <Badge size="S" variant="notice">
+                      Polling disabled
+                    </Badge>
+                  )}
+                </div>
+                <Text styles={style({ font: "body-sm", marginTop: 8 })}>
+                  {catalogConfig.selection.effectiveSource.repository.owner}/
+                  {catalogConfig.selection.effectiveSource.repository.repo} ·{" "}
+                  {catalogConfig.selection.effectiveSource.repository.defaultRef}
+                </Text>
+                <Text styles={style({ font: "code-sm", color: "neutral-subdued", marginTop: 4 })}>
+                  Latest indexed:{" "}
+                  {catalogConfig.selection.effectiveSource.latestIndexedCommitSha ?? "Not indexed"}
+                </Text>
+              </div>
+            ) : (
+              <InlineAlert variant="notice">
+                <Content>
+                  No skill catalog is configured for this project or organization.
+                </Content>
+              </InlineAlert>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className={section}>
         <Heading level={3} styles={style({ marginY: 0 })}>

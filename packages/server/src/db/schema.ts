@@ -1078,6 +1078,36 @@ export function createTables() {
   } catch { /* tunnels table may not exist yet on brand-new DBs */ }
 
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)"); } catch { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_project_org
+        ON projects(project_id, org_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_catalog_sources_org_source
+        ON skill_catalog_sources(org_id, source_id);
+
+      CREATE TABLE IF NOT EXISTS skill_catalog_org_defaults (
+        org_id TEXT PRIMARY KEY REFERENCES orgs(org_id) ON DELETE CASCADE,
+        source_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (org_id, source_id)
+          REFERENCES skill_catalog_sources(org_id, source_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_catalog_project_overrides (
+        project_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (project_id, org_id)
+          REFERENCES projects(project_id, org_id) ON DELETE CASCADE,
+        FOREIGN KEY (org_id, source_id)
+          REFERENCES skill_catalog_sources(org_id, source_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skill_catalog_project_overrides_org
+        ON skill_catalog_project_overrides(org_id, project_id);
+    `);
+  } catch { /* already exists or legacy schema is still being migrated */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_pods_org ON pods(org_id)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_org_time ON context_updates(org_id, timestamp DESC)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_conflicts_org ON conflicts(org_id)"); } catch { /* already exists */ }
