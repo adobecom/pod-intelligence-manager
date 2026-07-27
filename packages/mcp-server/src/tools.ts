@@ -171,6 +171,48 @@ const ActorSchema = z.object({
   display_name: z.string().optional(),
 });
 
+const SkillSourceId = z
+  .string()
+  .min(1)
+  .max(128)
+  .describe("Configured skill catalog source ID, e.g. 'mimir-main'");
+
+const SkillNamespace = z
+  .string()
+  .refine(
+    (value) =>
+      value === "shared" ||
+      /^project:[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/.test(value),
+    "Must be shared or project:<id>",
+  )
+  .describe("Skill namespace: 'shared' or 'project:<id>'");
+
+const FullGitSha = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/i, "Must be a full Git SHA")
+  .describe("Full 40-character base commit SHA");
+
+const SkillConflictCandidateInputSchema = z.object({
+  candidate_id: z.string().min(1).max(200).describe("Stable ID for this candidate"),
+  name: z.string().min(1).max(500).describe("Final skill name"),
+  description: z.string().max(4_000).optional(),
+  proposed_path: z
+    .string()
+    .min(1)
+    .max(1_024)
+    .describe("Final repository-relative path for the skill"),
+  target_namespace: SkillNamespace,
+  body: z
+    .string()
+    .describe("Complete final Markdown bytes. The API enforces 256 KiB per candidate."),
+  replaces_path: z
+    .string()
+    .min(1)
+    .max(1_024)
+    .optional()
+    .describe("Base-revision path replaced by a modified or renamed skill"),
+});
+
 /* ------------------------------------------------------------------ */
 /*  Registration                                                      */
 /* ------------------------------------------------------------------ */
@@ -196,6 +238,108 @@ export function registerTools(server: McpServer) {
     },
     async ({ org_slug }) => {
       return json(await setActiveOrg(org_slug));
+    },
+  );
+
+  // ── skill catalog & conflict detection ──────────────────────────
+
+  server.tool(
+    "search_skills",
+    "Search the configured skill catalog before drafting a new skill. Results are advisory reading suggestions, not a conflict verdict: an empty or unavailable result never means the draft is clear. Search needs a search-ready catalog snapshot and may be unavailable if embeddings are still building.",
+    {
+      source_id: SkillSourceId,
+      query: z
+        .string()
+        .min(1)
+        .max(16_000)
+        .describe("Plain-language description of the skill you intend to create"),
+      tentative_name: z
+        .string()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Tentative skill name, used to highlight name collisions"),
+      target_namespace: SkillNamespace.optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .optional()
+        .describe("Maximum results; defaults to 5"),
+    },
+    async ({ source_id, query, tentative_name, target_namespace, limit }) => {
+      return json(await apiPost("/api/skill-search", {
+        sourceId: source_id,
+        query,
+        ...(tentative_name !== undefined ? { tentativeName: tentative_name } : {}),
+        ...(target_namespace !== undefined ? { targetNamespace: target_namespace } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      }));
+    },
+  );
+
+  server.tool(
+    "check_skill_conflicts",
+    "Run the required deterministic conflict check on complete final skill Markdown before creation or submission. Send the base commit SHA the draft was prepared against. Deterministic conflicts are the verdict; any related skills are advisory only. A response with error='catalog_building' means the exact snapshot is still being built; retry shortly. API failures are not a clear verdict.",
+    {
+      source_id: SkillSourceId,
+      base_commit_sha: FullGitSha,
+      candidates: z
+        .array(SkillConflictCandidateInputSchema)
+        .min(1)
+        .max(20)
+        .describe("One to 20 final skill candidates; aggregate Markdown is limited to 1 MiB"),
+    },
+    async ({ source_id, base_commit_sha, candidates }) => {
+      return json(await apiPost("/api/skill-conflicts", {
+        sourceId: source_id,
+        baseCommitSha: base_commit_sha,
+        candidates: candidates.map((candidate) => ({
+          candidateId: candidate.candidate_id,
+          name: candidate.name,
+          ...(candidate.description !== undefined
+            ? { description: candidate.description }
+            : {}),
+          proposedPath: candidate.proposed_path,
+          targetNamespace: candidate.target_namespace,
+          body: candidate.body,
+          ...(candidate.replaces_path !== undefined
+            ? { replacesPath: candidate.replaces_path }
+            : {}),
+        })),
+      }));
+    },
+  );
+
+  server.tool(
+    "view_skill_catalog",
+    "Browse a configured skill catalog snapshot without modifying it. Omit commit_sha for the latest entries-ready snapshot, or pin it to inspect the same base revision used by a conflict check. If the response has error='catalog_building', retry shortly with the same inputs and cursor.",
+    {
+      source_id: SkillSourceId,
+      commit_sha: FullGitSha.optional(),
+      namespace: SkillNamespace.optional(),
+      cursor: z
+        .string()
+        .min(1)
+        .max(4_000)
+        .optional()
+        .describe("Opaque nextCursor returned by the previous page"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Entries per page; defaults to 100"),
+    },
+    async ({ source_id, commit_sha, namespace, cursor, limit }) => {
+      const query = new URLSearchParams({ sourceId: source_id });
+      if (commit_sha !== undefined) query.set("commitSha", commit_sha);
+      if (namespace !== undefined) query.set("namespace", namespace);
+      if (cursor !== undefined) query.set("cursor", cursor);
+      if (limit !== undefined) query.set("limit", String(limit));
+      return json(await apiFetch(`/api/skill-catalog?${query.toString()}`));
     },
   );
 
