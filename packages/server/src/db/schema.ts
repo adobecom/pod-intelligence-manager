@@ -622,6 +622,8 @@ export function createTables() {
       redacted_text TEXT,
       embedding_json TEXT,
       embedding_status TEXT NOT NULL DEFAULT 'pending',
+      embedding_attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
       matcher_version TEXT NOT NULL,
       created_at TEXT NOT NULL,
       PRIMARY KEY (source_id, blob_sha)
@@ -663,6 +665,9 @@ export function createTables() {
   // Migration guards for existing databases
   try { db.exec("ALTER TABLE skill_catalog_sources ADD COLUMN webhook_secret_alias TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE skill_catalog_snapshots ADD COLUMN is_default_ref INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE skill_catalog_blobs ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE skill_catalog_blobs ADD COLUMN next_retry_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_skill_catalog_blobs_embedding_retry ON skill_catalog_blobs(embedding_status, next_retry_at, embedding_attempts)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_skill_catalog_snapshots_default_ready ON skill_catalog_snapshots(source_id, is_default_ref DESC, state, created_at DESC)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE users ADD COLUMN is_service INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try {

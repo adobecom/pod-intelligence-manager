@@ -20,6 +20,7 @@ const conflictMocks = vi.hoisted(() => ({
 }));
 
 const searchMocks = vi.hoisted(() => ({
+  resetSkillCatalogEmbeddingRetries: vi.fn(),
   runSkillCatalogEmbeddingBackfill: vi.fn(),
   searchSkillCatalog: vi.fn(),
 }));
@@ -110,6 +111,19 @@ beforeEach(async () => {
     entries: [],
     nextPath: null,
   });
+  catalogMocks.syncSkillCatalogSource.mockResolvedValue({
+    state: "entries_ready",
+    snapshot: {
+      snapshotId: "snapshot",
+      sourceId: SOURCE.sourceId,
+      orgId: "org-route",
+      commitSha: "a".repeat(40),
+      state: "entries_ready",
+      isDefaultRef: true,
+      createdAt: SOURCE.createdAt,
+    },
+  });
+  searchMocks.resetSkillCatalogEmbeddingRetries.mockReturnValue(0);
   searchMocks.runSkillCatalogEmbeddingBackfill.mockResolvedValue({
     available: false,
     processed: 0,
@@ -277,6 +291,21 @@ describe("skill catalog admin routes", () => {
       SOURCE.sourceId,
       "MIMIR_WEBHOOK_SECRET",
     );
+  });
+
+  it("resets exhausted embedding retries when an administrator syncs a source", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/skill-catalog/sources/${SOURCE.sourceId}/sync`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(
+      searchMocks.resetSkillCatalogEmbeddingRetries,
+    ).toHaveBeenCalledWith("org-route", SOURCE.sourceId);
+    expect(
+      searchMocks.runSkillCatalogEmbeddingBackfill,
+    ).toHaveBeenCalledOnce();
   });
 });
 

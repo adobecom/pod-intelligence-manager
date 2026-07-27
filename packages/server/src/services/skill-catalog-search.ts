@@ -29,6 +29,8 @@ export const SKILL_CATALOG_EMBED_DELAY_MS = 1_100;
 export const DEFAULT_SKILL_SEARCH_LIMIT = 5;
 export const MAX_SKILL_SEARCH_LIMIT = 20;
 export const MAX_RELATED_SKILLS = 5;
+export const SKILL_CATALOG_EMBED_MAX_ATTEMPTS = 10;
+export const SKILL_CATALOG_EMBED_RETRY_BASE_MS = 60_000;
 
 const EXCERPT_MAX_CHARS = 500;
 
@@ -100,6 +102,9 @@ interface PendingBlobRow {
   normalized_name: string;
   description: string | null;
   redacted_text: string | null;
+  embedding_status: "pending" | "failed";
+  embedding_attempts: number;
+  next_retry_at: string | null;
   path: string;
 }
 
@@ -199,6 +204,9 @@ function pendingBlobRows(): PendingBlobRow[] {
          b.normalized_name,
          b.description,
          b.redacted_text,
+         b.embedding_status,
+         b.embedding_attempts,
+         b.next_retry_at,
          MIN(e.path) AS path
        FROM skill_catalog_blobs b
        INNER JOIN skill_catalog_sources src
@@ -218,18 +226,69 @@ function pendingBlobRows(): PendingBlobRow[] {
          b.normalized_name,
          b.description,
          b.redacted_text,
+         b.embedding_status,
+         b.embedding_attempts,
+         b.next_retry_at,
          b.created_at
        ORDER BY b.created_at, b.source_id, b.blob_sha`,
     )
     .all() as unknown as PendingBlobRow[];
 }
 
+function retryDelayMs(attempts: number): number {
+  return SKILL_CATALOG_EMBED_RETRY_BASE_MS * 2 ** Math.max(0, attempts - 1);
+}
+
+function retryIsDue(row: PendingBlobRow, nowMs: number): boolean {
+  if (row.embedding_status === "pending") return true;
+  if (row.embedding_attempts >= SKILL_CATALOG_EMBED_MAX_ATTEMPTS) {
+    return false;
+  }
+  if (!row.next_retry_at) return true;
+  const nextRetryMs = Date.parse(row.next_retry_at);
+  return !Number.isFinite(nextRetryMs) || nextRetryMs <= nowMs;
+}
+
 function markBlobFailed(row: PendingBlobRow): void {
+  const attempts = Math.min(
+    SKILL_CATALOG_EMBED_MAX_ATTEMPTS,
+    Math.max(0, row.embedding_attempts) + 1,
+  );
+  const nextRetryAt =
+    attempts < SKILL_CATALOG_EMBED_MAX_ATTEMPTS
+      ? new Date(dependencies.now() + retryDelayMs(attempts)).toISOString()
+      : null;
   db.prepare(
     `UPDATE skill_catalog_blobs
-     SET embedding_json = NULL, embedding_status = 'failed'
+     SET embedding_json = NULL,
+         embedding_status = 'failed',
+         embedding_attempts = ?,
+         next_retry_at = ?
      WHERE org_id = ? AND source_id = ? AND blob_sha = ?`,
-  ).run(row.org_id, row.source_id, row.blob_sha);
+  ).run(
+    attempts,
+    nextRetryAt,
+    row.org_id,
+    row.source_id,
+    row.blob_sha,
+  );
+}
+
+/** Explicit operator recovery after credentials or another persistent cause is fixed. */
+export function resetSkillCatalogEmbeddingRetries(
+  orgId: string,
+  sourceId: string,
+): number {
+  const result = db.prepare(
+    `UPDATE skill_catalog_blobs
+     SET embedding_status = 'pending',
+         embedding_attempts = 0,
+         next_retry_at = NULL
+     WHERE org_id = ?
+       AND source_id = ?
+       AND embedding_status = 'failed'`,
+  ).run(orgId, sourceId);
+  return Number(result.changes);
 }
 
 /**
@@ -284,6 +343,9 @@ export function reconcileSkillCatalogSearchReadySnapshots(): {
 async function performEmbeddingBackfill(): Promise<SkillCatalogEmbeddingBackfillResult> {
   let snapshots = reconcileSkillCatalogSearchReadySnapshots();
   const rows = pendingBlobRows();
+  const dueRows = rows.filter((row) =>
+    retryIsDue(row, dependencies.now()),
+  );
   recordSkillCatalogMetric({
     name: "EmbeddingBackfillDepth",
     value: rows.length,
@@ -305,7 +367,7 @@ async function performEmbeddingBackfill(): Promise<SkillCatalogEmbeddingBackfill
   let ready = 0;
   let failed = 0;
 
-  for (const row of rows) {
+  for (const row of dueRows) {
     try {
       let redactedText = row.redacted_text?.trim() || "";
       if (!redactedText) {
@@ -334,7 +396,11 @@ async function performEmbeddingBackfill(): Promise<SkillCatalogEmbeddingBackfill
       }
       db.prepare(
         `UPDATE skill_catalog_blobs
-         SET redacted_text = ?, embedding_json = ?, embedding_status = 'ready'
+         SET redacted_text = ?,
+             embedding_json = ?,
+             embedding_status = 'ready',
+             embedding_attempts = 0,
+             next_retry_at = NULL
          WHERE org_id = ? AND source_id = ? AND blob_sha = ?`,
       ).run(
         redactedText,
@@ -358,7 +424,7 @@ async function performEmbeddingBackfill(): Promise<SkillCatalogEmbeddingBackfill
   });
   return {
     available: true,
-    processed: rows.length,
+    processed: dueRows.length,
     hydrated,
     ready,
     failed,

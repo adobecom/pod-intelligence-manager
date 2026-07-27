@@ -42,6 +42,7 @@ import {
   reconcileSkillCatalogSearchReadySnapshots,
   resetSkillCatalogSearchForTests,
   setSkillCatalogSearchDependenciesForTests,
+  SKILL_CATALOG_EMBED_MAX_ATTEMPTS,
 } from "../skill-catalog-search.js";
 import {
   SKILL_RELATED_LOOKUP_BUDGET_MS,
@@ -868,10 +869,17 @@ describe("deterministic skill conflicts", () => {
         `UPDATE skill_catalog_blobs
          SET matcher_version = 'legacy',
              normalized_name = 'legacy-name',
-             content_hash = 'legacy-hash'
+             content_hash = 'legacy-hash',
+             embedding_status = 'failed',
+             embedding_attempts = ?,
+             next_retry_at = '2099-01-01T00:00:00.000Z'
          WHERE source_id = ? AND blob_sha = ?`,
       )
-      .run(source.sourceId, BLOB_REVIEW);
+      .run(
+        SKILL_CATALOG_EMBED_MAX_ATTEMPTS,
+        source.sourceId,
+        BLOB_REVIEW,
+      );
 
     const candidate = {
       candidateId: "copied",
@@ -917,7 +925,8 @@ describe("deterministic skill conflicts", () => {
     });
     const rebuiltBlob = testDb
       .prepare(
-        `SELECT matcher_version, normalized_name, content_hash
+        `SELECT matcher_version, normalized_name, content_hash,
+                embedding_status, embedding_attempts, next_retry_at
          FROM skill_catalog_blobs
          WHERE source_id = ? AND blob_sha = ?`,
       )
@@ -925,11 +934,17 @@ describe("deterministic skill conflicts", () => {
       matcher_version: string;
       normalized_name: string;
       content_hash: string;
+      embedding_status: string;
+      embedding_attempts: number;
+      next_retry_at: string | null;
     };
     expect(rebuiltBlob).toEqual({
       matcher_version: SKILL_MATCHER_VERSION,
       normalized_name: "review-pr",
       content_hash: hashNormalizedSkillContent(REVIEW_BODY),
+      embedding_status: "pending",
+      embedding_attempts: 0,
+      next_retry_at: null,
     });
   });
 

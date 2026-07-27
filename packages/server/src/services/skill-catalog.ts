@@ -837,6 +837,8 @@ async function performSnapshotBuild(input: {
            redacted_text = excluded.redacted_text,
            embedding_json = NULL,
            embedding_status = 'pending',
+           embedding_attempts = 0,
+           next_retry_at = NULL,
            matcher_version = excluded.matcher_version`,
       );
       for (const blob of preparedBlobs) {

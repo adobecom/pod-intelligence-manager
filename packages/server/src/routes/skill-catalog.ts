@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_SKILL_SEARCH_LIMIT,
   MAX_SKILL_SEARCH_LIMIT,
+  resetSkillCatalogEmbeddingRetries,
   runSkillCatalogEmbeddingBackfill,
   searchSkillCatalog,
 } from "../services/skill-catalog-search.js";
@@ -262,6 +263,10 @@ export default async function skillCatalogRoutes(app: FastifyInstance) {
             commitSha: result.snapshot.commitSha,
           };
         }
+        resetSkillCatalogEmbeddingRetries(
+          req.org!.org_id,
+          req.params.sourceId,
+        );
         void runSkillCatalogEmbeddingBackfill().catch((error) => {
           req.log.warn(
             {
