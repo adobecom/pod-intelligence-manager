@@ -2,9 +2,9 @@
 # Build context = repo root. Build with:
 #   docker build --platform linux/amd64 -f packages/server/Dockerfile -t pim-server .
 #
-# This project runs the server via tsx (TypeScript runtime), not compiled JS.
-# @pim/shared exposes src/index.ts directly as main; there is no build step.
-# We install all deps (including tsx) in the builder, ship a copy as-is.
+# This project runs the server via tsx (TypeScript runtime), while workspace
+# dependency @pim/shared publishes compiled files from dist. The build context
+# intentionally excludes dist, so rebuild shared after installing dependencies.
 
 # ---------- Build / install stage ----------
 FROM --platform=linux/amd64 node:22-alpine AS build
@@ -19,6 +19,7 @@ RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 COPY . .
 
 RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @pim/shared build
 
 # ---------- Runtime stage ----------
 FROM --platform=linux/amd64 node:22-alpine AS runtime

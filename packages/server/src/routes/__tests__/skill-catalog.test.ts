@@ -25,6 +25,10 @@ const searchMocks = vi.hoisted(() => ({
   searchSkillCatalog: vi.fn(),
 }));
 
+const bundleMocks = vi.hoisted(() => ({
+  importSkillCatalogBundle: vi.fn(),
+}));
+
 vi.mock("../../services/skill-catalog.js", () => ({
   ...catalogMocks,
   SkillCatalogError: class SkillCatalogError extends Error {
@@ -50,6 +54,11 @@ vi.mock("../../services/skill-catalog-search.js", () => ({
   ...searchMocks,
 }));
 
+vi.mock("../../services/skill-catalog-bundle.js", () => ({
+  SKILL_CATALOG_BUNDLE_BODY_LIMIT: 64 * 1024 * 1024,
+  ...bundleMocks,
+}));
+
 import { registerJsonBodyParser } from "../../middleware/validation.js";
 import { SkillCatalogLayoutError } from "../../services/skill-catalog-layout.js";
 import skillCatalogRoutes from "../skill-catalog.js";
@@ -57,6 +66,7 @@ import skillCatalogRoutes from "../skill-catalog.js";
 let app: FastifyInstance;
 let conflictRouteConfig: FastifyContextConfig | undefined;
 let searchRouteConfig: FastifyContextConfig | undefined;
+let importRouteConfig: FastifyContextConfig | undefined;
 
 const SOURCE = {
   sourceId: "mimir-main",
@@ -141,9 +151,18 @@ beforeEach(async () => {
     },
     results: [],
   });
+  bundleMocks.importSkillCatalogBundle.mockReturnValue({
+    sourceId: SOURCE.sourceId,
+    commitSha: "a".repeat(40),
+    snapshotState: "search_ready",
+    entriesImported: 100,
+    blobsImported: 90,
+    embeddingDimensions: 512,
+  });
 
   conflictRouteConfig = undefined;
   searchRouteConfig = undefined;
+  importRouteConfig = undefined;
   app = Fastify();
   registerJsonBodyParser(app);
   app.addHook("onRoute", (options) => {
@@ -152,6 +171,9 @@ beforeEach(async () => {
     }
     if (options.url === "/api/skill-search") {
       searchRouteConfig = options.config;
+    }
+    if (options.url === "/api/skill-catalog/sources/:sourceId/import") {
+      importRouteConfig = options.config;
     }
   });
   app.addHook("onRequest", async (req: FastifyRequest) => {
@@ -214,6 +236,83 @@ describe("skill catalog admin routes", () => {
     });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().sources).toHaveLength(1);
+  });
+
+  it("imports a portable catalog bundle through an admin-only body-suppressed route", async () => {
+    const bundle = {
+      schemaVersion: "pim.skill-catalog-bundle.v1",
+      source: { sourceId: SOURCE.sourceId },
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/skill-catalog/sources/${SOURCE.sourceId}/import`,
+      payload: bundle,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      catalog: {
+        sourceId: SOURCE.sourceId,
+        commitSha: "a".repeat(40),
+        snapshotState: "search_ready",
+      },
+      imported: {
+        entries: 100,
+        blobs: 90,
+        embeddingDimensions: 512,
+      },
+    });
+    expect(bundleMocks.importSkillCatalogBundle).toHaveBeenCalledWith({
+      orgId: "org-route",
+      sourceId: SOURCE.sourceId,
+      bundle,
+    });
+    expect(importRouteConfig?.suppressRequestBodyLogging).toBe(true);
+
+    const forbidden = await app.inject({
+      method: "POST",
+      url: `/api/skill-catalog/sources/${SOURCE.sourceId}/import`,
+      headers: { "x-test-role": "member" },
+      payload: bundle,
+    });
+    expect(forbidden.statusCode).toBe(403);
+  });
+
+  it("requires an org-wide skill-catalog admin scope for service-token imports", async () => {
+    const url = `/api/skill-catalog/sources/${SOURCE.sourceId}/import`;
+    const missingScope = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        "x-test-service": "true",
+        "x-test-scopes": "skill-catalog:read",
+      },
+      payload: {},
+    });
+    expect(missingScope.statusCode).toBe(403);
+
+    const projectBound = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        "x-test-service": "true",
+        "x-test-scopes": "skill-catalog:admin",
+        "x-test-project-bound": "true",
+      },
+      payload: {},
+    });
+    expect(projectBound.statusCode).toBe(403);
+
+    const allowed = await app.inject({
+      method: "POST",
+      url,
+      headers: {
+        "x-test-service": "true",
+        "x-test-scopes": "skill-catalog:admin",
+      },
+      payload: {},
+    });
+    expect(allowed.statusCode).toBe(200);
   });
 
   it("returns an actionable 400 for invalid source layout rules", async () => {

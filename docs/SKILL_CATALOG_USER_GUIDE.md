@@ -127,3 +127,66 @@ Use this simple sequence whenever you create a skill:
 
 If the assistant asks which catalog to use, choose the source configured by your
 team, such as `mimir-main`.
+
+## Building an IP-restricted catalog locally
+
+If the hosted PIM cannot reach the repository because of an IP allowlist, build
+the catalog on a machine that can reach it and upload the derived index. The
+hosted service does not need repository access for the imported commit.
+
+The destination source must already be configured in PIM with the same source
+ID, repository, default ref, layout rules, and exclusions as the local build.
+Configure it with `enabled: false` when hosted polling cannot reach the
+repository. Disabled sources still accept admin imports and serve imported
+search/conflict snapshots; the background GitHub poller skips them.
+For Mimir, the defaults are:
+
+- source ID: `mimir-main`
+- repository: `Adobe-acom/mimir`
+- ref: `main`
+- project skills: `projects/*/skills/**/*.md`
+- shared skills: `shared/skills/**/*.md`
+
+Build the portable bundle from the repository API on the local machine:
+
+```bash
+npm --prefix packages/server run skill-catalog:bundle -- \
+  --credential-alias MIMIR_GITHUB_TOKEN \
+  --embed
+```
+
+`--embed` makes both semantic skill search and related-skill suggestions
+available. Omit it when only deterministic path/name/content conflict checks are
+needed. The default output is:
+
+```text
+.data/exports/mimir-main.skill-catalog.json
+```
+
+Upload it after the version containing the import route is deployed:
+
+```bash
+npm --prefix packages/server run skill-catalog:upload -- \
+  .data/exports/mimir-main.skill-catalog.json \
+  --base-url https://your-pim-host \
+  --org your-org-slug \
+  --create-source
+```
+
+The uploader uses `PIM_SERVICE_TOKEN`, then `PIM_ACCESS_TOKEN`, then the
+refreshable IMS login written by `pim login`. A service token needs the
+org-wide `skill-catalog:admin` scope; a human login needs the admin or owner
+role. `--create-source` creates the source as disabled if it does not exist, so
+the hosted background worker will not poll the IP-blocked repository. Omit that
+flag when the destination source is already configured.
+
+The bundle is commit-pinned and integrity-checked. It contains catalog paths,
+namespaces, normalized names, content hashes, secret-redacted retrieval text,
+and optional embeddings. It does not contain the GitHub credential or
+unredacted skill Markdown. PIM rejects a bundle if its repository identity,
+layout, matcher version, vector dimensions, or digest does not match.
+
+For exact pull-request checks, the requested `base_commit_sha` must be one of
+the imported snapshots. Rebuild and upload a new bundle when Mimir's target
+commit changes; the imported snapshot remains usable even while the hosted
+instance cannot reach GitHub.

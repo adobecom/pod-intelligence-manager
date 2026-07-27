@@ -9,7 +9,7 @@ export function isEmbeddingAvailable(): boolean {
   return !!(process.env.AWS_BEARER_TOKEN_BEDROCK && process.env.AWS_REGION);
 }
 
-function getEmbeddingDimensions(): number {
+export function getEmbeddingDimensions(): number {
   const raw = parseInt(process.env.EMBEDDING_DIMENSIONS ?? "", 10);
   return VALID_DIMENSIONS.has(raw) ? raw : DEFAULT_DIMENSIONS;
 }

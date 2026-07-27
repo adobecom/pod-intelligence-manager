@@ -12,7 +12,9 @@
     "retrieval-eval": "tsx scripts/kg-retrieval-eval.ts",
     "rescore-legacy": "tsx src/scripts/rescore-legacy-patterns.ts",
     "seed-project-search": "tsx src/scripts/seed-project-search.ts",
-    "skill-conflict-pr-check": "tsx src/scripts/skill-conflict-pr-check.ts"
+    "skill-conflict-pr-check": "tsx src/scripts/skill-conflict-pr-check.ts",
+    "skill-catalog:bundle": "tsx src/scripts/build-skill-catalog-bundle.ts",
+    "skill-catalog:upload": "tsx src/scripts/upload-skill-catalog-bundle.ts"
   },
   "dependencies": {
     "@pim/shared": "workspace:*",
