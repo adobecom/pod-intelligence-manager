@@ -75,6 +75,11 @@ If the pod returned by \`get_agent_session_context\` has \`conflict_pressure >= 
 - \`get_conflict_details(pod_id, conflict_id)\` — full conflict record including opposing sides, analysis, impact, and pending work at risk of rework.
 - \`resolve_conflict(pod_id, conflict_id, resolution, resolved_by)\` — triggers pressure recalculation, WebSocket broadcast, and Slack notification. Immediately adds a \`resolved_conflict\` node to the knowledge graph.
 
+### Skill Catalog & Skill Conflict Detection
+- \`search_skills(source_id, query, tentative_name?, target_namespace?, limit?)\` — call before drafting a skill to find existing skills worth reading. This is advisory: \`unavailable\` or an empty result is never a clear verdict.
+- \`check_skill_conflicts(source_id, base_commit_sha, candidates)\` — call with complete final Markdown before creating or submitting skills. Deterministic conflicts are the verdict; \`related\` entries are advisory. If the result has \`error: "catalog_building"\`, retry shortly with the same inputs. Never treat an API error as clear.
+- \`view_skill_catalog(source_id, commit_sha?, namespace?, cursor?, limit?)\` — browse the latest entries-ready catalog or a commit-pinned snapshot. Use the opaque \`nextCursor\` for pagination.
+
 ### Tunnels
 - \`create_tunnel(pod_id, dev_name, branch, port)\` — register a localhost dev tunnel for a pod member.
 - \`disconnect_tunnel(pod_id, tunnel_id)\` — manually disconnect a tunnel. Idle tunnels are NOT auto-disconnected — only heartbeat failure disconnects them.
