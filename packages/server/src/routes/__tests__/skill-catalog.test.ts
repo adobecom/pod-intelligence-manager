@@ -9,10 +9,19 @@ const catalogMocks = vi.hoisted(() => ({
   configureSkillCatalogWebhookSecret: vi.fn(),
   createSkillCatalogSource: vi.fn(),
   ensureExactSkillCatalogSnapshot: vi.fn(),
+  getLatestSearchReadySnapshot: vi.fn(),
   getSkillCatalogPage: vi.fn(),
   getSkillCatalogSourceStatus: vi.fn(),
   listSkillCatalogSources: vi.fn(),
   syncSkillCatalogSource: vi.fn(),
+}));
+
+const configMocks = vi.hoisted(() => ({
+  getSkillCatalogConfiguration: vi.fn(),
+  resolvedSkillCatalogMetadata: vi.fn(),
+  resolveSkillCatalogSource: vi.fn(),
+  setOrgDefaultSkillCatalogSource: vi.fn(),
+  setProjectSkillCatalogSource: vi.fn(),
 }));
 
 const conflictMocks = vi.hoisted(() => ({
@@ -48,6 +57,10 @@ vi.mock("../../services/skill-conflicts.js", () => ({
   ...conflictMocks,
 }));
 
+vi.mock("../../services/skill-catalog-config.js", () => ({
+  ...configMocks,
+}));
+
 vi.mock("../../services/skill-catalog-search.js", () => ({
   DEFAULT_SKILL_SEARCH_LIMIT: 5,
   MAX_SKILL_SEARCH_LIMIT: 20,
@@ -60,6 +73,7 @@ vi.mock("../../services/skill-catalog-bundle.js", () => ({
 }));
 
 import { registerJsonBodyParser } from "../../middleware/validation.js";
+import { SkillCatalogError } from "../../services/skill-catalog.js";
 import { SkillCatalogLayoutError } from "../../services/skill-catalog-layout.js";
 import skillCatalogRoutes from "../skill-catalog.js";
 
@@ -101,6 +115,84 @@ beforeEach(async () => {
     latestEntriesReadyCommitSha: null,
     latestSearchReadyCommitSha: null,
   });
+  catalogMocks.getLatestSearchReadySnapshot.mockReturnValue({
+    snapshotId: "search-snapshot",
+    sourceId: SOURCE.sourceId,
+    orgId: "org-route",
+    commitSha: "a".repeat(40),
+    state: "search_ready",
+    isDefaultRef: true,
+    createdAt: SOURCE.createdAt,
+  });
+  configMocks.resolveSkillCatalogSource.mockImplementation(
+    (input: {
+      orgId: string;
+      projectId?: string;
+      sourceId?: string;
+    }) => ({
+      orgId: input.orgId,
+      projectId: input.projectId ?? null,
+      selectionMode: input.sourceId ? "explicit" : "org_default",
+      source: SOURCE,
+    }),
+  );
+  configMocks.resolvedSkillCatalogMetadata.mockImplementation(
+    (resolved: {
+      projectId: string | null;
+      selectionMode: string;
+      source: typeof SOURCE;
+    }) => ({
+      sourceId: resolved.source.sourceId,
+      displayName: resolved.source.displayName,
+      repository: {
+        apiBaseUrl: resolved.source.apiBaseUrl,
+        owner: resolved.source.owner,
+        repo: resolved.source.repo,
+        defaultRef: resolved.source.defaultRef,
+      },
+      selectionMode: resolved.selectionMode,
+      projectId: resolved.projectId,
+    }),
+  );
+  const configuration = {
+    sources: [
+      {
+        sourceId: SOURCE.sourceId,
+        displayName: SOURCE.displayName,
+        repository: {
+          apiBaseUrl: SOURCE.apiBaseUrl,
+          owner: SOURCE.owner,
+          repo: SOURCE.repo,
+          defaultRef: SOURCE.defaultRef,
+        },
+        enabled: true,
+        syncStatus: "ready",
+        lastSyncedAt: SOURCE.lastSyncedAt,
+        latestEntriesReadyCommitSha: "a".repeat(40),
+        latestSearchReadyCommitSha: "a".repeat(40),
+        latestIndexedCommitSha: "a".repeat(40),
+      },
+    ],
+    selection: {
+      projectId: null,
+      orgDefaultSourceId: SOURCE.sourceId,
+      projectOverrideSourceId: null,
+      effectiveSourceId: SOURCE.sourceId,
+      mode: "org_default",
+      effectiveSource: null,
+    },
+  };
+  configMocks.getSkillCatalogConfiguration.mockReturnValue(configuration);
+  configMocks.setOrgDefaultSkillCatalogSource.mockReturnValue(configuration);
+  configMocks.setProjectSkillCatalogSource.mockImplementation(
+    (_orgId: string, projectId: string) => ({
+      ...configuration,
+      selection: {
+        ...configuration.selection,
+        projectId,
+      },
+    }),
+  );
   catalogMocks.ensureExactSkillCatalogSnapshot.mockReturnValue({
     status: "ready",
     snapshot: {
@@ -408,6 +500,88 @@ describe("skill catalog admin routes", () => {
   });
 });
 
+describe("skill catalog selection configuration routes", () => {
+  it("returns sanitized sources and the effective project selection to members", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/skill-catalog/config?projectId=project-one",
+      headers: { "x-test-role": "member" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sources: [
+        {
+          sourceId: SOURCE.sourceId,
+          repository: { owner: SOURCE.owner, repo: SOURCE.repo },
+        },
+      ],
+      selection: { orgDefaultSourceId: SOURCE.sourceId },
+    });
+    expect(response.body).not.toContain("credentialAlias");
+    expect(configMocks.getSkillCatalogConfiguration).toHaveBeenCalledWith(
+      "org-route",
+      "project-one",
+    );
+  });
+
+  it.each(["owner", "admin", "member"])(
+    "allows a human %s to set and clear org and project mappings",
+    async (role) => {
+      const headers = { "x-test-role": role };
+      const orgDefault = await app.inject({
+        method: "PUT",
+        url: "/api/skill-catalog/config/org-default",
+        headers,
+        payload: { sourceId: SOURCE.sourceId },
+      });
+      const projectOverride = await app.inject({
+        method: "PUT",
+        url: "/api/projects/project-one/skill-catalog",
+        headers,
+        payload: { sourceId: null },
+      });
+
+      expect(orgDefault.statusCode).toBe(200);
+      expect(projectOverride.statusCode).toBe(200);
+      expect(
+        configMocks.setOrgDefaultSkillCatalogSource,
+      ).toHaveBeenCalledWith("org-route", SOURCE.sourceId);
+      expect(configMocks.setProjectSkillCatalogSource).toHaveBeenCalledWith(
+        "org-route",
+        "project-one",
+        null,
+      );
+    },
+  );
+
+  it("rejects service-token configuration writes even with admin scope", async () => {
+    const headers = {
+      "x-test-service": "true",
+      "x-test-scopes": "skill-catalog:admin",
+    };
+    const orgDefault = await app.inject({
+      method: "PUT",
+      url: "/api/skill-catalog/config/org-default",
+      headers,
+      payload: { sourceId: SOURCE.sourceId },
+    });
+    const projectOverride = await app.inject({
+      method: "PUT",
+      url: "/api/projects/project-one/skill-catalog",
+      headers,
+      payload: { sourceId: SOURCE.sourceId },
+    });
+
+    expect(orgDefault.statusCode).toBe(403);
+    expect(projectOverride.statusCode).toBe(403);
+    expect(
+      configMocks.setOrgDefaultSkillCatalogSource,
+    ).not.toHaveBeenCalled();
+    expect(configMocks.setProjectSkillCatalogSource).not.toHaveBeenCalled();
+  });
+});
+
 describe("skill catalog read and validation routes", () => {
   it("requires the catalog-read scope for service tokens", async () => {
     const denied = await app.inject({
@@ -461,6 +635,31 @@ describe("skill catalog read and validation routes", () => {
     expect(response.statusCode).toBe(202);
     expect(response.headers["retry-after"]).toBe("2");
     expect(response.json().error).toBe("catalog_building");
+  });
+
+  it("returns 409 instead of guessing when no mapping or explicit source exists", async () => {
+    configMocks.resolveSkillCatalogSource.mockImplementationOnce(() => {
+      throw new SkillCatalogError(
+        "No skill catalog source is configured",
+        409,
+        "skill_catalog_source_not_configured",
+      );
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/skill-search",
+      payload: {
+        projectId: "project-one",
+        query: "Review pull requests",
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "skill_catalog_source_not_configured",
+      message: "No skill catalog source is configured",
+    });
+    expect(searchMocks.searchSkillCatalog).not.toHaveBeenCalled();
   });
 
   it("returns an actionable 400 for invalid candidate paths", async () => {
@@ -541,12 +740,93 @@ describe("skill catalog read and validation routes", () => {
     expect(searchMocks.searchSkillCatalog).toHaveBeenCalledWith({
       orgId: "org-route",
       sourceId: SOURCE.sourceId,
+      projectId: null,
+      selectionMode: "explicit",
       query: "Review pull requests for security problems",
       tentativeName: "pr_review",
       targetNamespace: "project:example",
       limit: 5,
     });
     expect(searchRouteConfig?.suppressRequestBodyLogging).toBe(true);
+  });
+
+  it("uses the mapped source's search-ready snapshot without switching catalogs", async () => {
+    configMocks.resolveSkillCatalogSource.mockReturnValueOnce({
+      orgId: "org-route",
+      projectId: "project-one",
+      selectionMode: "project",
+      source: SOURCE,
+    });
+    searchMocks.searchSkillCatalog.mockResolvedValueOnce({
+      status: "ready",
+      catalog: {
+        sourceId: SOURCE.sourceId,
+        commitSha: "e".repeat(40),
+        snapshotState: "search_ready",
+      },
+      results: [],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/skill-search",
+      payload: {
+        projectId: "project-one",
+        query: "Review pull requests",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().catalog).toMatchObject({
+      sourceId: SOURCE.sourceId,
+      selectionMode: "project",
+      projectId: "project-one",
+      commitSha: "e".repeat(40),
+    });
+    expect(configMocks.resolveSkillCatalogSource).toHaveBeenCalledWith({
+      orgId: "org-route",
+      projectId: "project-one",
+      sourceId: undefined,
+    });
+    expect(searchMocks.searchSkillCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgId: "org-route",
+        projectId: "project-one",
+        sourceId: SOURCE.sourceId,
+        selectionMode: "project",
+      }),
+    );
+  });
+
+  it("allows matching project-bound service tokens without widening their scope", async () => {
+    const allowed = await app.inject({
+      method: "POST",
+      url: "/api/skill-search",
+      headers: {
+        "x-test-service": "true",
+        "x-test-scopes": "skill-catalog:read",
+        "x-test-project-bound": "true",
+      },
+      payload: {
+        projectId: "project-one",
+        query: "Review pull requests",
+      },
+    });
+    const denied = await app.inject({
+      method: "POST",
+      url: "/api/skill-search",
+      headers: {
+        "x-test-service": "true",
+        "x-test-scopes": "skill-catalog:read",
+        "x-test-project-bound": "true",
+      },
+      payload: {
+        projectId: "project-two",
+        query: "Review pull requests",
+      },
+    });
+
+    expect(allowed.statusCode).toBe(200);
+    expect(denied.statusCode).toBe(403);
   });
 
   it("returns search unavailability as a non-blocking response", async () => {
@@ -564,9 +844,14 @@ describe("skill catalog read and validation routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       status: "unavailable",
       results: [],
+      catalog: {
+        sourceId: SOURCE.sourceId,
+        commitSha: "a".repeat(40),
+        snapshotState: "search_ready",
+      },
     });
   });
 
@@ -626,6 +911,65 @@ describe("skill catalog read and validation routes", () => {
       "clear",
     ]);
     expect(response.body).not.toMatch(/disposition|allowedAction|decision/i);
+  });
+
+  it("resolves project mappings and allows conflict checks without a SHA", async () => {
+    configMocks.resolveSkillCatalogSource.mockReturnValueOnce({
+      orgId: "org-route",
+      projectId: "project-one",
+      selectionMode: "project",
+      source: SOURCE,
+    });
+    conflictMocks.validateSkillConflicts.mockResolvedValueOnce({
+      status: "ready",
+      response: {
+        catalog: {
+          commitSha: "d".repeat(40),
+          snapshotState: "entries_ready",
+        },
+        matcherVersion: "v1",
+        results: [
+          {
+            candidateId: "one",
+            status: "clear",
+            conflicts: [],
+            related: [],
+          },
+        ],
+      },
+    });
+    const candidate = {
+      candidateId: "one",
+      name: "Review",
+      proposedPath: "projects/example/skills/review.md",
+      targetNamespace: "project:example",
+      body: "# Review",
+    };
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/skill-conflicts",
+      payload: {
+        projectId: "project-one",
+        candidates: [candidate],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().catalog).toMatchObject({
+      sourceId: SOURCE.sourceId,
+      projectId: "project-one",
+      selectionMode: "project",
+      commitSha: "d".repeat(40),
+      repository: { owner: SOURCE.owner, repo: SOURCE.repo },
+    });
+    expect(conflictMocks.validateSkillConflicts).toHaveBeenCalledWith({
+      orgId: "org-route",
+      sourceId: SOURCE.sourceId,
+      baseCommitSha: undefined,
+      projectId: "project-one",
+      selectionMode: "project",
+      candidates: [candidate],
+    });
   });
 
   it("enforces candidate count, aggregate body limit, and log suppression", async () => {

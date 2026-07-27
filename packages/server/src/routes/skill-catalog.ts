@@ -4,10 +4,12 @@ import type { SkillCatalogNamespace } from "@pim/shared";
 import { atLeast } from "../services/org-permissions.js";
 import type { ServiceTokenScope } from "../services/service-tokens.js";
 import { validateBody } from "../middleware/validation.js";
+import { requireProjectBinding } from "../middleware/service-authz.js";
 import {
   configureSkillCatalogWebhookSecret,
   createSkillCatalogSource,
   ensureExactSkillCatalogSnapshot,
+  getLatestSearchReadySnapshot,
   getSkillCatalogPage,
   getSkillCatalogSourceStatus,
   listSkillCatalogSources,
@@ -15,6 +17,14 @@ import {
   syncSkillCatalogSource,
   type SkillCatalogSource,
 } from "../services/skill-catalog.js";
+import {
+  getSkillCatalogConfiguration,
+  resolvedSkillCatalogMetadata,
+  resolveSkillCatalogSource,
+  setOrgDefaultSkillCatalogSource,
+  setProjectSkillCatalogSource,
+  type ResolvedSkillCatalogSource,
+} from "../services/skill-catalog-config.js";
 import {
   MAX_SKILL_CONFLICT_CANDIDATES,
   SKILL_CONFLICT_ROUTE_BODY_LIMIT,
@@ -81,8 +91,12 @@ const ConflictCandidateSchema = z.object({
 });
 
 const SkillConflictsSchema = z.object({
-  sourceId: z.string().min(1).max(128),
-  baseCommitSha: z.string().regex(/^[0-9a-f]{40}$/i, "Must be a full Git SHA"),
+  projectId: z.string().min(1).max(200).optional(),
+  sourceId: z.string().min(1).max(128).optional(),
+  baseCommitSha: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/i, "Must be a full Git SHA")
+    .optional(),
   candidates: z
     .array(ConflictCandidateSchema)
     .min(1)
@@ -90,7 +104,8 @@ const SkillConflictsSchema = z.object({
 });
 
 const SkillSearchSchema = z.object({
-  sourceId: z.string().min(1).max(128),
+  projectId: z.string().min(1).max(200).optional(),
+  sourceId: z.string().min(1).max(128).optional(),
   query: z.string().min(1).max(16_000),
   tentativeName: z.string().min(1).max(500).optional(),
   targetNamespace: SkillNamespaceSchema.optional(),
@@ -100,6 +115,10 @@ const SkillSearchSchema = z.object({
     .min(1)
     .max(MAX_SKILL_SEARCH_LIMIT)
     .default(DEFAULT_SKILL_SEARCH_LIMIT),
+});
+
+const SetCatalogSourceSchema = z.object({
+  sourceId: z.string().min(1).max(128).nullable(),
 });
 
 const SKILL_SEARCH_ROUTE_BODY_LIMIT = 64 * 1024;
@@ -172,6 +191,38 @@ function requireCatalogAdmin(req: FastifyRequest, reply: FastifyReply): boolean 
   return true;
 }
 
+function requireCatalogConfigurationWriter(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): boolean {
+  if (req.auth?.kind === "service_token") {
+    return forbidden(
+      reply,
+      "PIM service tokens cannot change skill catalog configuration",
+    );
+  }
+  if (!req.membership) {
+    return forbidden(reply, "Organization membership is required");
+  }
+  return true;
+}
+
+function requireCatalogOperationScope(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  scopes: ServiceTokenScope[],
+  projectId?: string,
+): boolean {
+  if (req.auth?.kind !== "service_token") return true;
+  if (!scopes.some((scope) => req.auth?.kind === "service_token" && req.auth.scopes.includes(scope))) {
+    return forbidden(
+      reply,
+      `PIM service token is missing required scope: ${scopes.join(" or ")}`,
+    );
+  }
+  return requireProjectBinding(req, reply, projectId);
+}
+
 function sendCatalogError(reply: FastifyReply, error: unknown) {
   const catalogError =
     error instanceof SkillCatalogLayoutError
@@ -180,6 +231,18 @@ function sendCatalogError(reply: FastifyReply, error: unknown) {
   if (!(catalogError instanceof SkillCatalogError)) throw error;
   reply.code(catalogError.statusCode);
   return { error: catalogError.code, message: catalogError.message };
+}
+
+function catalogResponseMetadata(
+  resolved: ResolvedSkillCatalogSource,
+  commitSha: string | null,
+  snapshotState: "entries_ready" | "search_ready" | null,
+) {
+  return {
+    ...resolvedSkillCatalogMetadata(resolved),
+    commitSha,
+    snapshotState,
+  };
 }
 
 function encodeCursor(cursor: CatalogCursor): string {
@@ -230,6 +293,72 @@ export default async function skillCatalogRoutes(app: FastifyInstance) {
       sources: listSkillCatalogSources(req.org!.org_id).map(sourceResponse),
     };
   });
+
+  app.get<{
+    Querystring: { projectId?: string };
+  }>("/api/skill-catalog/config", async (req, reply) => {
+    if (
+      !requireAnyServiceScope(req, reply, [
+        "skill-catalog:read",
+        "skill-catalog:admin",
+      ])
+    ) {
+      return;
+    }
+    const query = z
+      .object({
+        projectId: z.string().min(1).max(200).optional(),
+      })
+      .safeParse(req.query);
+    if (!query.success) {
+      reply.code(400);
+      return { error: "Validation failed", details: query.error.issues };
+    }
+    try {
+      return getSkillCatalogConfiguration(
+        req.org!.org_id,
+        query.data.projectId,
+      );
+    } catch (error) {
+      return sendCatalogError(reply, error);
+    }
+  });
+
+  app.put<{ Body: z.infer<typeof SetCatalogSourceSchema> }>(
+    "/api/skill-catalog/config/org-default",
+    { preHandler: validateBody(SetCatalogSourceSchema) },
+    async (req, reply) => {
+      if (!requireCatalogConfigurationWriter(req, reply)) return;
+      try {
+        return setOrgDefaultSkillCatalogSource(
+          req.org!.org_id,
+          req.body.sourceId,
+        );
+      } catch (error) {
+        return sendCatalogError(reply, error);
+      }
+    },
+  );
+
+  app.put<{
+    Params: { projectId: string };
+    Body: z.infer<typeof SetCatalogSourceSchema>;
+  }>(
+    "/api/projects/:projectId/skill-catalog",
+    { preHandler: validateBody(SetCatalogSourceSchema) },
+    async (req, reply) => {
+      if (!requireCatalogConfigurationWriter(req, reply)) return;
+      try {
+        return setProjectSkillCatalogSource(
+          req.org!.org_id,
+          req.params.projectId,
+          req.body.sourceId,
+        );
+      } catch (error) {
+        return sendCatalogError(reply, error);
+      }
+    },
+  );
 
   app.get<{ Params: { sourceId: string } }>(
     "/api/skill-catalog/sources/:sourceId",
@@ -448,29 +577,65 @@ export default async function skillCatalogRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       if (
-        !requireAnyServiceScope(req, reply, [
-          "skill-catalog:read",
-          "skill-catalog:admin",
-        ])
+        !requireCatalogOperationScope(
+          req,
+          reply,
+          ["skill-catalog:read", "skill-catalog:admin"],
+          req.body.projectId,
+        )
       ) {
         return;
       }
       const startedAt = Date.now();
       try {
+        const resolved = resolveSkillCatalogSource({
+          orgId: req.org!.org_id,
+          projectId: req.body.projectId,
+          sourceId: req.body.sourceId,
+        });
         const outcome = await searchSkillCatalog({
           orgId: req.org!.org_id,
-          ...req.body,
+          sourceId: resolved.source.sourceId,
+          projectId: resolved.projectId,
+          selectionMode: resolved.selectionMode,
+          query: req.body.query,
+          tentativeName: req.body.tentativeName,
+          targetNamespace: req.body.targetNamespace,
+          limit: req.body.limit,
         });
+        const latestSearchReady =
+          outcome.status === "ready"
+            ? null
+            : getLatestSearchReadySnapshot(
+                req.org!.org_id,
+                resolved.source.sourceId,
+              );
+        const commitSha =
+          outcome.status === "ready"
+            ? outcome.catalog.commitSha
+            : latestSearchReady?.commitSha ?? null;
         req.log.info(
           {
             latency_ms: Date.now() - startedAt,
             result_count: outcome.results.length,
-            source_id: req.body.sourceId,
+            project_id: resolved.projectId,
+            source_id: resolved.source.sourceId,
+            selection_mode: resolved.selectionMode,
+            repository_owner: resolved.source.owner,
+            repository_name: resolved.source.repo,
+            commit_sha: commitSha,
             status: outcome.status,
           },
           "Skill catalog search completed",
         );
-        return outcome;
+        return {
+          ...outcome,
+          catalog: catalogResponseMetadata(
+            resolved,
+            commitSha,
+            commitSha ? "search_ready" : null,
+          ),
+        };
       } catch (error) {
         return sendCatalogError(reply, error);
       }
@@ -488,32 +653,101 @@ export default async function skillCatalogRoutes(app: FastifyInstance) {
       preHandler: validateBody(SkillConflictsSchema),
     },
     async (req, reply) => {
-      if (!requireAnyServiceScope(req, reply, ["skill-conflicts:check"])) return;
+      if (
+        !requireCatalogOperationScope(
+          req,
+          reply,
+          ["skill-conflicts:check"],
+          req.body.projectId,
+        )
+      ) {
+        return;
+      }
+      const startedAt = Date.now();
       try {
+        const resolved = resolveSkillCatalogSource({
+          orgId: req.org!.org_id,
+          projectId: req.body.projectId,
+          sourceId: req.body.sourceId,
+        });
         const outcome = await validateSkillConflicts({
           orgId: req.org!.org_id,
-          sourceId: req.body.sourceId,
+          sourceId: resolved.source.sourceId,
           baseCommitSha: req.body.baseCommitSha,
+          projectId: resolved.projectId,
+          selectionMode: resolved.selectionMode,
           candidates: req.body.candidates,
         });
+        const logFields = {
+          latency_ms: Date.now() - startedAt,
+          candidate_count: req.body.candidates.length,
+          project_id: resolved.projectId,
+          source_id: resolved.source.sourceId,
+          selection_mode: resolved.selectionMode,
+          repository_owner: resolved.source.owner,
+          repository_name: resolved.source.repo,
+        };
         if (outcome.status === "building") {
+          req.log.info(
+            {
+              ...logFields,
+              commit_sha: req.body.baseCommitSha ?? null,
+              status: outcome.status,
+            },
+            "Skill catalog conflict check completed",
+          );
           reply.header("Retry-After", String(outcome.retryAfterSeconds));
           reply.code(202);
           return {
             error: "catalog_building",
-            sourceId: req.body.sourceId,
-            commitSha: req.body.baseCommitSha,
+            sourceId: resolved.source.sourceId,
+            commitSha: req.body.baseCommitSha ?? null,
+            catalog: catalogResponseMetadata(
+              resolved,
+              req.body.baseCommitSha ?? null,
+              null,
+            ),
           };
         }
         if (outcome.status === "failed") {
+          req.log.info(
+            {
+              ...logFields,
+              commit_sha: outcome.snapshot.commitSha,
+              status: outcome.status,
+            },
+            "Skill catalog conflict check completed",
+          );
           reply.code(503);
           return {
             error: "catalog_not_ready",
-            sourceId: req.body.sourceId,
-            commitSha: req.body.baseCommitSha,
+            sourceId: resolved.source.sourceId,
+            commitSha: outcome.snapshot.commitSha,
+            catalog: catalogResponseMetadata(
+              resolved,
+              outcome.snapshot.commitSha,
+              null,
+            ),
           };
         }
-        return outcome.response;
+        req.log.info(
+          {
+            ...logFields,
+            commit_sha: outcome.response.catalog.commitSha,
+            status: outcome.status,
+          },
+          "Skill catalog conflict check completed",
+        );
+        return {
+          ...outcome.response,
+          catalog: {
+            ...catalogResponseMetadata(
+              resolved,
+              outcome.response.catalog.commitSha,
+              outcome.response.catalog.snapshotState,
+            ),
+          },
+        };
       } catch (error) {
         return sendCatalogError(reply, error);
       }

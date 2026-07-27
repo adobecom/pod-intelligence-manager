@@ -560,6 +560,8 @@ function unavailableSearch(): SkillSearchOutcome {
 export async function searchSkillCatalog(input: {
   orgId: string;
   sourceId: string;
+  projectId?: string | null;
+  selectionMode?: string;
   query: string;
   tentativeName?: string;
   targetNamespace?: SkillCatalogNamespace;
@@ -579,10 +581,14 @@ export async function searchSkillCatalog(input: {
     );
   }
   const startedAt = dependencies.now();
+  let selectedCommitSha: string | null = null;
   const finish = (outcome: SkillSearchOutcome): SkillSearchOutcome => {
     const fields = {
       org_id: input.orgId,
       source_id: input.sourceId,
+      project_id: input.projectId ?? null,
+      selection_mode: input.selectionMode ?? "explicit",
+      commit_sha: selectedCommitSha,
     };
     recordSkillCatalogMetric({
       name: "SearchLatency",
@@ -612,6 +618,7 @@ export async function searchSkillCatalog(input: {
     input.sourceId,
   );
   if (!snapshot) return finish(unavailableSearch());
+  selectedCommitSha = snapshot.commitSha;
 
   try {
     const queryEmbedding = await scheduleCatalogEmbedding(

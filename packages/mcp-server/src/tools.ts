@@ -9,6 +9,7 @@ import {
   apiPost,
   apiPut,
   getOrgSelectionStatus,
+  resolveProjectId,
   setActiveOrg,
 } from "./api.js";
 import { registerAuthTools } from "./auth-tools.js";
@@ -175,7 +176,9 @@ const SkillSourceId = z
   .string()
   .min(1)
   .max(128)
-  .describe("Configured skill catalog source ID, e.g. 'mimir-main'");
+  .describe(
+    "Advanced override for a configured skill catalog source ID, e.g. 'mimir-main'. Normally omit this so PIM uses the project mapping or org default.",
+  );
 
 const SkillNamespace = z
   .string()
@@ -245,9 +248,12 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "search_skills",
-    "Search the configured skill catalog before drafting a new skill. Results are advisory reading suggestions, not a conflict verdict: an empty or unavailable result never means the draft is clear. Search needs a search-ready catalog snapshot and may be unavailable if embeddings are still building.",
+    "Search the skill catalog configured for the current project before drafting a new skill. Normally provide project context and omit source_id; PIM resolves explicit project_id, PIM_PROJECT_ID, or .pim.json projectId, then uses the stored project mapping or org default. source_id remains an advanced override. Results are advisory reading suggestions, not a conflict verdict: an empty or unavailable result never means the draft is clear.",
     {
-      source_id: SkillSourceId,
+      project_id: ProjectId.optional().describe(
+        "Explicit project context. If omitted, MCP checks PIM_PROJECT_ID and then .pim.json projectId; if none exists, PIM uses the org default.",
+      ),
+      source_id: SkillSourceId.optional(),
       query: z
         .string()
         .min(1)
@@ -268,9 +274,11 @@ export function registerTools(server: McpServer) {
         .optional()
         .describe("Maximum results; defaults to 5"),
     },
-    async ({ source_id, query, tentative_name, target_namespace, limit }) => {
+    async ({ project_id, source_id, query, tentative_name, target_namespace, limit }) => {
+      const projectId = resolveProjectId(project_id);
       return json(await apiPost("/api/skill-search", {
-        sourceId: source_id,
+        ...(projectId !== undefined ? { projectId } : {}),
+        ...(source_id !== undefined ? { sourceId: source_id } : {}),
         query,
         ...(tentative_name !== undefined ? { tentativeName: tentative_name } : {}),
         ...(target_namespace !== undefined ? { targetNamespace: target_namespace } : {}),
@@ -281,20 +289,29 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "check_skill_conflicts",
-    "Run the required deterministic conflict check on complete final skill Markdown before creation or submission. Send the base commit SHA the draft was prepared against. Deterministic conflicts are the verdict; any related skills are advisory only. A response with error='catalog_building' means the exact snapshot is still being built; retry shortly. API failures are not a clear verdict.",
+    "Run the required deterministic conflict check on complete final skill Markdown before creation or submission. Normally provide project context plus candidates and omit source_id/base_commit_sha; PIM uses the mapped source's newest ready default-branch snapshot. Keep explicit source_id and base_commit_sha for Mimir pull-request checks, CI, and replay. Deterministic conflicts are the verdict; related skills are advisory only. A response with error='catalog_building' means an explicitly pinned snapshot is still being built; retry shortly. API failures are not a clear verdict.",
     {
-      source_id: SkillSourceId,
-      base_commit_sha: FullGitSha,
+      project_id: ProjectId.optional().describe(
+        "Explicit project context. If omitted, MCP checks PIM_PROJECT_ID and then .pim.json projectId; if none exists, PIM uses the org default.",
+      ),
+      source_id: SkillSourceId.optional(),
+      base_commit_sha: FullGitSha.optional().describe(
+        "Advanced exact-snapshot pin for PR checks, CI, or replay. Omit for the selected source's latest ready default-branch snapshot.",
+      ),
       candidates: z
         .array(SkillConflictCandidateInputSchema)
         .min(1)
         .max(20)
         .describe("One to 20 final skill candidates; aggregate Markdown is limited to 1 MiB"),
     },
-    async ({ source_id, base_commit_sha, candidates }) => {
+    async ({ project_id, source_id, base_commit_sha, candidates }) => {
+      const projectId = resolveProjectId(project_id);
       return json(await apiPost("/api/skill-conflicts", {
-        sourceId: source_id,
-        baseCommitSha: base_commit_sha,
+        ...(projectId !== undefined ? { projectId } : {}),
+        ...(source_id !== undefined ? { sourceId: source_id } : {}),
+        ...(base_commit_sha !== undefined
+          ? { baseCommitSha: base_commit_sha }
+          : {}),
         candidates: candidates.map((candidate) => ({
           candidateId: candidate.candidate_id,
           name: candidate.name,

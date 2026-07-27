@@ -8,6 +8,7 @@ import {
 import db from "../db/connection.js";
 import {
   ensureExactSkillCatalogSnapshot,
+  getLatestReadySnapshot,
   requireSkillCatalogSource,
   SkillCatalogError,
   type SkillCatalogSnapshot,
@@ -354,8 +355,18 @@ function recordValidationMetrics(
   orgId: string,
   sourceId: string,
   response: SkillConflictValidationResponse,
+  context?: {
+    projectId?: string | null;
+    selectionMode?: string;
+  },
 ): void {
-  const fields = { org_id: orgId, source_id: sourceId };
+  const fields = {
+    org_id: orgId,
+    source_id: sourceId,
+    project_id: context?.projectId ?? null,
+    selection_mode: context?.selectionMode ?? "explicit",
+    commit_sha: response.catalog.commitSha,
+  };
   const outcomes = new Map<string, number>();
   const conflictKinds = new Map<string, number>();
   for (const result of response.results) {
@@ -390,7 +401,9 @@ function recordValidationMetrics(
 export async function validateSkillConflicts(input: {
   orgId: string;
   sourceId: string;
-  baseCommitSha: string;
+  baseCommitSha?: string;
+  projectId?: string | null;
+  selectionMode?: string;
   candidates: SkillConflictCandidate[];
 }): Promise<SkillConflictValidationOutcome> {
   const candidates = prepareCandidates(
@@ -398,11 +411,23 @@ export async function validateSkillConflicts(input: {
     input.orgId,
     input.candidates,
   );
-  const availability = ensureExactSkillCatalogSnapshot(
-    input.orgId,
-    input.sourceId,
-    input.baseCommitSha,
-  );
+  const availability = input.baseCommitSha
+    ? ensureExactSkillCatalogSnapshot(
+        input.orgId,
+        input.sourceId,
+        input.baseCommitSha,
+      )
+    : (() => {
+        const snapshot = getLatestReadySnapshot(input.orgId, input.sourceId);
+        if (!snapshot) {
+          throw new SkillCatalogError(
+            "The selected skill catalog has no ready default-branch snapshot",
+            503,
+            "catalog_not_ready",
+          );
+        }
+        return { status: "ready" as const, snapshot };
+      })();
   if (availability.status === "building") return availability;
   if (availability.status === "failed") return availability;
 
@@ -411,7 +436,10 @@ export async function validateSkillConflicts(input: {
     availability.snapshot,
     candidates,
   );
-  recordValidationMetrics(input.orgId, input.sourceId, response);
+  recordValidationMetrics(input.orgId, input.sourceId, response, {
+    projectId: input.projectId,
+    selectionMode: input.selectionMode,
+  });
   if (availability.snapshot.state === "search_ready") {
     const notAfterMs = Date.now() + SKILL_RELATED_LOOKUP_BUDGET_MS;
     const relatedByCandidate: RelatedSkillResult[][] = candidates.map(

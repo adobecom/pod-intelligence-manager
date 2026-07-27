@@ -125,8 +125,24 @@ Use this simple sequence whenever you create a skill:
 > Search first, create only if needed, run the final check, then open the pull
 > request.
 
-If the assistant asks which catalog to use, choose the source configured by your
-team, such as `mimir-main`.
+For normal project work, the assistant should not need to ask which catalog to
+use. PIM resolves an explicit advanced override first, then the project's
+catalog mapping, then the organization default. It returns
+`skill_catalog_source_not_configured` instead of guessing when neither mapping
+exists.
+
+Any human organization member can choose the org default on the Organization
+Dashboard and a project override on the Project Dashboard. Service tokens
+cannot change these mappings. The selectors use sanitized source metadata and
+show the repository, sync state, and latest indexed commit. Source creation and
+bundle import remain in the administrative workflow.
+
+MCP project context resolves in this order: explicit `project_id`,
+`PIM_PROJECT_ID`, then `.pim.json.projectId`. Normal `search_skills` and
+`check_skill_conflicts` calls can omit `source_id`; conflict checks can also
+omit `base_commit_sha` to use the selected source's newest ready default-branch
+snapshot. Mimir pull-request checks, CI, and replay should continue to send
+their explicit source and exact base SHA.
 
 ## Building an IP-restricted catalog locally
 
