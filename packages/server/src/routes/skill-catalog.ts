@@ -27,6 +27,10 @@ import {
   runSkillCatalogEmbeddingBackfill,
   searchSkillCatalog,
 } from "../services/skill-catalog-search.js";
+import {
+  importSkillCatalogBundle,
+  SKILL_CATALOG_BUNDLE_BODY_LIMIT,
+} from "../services/skill-catalog-bundle.js";
 import { SkillCatalogLayoutError } from "../services/skill-catalog-layout.js";
 
 declare module "fastify" {
@@ -281,6 +285,38 @@ export default async function skillCatalogRoutes(app: FastifyInstance) {
             sourceId: req.params.sourceId,
             commitSha: result.snapshot.commitSha,
             snapshotState: result.snapshot.state,
+          },
+        };
+      } catch (error) {
+        return sendCatalogError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Params: { sourceId: string }; Body: unknown }>(
+    "/api/skill-catalog/sources/:sourceId/import",
+    {
+      bodyLimit: SKILL_CATALOG_BUNDLE_BODY_LIMIT,
+      config: { suppressRequestBodyLogging: true },
+    },
+    async (req, reply) => {
+      if (!requireCatalogAdmin(req, reply)) return;
+      try {
+        const result = importSkillCatalogBundle({
+          orgId: req.org!.org_id,
+          sourceId: req.params.sourceId,
+          bundle: req.body,
+        });
+        return {
+          catalog: {
+            sourceId: result.sourceId,
+            commitSha: result.commitSha,
+            snapshotState: result.snapshotState,
+          },
+          imported: {
+            entries: result.entriesImported,
+            blobs: result.blobsImported,
+            embeddingDimensions: result.embeddingDimensions,
           },
         };
       } catch (error) {
