@@ -24,10 +24,13 @@ vi.mock("../../db/connection.js", () => ({
 import { createTables } from "../../db/schema.js";
 import {
   findRelatedSkills,
+  resetSkillCatalogEmbeddingRetries,
   resetSkillCatalogSearchForTests,
   runSkillCatalogEmbeddingBackfill,
   searchSkillCatalog,
   setSkillCatalogSearchDependenciesForTests,
+  SKILL_CATALOG_EMBED_MAX_ATTEMPTS,
+  SKILL_CATALOG_EMBED_RETRY_BASE_MS,
 } from "../skill-catalog-search.js";
 import type { SkillCatalogSnapshot } from "../skill-catalog.js";
 import type {
@@ -156,14 +159,17 @@ function seedBlob(input: {
   redactedText?: string | null;
   embedding?: number[] | null;
   status?: "pending" | "ready" | "failed";
+  attempts?: number;
+  nextRetryAt?: string | null;
 }): void {
   const status = input.status ?? (input.embedding ? "ready" : "pending");
   testDb
     .prepare(
       `INSERT OR IGNORE INTO skill_catalog_blobs
          (org_id, source_id, blob_sha, normalized_name, description, content_hash,
-          redacted_text, embedding_json, embedding_status, matcher_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?)`,
+          redacted_text, embedding_json, embedding_status, embedding_attempts,
+          next_retry_at, matcher_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'v1', ?)`,
     )
     .run(
       input.orgId,
@@ -175,6 +181,8 @@ function seedBlob(input: {
       input.redactedText ?? null,
       input.embedding ? JSON.stringify(input.embedding) : null,
       status,
+      input.attempts ?? 0,
+      input.nextRetryAt ?? null,
       nextTimestamp(),
     );
   testDb
@@ -188,7 +196,8 @@ function seedBlob(input: {
 function blobRow(sourceId: string, blobSha: string) {
   return testDb
     .prepare(
-      `SELECT redacted_text, embedding_json, embedding_status
+      `SELECT redacted_text, embedding_json, embedding_status,
+              embedding_attempts, next_retry_at
        FROM skill_catalog_blobs
        WHERE source_id = ? AND blob_sha = ?`,
     )
@@ -196,6 +205,8 @@ function blobRow(sourceId: string, blobSha: string) {
     redacted_text: string | null;
     embedding_json: string | null;
     embedding_status: string;
+    embedding_attempts: number;
+    next_retry_at: string | null;
   };
 }
 
@@ -330,7 +341,7 @@ describe("skill catalog embedding backfill", () => {
     expect(snapshotState("snapshot-empty")).toBe("search_ready");
   });
 
-  it("demotes an incomplete snapshot, records strict failures, and retries them later", async () => {
+  it("demotes an incomplete snapshot, backs failures off, and retries them when due", async () => {
     const sourceId = "source-retry";
     const snapshotId = "snapshot-retry";
     const blobSha = "c".repeat(40);
@@ -358,10 +369,12 @@ describe("skill catalog embedding backfill", () => {
       .fn<(text: string) => Promise<number[]>>()
       .mockRejectedValueOnce(new Error("Bedrock unavailable"))
       .mockResolvedValueOnce([1, 0]);
+    let now = Date.parse("2026-07-25T12:00:00.000Z");
     setSkillCatalogSearchDependenciesForTests({
       embeddingAvailable: () => true,
       generateEmbedding: embed,
       embeddingDelayMs: 0,
+      now: () => now,
     });
 
     await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
@@ -370,9 +383,23 @@ describe("skill catalog embedding backfill", () => {
       failed: 1,
       snapshots: { entriesReady: 1, searchReady: 0 },
     });
-    expect(blobRow(sourceId, blobSha).embedding_status).toBe("failed");
+    expect(blobRow(sourceId, blobSha)).toMatchObject({
+      embedding_status: "failed",
+      embedding_attempts: 1,
+      next_retry_at: new Date(
+        now + SKILL_CATALOG_EMBED_RETRY_BASE_MS,
+      ).toISOString(),
+    });
     expect(snapshotState(snapshotId)).toBe("entries_ready");
 
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 0,
+      ready: 0,
+      failed: 0,
+    });
+    expect(embed).toHaveBeenCalledTimes(1);
+
+    now += SKILL_CATALOG_EMBED_RETRY_BASE_MS;
     await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
       processed: 1,
       ready: 1,
@@ -382,8 +409,133 @@ describe("skill catalog embedding backfill", () => {
     expect(blobRow(sourceId, blobSha)).toMatchObject({
       embedding_status: "ready",
       embedding_json: JSON.stringify([1, 0]),
+      embedding_attempts: 0,
+      next_retry_at: null,
     });
     expect(snapshotState(snapshotId)).toBe("search_ready");
+    expect(embed).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs off hydration failures without repeatedly fetching the blob", async () => {
+    const sourceId = "source-hydration-retry";
+    const snapshotId = "snapshot-hydration-retry";
+    const blobSha = "e".repeat(40);
+    seedSource(ORG_A, sourceId);
+    seedSnapshot({
+      orgId: ORG_A,
+      sourceId,
+      snapshotId,
+      commitChar: "5",
+      state: "entries_ready",
+    });
+    seedBlob({
+      orgId: ORG_A,
+      sourceId,
+      snapshotId,
+      blobSha,
+      path: "shared/skills/missing.md",
+      namespace: "shared",
+      name: "missing",
+      redactedText: null,
+      status: "pending",
+    });
+
+    const git = new FakeGitClient();
+    let now = Date.parse("2026-07-25T12:00:00.000Z");
+    setSkillCatalogSearchDependenciesForTests({
+      embeddingAvailable: () => true,
+      gitClientFactory: () => git,
+      now: () => now,
+    });
+
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 1,
+      failed: 1,
+    });
+    expect(git.blobCalls).toEqual([blobSha]);
+
+    now += SKILL_CATALOG_EMBED_RETRY_BASE_MS - 1;
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 0,
+      failed: 0,
+    });
+    expect(git.blobCalls).toEqual([blobSha]);
+
+    now += 1;
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 1,
+      failed: 1,
+    });
+    expect(git.blobCalls).toEqual([blobSha, blobSha]);
+    expect(blobRow(sourceId, blobSha)).toMatchObject({
+      embedding_attempts: 2,
+      next_retry_at: new Date(
+        now + SKILL_CATALOG_EMBED_RETRY_BASE_MS * 2,
+      ).toISOString(),
+    });
+  });
+
+  it("caps consecutive failures and lets an explicit retry recover", async () => {
+    const sourceId = "source-exhausted";
+    const snapshotId = "snapshot-exhausted";
+    const blobSha = "f".repeat(40);
+    seedSource(ORG_A, sourceId);
+    seedSnapshot({
+      orgId: ORG_A,
+      sourceId,
+      snapshotId,
+      commitChar: "6",
+      state: "entries_ready",
+    });
+    seedBlob({
+      orgId: ORG_A,
+      sourceId,
+      snapshotId,
+      blobSha,
+      path: "shared/skills/exhausted.md",
+      namespace: "shared",
+      name: "exhausted",
+      redactedText: "exhausted",
+      status: "failed",
+      attempts: SKILL_CATALOG_EMBED_MAX_ATTEMPTS - 1,
+    });
+
+    const embed = vi
+      .fn<(text: string) => Promise<number[]>>()
+      .mockRejectedValueOnce(new Error("permanent failure"))
+      .mockResolvedValueOnce([1, 0]);
+    setSkillCatalogSearchDependenciesForTests({
+      embeddingAvailable: () => true,
+      generateEmbedding: embed,
+      embeddingDelayMs: 0,
+    });
+
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 1,
+      failed: 1,
+    });
+    expect(blobRow(sourceId, blobSha)).toMatchObject({
+      embedding_status: "failed",
+      embedding_attempts: SKILL_CATALOG_EMBED_MAX_ATTEMPTS,
+      next_retry_at: null,
+    });
+
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 0,
+      failed: 0,
+    });
+    expect(embed).toHaveBeenCalledTimes(1);
+
+    expect(resetSkillCatalogEmbeddingRetries(ORG_A, sourceId)).toBe(1);
+    expect(blobRow(sourceId, blobSha)).toMatchObject({
+      embedding_status: "pending",
+      embedding_attempts: 0,
+      next_retry_at: null,
+    });
+    await expect(runSkillCatalogEmbeddingBackfill()).resolves.toMatchObject({
+      processed: 1,
+      ready: 1,
+    });
     expect(embed).toHaveBeenCalledTimes(2);
   });
 
