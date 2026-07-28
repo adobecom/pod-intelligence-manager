@@ -20,6 +20,7 @@ import contextSearchRoutes from "./routes/context-search.js";
 import agentMemoryRoutes from "./routes/agent-memory.js";
 import skillCatalogRoutes from "./routes/skill-catalog.js";
 import skillCatalogWebhookRoutes from "./routes/skill-catalog-webhooks.js";
+import hostedMcpRoutes from "./routes/hosted-mcp.js";
 import wsRoutes from "./routes/ws.js";
 import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
@@ -40,6 +41,7 @@ import { resolveRequestOrg } from "./middleware/org-context.js";
 import { registerJsonBodyParser } from "./middleware/validation.js";
 import db from "./db/connection.js";
 
+const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const app = Fastify({ logger: true });
 registerJsonBodyParser(app);
 setSkillCatalogMetricSink(createCloudWatchSkillCatalogMetricSink(app.log));
@@ -124,7 +126,9 @@ const authenticate = createAuthHook(authMode);
 // The `/tunnel/` proxy authenticates via a per-tunnel share_token path segment
 // (checked in tunnel-proxy.ts) so external collaborators without IMS sessions
 // can load previews — matching Expo/ngrok semantics.
-const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config"]);
+// `/mcp` performs stricter service-token-only authentication in its own route
+// before constructing the per-request MCP server.
+const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config", "/mcp"]);
 const PUBLIC_PREFIXES = [
   "/ws",
   "/tunnel",
@@ -166,6 +170,9 @@ app.register(contextSearchRoutes);
 app.register(agentMemoryRoutes);
 app.register(skillCatalogRoutes);
 app.register(skillCatalogWebhookRoutes);
+app.register(hostedMcpRoutes, {
+  apiBaseUrl: `http://127.0.0.1:${PORT}`,
+});
 app.register(wsRoutes);
 app.register(wsTunnelRoutes);
 app.register(tunnelProxyRoutes);
@@ -215,7 +222,6 @@ app.get("/api/cli-config", {
   };
 });
 
-const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min

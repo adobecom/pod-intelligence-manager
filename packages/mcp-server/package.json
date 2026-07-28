@@ -3,6 +3,17 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./hosted-skills": {
+      "types": "./dist/hosted-skills.d.ts",
+      "import": "./dist/hosted-skills.js"
+    }
+  },
   "bin": {
     "pim-mcp": "./dist/index.js"
   },

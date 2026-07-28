@@ -3,8 +3,8 @@
 #   docker build --platform linux/amd64 -f packages/server/Dockerfile -t pim-server .
 #
 # This project runs the server via tsx (TypeScript runtime), while workspace
-# dependency @pim/shared publishes compiled files from dist. The build context
-# intentionally excludes dist, so rebuild shared after installing dependencies.
+# dependencies @pim/shared and @pim/mcp-server publish compiled files from dist.
+# The build context intentionally excludes dist, so rebuild both after install.
 
 # ---------- Build / install stage ----------
 FROM --platform=linux/amd64 node:22-alpine AS build
@@ -20,6 +20,7 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @pim/shared build
+RUN pnpm --filter @pim/mcp-server build
 
 # ---------- Runtime stage ----------
 FROM --platform=linux/amd64 node:22-alpine AS runtime
