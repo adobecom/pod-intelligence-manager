@@ -184,6 +184,19 @@ export type {
 } from "./types/living-doc.js";
 
 export {
+  SKILL_MATCHER_VERSION,
+  normalizeSkillContent,
+  normalizeSkillName,
+} from "./types/skill-catalog.js";
+
+export type {
+  SkillCatalogLayoutRule,
+  SkillCatalogNamespace,
+  SkillConflictCandidate,
+  SkillConflictKind,
+} from "./types/skill-catalog.js";
+
+export {
   PRESSURE_THRESHOLDS,
   getPressureLevel,
   getPressureLabel,

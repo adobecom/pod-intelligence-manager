@@ -9,9 +9,11 @@ import {
   apiPost,
   apiPut,
   getOrgSelectionStatus,
+  resolveProjectId,
   setActiveOrg,
 } from "./api.js";
 import { registerAuthTools } from "./auth-tools.js";
+import { registerHostedSkillTools } from "./hosted-skills.js";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -171,6 +173,29 @@ const ActorSchema = z.object({
   display_name: z.string().optional(),
 });
 
+const SkillSourceId = z
+  .string()
+  .min(1)
+  .max(128)
+  .describe(
+    "Advanced override for a configured skill catalog source ID, e.g. 'mimir-main'. Normally omit this so PIM uses the project mapping or org default.",
+  );
+
+const SkillNamespace = z
+  .string()
+  .refine(
+    (value) =>
+      value === "shared" ||
+      /^project:[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/.test(value),
+    "Must be shared or project:<id>",
+  )
+  .describe("Skill namespace: 'shared' or 'project:<id>'");
+
+const FullGitSha = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/i, "Must be a full Git SHA")
+  .describe("Full 40-character base commit SHA");
+
 /* ------------------------------------------------------------------ */
 /*  Registration                                                      */
 /* ------------------------------------------------------------------ */
@@ -196,6 +221,45 @@ export function registerTools(server: McpServer) {
     },
     async ({ org_slug }) => {
       return json(await setActiveOrg(org_slug));
+    },
+  );
+
+  // ── skill catalog & conflict detection ──────────────────────────
+
+  registerHostedSkillTools(
+    server,
+    { post: apiPost },
+    { resolveProjectId, projectContext: "stdio" },
+  );
+
+  server.tool(
+    "view_skill_catalog",
+    "Browse a configured skill catalog snapshot without modifying it. Omit commit_sha for the latest entries-ready snapshot, or pin it to inspect the same base revision used by a conflict check. If the response has error='catalog_building', retry shortly with the same inputs and cursor.",
+    {
+      source_id: SkillSourceId,
+      commit_sha: FullGitSha.optional(),
+      namespace: SkillNamespace.optional(),
+      cursor: z
+        .string()
+        .min(1)
+        .max(4_000)
+        .optional()
+        .describe("Opaque nextCursor returned by the previous page"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Entries per page; defaults to 100"),
+    },
+    async ({ source_id, commit_sha, namespace, cursor, limit }) => {
+      const query = new URLSearchParams({ sourceId: source_id });
+      if (commit_sha !== undefined) query.set("commitSha", commit_sha);
+      if (namespace !== undefined) query.set("namespace", namespace);
+      if (cursor !== undefined) query.set("cursor", cursor);
+      if (limit !== undefined) query.set("limit", String(limit));
+      return json(await apiFetch(`/api/skill-catalog?${query.toString()}`));
     },
   );
 

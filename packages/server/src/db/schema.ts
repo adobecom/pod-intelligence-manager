@@ -639,9 +639,88 @@ export function createTables() {
       ON memory_relationships(org_id, source_entity_id, relation_type, valid_until);
     CREATE INDEX IF NOT EXISTS idx_memory_relationships_target
       ON memory_relationships(org_id, target_entity_id, relation_type, valid_from DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_catalog_sources (
+      source_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      api_base_url TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      default_ref TEXT NOT NULL,
+      layout_rules_json TEXT NOT NULL,
+      exclude_globs_json TEXT,
+      credential_alias TEXT NOT NULL,
+      webhook_secret_alias TEXT,
+      webhook_secret_hash TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sync_status TEXT NOT NULL DEFAULT 'pending',
+      last_synced_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_catalog_source_repo
+      ON skill_catalog_sources(org_id, api_base_url, owner, repo);
+    CREATE INDEX IF NOT EXISTS idx_skill_catalog_sources_org
+      ON skill_catalog_sources(org_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_catalog_blobs (
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL REFERENCES skill_catalog_sources(source_id) ON DELETE CASCADE,
+      blob_sha TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      description TEXT,
+      content_hash TEXT NOT NULL,
+      redacted_text TEXT,
+      embedding_json TEXT,
+      embedding_status TEXT NOT NULL DEFAULT 'pending',
+      embedding_attempts INTEGER NOT NULL DEFAULT 0,
+      next_retry_at TEXT,
+      matcher_version TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (source_id, blob_sha)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skill_catalog_blobs_org_source
+      ON skill_catalog_blobs(org_id, source_id);
+    CREATE INDEX IF NOT EXISTS idx_skill_catalog_blobs_content
+      ON skill_catalog_blobs(source_id, content_hash);
+
+    CREATE TABLE IF NOT EXISTS skill_catalog_snapshots (
+      snapshot_id TEXT PRIMARY KEY,
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL REFERENCES skill_catalog_sources(source_id) ON DELETE CASCADE,
+      commit_sha TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('building','entries_ready','search_ready','failed')),
+      is_default_ref INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE (source_id, commit_sha)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skill_catalog_snapshots_ready
+      ON skill_catalog_snapshots(source_id, state, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS skill_catalog_entries (
+      snapshot_id TEXT NOT NULL REFERENCES skill_catalog_snapshots(snapshot_id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      blob_sha TEXT NOT NULL,
+      namespace TEXT NOT NULL,
+      PRIMARY KEY (snapshot_id, path)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_skill_entries_ns
+      ON skill_catalog_entries(snapshot_id, namespace);
+    CREATE INDEX IF NOT EXISTS idx_skill_entries_blob
+      ON skill_catalog_entries(snapshot_id, blob_sha);
   `);
 
   // Migration guards for existing databases
+  try { db.exec("ALTER TABLE skill_catalog_sources ADD COLUMN webhook_secret_alias TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE skill_catalog_snapshots ADD COLUMN is_default_ref INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE skill_catalog_blobs ADD COLUMN embedding_attempts INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE skill_catalog_blobs ADD COLUMN next_retry_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_skill_catalog_blobs_embedding_retry ON skill_catalog_blobs(embedding_status, next_retry_at, embedding_attempts)"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_skill_catalog_snapshots_default_ready ON skill_catalog_snapshots(source_id, is_default_ref DESC, state, created_at DESC)"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE users ADD COLUMN is_service INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
   try {
     db.exec(`
@@ -1117,6 +1196,36 @@ export function createTables() {
   } catch { /* tunnels table may not exist yet on brand-new DBs */ }
 
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)"); } catch { /* already exists */ }
+  try {
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_project_org
+        ON projects(project_id, org_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_catalog_sources_org_source
+        ON skill_catalog_sources(org_id, source_id);
+
+      CREATE TABLE IF NOT EXISTS skill_catalog_org_defaults (
+        org_id TEXT PRIMARY KEY REFERENCES orgs(org_id) ON DELETE CASCADE,
+        source_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (org_id, source_id)
+          REFERENCES skill_catalog_sources(org_id, source_id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS skill_catalog_project_overrides (
+        project_id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (project_id, org_id)
+          REFERENCES projects(project_id, org_id) ON DELETE CASCADE,
+        FOREIGN KEY (org_id, source_id)
+          REFERENCES skill_catalog_sources(org_id, source_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_skill_catalog_project_overrides_org
+        ON skill_catalog_project_overrides(org_id, project_id);
+    `);
+  } catch { /* already exists or legacy schema is still being migrated */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_pods_org ON pods(org_id)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_context_updates_org_time ON context_updates(org_id, timestamp DESC)"); } catch { /* already exists */ }
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_conflicts_org ON conflicts(org_id)"); } catch { /* already exists */ }

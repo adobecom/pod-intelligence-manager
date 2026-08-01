@@ -238,6 +238,9 @@ MCP (Model Context Protocol) server that exposes PIM data to Claude.ai. When con
 |------|-------|-------------|
 | `list_pods` | (none) | List all active pods with IDs, names, pressure, and conflict counts |
 | `render_pod_dashboard` | `pod_id` | Fetch all pod data and return a self-contained React component for rendering as a Claude.ai artifact |
+| `search_skills` | `source_id`, `query`, optional `tentative_name`, `target_namespace`, `limit` | Find existing skills worth reading before drafting; advisory only |
+| `check_skill_conflicts` | `source_id`, `base_commit_sha`, `candidates` | Check complete final skill Markdown for deterministic conflicts |
+| `view_skill_catalog` | `source_id`, optional `commit_sha`, `namespace`, `cursor`, `limit` | Browse the latest or commit-pinned skill catalog |
 
 The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, the living doc, tunnels, and lint findings, then embeds them as inline JSON into a single-file React component with a dark Spectrum-inspired theme. The artifact has four tabs: Dashboard, Conflicts, Feed, and Live Doc.
 

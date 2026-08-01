@@ -148,6 +148,12 @@ importers:
       '@fastify/websocket':
         specifier: ^11.2.0
         version: 11.2.0
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.12.1
+        version: 1.29.0(zod@3.25.76)
+      '@pim/mcp-server':
+        specifier: workspace:*
+        version: link:../mcp-server
       '@pim/shared':
         specifier: workspace:*
         version: link:../shared

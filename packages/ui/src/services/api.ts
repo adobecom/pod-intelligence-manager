@@ -231,6 +231,73 @@ export async function patchOrgConfig(body: OrgConfig): Promise<OrgConfig> {
   });
 }
 
+export interface SkillCatalogSourceSummary {
+  sourceId: string;
+  displayName: string;
+  repository: {
+    apiBaseUrl: string;
+    owner: string;
+    repo: string;
+    defaultRef: string;
+  };
+  enabled: boolean;
+  syncStatus: string;
+  lastSyncedAt: string | null;
+  latestEntriesReadyCommitSha: string | null;
+  latestSearchReadyCommitSha: string | null;
+  latestIndexedCommitSha: string | null;
+}
+
+export interface SkillCatalogConfiguration {
+  sources: SkillCatalogSourceSummary[];
+  selection: {
+    projectId: string | null;
+    orgDefaultSourceId: string | null;
+    projectOverrideSourceId: string | null;
+    effectiveSourceId: string | null;
+    mode: "project" | "org_default" | "unconfigured";
+    effectiveSource: SkillCatalogSourceSummary | null;
+  };
+}
+
+export async function getSkillCatalogConfiguration(
+  projectId?: string,
+): Promise<SkillCatalogConfiguration> {
+  const query = projectId
+    ? `?projectId=${encodeURIComponent(projectId)}`
+    : "";
+  return fetchJSON<SkillCatalogConfiguration>(
+    `/api/skill-catalog/config${query}`,
+  );
+}
+
+export async function putOrgDefaultSkillCatalogSource(
+  sourceId: string | null,
+): Promise<SkillCatalogConfiguration> {
+  return fetchJSON<SkillCatalogConfiguration>(
+    "/api/skill-catalog/config/org-default",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId }),
+    },
+  );
+}
+
+export async function putProjectSkillCatalogSource(
+  projectId: string,
+  sourceId: string | null,
+): Promise<SkillCatalogConfiguration> {
+  return fetchJSON<SkillCatalogConfiguration>(
+    `/api/projects/${encodeURIComponent(projectId)}/skill-catalog`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId }),
+    },
+  );
+}
+
 export async function getOrgTuning(): Promise<OrgTuning> {
   return fetchJSON<OrgTuning>("/api/org/tuning");
 }

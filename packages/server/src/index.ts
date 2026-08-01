@@ -18,6 +18,9 @@ import pendingWorkRoutes from "./routes/pending-work.js";
 import graphRoutes from "./routes/graph.js";
 import contextSearchRoutes from "./routes/context-search.js";
 import agentMemoryRoutes from "./routes/agent-memory.js";
+import skillCatalogRoutes from "./routes/skill-catalog.js";
+import skillCatalogWebhookRoutes from "./routes/skill-catalog-webhooks.js";
+import hostedMcpRoutes from "./routes/hosted-mcp.js";
 import wsRoutes from "./routes/ws.js";
 import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
@@ -27,13 +30,21 @@ import { initializeKnowledgeGraph, loadedOrgIds, pruneStaleNodes, refreshAnalysi
 import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
 import { runProjectSearchRefreshTick } from "./services/project-search-refresh.js";
+import { runSkillCatalogRefPollTick } from "./services/skill-catalog-freshness.js";
+import { runSkillCatalogEmbeddingBackfill } from "./services/skill-catalog-search.js";
+import {
+  createCloudWatchSkillCatalogMetricSink,
+  setSkillCatalogMetricSink,
+} from "./services/skill-catalog-metrics.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import { registerJsonBodyParser } from "./middleware/validation.js";
 import db from "./db/connection.js";
 
+const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const app = Fastify({ logger: true });
 registerJsonBodyParser(app);
+setSkillCatalogMetricSink(createCloudWatchSkillCatalogMetricSink(app.log));
 
 // Global error handler — structured errors, no stack traces to clients
 app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
@@ -115,8 +126,14 @@ const authenticate = createAuthHook(authMode);
 // The `/tunnel/` proxy authenticates via a per-tunnel share_token path segment
 // (checked in tunnel-proxy.ts) so external collaborators without IMS sessions
 // can load previews — matching Expo/ngrok semantics.
-const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config"]);
-const PUBLIC_PREFIXES = ["/ws", "/tunnel"];
+// `/mcp` performs stricter service-token-only authentication in its own route
+// before constructing the per-request MCP server.
+const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config", "/mcp"]);
+const PUBLIC_PREFIXES = [
+  "/ws",
+  "/tunnel",
+  "/api/skill-catalog/webhooks/github",
+];
 const isPublic = (url: string) => {
   const path = url.split("?")[0];
   return PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some(p => path === p || path.startsWith(p + "/"));
@@ -151,6 +168,11 @@ app.register(pendingWorkRoutes);
 app.register(graphRoutes);
 app.register(contextSearchRoutes);
 app.register(agentMemoryRoutes);
+app.register(skillCatalogRoutes);
+app.register(skillCatalogWebhookRoutes);
+app.register(hostedMcpRoutes, {
+  apiBaseUrl: `http://127.0.0.1:${PORT}`,
+});
 app.register(wsRoutes);
 app.register(wsTunnelRoutes);
 app.register(tunnelProxyRoutes);
@@ -200,7 +222,6 @@ app.get("/api/cli-config", {
   };
 });
 
-const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const ESCALATION_INTERVAL_MS = parseInt(process.env.ESCALATION_INTERVAL_MS ?? "300000", 10); // 5 min
 const LINT_INTERVAL_MS = parseInt(process.env.LINT_INTERVAL_MS ?? "7200000", 10); // 2 hours
 const GRAPH_REFRESH_INTERVAL_MS = parseInt(process.env.GRAPH_REFRESH_INTERVAL_MS ?? "1800000", 10); // 30 min
@@ -212,6 +233,25 @@ const PROJECT_SEARCH_REFRESH_INTERVAL_MS = parseInt(process.env.PROJECT_SEARCH_R
 const PROJECT_SEARCH_REFRESH_WINDOW_DAYS = parseInt(process.env.PROJECT_SEARCH_REFRESH_WINDOW_DAYS ?? "30", 10);
 /** Set to "0" to disable the scheduled project-search refresh (e.g. in read-only worker processes). */
 const PROJECT_SEARCH_REFRESH_ENABLED = process.env.PROJECT_SEARCH_REFRESH_ENABLED !== "0";
+function positiveIntervalMs(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+/** How often to reconcile every enabled skill-catalog source's configured ref. */
+const SKILL_CATALOG_POLL_INTERVAL_MS = positiveIntervalMs(
+  process.env.SKILL_CATALOG_POLL_INTERVAL_MS,
+  60_000,
+);
+/** Set to "0" to disable automatic skill-catalog ref polling. */
+const SKILL_CATALOG_POLL_ENABLED = process.env.SKILL_CATALOG_POLL_ENABLED !== "0";
+/** How often to retry pending/failed catalog embeddings. */
+const SKILL_CATALOG_EMBED_INTERVAL_MS = positiveIntervalMs(
+  process.env.SKILL_CATALOG_EMBED_INTERVAL_MS,
+  60_000,
+);
+/** Set to "0" to disable background skill-catalog embedding work. */
+const SKILL_CATALOG_EMBED_ENABLED =
+  process.env.SKILL_CATALOG_EMBED_ENABLED !== "0";
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -324,6 +364,51 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     }, PROJECT_SEARCH_REFRESH_INTERVAL_MS);
   }
 
+  if (SKILL_CATALOG_POLL_ENABLED) {
+    const pollSkillCatalogRefs = () => {
+      void runSkillCatalogRefPollTick(app.log).catch((e) => {
+        app.log.error(e, "Skill catalog ref poll failed");
+      });
+    };
+    // Reconcile once at startup so a push missed during a deploy does not wait
+    // for a full interval before the source becomes current.
+    pollSkillCatalogRefs();
+    setInterval(pollSkillCatalogRefs, SKILL_CATALOG_POLL_INTERVAL_MS);
+  }
+
+  if (SKILL_CATALOG_EMBED_ENABLED) {
+    let running = false;
+    const backfillSkillCatalogEmbeddings = () => {
+      if (running) return;
+      running = true;
+      void runSkillCatalogEmbeddingBackfill()
+        .then((result) => {
+          app.log.info(
+            {
+              available: result.available,
+              failed: result.failed,
+              hydrated: result.hydrated,
+              processed: result.processed,
+              ready: result.ready,
+              search_ready_snapshots: result.snapshots.searchReady,
+            },
+            "Skill catalog embedding backfill completed",
+          );
+        })
+        .catch((error) => {
+          app.log.error(error, "Skill catalog embedding backfill failed");
+        })
+        .finally(() => {
+          running = false;
+        });
+    };
+    backfillSkillCatalogEmbeddings();
+    setInterval(
+      backfillSkillCatalogEmbeddings,
+      SKILL_CATALOG_EMBED_INTERVAL_MS,
+    );
+  }
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
@@ -333,6 +418,16 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     PROJECT_SEARCH_REFRESH_ENABLED
       ? `Project search refresh interval: ${PROJECT_SEARCH_REFRESH_INTERVAL_MS}ms (window: ${PROJECT_SEARCH_REFRESH_WINDOW_DAYS}d)`
       : "Project search refresh: disabled (PROJECT_SEARCH_REFRESH_ENABLED=0)",
+  );
+  app.log.info(
+    SKILL_CATALOG_POLL_ENABLED
+      ? `Skill catalog ref poll interval: ${SKILL_CATALOG_POLL_INTERVAL_MS}ms`
+      : "Skill catalog ref polling: disabled (SKILL_CATALOG_POLL_ENABLED=0)",
+  );
+  app.log.info(
+    SKILL_CATALOG_EMBED_ENABLED
+      ? `Skill catalog embedding interval: ${SKILL_CATALOG_EMBED_INTERVAL_MS}ms`
+      : "Skill catalog embeddings: disabled (SKILL_CATALOG_EMBED_ENABLED=0)",
   );
 });
 

@@ -20,6 +20,9 @@ export const SERVICE_TOKEN_SCOPES = [
   "agent-memory:curate",
   "context-update:write",
   "org-config:read",
+  "skill-catalog:read",
+  "skill-conflicts:check",
+  "skill-catalog:admin",
 ] as const;
 
 export type ServiceTokenScope = typeof SERVICE_TOKEN_SCOPES[number];

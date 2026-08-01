@@ -429,14 +429,36 @@ export class PimEc2Stack extends cdk.Stack {
       originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
     };
 
+    // Scope SPA fallback to the UI behavior. A distribution-wide custom 403
+    // response would also rewrite legitimate API/MCP authorization failures to
+    // index.html, hiding the status and JSON body from clients.
+    const spaRewrite = new cloudfront.Function(this, "SpaRewrite", {
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+  if (request.uri.indexOf(".") === -1) {
+    request.uri = "/index.html";
+  }
+  return request;
+}
+`),
+    });
+
     const distribution = new cloudfront.Distribution(this, "PimCdn", {
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(uiBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        functionAssociations: [
+          {
+            function: spaRewrite,
+            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+          },
+        ],
       },
       additionalBehaviors: {
+        "/mcp": apiBehavior,
         "/api/*": apiBehavior,
         "/ws": apiBehavior,
         "/ws/*": apiBehavior,
@@ -445,11 +467,6 @@ export class PimEc2Stack extends cdk.Stack {
         "/tunnel/*": apiBehavior,
       },
       defaultRootObject: "index.html",
-      errorResponses: [
-        // SPA fallback: S3 with OAC returns 403 for any missing key; rewrite to index.html.
-        // 404 is intentionally NOT rewritten so genuine API 404s pass through unchanged.
-        { httpStatus: 403, responseHttpStatus: 200, responsePagePath: "/index.html" },
-      ],
     });
 
     // ──────────────────────────────────────

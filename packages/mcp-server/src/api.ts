@@ -117,16 +117,44 @@ function findGitRoot(): string | null {
   }
 }
 
-function readPimJsonOrgSlug(): string | null {
+interface PimRepoConfig {
+  orgSlug?: unknown;
+  projectId?: unknown;
+}
+
+function readPimJson(): PimRepoConfig | null {
   const root = findGitRoot();
   if (!root) return null;
   try {
     const raw = readFileSync(path.join(root, ".pim.json"), "utf-8");
-    const json = JSON.parse(raw) as { orgSlug?: string };
-    return json.orgSlug?.trim() || null;
+    const json = JSON.parse(raw) as unknown;
+    return json && typeof json === "object" && !Array.isArray(json)
+      ? (json as PimRepoConfig)
+      : null;
   } catch {
     return null;
   }
+}
+
+function readPimJsonOrgSlug(): string | null {
+  const orgSlug = readPimJson()?.orgSlug;
+  return typeof orgSlug === "string" ? orgSlug.trim() || null : null;
+}
+
+/**
+ * Resolve MCP project context without guessing: explicit tool input wins,
+ * followed by the process environment and the current repository binding.
+ * Returning undefined intentionally delegates the final choice to the
+ * server's configured organization default.
+ */
+export function resolveProjectId(explicitProjectId?: string): string | undefined {
+  const explicit = explicitProjectId?.trim();
+  if (explicit) return explicit;
+  const environment = process.env.PIM_PROJECT_ID?.trim();
+  if (environment) return environment;
+  const repositoryProjectId = readPimJson()?.projectId;
+  if (typeof repositoryProjectId !== "string") return undefined;
+  return repositoryProjectId.trim() || undefined;
 }
 
 function pimDir(): string {

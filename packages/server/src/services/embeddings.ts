@@ -9,7 +9,7 @@ export function isEmbeddingAvailable(): boolean {
   return !!(process.env.AWS_BEARER_TOKEN_BEDROCK && process.env.AWS_REGION);
 }
 
-function getEmbeddingDimensions(): number {
+export function getEmbeddingDimensions(): number {
   const raw = parseInt(process.env.EMBEDDING_DIMENSIONS ?? "", 10);
   return VALID_DIMENSIONS.has(raw) ? raw : DEFAULT_DIMENSIONS;
 }
@@ -30,10 +30,17 @@ const BEDROCK_TIMEOUT_MS = 8_000;
 
 /**
  * Calls Amazon Titan Text Embeddings v2 via the Bedrock `/invoke` endpoint.
- * Returns null (silently) when the embedding service is unavailable or errors.
+ *
+ * Unlike `generateEmbedding`, this strict variant never converts an embedding
+ * failure into a successful-looking null result. Catalog indexing uses this
+ * path so failed blobs remain retryable instead of being marked ready.
  */
-export async function generateEmbedding(text: string): Promise<number[] | null> {
-  if (!isEmbeddingAvailable()) return null;
+export async function generateEmbeddingStrict(text: string): Promise<number[]> {
+  if (!isEmbeddingAvailable()) {
+    throw new Error(
+      "Bedrock embeddings are unavailable: AWS_BEARER_TOKEN_BEDROCK and AWS_REGION are required",
+    );
+  }
 
   const region = process.env.AWS_REGION!;
   const token = process.env.AWS_BEARER_TOKEN_BEDROCK!;
@@ -56,21 +63,58 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
     });
 
     if (!response.ok) {
-      console.warn(`[embeddings] Bedrock request failed: ${response.status} ${response.statusText}`);
-      return null;
+      throw new Error(
+        `Bedrock request failed: ${response.status} ${response.statusText}`,
+      );
     }
 
-    const data = (await response.json()) as { embedding?: number[] };
-    return data.embedding ?? null;
+    const data = (await response.json()) as unknown;
+    const embedding =
+      typeof data === "object" && data !== null
+        ? (data as { embedding?: unknown }).embedding
+        : undefined;
+    if (
+      !Array.isArray(embedding) ||
+      embedding.length !== dimensions ||
+      !embedding.every(
+        (value): value is number =>
+          typeof value === "number" && Number.isFinite(value),
+      )
+    ) {
+      throw new Error(
+        `Bedrock returned an invalid embedding; expected ${dimensions} finite dimensions`,
+      );
+    }
+    return embedding;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Best-effort embedding path used by knowledge-graph and search recall.
+ * Returns null (silently) when the service is not configured and degrades to
+ * null, with a warning, for every Bedrock failure.
+ */
+export async function generateEmbedding(text: string): Promise<number[] | null> {
+  if (!isEmbeddingAvailable()) return null;
+
+  try {
+    return await generateEmbeddingStrict(text);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      console.warn(`[embeddings] Bedrock timed out after ${BEDROCK_TIMEOUT_MS}ms — falling back to keyword scoring`);
+      console.warn(
+        `[embeddings] Bedrock timed out after ${BEDROCK_TIMEOUT_MS}ms — falling back to keyword scoring`,
+      );
+    } else if (
+      err instanceof Error &&
+      err.message.startsWith("Bedrock request failed:")
+    ) {
+      console.warn(`[embeddings] ${err.message}`);
     } else {
       console.warn("[embeddings] Embedding generation failed:", err);
     }
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

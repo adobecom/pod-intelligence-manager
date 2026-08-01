@@ -22,6 +22,7 @@ import type { OrgScopeDefinition, OrgTuning } from "@pim/shared";
 import { DEFAULT_ORG_TUNING } from "@pim/shared";
 import { useOrgStore } from "../../stores/orgStore";
 import { PressureMeter } from "../../components/PressureMeter";
+import * as api from "../../services/api";
 
 const page = style({ padding: 24 });
 const column = style({ display: "flex", flexDirection: "column", gap: 32 });
@@ -151,10 +152,42 @@ export function OrgDashboard() {
   const [scopeDraft, setScopeDraft] = useState<OrgScopeDefinition[]>([]);
   const [orgConfigSaveError, setOrgConfigSaveError] = useState<string | null>(null);
   const [savingOrgConfig, setSavingOrgConfig] = useState(false);
+  const [catalogConfig, setCatalogConfig] =
+    useState<api.SkillCatalogConfiguration | null>(null);
+  const [catalogDefaultDraft, setCatalogDefaultDraft] = useState<string | null>(
+    null,
+  );
+  const [catalogConfigError, setCatalogConfigError] = useState<string | null>(
+    null,
+  );
+  const [savingCatalogConfig, setSavingCatalogConfig] = useState(false);
 
   useEffect(() => {
     loadOrg();
     loadOrgTuning();
+    let cancelled = false;
+    void api
+      .getSkillCatalogConfiguration()
+      .then((configuration) => {
+        if (cancelled) return;
+        setCatalogConfig(configuration);
+        setCatalogDefaultDraft(
+          configuration.selection.orgDefaultSourceId,
+        );
+        setCatalogConfigError(null);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCatalogConfigError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load skill catalog configuration",
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [loadOrg, loadOrgTuning]);
 
   useEffect(() => {
@@ -285,6 +318,26 @@ export function OrgDashboard() {
       setOrgConfigSaveError(err instanceof Error ? err.message : "Failed to save org config");
     } finally {
       setSavingOrgConfig(false);
+    }
+  }
+
+  async function handleSaveCatalogDefault() {
+    setCatalogConfigError(null);
+    setSavingCatalogConfig(true);
+    try {
+      const configuration = await api.putOrgDefaultSkillCatalogSource(
+        catalogDefaultDraft,
+      );
+      setCatalogConfig(configuration);
+      setCatalogDefaultDraft(configuration.selection.orgDefaultSourceId);
+    } catch (err) {
+      setCatalogConfigError(
+        err instanceof Error
+          ? err.message
+          : "Failed to save skill catalog configuration",
+      );
+    } finally {
+      setSavingCatalogConfig(false);
     }
   }
 
@@ -567,6 +620,88 @@ export function OrgDashboard() {
             </InlineAlert>
           )}
           <div className={style({ display: "flex", flexDirection: "column", gap: 16 })}>
+            <div className={style({ display: "flex", flexDirection: "column", gap: 8 })}>
+              <Text styles={style({ fontWeight: "bold", font: "body-sm" })}>
+                Default skill catalog
+              </Text>
+              <Text styles={style({ font: "body-sm", color: "neutral-subdued" })}>
+                Projects without an override use this catalog. Catalog sources are created and imported through the administrative workflow.
+              </Text>
+              {catalogConfigError && (
+                <InlineAlert variant="negative">
+                  <Content>{catalogConfigError}</Content>
+                </InlineAlert>
+              )}
+              {catalogConfig && (
+                <>
+                  <div className={style({ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" })}>
+                    <Picker
+                      label="Organization default"
+                      selectedKey={catalogDefaultDraft ?? "none"}
+                      onSelectionChange={(key) => {
+                        setCatalogDefaultDraft(
+                          key === "none" ? null : String(key),
+                        );
+                      }}
+                    >
+                      <PickerItem id="none">Not configured</PickerItem>
+                      {catalogConfig.sources.map((source) => (
+                          <PickerItem key={source.sourceId} id={source.sourceId}>
+                            {source.displayName} ({source.repository.owner}/{source.repository.repo})
+                            {source.enabled ? "" : " · polling disabled"}
+                          </PickerItem>
+                        ))}
+                    </Picker>
+                    <Button
+                      variant="accent"
+                      onPress={handleSaveCatalogDefault}
+                      isPending={savingCatalogConfig}
+                      isDisabled={
+                        catalogDefaultDraft ===
+                        catalogConfig.selection.orgDefaultSourceId
+                      }
+                    >
+                      Save catalog default
+                    </Button>
+                  </div>
+                  {catalogConfig.selection.effectiveSource ? (
+                    <div className={archiveCard}>
+                      <div className={archiveInfo}>
+                        <Text styles={style({ fontWeight: "bold" })}>
+                          {catalogConfig.selection.effectiveSource.displayName}
+                        </Text>
+                        <Text styles={style({ font: "body-sm" })}>
+                          {catalogConfig.selection.effectiveSource.repository.owner}/
+                          {catalogConfig.selection.effectiveSource.repository.repo} ·{" "}
+                          {catalogConfig.selection.effectiveSource.repository.defaultRef}
+                        </Text>
+                        <div className={style({ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" })}>
+                          <Badge size="S" variant="neutral">
+                            Sync: {catalogConfig.selection.effectiveSource.syncStatus}
+                          </Badge>
+                          {!catalogConfig.selection.effectiveSource.enabled && (
+                            <Badge size="S" variant="notice">
+                              Polling disabled
+                            </Badge>
+                          )}
+                          <Text styles={style({ font: "code-sm", color: "neutral-subdued" })}>
+                            Latest indexed:{" "}
+                            {catalogConfig.selection.effectiveSource.latestIndexedCommitSha ?? "Not indexed"}
+                          </Text>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <InlineAlert variant="notice">
+                      <Content>
+                        No organization default skill catalog is configured.
+                      </Content>
+                    </InlineAlert>
+                  )}
+                </>
+              )}
+            </div>
+            <Divider size="S" />
             <div>
               <Text styles={style({ fontWeight: "bold", font: "body-sm" })}>Scopes</Text>
               <div className={style({ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 })}>
