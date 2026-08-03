@@ -51,6 +51,7 @@ import {
   reindexProjectSearch,
   type IndexDocumentInput,
 } from "../project-search-index.js";
+import { connectorBindingVersion } from "../project-resource-bindings.js";
 import { searchProject } from "../project-search.js";
 import { queryKnowledge } from "../knowledge-graph.js";
 
@@ -156,8 +157,6 @@ beforeEach(() => {
   process.env.CONFLUENCE_BASE_URL = "https://wiki.example.test";
   process.env.PROJECT_SLACK_SEARCH_ENABLED = "1";
   process.env.PROJECT_CONFLUENCE_SEARCH_ENABLED = "1";
-  process.env.PROJECT_GITHUB_VISIBLE_REPOS = "adobe/emc";
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "EMC,MWPW";
   vi.clearAllMocks();
   llmCalls.length = 0;
   mockKgNodes([]);
@@ -203,6 +202,49 @@ afterEach(() => {
 });
 
 describe("indexed project search — retrieval", () => {
+  it("re-stamps stale evidence metadata and ignores legacy operator allowlist changes", async () => {
+    const currentVersion = connectorBindingVersion({
+      jira: { project_keys: ["EMC", "MWPW"] },
+    }, "jira");
+    const now = new Date().toISOString();
+    testDb.prepare(
+      `INSERT INTO project_evidence_items
+         (id, org_id, project_id, source, source_type, source_id, source_title,
+          summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+       VALUES ('evidence-binding-restamp', ?, ?, 'jira', 'issue', 'EMC-101',
+               'bindingrestampneedle remains searchable', 'Historical evidence',
+               'Historical evidence under the configured project binding.', ?, ?, ?, 0.7, 'project_visible')`,
+    ).run(
+      ORG_ID,
+      PROJECT_ID,
+      now,
+      now,
+      JSON.stringify({ key: "EMC-101", resource_binding_version: "resource-binding-v1:obsolete" }),
+    );
+
+    backfillProjectSearch(ORG_ID, PROJECT_ID);
+
+    const storedDocument = testDb.prepare(
+      "SELECT metadata_json FROM project_search_documents WHERE project_id = ? AND source_id = ?",
+    ).get(PROJECT_ID, "EMC-101") as { metadata_json: string };
+    const storedEvidence = testDb.prepare(
+      "SELECT metadata_json FROM project_evidence_items WHERE project_id = ? AND source_id = ?",
+    ).get(PROJECT_ID, "EMC-101") as { metadata_json: string };
+    expect(JSON.parse(storedDocument.metadata_json)).toMatchObject({
+      resource_binding_version: currentVersion,
+    });
+    expect(JSON.parse(storedEvidence.metadata_json)).toMatchObject({
+      resource_binding_version: currentVersion,
+    });
+
+    process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "UNRELATED,REORDERED";
+    expect(connectorBindingVersion({
+      jira: { project_keys: ["EMC", "MWPW"] },
+    }, "jira")).toBe(currentVersion);
+    const result = await searchProject(ORG_ID, PROJECT_ID, { query: "bindingrestampneedle" });
+    expect(result?.hits.map((hit) => hit.source_id)).toContain("EMC-101");
+  });
+
   it("returns an exact Jira-key lookup as the top hit", async () => {
     indexProjectDocument(doc({
       source: "jira", source_type: "resolved_issue", source_id: "EMC-123",

@@ -546,7 +546,11 @@ export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumen
       `Project search source has no eligible current project binding: ${bindingSource}`,
     );
   }
-  const scopedInput = bindingVersion && typeof rawInput.metadata?.resource_binding_version !== "string"
+  // Binding versions are derived from the current admin-controlled project
+  // profile. Never preserve a caller/evidence copy after that profile has been
+  // revalidated, otherwise normal backfills can strand documents behind an
+  // obsolete version forever.
+  const scopedInput = bindingVersion
     ? {
         ...rawInput,
         metadata: { ...(rawInput.metadata ?? {}), resource_binding_version: bindingVersion },
@@ -1211,6 +1215,18 @@ function mapEvidenceSource(source: ProjectEvidenceItem["source"]): ProjectSearch
   }
 }
 
+function evidenceBindingSource(
+  source: ProjectEvidenceItem["source"],
+): "github" | "jira" | "slack" | "confluence" | "git" | null {
+  if (source === "commit") return "git";
+  return source === "github"
+    || source === "jira"
+    || source === "slack"
+    || source === "confluence"
+    ? source
+    : null;
+}
+
 export function documentInputFromEvidence(evidence: ProjectEvidenceItem): IndexDocumentInput {
   const meta = evidence.metadata ?? {};
   const status = typeof meta.status === "string" ? meta.status : typeof meta.state === "string" ? meta.state : undefined;
@@ -1307,6 +1323,7 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
 export function backfillProjectSearch(orgId: string, projectId: string): { documents: number; chunks: number } {
   let documents = 0;
   let chunks = 0;
+  const resources = loadProjectResources(orgId, projectId);
   const seen = new Set<string>();
   const index = (input: IndexDocumentInput) => {
     const key = `${input.source}${KEY_SEPARATOR}${input.source_id}`;
@@ -1328,7 +1345,19 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
        WHERE org_id = ? AND project_id = ? AND visibility = 'project_visible'`,
     )
     .all(orgId, projectId) as unknown as EvidenceBackfillRow[];
+  const updateEvidenceMetadata = db.prepare(
+    "UPDATE project_evidence_items SET metadata_json = ? WHERE id = ? AND org_id = ? AND project_id = ?",
+  );
   for (const row of evidence) {
+    let metadata = parseJson<Record<string, unknown>>(row.metadata_json, {});
+    const bindingSource = evidenceBindingSource(row.source);
+    const bindingVersion = bindingSource
+      ? connectorBindingVersion(resources, bindingSource)
+      : null;
+    if (bindingVersion && metadata.resource_binding_version !== bindingVersion) {
+      metadata = { ...metadata, resource_binding_version: bindingVersion };
+      updateEvidenceMetadata.run(JSON.stringify(metadata), row.id, orgId, projectId);
+    }
     index(
       documentInputFromEvidence({
         id: row.id,
@@ -1344,7 +1373,7 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
         ...(row.author ? { author: row.author } : {}),
         occurred_at: row.occurred_at,
         ingested_at: row.occurred_at,
-        metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
+        metadata,
         confidence_score: row.confidence_score,
         promotable: row.promotable === 1,
         source_instance: row.source_instance,

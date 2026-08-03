@@ -4,7 +4,7 @@ import {
   type IntegrationSearchOpts,
   truncate,
 } from "./types.js";
-import { hasJiraProjectVisibilityPolicy } from "../services/project-resource-bindings.js";
+import { hasJiraProjectBinding } from "../services/project-resource-bindings.js";
 
 // Jira search with JQL. Supports two Jira flavors:
 //   - Adobe on-prem (jira.corp.adobe.com): Authorization: Bearer <PAT>, REST v2.
@@ -156,8 +156,8 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
   if (opts.project_id && projectKeys.length === 0 && !team) {
     return { source: "jira", documents: [], missing: "No Jira project or team is bound to this project" };
   }
-  if (opts.project_id && opts.project_resources && !hasJiraProjectVisibilityPolicy(opts.project_resources)) {
-    return { source: "jira", documents: [], missing: "Jira project visibility policy is not configured" };
+  if (opts.project_id && opts.project_resources && !hasJiraProjectBinding(opts.project_resources)) {
+    return { source: "jira", documents: [], missing: "Jira project binding is invalid" };
   }
   const hasActor = !!opts.actor?.email;
   const { versions } = extractFixVersions(opts.query);

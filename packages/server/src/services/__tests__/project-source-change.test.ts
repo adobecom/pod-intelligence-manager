@@ -91,7 +91,6 @@ function confluenceChange(overrides: Partial<SourceChange> = {}): SourceChange {
 }
 
 beforeEach(() => {
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "EMC";
   vi.clearAllMocks();
   testDb.exec(`
     PRAGMA foreign_keys = OFF;

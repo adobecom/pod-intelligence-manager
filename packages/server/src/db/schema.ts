@@ -311,8 +311,6 @@ export function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_project_evidence_project_time
       ON project_evidence_items(org_id, project_id, occurred_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_project_evidence_source_identity
-      ON project_evidence_items(org_id, project_id, source, source_instance, native_id);
 
     CREATE TABLE IF NOT EXISTS project_memory_candidates (
       id TEXT PRIMARY KEY,
@@ -409,8 +407,6 @@ export function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_project_search_docs_scope
       ON project_search_documents(org_id, project_id, source, occurred_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_project_search_docs_source_identity
-      ON project_search_documents(org_id, project_id, source, source_instance, native_id);
 
     CREATE TABLE IF NOT EXISTS project_search_chunks (
       id TEXT PRIMARY KEY,

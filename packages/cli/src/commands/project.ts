@@ -75,7 +75,7 @@ export function registerProjectCommands(program: Command) {
 
   project
     .command("create")
-    .description("Create a new project with optional onboarded resources")
+    .description("Create a new project with optional onboarded resources (resources require org admin)")
     .argument("<name>", "Project name")
     .option("--description <text>")
     .option("--jira <keys>", "Comma-separated Jira project keys (e.g. ADPINTAKE,T3EV)")
@@ -140,7 +140,7 @@ export function registerProjectCommands(program: Command) {
 
   project
     .command("set-resources")
-    .description("Replace a project's external resources (Jira, GitHub, Slack, Confluence, git paths, aliases)")
+    .description("Replace a project's external resources (org admin only)")
     .argument("<projectId>", "Project ID")
     .option("--jira <keys>")
     .option("--jira-team <team>")

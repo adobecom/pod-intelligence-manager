@@ -59,7 +59,6 @@ const ORG_ID = "org_sem";
 const PROJECT_ID = "project-sem";
 
 beforeEach(() => {
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "EMC,SEM";
   vi.clearAllMocks();
   testDb.exec(`
     PRAGMA foreign_keys = OFF;

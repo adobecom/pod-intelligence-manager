@@ -9,12 +9,24 @@
 # exactly what will be restored), and again against the restored DB after cutover;
 # the two must be identical (the app is stopped, so there is no legitimate growth).
 #
-# Usage: capture-manifest.sh [db_path]   # prints manifest to stdout
+# Use --core for a manifest paired with the automatic portable backup format;
+# it excludes the same rebuildable project_search_* tables on both sides.
+#
+# Usage: capture-manifest.sh [--core] [db_path]   # prints manifest to stdout
 set -eu
+MODE="full"
+if [ "${1:-}" = "--core" ]; then
+    MODE="core"
+    shift
+fi
 DB="${1:-${DB_PATH:-/data/pim.db}}"
+TABLE_FILTER="type='table' AND name NOT LIKE 'sqlite_%'"
+if [ "$MODE" = "core" ]; then
+    TABLE_FILTER="$TABLE_FILTER AND name NOT GLOB 'project_search_*'"
+fi
 
 # Per-table counts (drive the gate).
-sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name" \
+sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE $TABLE_FILTER ORDER BY name" \
   | while read -r t; do
       [ -n "$t" ] || continue
       echo "$t=$(sqlite3 "$DB" "SELECT count(*) FROM \"$t\"")"
@@ -22,6 +34,7 @@ sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LI
 
 # Human-review context (ignored by the gate).
 echo "# captured=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "# mode=$MODE"
 echo "# sqlite=$(sqlite3 "$DB" 'SELECT sqlite_version()')"
 echo "# org_ids=$(sqlite3 "$DB" 'SELECT group_concat(org_id) FROM orgs' 2>/dev/null || echo '?')"
 

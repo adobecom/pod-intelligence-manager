@@ -321,6 +321,46 @@ describe("project source health", () => {
 });
 
 describe("project source polling", () => {
+  it("does not purge configured GitHub or Jira evidence when legacy operator allowlists are absent", async () => {
+    await recordProjectEvidence({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "github",
+      source_type: "issue",
+      source_id: "adobe/app#7",
+      source_title: "Issue #7",
+      summary: "Configured GitHub evidence",
+      body: "This row must survive a credential-only poll failure.",
+      metadata: { repo: "adobe/app", number: 7 },
+      confidence_score: 0.6,
+    });
+    await recordProjectEvidence({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "jira",
+      source_type: "active_issue",
+      source_id: "MWPW-7",
+      source_title: "MWPW-7",
+      summary: "Configured Jira evidence",
+      body: "This row must survive a credential-only poll failure.",
+      metadata: { key: "MWPW-7" },
+      confidence_score: 0.6,
+    });
+    delete process.env.PROJECT_GITHUB_VISIBLE_REPOS;
+    delete process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS;
+
+    const result = await pollProjectSources(ORG_ID, PROJECT_ID);
+
+    expect(result?.results.find((entry) => entry.source === "github")?.missing).toBe("GH_TOKEN not set");
+    expect(result?.results.find((entry) => entry.source === "jira")?.missing).toBe("jira_source_poll_failed");
+    expect(testDb.prepare(
+      "SELECT source, source_id FROM project_evidence_items WHERE source IN ('github', 'jira') ORDER BY source",
+    ).all()).toEqual([
+      { source: "github", source_id: "adobe/app#7" },
+      { source: "jira", source_id: "MWPW-7" },
+    ]);
+  });
+
   it("does not echo an upstream response body in poll failures", async () => {
     setProjectResources({ jira: { project_keys: ["MWPW"] } });
     process.env.JIRA_BASE_URL = "https://jira.example.com";

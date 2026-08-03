@@ -14,8 +14,9 @@
 #   PIM_BACKUPS_BUCKET       S3 bucket holding backups/ (required to restore)
 #   AWS_REGION               default us-west-2
 #   PIM_REQUIRE_RESTORE      "true" => stateful host: refuse to start empty
-#   PIM_RESTORE_KEY          exact S3 key to restore (e.g. backups/pim-...sql.gz);
-#                            default: lexically-greatest key under backups/
+#   PIM_RESTORE_KEY          exact S3 key to restore (e.g.
+#                            backups/hourly/pim-core-...sql.gz); default: newest
+#                            .sql.gz object anywhere under backups/
 #   PIM_RESTORE_SHA256       if set, the downloaded object must match this sha256
 #   PIM_RESTORE_MANIFEST_KEY if set, S3 key of a "table=count" manifest the restored
 #                            DB must match exactly (else fail-closed)
@@ -36,8 +37,19 @@ count_orgs() { sqlite3 "$1" "SELECT count(*) FROM orgs" 2>/dev/null || echo 0; }
 # populated DB_PATH that a systemd retry would mistake for a completed restore.
 # Keeping the staging file beside DB_PATH also makes the final rename atomic.
 STAGED_DB="${DB_PATH}.restore"
+REBUILD_MARKER="${DB_PATH}.project-search-rebuild-required"
+WORK_DIR=""
+GUNZIP_PID=""
 cleanup() {
-    rm -f /tmp/restore.sql.gz /tmp/restore.sql /tmp/manifest.txt
+    if [ -n "$GUNZIP_PID" ]; then
+        kill "$GUNZIP_PID" 2>/dev/null || true
+        wait "$GUNZIP_PID" 2>/dev/null || true
+    fi
+    if [ -n "$WORK_DIR" ]; then
+        rm -f "$WORK_DIR/restore.sql.gz" "$WORK_DIR/restore.sql.gz.sha256" \
+            "$WORK_DIR/manifest.txt" "$WORK_DIR/objects.txt" "$WORK_DIR/restore.pipe"
+        rmdir "$WORK_DIR" 2>/dev/null || true
+    fi
     if [ -n "${STAGED_DB:-}" ]; then
         rm -f "$STAGED_DB" "${STAGED_DB}-wal" "${STAGED_DB}-shm"
     fi
@@ -53,31 +65,74 @@ if [ "${existing:-0}" -gt 0 ] 2>/dev/null; then
 fi
 
 [ -n "$BUCKET" ] || soft "PIM_BACKUPS_BUCKET unset"
+WORK_DIR=$(mktemp -d /tmp/pim-restore.XXXXXX) || die "temporary directory creation failed"
+ARCHIVE="$WORK_DIR/restore.sql.gz"
+CHECKSUM_FILE="$WORK_DIR/restore.sql.gz.sha256"
+MANIFEST_FILE="$WORK_DIR/manifest.txt"
+OBJECTS_FILE="$WORK_DIR/objects.txt"
+FIFO="$WORK_DIR/restore.pipe"
 
-# Resolve the key: exact if pinned, else the lexically-greatest (== chronological).
+# Resolve the key: exact if pinned, otherwise compare object LastModified values
+# recursively. Tier prefixes make a plain lexical key comparison incorrect.
 if [ -n "${PIM_RESTORE_KEY:-}" ]; then
     KEY="$PIM_RESTORE_KEY"
     log "using pinned key $KEY"
 else
-    name=$(aws s3 ls "s3://$BUCKET/backups/" --region "$REGION" \
-        | tr -s ' ' | cut -d' ' -f4 | grep -E '\.sql\.gz$' | sort | tail -n1 || true)
-    [ -n "$name" ] || soft "no backup under s3://$BUCKET/backups/"
-    KEY="backups/$name"
+    if ! aws s3 ls "s3://$BUCKET/backups/" --recursive --region "$REGION" > "$OBJECTS_FILE"; then
+        soft "backup listing failed under s3://$BUCKET/backups/"
+    fi
+    KEY=$(awk '$4 ~ /\.sql\.gz$/ { print $1, $2, $4 }' "$OBJECTS_FILE" \
+        | sort -k1,2 | tail -n1 | awk '{ print $3 }')
+    [ -n "$KEY" ] || soft "no backup under s3://$BUCKET/backups/"
     log "resolved latest key $KEY"
 fi
 
-aws s3 cp "s3://$BUCKET/$KEY" /tmp/restore.sql.gz --region "$REGION" --quiet \
+case "$KEY" in
+    */pim-core-*.sql.gz|pim-core-*.sql.gz) CORE_RESTORE="true" ;;
+    *) CORE_RESTORE="false" ;;
+esac
+
+aws s3 cp "s3://$BUCKET/$KEY" "$ARCHIVE" --region "$REGION" --quiet \
     || die "download failed: s3://$BUCKET/$KEY"
 
-if [ -n "${PIM_RESTORE_SHA256:-}" ]; then
-    got=$(sha256sum /tmp/restore.sql.gz | cut -d' ' -f1)
-    [ "$got" = "$PIM_RESTORE_SHA256" ] || die "checksum mismatch: got=$got want=$PIM_RESTORE_SHA256"
+# New core backups always publish a checksum sidecar. A caller-provided checksum
+# still takes precedence for a pinned, operator-verified migration backup.
+EXPECTED_SHA="${PIM_RESTORE_SHA256:-}"
+if [ -z "$EXPECTED_SHA" ]; then
+    if aws s3 cp "s3://$BUCKET/$KEY.sha256" "$CHECKSUM_FILE" --region "$REGION" --quiet 2>/dev/null; then
+        EXPECTED_SHA=$(awk 'NR == 1 { print $1 }' "$CHECKSUM_FILE")
+    elif [ "$CORE_RESTORE" = "true" ]; then
+        die "checksum sidecar missing: s3://$BUCKET/$KEY.sha256"
+    else
+        log "legacy backup has no checksum sidecar; relying on gzip + SQLite integrity checks"
+    fi
+fi
+
+if [ -n "$EXPECTED_SHA" ]; then
+    case "$EXPECTED_SHA" in *[!0-9A-Fa-f]*) die "invalid sha256 value" ;; esac
+    [ "${#EXPECTED_SHA}" -eq 64 ] || die "invalid sha256 length"
+    EXPECTED_SHA=$(printf '%s' "$EXPECTED_SHA" | tr 'A-F' 'a-f')
+    got=$(sha256sum "$ARCHIVE" | cut -d' ' -f1)
+    [ "$got" = "$EXPECTED_SHA" ] || die "checksum mismatch: got=$got want=$EXPECTED_SHA"
     log "checksum verified"
 fi
 
-gunzip -f /tmp/restore.sql.gz || die "gunzip failed"
+gzip -t "$ARCHIVE" || die "compressed archive validation failed"
 rm -f "$STAGED_DB" "${STAGED_DB}-wal" "${STAGED_DB}-shm"
-sqlite3 -bail "$STAGED_DB" < /tmp/restore.sql || die "sqlite import failed"
+mkfifo "$FIFO" || die "restore pipe creation failed"
+gzip -dc "$ARCHIVE" > "$FIFO" &
+GUNZIP_PID=$!
+if ! sqlite3 -bail "$STAGED_DB" < "$FIFO"; then
+    wait "$GUNZIP_PID" 2>/dev/null || true
+    GUNZIP_PID=""
+    die "sqlite import failed"
+fi
+if ! wait "$GUNZIP_PID"; then
+    GUNZIP_PID=""
+    die "decompression failed"
+fi
+GUNZIP_PID=""
+rm -f "$FIFO"
 
 ic=$(sqlite3 "$STAGED_DB" "PRAGMA integrity_check" 2>/dev/null || echo error)
 [ "$ic" = "ok" ] || die "integrity_check failed: $ic"
@@ -89,15 +144,16 @@ log "restored orgs=$orgs, integrity ok"
 # Optional manifest gate: restored counts must EXACTLY match the pre-shutdown
 # manifest (lines "table=count"). Fail-closed on any mismatch.
 if [ -n "${PIM_RESTORE_MANIFEST_KEY:-}" ]; then
-    aws s3 cp "s3://$BUCKET/$PIM_RESTORE_MANIFEST_KEY" /tmp/manifest.txt --region "$REGION" --quiet \
+    aws s3 cp "s3://$BUCKET/$PIM_RESTORE_MANIFEST_KEY" "$MANIFEST_FILE" --region "$REGION" --quiet \
         || die "manifest download failed: $PIM_RESTORE_MANIFEST_KEY"
     while IFS='=' read -r tbl want; do
         [ -n "${tbl:-}" ] || continue
         case "$tbl" in \#*) continue ;; esac
+        case "$tbl" in *[!A-Za-z0-9_]*) die "manifest contains invalid table name: $tbl" ;; esac
         got=$(sqlite3 "$STAGED_DB" "SELECT count(*) FROM \"$tbl\"" 2>/dev/null || echo ERR)
         [ "$got" = "$want" ] || die "manifest mismatch: $tbl got=$got want=$want"
-    done < /tmp/manifest.txt
-    rm -f /tmp/manifest.txt
+    done < "$MANIFEST_FILE"
+    rm -f "$MANIFEST_FILE"
     log "manifest gate passed"
 fi
 
@@ -105,6 +161,16 @@ fi
 # then atomically publish the validated DB. Clear STAGED_DB so the EXIT trap does
 # not remove the file after it has become DB_PATH.
 rm -f "${DB_PATH}-wal" "${DB_PATH}-shm"
+if [ "$CORE_RESTORE" = "true" ]; then
+    # Core dumps deliberately omit the rebuildable project_search_* tables.
+    # createTables() recreates their schema and server startup consumes this
+    # marker to rebuild lexical/graph rows from authoritative evidence/context.
+    touch "$REBUILD_MARKER" || die "failed to create project-search rebuild marker"
+fi
 mv -f "$STAGED_DB" "$DB_PATH" || die "failed to publish validated DB"
 STAGED_DB=""
-log "restore complete (validated DB published atomically)"
+if [ "$CORE_RESTORE" = "true" ]; then
+    log "restore complete (validated core DB published; project-search rebuild requested)"
+else
+    log "restore complete (validated DB published atomically)"
+fi

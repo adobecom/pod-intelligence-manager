@@ -101,7 +101,6 @@ beforeAll(() => {
   ]) {
     delete process.env[k];
   }
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "MWPW";
 
   const creator = upsertUserByIms({ email: "creator@adobe.com", display_name: "Creator" });
   const u1 = upsertUserByIms({ email: "rea01581@adobe.com", display_name: "Rayyan Khan" });

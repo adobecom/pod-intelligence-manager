@@ -11,6 +11,7 @@ import {
 import { validateBody } from "../middleware/validation.js";
 import {
   rejectServiceToken,
+  requireAdmin,
   requireProjectBinding,
   requireServiceScope,
 } from "../middleware/service-authz.js";
@@ -349,7 +350,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources",
     { preHandler: validateBody(ResourcesSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = db
         .prepare("SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?")
         .get(req.params.projectId, req.org!.org_id) as { resources_json: string | null } | undefined;
@@ -382,7 +383,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/profile",
     { preHandler: validateBody(ResourcesPatchSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -399,7 +400,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -422,7 +423,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
@@ -445,8 +446,8 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects",
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
       const { name, description, resources } = req.body;
+      if (resources ? !requireAdmin(req, reply) : !rejectServiceToken(req, reply)) return;
       const orgId = req.org!.org_id;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),

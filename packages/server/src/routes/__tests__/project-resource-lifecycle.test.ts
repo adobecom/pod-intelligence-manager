@@ -175,6 +175,12 @@ beforeAll(async () => {
       created_at: NOW,
       last_login_at: NOW,
     };
+    req.membership = {
+      org_id: ORG_ID,
+      user_id: USER_ID,
+      role: req.headers["x-test-role"] === "member" ? "member" : "admin",
+      created_at: NOW,
+    };
   });
   app.register(projectRoutes);
   await app.ready();
@@ -192,6 +198,46 @@ beforeEach(() => {
 });
 
 describe("project resource lifecycle routes", () => {
+  it("requires an org admin to change connector bindings", async () => {
+    const projectId = "project-member-resource-change";
+    seedProject(projectId, { github: { repos: ["adobe/keep"] } });
+    seedSourceState(projectId, "github");
+
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/projects/${projectId}/resources`,
+      headers: { "x-test-role": "member" },
+      payload: { github: { repos: ["adobe/forbidden"] } },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(JSON.parse((testDb.prepare(
+      "SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?",
+    ).get(projectId, ORG_ID) as { resources_json: string }).resources_json)).toEqual({
+      github: { repos: ["adobe/keep"] },
+    });
+    expect(sourceStateCounts(projectId, "github").evidence).toBe(1);
+    expect(scheduleProjectSearchRefresh).not.toHaveBeenCalled();
+  });
+
+  it("requires an org admin to create a project with connector bindings", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { "x-test-role": "member" },
+      payload: {
+        name: "Forbidden Bound Project",
+        resources: { jira: { project_keys: ["SECRET"] } },
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(testDb.prepare(
+      "SELECT COUNT(*) AS count FROM projects WHERE org_id = ? AND name = ?",
+    ).get(ORG_ID, "Forbidden Bound Project")).toMatchObject({ count: 0 });
+    expect(scheduleProjectSearchRefresh).not.toHaveBeenCalled();
+  });
+
   it("purges only the changed connector before scheduling its replacement refresh", async () => {
     const projectId = "project-change-resource";
     seedProject(projectId, {

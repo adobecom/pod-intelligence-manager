@@ -247,7 +247,6 @@ function insertPodContextUpdate(input: {
 }
 
 beforeEach(() => {
-  process.env.PROJECT_GITHUB_VISIBLE_REPOS = "acme/pim";
   vi.clearAllMocks();
   vi.mocked(isLLMAvailable).mockReturnValue(false);
   vi.mocked(callLLMJSON).mockResolvedValue(null);

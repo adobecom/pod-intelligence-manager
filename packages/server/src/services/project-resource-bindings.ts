@@ -12,28 +12,18 @@ export const CONNECTOR_RESOURCE_KEYS: readonly ProjectSourceHealthSource[] = [
   "git",
 ];
 
-function csvSet(name: string, normalize: (value: string) => string): Set<string> {
-  return new Set((process.env[name] ?? "")
-    .split(",")
-    .map((value) => normalize(value.trim()))
-    .filter(Boolean));
-}
-
-/** Operator attestations for sources whose service credentials can see a
- * broader audience than the PIM project. Missing/partial attestations fail
- * closed; project bindings alone are not an ACL proof. */
-export function universallyVisibleGithubRepos(resources: ProjectResources): string[] {
-  const configured = [...new Set((resources.github?.repos ?? [])
+/** Canonical connector scopes selected by an org administrator and persisted
+ * with the project. Service credentials remain deployment secrets, but their
+ * non-secret resource scope has a single source of truth in resources_json. */
+export function configuredGithubRepos(resources: ProjectResources): string[] {
+  return [...new Set((resources.github?.repos ?? [])
     .map((repo) => repo.trim().toLowerCase()).filter(Boolean))].sort();
-  const allowed = csvSet("PROJECT_GITHUB_VISIBLE_REPOS", (repo) => repo.toLowerCase());
-  return configured.length > 0 && configured.every((repo) => allowed.has(repo)) ? configured : [];
 }
 
-export function universallyVisibleJiraProjectKeys(resources: ProjectResources): string[] {
+export function configuredJiraProjectKeys(resources: ProjectResources): string[] {
   const configured = [...new Set((resources.jira?.project_keys ?? [])
     .map((key) => key.trim().toUpperCase()).filter(Boolean))].sort();
-  const allowed = csvSet("PROJECT_JIRA_VISIBLE_PROJECT_KEYS", (key) => key.toUpperCase());
-  if (configured.length === 0 || !configured.every((key) => allowed.has(key))) return [];
+  if (configured.length === 0) return [];
   const boundIssueKeys = [
     ...(resources.jira?.issue_keys ?? []),
     ...(resources.jira?.epics ?? []),
@@ -42,14 +32,14 @@ export function universallyVisibleJiraProjectKeys(resources: ProjectResources): 
   return configured;
 }
 
-export function hasGithubProjectVisibilityPolicy(resources: ProjectResources): boolean {
+export function hasGithubProjectBinding(resources: ProjectResources): boolean {
   const configured = new Set((resources.github?.repos ?? [])
     .map((repo) => repo.trim().toLowerCase()).filter(Boolean)).size;
-  return configured > 0 && universallyVisibleGithubRepos(resources).length === configured;
+  return configured > 0 && configuredGithubRepos(resources).length === configured;
 }
 
-export function hasJiraProjectVisibilityPolicy(resources: ProjectResources): boolean {
-  return universallyVisibleJiraProjectKeys(resources).length > 0;
+export function hasJiraProjectBinding(resources: ProjectResources): boolean {
+  return configuredJiraProjectKeys(resources).length > 0;
 }
 
 function canonicalExistingPath(value: string): string | null {
@@ -131,9 +121,9 @@ export function connectorBindingVersion(
   resources = sanitizeProjectResources(resources);
   const gitPaths = resources.git?.repo_paths ?? [];
   const configured = source === "github"
-    ? hasGithubProjectVisibilityPolicy(resources)
+    ? hasGithubProjectBinding(resources)
     : source === "jira"
-      ? hasJiraProjectVisibilityPolicy(resources)
+      ? hasJiraProjectBinding(resources)
       : source === "slack"
         ? (resources.slack?.channels?.length ?? 0) > 0
         : source === "confluence"
@@ -143,11 +133,11 @@ export function connectorBindingVersion(
           : gitPaths.length > 0 && gitPaths.every(isAllowedProjectGitPath);
   if (!configured) return null;
   const endpointIdentity = source === "jira"
-    ? `${process.env.JIRA_BASE_URL ?? ""}\0${process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS ?? ""}`
+    ? (process.env.JIRA_BASE_URL ?? "").trim().replace(/\/+$/, "")
     : source === "confluence"
       ? process.env.CONFLUENCE_BASE_URL ?? ""
       : source === "github"
-        ? `https://api.github.com\0${process.env.PROJECT_GITHUB_VISIBLE_REPOS ?? ""}`
+        ? "https://api.github.com"
         : source === "git"
           ? canonicalResourceValue(configuredProjectGitRoots())
           : "";
@@ -210,7 +200,7 @@ export function projectResourceEligibilitySql(
     params.push(version, ...itemParams);
   };
 
-  const repos = universallyVisibleGithubRepos(resources);
+  const repos = configuredGithubRepos(resources);
   if (repos.length > 0) {
     const repoTerms = repos.map(() =>
       `(lower(CAST(json_extract(${safeMetadata}, '$.repo') AS TEXT)) = ?`
@@ -223,7 +213,7 @@ export function projectResourceEligibilitySql(
     );
   }
 
-  const projectKeys = universallyVisibleJiraProjectKeys(resources);
+  const projectKeys = configuredJiraProjectKeys(resources);
   const issueKeys = projectKeys.length > 0
     ? [...new Set((resources.jira?.issue_keys ?? [])
         .map((key) => key.trim().toUpperCase()).filter(Boolean))].sort()

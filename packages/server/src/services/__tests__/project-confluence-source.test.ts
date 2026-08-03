@@ -35,12 +35,14 @@ describe("Confluence project source", () => {
 
   it("builds a fail-closed CQL scope from spaces and page bindings", () => {
     expect(buildConfluenceScopeCql({})).toBeNull();
-    expect(buildConfluenceScopeCql({
+    const cql = buildConfluenceScopeCql({
       confluence: {
         space_keys: ["ENG"],
         page_urls: ["https://docs.example.test/wiki/spaces/ENG/pages/123/Plan"],
       },
-    })).toContain('(space in ("ENG") OR id in ("123"))');
+    });
+    expect(cql).toBe('type = page AND (space in ("ENG") OR id in ("123")) ORDER BY lastmodified ASC');
+    expect(cql).not.toContain("status");
   });
 
   it("splits storage HTML by heading hierarchy and preserves adjacency", () => {
@@ -102,6 +104,9 @@ describe("Confluence project source", () => {
     expect(result.seen_page_ids).toEqual(["100", "200"]);
     expect(result.pages_admitted).toBe(2);
     expect(result.changes).toHaveLength(3);
+    const initialSearch = new URL(calls[0]);
+    expect(initialSearch.searchParams.get("status")).toBe("current");
+    expect(initialSearch.searchParams.get("cql")).not.toContain("status");
     expect(JSON.stringify(result.changes)).not.toContain("confluence-secret-value");
     expect(JSON.stringify(result.changes)).toContain("[REDACTED:Generic Secret]");
     expect(result.changes[0]).toMatchObject({

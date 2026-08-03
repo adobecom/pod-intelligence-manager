@@ -1,8 +1,8 @@
 import type { ContextSearchActor, SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 import {
-  hasGithubProjectVisibilityPolicy,
-  universallyVisibleGithubRepos,
+  configuredGithubRepos,
+  hasGithubProjectBinding,
 } from "../services/project-resource-bindings.js";
 
 function stripPersonTokens(query: string, actor?: ContextSearchActor): string {
@@ -51,7 +51,7 @@ function orgScope(): string {
 
 function repoScope(opts: IntegrationSearchOpts): string {
   const repos = opts.project_id && opts.project_resources
-    ? universallyVisibleGithubRepos(opts.project_resources)
+    ? configuredGithubRepos(opts.project_resources)
     : opts.project_resources?.github?.repos ?? [];
   return repos.map((r) => `repo:${r}`).join(" ");
 }
@@ -65,8 +65,8 @@ export async function searchGithub(opts: IntegrationSearchOpts): Promise<Integra
   if (opts.project_id && projectRepos.length === 0) {
     return { source: "github", documents: [], missing: "No GitHub repositories are bound to this project" };
   }
-  if (opts.project_id && opts.project_resources && !hasGithubProjectVisibilityPolicy(opts.project_resources)) {
-    return { source: "github", documents: [], missing: "GitHub project visibility policy is not configured" };
+  if (opts.project_id && opts.project_resources && !hasGithubProjectBinding(opts.project_resources)) {
+    return { source: "github", documents: [], missing: "GitHub project binding is invalid" };
   }
 
   // Prefer project-configured repos over the env org scope. If neither is

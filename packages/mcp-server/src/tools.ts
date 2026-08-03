@@ -302,7 +302,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "create_project",
-    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy. Pass optional `resources` (Jira keys, GitHub repos, Slack channels, Confluence spaces, local git paths, aliases) to scope downstream context_search calls — this improves result precision dramatically vs. a broad query.",
+    "Create a long-lived project (POST /api/projects). Returns the new project with empty anatomy; use update_project to set anatomy. Org-admin access is required when optional connector `resources` are supplied.",
     {
       name: z.string().min(1).describe("Project display name"),
       description: z.string().optional().describe("Optional description"),
@@ -318,7 +318,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "configure_project_resources",
-    "Replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
+    "Admin-only: replace the external resource configuration for a project (Jira keys, GitHub repos, Slack channels, etc.). The new object fully replaces the prior resources — pass the complete desired state.",
     {
       project_id: ProjectId,
       resources: ProjectResourcesSchema,
@@ -341,7 +341,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "patch_project_profile",
-    "Safely patch a project's context profile without replacing unspecified fields. Use this for adding Jira epics/fixVersions, GitHub default branch hints, Slack thread URLs, Confluence pages, aliases, or glossary terms while preserving existing bindings.",
+    "Admin-only: safely patch a project's context profile without replacing unspecified fields. Use this for adding Jira epics/fixVersions, GitHub default branch hints, Slack thread URLs, Confluence pages, aliases, or glossary terms while preserving existing bindings.",
     {
       project_id: ProjectId,
       patch: ProjectResourcesPatchSchema.describe("Partial profile to merge into the current profile"),
@@ -354,7 +354,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "add_project_resource_binding",
-    "Add one binding to a project profile without replacing the profile. Examples: source=jira field=project_keys value=MWPW, source=github field=repos value=adobe/aio, source=slack field=thread_urls value=https://...",
+    "Admin-only: add one binding to a project profile without replacing the profile. Examples: source=jira field=project_keys value=MWPW, source=github field=repos value=adobe/aio, source=slack field=thread_urls value=https://...",
     ProjectResourceBindingSchema,
     async ({ project_id, source, field, value }) => {
       const result = await apiPost(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {
@@ -368,7 +368,7 @@ export function registerTools(server: McpServer) {
 
   server.tool(
     "remove_project_resource_binding",
-    "Remove one binding from a project profile without replacing the profile. Uses the same source/field/value tuple as add_project_resource_binding.",
+    "Admin-only: remove one binding from a project profile without replacing the profile. Uses the same source/field/value tuple as add_project_resource_binding.",
     ProjectResourceBindingSchema,
     async ({ project_id, source, field, value }) => {
       const result = await apiDelete(`/api/projects/${encodeURIComponent(project_id)}/resources/bindings`, {

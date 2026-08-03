@@ -134,7 +134,7 @@ export function buildConfluenceScopeCql(resources: ProjectResources): string | n
   if (spaces.length > 0) scopes.push(`space in (${spaces.map((key) => `"${escapeCql(key)}"`).join(", ")})`);
   if (pageIds.length > 0) scopes.push(`id in (${pageIds.map((id) => `"${escapeCql(id)}"`).join(", ")})`);
   if (scopes.length === 0) return null;
-  return `type = page AND status = current AND (${scopes.join(" OR ")}) ORDER BY lastmodified ASC`;
+  return `type = page AND (${scopes.join(" OR ")}) ORDER BY lastmodified ASC`;
 }
 
 function confluenceIdentity(): ConfluenceIdentity | null {
@@ -495,6 +495,7 @@ export async function pollConfluenceSource(
   const pageLimit = Math.max(1, Math.min(200, dependencies.pageLimit ?? DEFAULT_PAGE_LIMIT));
   const first = apiUrl(identity, "/rest/api/content/search");
   first.searchParams.set("cql", cql);
+  first.searchParams.set("status", "current");
   first.searchParams.set("limit", String(pageLimit));
   first.searchParams.set("expand", "body.storage,version,space,ancestors,history.lastUpdated,history.createdBy");
 

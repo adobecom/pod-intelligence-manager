@@ -30,9 +30,9 @@ import {
   connectorBindingVersion,
   projectResourceEligibilitySql,
   sanitizeProjectResources,
-  hasGithubProjectVisibilityPolicy,
-  hasJiraProjectVisibilityPolicy,
-  universallyVisibleGithubRepos,
+  configuredGithubRepos,
+  hasGithubProjectBinding,
+  hasJiraProjectBinding,
 } from "./project-resource-bindings.js";
 
 const AUTO_PROMOTE_CONFIDENCE_MIN = 0.85;
@@ -493,7 +493,10 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
       `Project evidence source has no eligible current project binding: ${bindingSource}`,
     );
   }
-  const metadata = bindingVersion && typeof input.metadata?.resource_binding_version !== "string"
+  // A persisted binding version is derived state, not caller authority. Always
+  // stamp the current admin-controlled project binding after validating that a
+  // connector binding exists, so re-ingestion repairs stale metadata.
+  const metadata = bindingVersion
     ? { ...(input.metadata ?? {}), resource_binding_version: bindingVersion }
     : input.metadata;
 
@@ -875,13 +878,13 @@ async function reconcileGithubRepo(
 async function pollGithub(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
   const configuredRepos = resources.github?.repos ?? [];
   if (configuredRepos.length === 0) return { source: "github", ingested: 0 };
-  if (!hasGithubProjectVisibilityPolicy(resources)) {
-    return { source: "github", ingested: 0, missing: "github_project_visibility_policy_missing" };
+  if (!hasGithubProjectBinding(resources)) {
+    return { source: "github", ingested: 0, missing: "github_project_binding_invalid" };
   }
-  const repos = universallyVisibleGithubRepos(resources);
+  const repos = configuredGithubRepos(resources);
   const resourceBindingVersion = connectorBindingVersion(resources, "github");
   if (!resourceBindingVersion) {
-    return { source: "github", ingested: 0, missing: "github_project_visibility_policy_missing" };
+    return { source: "github", ingested: 0, missing: "github_project_binding_invalid" };
   }
   const token = process.env.GH_TOKEN;
   if (!token) return { source: "github", ingested: 0, missing: "GH_TOKEN not set" };
@@ -1079,8 +1082,8 @@ function buildProbeJql(resources: ProjectResources): string | null {
 async function probeGithubHealth(resources: ProjectResources): Promise<HealthProbeResult> {
   const repos = resources.github?.repos ?? [];
   if (repos.length === 0) return { credentialState: "not_configured" };
-  if (!hasGithubProjectVisibilityPolicy(resources)) {
-    return { credentialState: "misconfigured", message: "GitHub project visibility policy not configured" };
+  if (!hasGithubProjectBinding(resources)) {
+    return { credentialState: "misconfigured", message: "GitHub project binding is invalid" };
   }
   const token = process.env.GH_TOKEN;
   if (!token) return { credentialState: "missing_credentials", message: "GH_TOKEN not set" };
@@ -1117,8 +1120,8 @@ async function probeGithubHealth(resources: ProjectResources): Promise<HealthPro
 }
 
 async function probeJiraHealth(resources: ProjectResources): Promise<HealthProbeResult> {
-  if (buildProbeJql(resources) && !hasJiraProjectVisibilityPolicy(resources)) {
-    return { credentialState: "misconfigured", message: "Jira project visibility policy not configured" };
+  if (buildProbeJql(resources) && !hasJiraProjectBinding(resources)) {
+    return { credentialState: "misconfigured", message: "Jira project binding is invalid" };
   }
   const base = process.env.JIRA_BASE_URL;
   const token = process.env.JIRA_TOKEN;
@@ -1339,7 +1342,7 @@ async function pollJira(project: ProjectRow, resources: ProjectResources): Promi
   const windowSince = new Date(Date.now() - lookbackDays * 864e5).toISOString();
   const resourceBindingVersion = connectorBindingVersion(resources, "jira");
   if (!resourceBindingVersion) {
-    return { source: "jira", ingested: 0, missing: "jira_project_visibility_policy_missing" };
+    return { source: "jira", ingested: 0, missing: "jira_project_binding_invalid" };
   }
   const pageCursorRaw = getProjectCursor(project.org_id, project.project_id, "jira", JIRA_ISSUE_PAGE_CURSOR);
   const pageCursor = parseJiraIssuePageCursor(pageCursorRaw, resourceBindingVersion);
@@ -1450,7 +1453,7 @@ async function reconcileJiraIssues(project: ProjectRow, resources: ProjectResour
   }
   const resourceBindingVersion = connectorBindingVersion(resources, "jira");
   if (!resourceBindingVersion) {
-    return { source: "jira", ingested: 0, missing: "jira_project_visibility_policy_missing" };
+    return { source: "jira", ingested: 0, missing: "jira_project_binding_invalid" };
   }
 
   const rawCursor = getProjectCursor(project.org_id, project.project_id, "jira", JIRA_RECONCILIATION_CURSOR);
@@ -1584,8 +1587,8 @@ async function pollJiraReleases(project: ProjectRow, resources: ProjectResources
 }
 
 async function pollJiraResources(project: ProjectRow, resources: ProjectResources): Promise<PollSourceResult> {
-  if (buildPollJql(resources, new Date(0).toISOString()) && !hasJiraProjectVisibilityPolicy(resources)) {
-    return { source: "jira", ingested: 0, missing: "jira_project_visibility_policy_missing" };
+  if (buildPollJql(resources, new Date(0).toISOString()) && !hasJiraProjectBinding(resources)) {
+    return { source: "jira", ingested: 0, missing: "jira_project_binding_invalid" };
   }
   const parts: Array<[string, () => Promise<PollSourceResult>]> = [
     ["issues", () => pollJira(project, resources)],
@@ -1652,22 +1655,6 @@ export async function pollProjectSources(orgId: string, projectId: string): Prom
       results.push(await poller());
     } catch {
       results.push({ source, ingested: 0, missing: `${source}_source_poll_failed` });
-    }
-  }
-
-  const revokedVisibilitySources = results
-    .filter((result) => result.missing === "github_project_visibility_policy_missing"
-      || result.missing === "jira_project_visibility_policy_missing")
-    .map((result) => result.source);
-  if (revokedVisibilitySources.length > 0) {
-    const { purgeProjectEvidenceSource } = await import("./project-source-change.js");
-    for (const source of revokedVisibilitySources) {
-      const purged = purgeProjectEvidenceSource(orgId, projectId, source);
-      const result = results.find((entry) => entry.source === source);
-      if (result) {
-        result.ingested = 0;
-        result.deleted = purged.evidence_deleted;
-      }
     }
   }
 
@@ -1835,14 +1822,14 @@ export function getProjectSourceHealth(orgId: string, projectId: string): Projec
     "SLACK_BOT_TOKEN_ADOBEDOTCOM",
   ].some((key) => !!process.env[key]);
   const githubCredentialConfigured = !!process.env.GH_TOKEN;
-  const githubVisibilityConfigured = hasGithubProjectVisibilityPolicy(resources);
+  const githubVisibilityConfigured = hasGithubProjectBinding(resources);
   const githubCredentialState: ProjectSourceHealth["credential_state"] = !githubCredentialConfigured
     ? "missing_credentials"
     : !githubVisibilityConfigured
       ? "misconfigured"
       : "ok";
   const jiraCredentialConfigured = !!process.env.JIRA_BASE_URL && !!process.env.JIRA_TOKEN;
-  const jiraVisibilityConfigured = hasJiraProjectVisibilityPolicy(resources);
+  const jiraVisibilityConfigured = hasJiraProjectBinding(resources);
   const jiraCredentialState: ProjectSourceHealth["credential_state"] = !jiraCredentialConfigured
     ? "missing_credentials"
     : !jiraVisibilityConfigured
@@ -1868,7 +1855,7 @@ export function getProjectSourceHealth(orgId: string, projectId: string): Projec
       !githubCredentialConfigured
         ? "GH_TOKEN not set"
         : !githubVisibilityConfigured
-          ? "GitHub project visibility policy not configured"
+          ? "GitHub project binding is invalid"
           : undefined,
     ),
     health(
@@ -1882,7 +1869,7 @@ export function getProjectSourceHealth(orgId: string, projectId: string): Projec
       !jiraCredentialConfigured
         ? "JIRA_BASE_URL or JIRA_TOKEN not set"
         : !jiraVisibilityConfigured
-          ? "Jira project visibility policy not configured"
+          ? "Jira project binding is invalid"
           : undefined,
     ),
     health(

@@ -2,7 +2,7 @@
 
 Slack and Confluence scheduled ingestion are disabled by default. Configure and validate one project/source at a time, then enable its independent flag.
 
-GitHub and Jira service credentials can see more than a PIM project audience. Their indexed and project-live paths therefore also require explicit operator attestations: `PROJECT_GITHUB_VISIBLE_REPOS` and `PROJECT_JIRA_VISIBLE_PROJECT_KEYS`. The Jira list attests that the project has no issue-security audience narrower than the PIM project. Missing or partial attestations fail closed.
+GitHub and Jira service credentials can see more than a PIM project audience. Their indexed and project-live paths are therefore restricted to the canonical repository and Jira-project bindings stored in the project's `resources_json`. Connector bindings are non-secret configuration and may only be changed by an org admin or owner; service credentials remain deployment secrets. Jira projects configured here must not use an issue-security audience narrower than the corresponding PIM project.
 
 Local Git reads are limited to the server working directory by default. Set `PROJECT_GIT_ALLOWED_ROOTS` to a comma-separated list of additional operator-owned roots; project users cannot use `repo_paths` to read arbitrary server repositories.
 

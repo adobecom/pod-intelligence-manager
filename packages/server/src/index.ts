@@ -30,6 +30,7 @@ import { initializeKnowledgeGraph, loadedOrgIds, pruneStaleNodes, refreshAnalysi
 import { migrateLegacyDefaultGraph, restoreGraphFromS3IfEmpty } from "./services/graph-storage.js";
 import { runScheduledGraphSynthesis } from "./services/knowledge-synthesis.js";
 import { runProjectSearchRefreshTick } from "./services/project-search-refresh.js";
+import { rebuildProjectSearchAfterCoreRestore } from "./services/project-search-recovery.js";
 import { runSkillCatalogRefPollTick } from "./services/skill-catalog-freshness.js";
 import { runSkillCatalogEmbeddingBackfill } from "./services/skill-catalog-search.js";
 import {
@@ -99,6 +100,19 @@ try {
   pruneStaleNodes();
 } catch (err) {
   app.log.error(err, "Initial knowledge graph prune failed");
+}
+
+// Portable core backups omit project_search_* because those rows (especially
+// embeddings) dominate backup size and are reproducible from evidence/context.
+// restore-db.sh leaves a marker only for that backup format. Rebuild locally,
+// after org graphs are loaded and before the server becomes healthy; connector
+// polling and embedding backfill remain on the normal background schedule.
+try {
+  await rebuildProjectSearchAfterCoreRestore(app.log);
+} catch (err) {
+  // Keep core PIM available even if recovery orchestration itself fails. The
+  // untouched marker causes another deterministic attempt on the next start.
+  app.log.error(err, "Project search recovery orchestration failed; rebuild marker retained");
 }
 
 // Register WebSocket support

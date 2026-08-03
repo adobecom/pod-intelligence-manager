@@ -118,7 +118,6 @@ function seedEvidence(projectId = PROJECT_ID, daysAgo = 1) {
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 beforeAll(() => {
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "EMC,OLD,CTX";
   createTables();
 
   const creator = upsertUserByIms({ email: "refresh@local", display_name: "Refresher" });

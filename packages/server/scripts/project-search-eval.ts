@@ -459,8 +459,6 @@ async function runEvaluation(
   process.env.PROJECT_CONFLUENCE_INGESTION_ENABLED = "1";
   process.env.PROJECT_SLACK_SEARCH_ENABLED = "1";
   process.env.PROJECT_CONFLUENCE_SEARCH_ENABLED = "1";
-  process.env.PROJECT_GITHUB_VISIBLE_REPOS = "acme/search";
-  process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "ACME";
   process.env.PROJECT_GIT_ALLOWED_ROOTS = gitFixtureRoot;
   process.env.CONFLUENCE_BASE_URL = "https://eval.invalid";
   // The fixture's SRCH space is the explicitly approved, project-wide-visible

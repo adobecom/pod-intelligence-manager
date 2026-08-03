@@ -33,7 +33,6 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = ORIGINAL_FETCH;
-  delete process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS;
   vi.restoreAllMocks();
 });
 
@@ -115,7 +114,6 @@ describe("searchJira fail-closed scope guard", () => {
   });
 
   it("keeps every configured Jira binding as a conjunctive live-search scope", async () => {
-    process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "MWPW";
     const res = await searchJira(
       baseOpts({
         project_id: "project-test",
