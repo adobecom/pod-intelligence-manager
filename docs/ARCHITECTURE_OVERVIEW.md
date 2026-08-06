@@ -1,5 +1,7 @@
 # Architecture Overview
 
+> Repository-bound durable memory uses the strict v1 surface documented in [MEMORY_API.md](./MEMORY_API.md). The legacy organization knowledge graph is not a repository- or plane-authorized substitute for that API.
+
 A quick reference for the PIM system. For full design rationale and resolved decisions, see [../SPEC.md](../SPEC.md).
 
 ## Intended Monorepo Layout

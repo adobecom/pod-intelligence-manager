@@ -39,7 +39,14 @@ describe("rebuildProjectSearchAfterCoreRestore", () => {
     vi.clearAllMocks();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pim-search-recovery-"));
     markerPath = path.join(tempDir, "pim.db.project-search-rebuild-required");
-    mocks.backfill.mockReturnValue({ documents: 2, chunks: 3 });
+    mocks.backfill.mockReturnValue({
+      documents: 2,
+      chunks: 3,
+      skipped_ineligible: 0,
+      failed_rows: 0,
+      complete: true,
+      failures: [],
+    });
     mocks.indexKg.mockReturnValue({ indexed: 1, deleted: 0, skipped: 0 });
     mocks.annotate.mockReturnValue({ annotated: 4, skipped: false });
   });
@@ -94,7 +101,14 @@ describe("rebuildProjectSearchAfterCoreRestore", () => {
     });
     mocks.backfill.mockImplementation((orgId: string) => {
       if (orgId === "org-1") throw new Error("bad evidence row");
-      return { documents: 2, chunks: 3 };
+      return {
+        documents: 2,
+        chunks: 3,
+        skipped_ineligible: 0,
+        failed_rows: 0,
+        complete: true,
+        failures: [],
+      };
     });
 
     const result = await rebuildProjectSearchAfterCoreRestore(log, markerPath);
@@ -107,5 +121,66 @@ describe("rebuildProjectSearchAfterCoreRestore", () => {
     expect(fs.existsSync(markerPath)).toBe(true);
     expect(mocks.purge).toHaveBeenCalledTimes(2);
     expect(log.warn).toHaveBeenCalled();
+  });
+
+  it("retains the marker after a partial row rebuild while continuing later stages and projects", async () => {
+    fs.writeFileSync(markerPath, "");
+    mocks.prepare.mockReturnValue({
+      all: () => [
+        { org_id: "org-1", project_id: "project-a" },
+        { org_id: "org-2", project_id: "project-b" },
+      ],
+    });
+    mocks.backfill.mockImplementation((orgId: string) => orgId === "org-1"
+      ? {
+          documents: 1,
+          chunks: 2,
+          skipped_ineligible: 0,
+          failed_rows: 1,
+          complete: false,
+          failures: [{ row_id: "evidence-1", source: "jira", code: "metadata_json" }],
+        }
+      : {
+          documents: 2,
+          chunks: 3,
+          skipped_ineligible: 1,
+          failed_rows: 0,
+          complete: true,
+          failures: [],
+        });
+
+    const result = await rebuildProjectSearchAfterCoreRestore(log, markerPath);
+
+    expect(mocks.purge).toHaveBeenCalledTimes(2);
+    expect(mocks.indexKg).toHaveBeenCalledTimes(2);
+    expect(mocks.annotate).toHaveBeenCalledTimes(2);
+    expect(result.projects_rebuilt).toBe(1);
+    expect(result.failed_projects).toEqual([{ org_id: "org-1", project_id: "project-a" }]);
+    expect(result.marker_removed).toBe(false);
+    expect(fs.existsSync(markerPath)).toBe(true);
+    expect(log.warn).toHaveBeenCalledWith(expect.objectContaining({
+      msg: "Project search recovery partial; rebuild marker retained",
+      failed_rows: 1,
+    }));
+  });
+
+  it("removes the marker when rows are only deliberately ineligible", async () => {
+    fs.writeFileSync(markerPath, "");
+    mocks.prepare.mockReturnValue({
+      all: () => [{ org_id: "org-1", project_id: "project-a" }],
+    });
+    mocks.backfill.mockReturnValue({
+      documents: 1,
+      chunks: 2,
+      skipped_ineligible: 3,
+      failed_rows: 0,
+      complete: true,
+      failures: [],
+    });
+
+    const result = await rebuildProjectSearchAfterCoreRestore(log, markerPath);
+
+    expect(result).toMatchObject({ projects_rebuilt: 1, marker_removed: true });
+    expect(fs.existsSync(markerPath)).toBe(false);
   });
 });

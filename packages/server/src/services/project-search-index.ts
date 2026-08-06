@@ -94,6 +94,26 @@ export interface IndexDocumentResult {
   reused: boolean;
 }
 
+export interface ProjectSearchRowFailure {
+  row_id: string;
+  source: string;
+  code: string;
+}
+
+export interface ProjectSearchBackfillResult {
+  documents: number;
+  chunks: number;
+  skipped_ineligible: number;
+  failed_rows: number;
+  complete: boolean;
+  failures: ProjectSearchRowFailure[];
+}
+
+export interface ProjectSearchRowIndexResult {
+  indexed: boolean;
+  code?: string;
+}
+
 // ---------------------------------------------------------------------------
 // FTS availability (probed lazily; not cached so the test harness that drops
 // and recreates tables between cases stays correct).
@@ -493,6 +513,29 @@ function removeDocumentGraph(documentId: string): void {
   ).run();
 }
 
+/** Remove one derived document by its natural key without touching the
+ * authoritative evidence or context row that produced it. */
+function pruneProjectSearchDocument(
+  orgId: string,
+  projectId: string,
+  source: ProjectSearchSource,
+  sourceId: string,
+): void {
+  const existing = db.prepare(
+    `SELECT id FROM project_search_documents
+     WHERE org_id = ? AND project_id = ? AND source = ? AND source_id = ?`,
+  ).get(orgId, projectId, source, sourceId) as { id: string } | undefined;
+  if (!existing) return;
+  withTransaction(() => {
+    if (isProjectSearchFtsAvailable()) {
+      db.prepare("DELETE FROM project_search_fts WHERE document_id = ?").run(existing.id);
+    }
+    removeDocumentGraph(existing.id);
+    db.prepare("DELETE FROM project_search_chunks WHERE document_id = ?").run(existing.id);
+    db.prepare("DELETE FROM project_search_documents WHERE id = ?").run(existing.id);
+  });
+}
+
 function upsertDirectEdge(
   orgId: string,
   projectId: string,
@@ -529,7 +572,10 @@ interface DocRow {
  * entities/edges. Returns `reused: true` when the content hash was unchanged
  * and nothing needed rewriting.
  */
-export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumentResult {
+function indexProjectDocumentWithResources(
+  rawInput: IndexDocumentInput,
+  loadedProjectResources?: ProjectResources,
+): IndexDocumentResult {
   const bindingSource = rawInput.source === "github"
     || rawInput.source === "jira"
     || rawInput.source === "slack"
@@ -538,7 +584,10 @@ export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumen
     ? rawInput.source
     : null;
   const bindingVersion = bindingSource
-    ? connectorBindingVersion(loadProjectResources(rawInput.org_id, rawInput.project_id), bindingSource)
+    ? connectorBindingVersion(
+        loadedProjectResources ?? loadProjectResources(rawInput.org_id, rawInput.project_id),
+        bindingSource,
+      )
     : null;
   if (bindingSource && !bindingVersion) {
     throw new ProjectEvidenceNormalizationError(
@@ -706,6 +755,10 @@ export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumen
 
     return { document_id: documentId, chunks: chunks.length, reused: false };
   });
+}
+
+export function indexProjectDocument(rawInput: IndexDocumentInput): IndexDocumentResult {
+  return indexProjectDocumentWithResources(rawInput);
 }
 
 // ---------------------------------------------------------------------------
@@ -1057,8 +1110,8 @@ function indexLocalGitResources(
   orgId: string,
   projectId: string,
   seen: Set<string>,
+  resources: ProjectResources,
 ): { documents: number; chunks: number } {
-  const resources = loadProjectResources(orgId, projectId);
   const configuredRepos = resources.git?.repo_paths ?? [];
   if (configuredRepos.length === 0) return { documents: 0, chunks: 0 };
 
@@ -1093,7 +1146,7 @@ function indexLocalGitResources(
 
       if (!seen.has(seenKey)) {
         seen.add(seenKey);
-        const res = indexProjectDocument({
+        const res = indexProjectDocumentWithResources({
           org_id: orgId,
           project_id: projectId,
           source: "git",
@@ -1108,7 +1161,7 @@ function indexLocalGitResources(
             sha: commit.sha,
             touched_files: touchedSourceFiles,
           },
-        });
+        }, resources);
         documents++;
         chunks += res.chunks;
         commitDocIds.set(commit.sha, res.document_id);
@@ -1133,7 +1186,7 @@ function indexLocalGitResources(
       if (seen.has(seenKey)) continue;
       seen.add(seenKey);
 
-      const res = indexProjectDocument({
+      const res = indexProjectDocumentWithResources({
         org_id: orgId,
         project_id: projectId,
         source: "git",
@@ -1147,7 +1200,7 @@ function indexLocalGitResources(
           path: file.path,
           recent_commits: [...new Set(file.recent_commits)].slice(0, 20),
         },
-      });
+      }, resources);
       documents++;
       chunks += res.chunks;
       fileDocIds.set(file.path, res.document_id);
@@ -1256,12 +1309,25 @@ export function documentInputFromEvidence(evidence: ProjectEvidenceItem): IndexD
   };
 }
 
-/** Live hook: index an evidence item into the search layer. Never throws. */
-export function indexEvidenceItem(evidence: ProjectEvidenceItem): void {
+function rowFailureCode(error: unknown): string {
+  if (error instanceof ProjectEvidenceNormalizationError) return error.code;
+  return "unexpected_row_failure";
+}
+
+/** Live hook: index an evidence item into the search layer. Never throws and
+ * returns the same sanitized classification used by bulk backfill. */
+export function indexEvidenceItem(evidence: ProjectEvidenceItem): ProjectSearchRowIndexResult {
   try {
     indexProjectDocument(documentInputFromEvidence(evidence));
-  } catch (err) {
-    console.warn("[project-search] failed to index evidence", evidence.id, (err as Error).message);
+    return { indexed: true };
+  } catch (error) {
+    const code = rowFailureCode(error);
+    console.warn("[project-search] failed to index evidence", {
+      row_id: evidence.id,
+      source: mapEvidenceSource(evidence.source),
+      code,
+    });
+    return { indexed: false, code };
   }
 }
 
@@ -1315,23 +1381,48 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   }
 }
 
+function parseEvidenceMetadata(raw: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new Error("metadata is not an object");
+    }
+    return value as Record<string, unknown>;
+  } catch {
+    throw new ProjectEvidenceNormalizationError(
+      "metadata_json",
+      "Evidence metadata is not a valid JSON object",
+    );
+  }
+}
+
 /**
  * Rebuilds the lexical/graph index for a project from its existing working
  * memory: evidence items, project context updates, and linked pod updates.
  * Idempotent. Does not embed — call embedProjectSearchChunks() separately.
  */
-export function backfillProjectSearch(orgId: string, projectId: string): { documents: number; chunks: number } {
+export function backfillProjectSearch(orgId: string, projectId: string): ProjectSearchBackfillResult {
   let documents = 0;
   let chunks = 0;
+  let skippedIneligible = 0;
+  const failures: ProjectSearchRowFailure[] = [];
   const resources = loadProjectResources(orgId, projectId);
   const seen = new Set<string>();
-  const index = (input: IndexDocumentInput) => {
+  const recordFailure = (rowId: string, source: string, error: unknown) => {
+    failures.push({ row_id: rowId, source, code: rowFailureCode(error) });
+  };
+  const index = (input: IndexDocumentInput, rowId: string, source: string) => {
     const key = `${input.source}${KEY_SEPARATOR}${input.source_id}`;
     if (seen.has(key)) return;
-    seen.add(key);
-    const res = indexProjectDocument(input);
-    documents++;
-    chunks += res.chunks;
+    try {
+      const res = indexProjectDocumentWithResources(input, resources);
+      // A failed earlier duplicate must not suppress a later valid candidate.
+      seen.add(key);
+      documents++;
+      chunks += res.chunks;
+    } catch (error) {
+      recordFailure(rowId, source, error);
+    }
   };
 
   // 1. Evidence items (github / jira / slack / confluence / commit / project_update).
@@ -1345,21 +1436,26 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
        WHERE org_id = ? AND project_id = ? AND visibility = 'project_visible'`,
     )
     .all(orgId, projectId) as unknown as EvidenceBackfillRow[];
-  const updateEvidenceMetadata = db.prepare(
-    "UPDATE project_evidence_items SET metadata_json = ? WHERE id = ? AND org_id = ? AND project_id = ?",
-  );
   for (const row of evidence) {
-    let metadata = parseJson<Record<string, unknown>>(row.metadata_json, {});
-    const bindingSource = evidenceBindingSource(row.source);
-    const bindingVersion = bindingSource
-      ? connectorBindingVersion(resources, bindingSource)
-      : null;
-    if (bindingVersion && metadata.resource_binding_version !== bindingVersion) {
-      metadata = { ...metadata, resource_binding_version: bindingVersion };
-      updateEvidenceMetadata.run(JSON.stringify(metadata), row.id, orgId, projectId);
-    }
-    index(
-      documentInputFromEvidence({
+    const mappedSource = mapEvidenceSource(row.source);
+    const key = `${mappedSource}${KEY_SEPARATOR}${row.source_id}`;
+    if (seen.has(key)) continue;
+    try {
+      const bindingSource = evidenceBindingSource(row.source);
+      const bindingVersion = bindingSource
+        ? connectorBindingVersion(resources, bindingSource)
+        : null;
+      if (bindingSource && !bindingVersion) {
+        pruneProjectSearchDocument(orgId, projectId, mappedSource, row.source_id);
+        skippedIneligible++;
+        seen.add(key);
+        continue;
+      }
+      let metadata = parseEvidenceMetadata(row.metadata_json);
+      if (bindingVersion && metadata.resource_binding_version !== bindingVersion) {
+        metadata = { ...metadata, resource_binding_version: bindingVersion };
+      }
+      const res = indexProjectDocumentWithResources(documentInputFromEvidence({
         id: row.id,
         org_id: row.org_id,
         project_id: row.project_id,
@@ -1384,8 +1480,13 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
         redaction_version: row.redaction_version ?? "legacy",
         ...(row.normalized_content_hash ? { normalized_content_hash: row.normalized_content_hash } : {}),
         ...(row.source_updated_at ? { source_updated_at: row.source_updated_at } : {}),
-      }),
-    );
+      }), resources);
+      seen.add(key);
+      documents++;
+      chunks += res.chunks;
+    } catch (error) {
+      recordFailure(row.id, mappedSource, error);
+    }
   }
 
   // 2. Project context updates.
@@ -1408,7 +1509,7 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
       occurred_at: u.timestamp,
       body: u.details,
       metadata: { scope: u.scope, status: u.status, domains: [u.scope] },
-    });
+    }, u.id, "project_update");
   }
 
   // 3. Pod context updates for pods linked to this project.
@@ -1433,14 +1534,25 @@ export function backfillProjectSearch(orgId: string, projectId: string): { docum
       occurred_at: u.timestamp,
       body: u.details,
       metadata: { scope: u.scope, status: u.status, domains: [u.scope] },
-    });
+    }, u.id, "pod_update");
   }
 
-  const gitStats = indexLocalGitResources(orgId, projectId, seen);
-  documents += gitStats.documents;
-  chunks += gitStats.chunks;
+  try {
+    const gitStats = indexLocalGitResources(orgId, projectId, seen, resources);
+    documents += gitStats.documents;
+    chunks += gitStats.chunks;
+  } catch (error) {
+    recordFailure(projectId, "git", error);
+  }
 
-  return { documents, chunks };
+  return {
+    documents,
+    chunks,
+    skipped_ineligible: skippedIneligible,
+    failed_rows: failures.length,
+    complete: failures.length === 0,
+    failures,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1739,7 +1851,7 @@ export async function reindexProjectSearch(
   opts: ReindexOptions = {},
 ): Promise<ProjectSearchIndexStats> {
   purgeProjectSearch(orgId, projectId);
-  backfillProjectSearch(orgId, projectId);
+  const backfill = backfillProjectSearch(orgId, projectId);
   const chunksEmbedded = opts.embed ? await embedProjectSearchChunks(orgId, projectId) : 0;
   annotateProjectGraph(orgId, projectId);
 
@@ -1766,6 +1878,10 @@ export async function reindexProjectSearch(
     edges_indexed: counts.edges,
     chunks_embedded: chunksEmbedded,
     embedding_available: isEmbeddingAvailable(),
+    complete: backfill.complete,
+    skipped_ineligible: backfill.skipped_ineligible,
+    failed_rows: backfill.failed_rows,
+    failures: backfill.failures,
   };
 }
 

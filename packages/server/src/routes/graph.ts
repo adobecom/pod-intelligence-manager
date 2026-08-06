@@ -29,6 +29,7 @@ import {
 } from "../services/knowledge-graph.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
+import { assertLegacyActivationStructure } from "../services/memory-structural-validator.js";
 import {
   rejectServiceToken,
   requireProjectBinding,
@@ -202,6 +203,7 @@ export default async function graphRoutes(app: FastifyInstance) {
     async (req, reply) => {
       if (!rejectServiceToken(req, reply)) return;
       const body = req.body;
+      assertLegacyActivationStructure(body);
       const learning: EnhancedPodLearning = {
         type: body.type,
         summary: body.summary,

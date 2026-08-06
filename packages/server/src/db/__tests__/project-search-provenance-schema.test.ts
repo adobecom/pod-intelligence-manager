@@ -5,6 +5,36 @@ const { testDb } = vi.hoisted(() => {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = OFF");
   database.exec(`
+    CREATE TABLE users (
+      user_id TEXT PRIMARY KEY,
+      ims_user_id TEXT UNIQUE,
+      email TEXT NOT NULL,
+      display_name TEXT,
+      is_service INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+    CREATE TABLE orgs (
+      org_id TEXT PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      created_by_user_id TEXT NOT NULL REFERENCES users(user_id),
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE projects (
+      project_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO users
+      (user_id, ims_user_id, email, display_name, is_service, created_at, last_login_at)
+    VALUES ('user-1', NULL, 'user-1@example.test', 'Fixture owner', 0, '2026-01-01', NULL);
+    INSERT INTO orgs (org_id, slug, name, created_by_user_id, created_at)
+    VALUES ('org-1', 'org-1', 'Fixture org', 'user-1', '2026-01-01');
+    INSERT INTO projects (project_id, name, description, created_at)
+    VALUES ('project-1', 'Fixture project', NULL, '2026-01-01');
+
     CREATE TABLE project_evidence_items (
       id TEXT PRIMARY KEY,
       org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,

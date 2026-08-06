@@ -7,6 +7,31 @@ import {
 } from "../project-evidence-normalization.js";
 
 describe("project evidence canonical normalization", () => {
+  it("uses the v2 policy and preserves identifiers that contain ordinary sk suffixes", () => {
+    const values = [
+      "risk-analysis-dashboard-update",
+      "task-orchestration-migration-strategy",
+    ];
+    for (const value of values) {
+      const normalized = normalizeProjectEvidence({
+        source: "jira",
+        source_type: "issue",
+        source_id: value,
+        native_id: value,
+        source_title: value,
+        summary: value,
+        body: value,
+      });
+      expect(PROJECT_EVIDENCE_REDACTION_VERSION).toBe("project-evidence-v2");
+      expect(normalized.redaction_version).toBe("project-evidence-v2");
+      expect(normalized.source_id).toBe(value);
+      expect(normalized.native_id).toBe(value);
+      expect(normalized.source_title).toBe(value);
+      expect(normalized.body).toBe(value);
+      expect(normalized.findings).not.toContain("OpenAI Key");
+    }
+  });
+
   it("redacts every persisted field, allowlists connector metadata, and hashes deterministically", () => {
     const raw = {
       source: "slack" as const,

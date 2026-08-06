@@ -26,7 +26,7 @@ vi.mock("../project-search-index.js", () => ({
   annotateProjectGraph: mocks.annotateProjectGraph,
 }));
 
-import { scheduleProjectSearchRefresh } from "../project-search-refresh.js";
+import { refreshProjectSearch, scheduleProjectSearchRefresh } from "../project-search-refresh.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,7 +42,14 @@ describe("scheduleProjectSearchRefresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.pollProjectSources.mockResolvedValue({ results: [], health: [] });
-    mocks.backfillProjectSearch.mockReturnValue({ documents: 0, chunks: 0 });
+    mocks.backfillProjectSearch.mockReturnValue({
+      documents: 0,
+      chunks: 0,
+      skipped_ineligible: 0,
+      failed_rows: 0,
+      complete: true,
+      failures: [],
+    });
     mocks.embedProjectSearchChunks.mockResolvedValue(0);
   });
 
@@ -72,5 +79,50 @@ describe("scheduleProjectSearchRefresh", () => {
       expect(mocks.annotateProjectGraph).toHaveBeenCalledTimes(3);
       expect(mocks.recordWatermark).toHaveBeenCalledTimes(3);
     });
+  });
+
+  it("reports a partial backfill, withholds the watermark, and still attempts later stages", async () => {
+    mocks.backfillProjectSearch.mockReturnValueOnce({
+      documents: 2,
+      chunks: 4,
+      skipped_ineligible: 1,
+      failed_rows: 1,
+      complete: false,
+      failures: [{ row_id: "evidence-1", source: "jira", code: "metadata_json" }],
+    });
+
+    const result = await refreshProjectSearch("org-1", "project-1");
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "project_backfill_partial",
+      index_documents: 2,
+      backfill_skipped_ineligible: 1,
+      backfill_failed_rows: 1,
+    });
+    expect(mocks.indexProjectKgNodes).toHaveBeenCalledWith("org-1", "project-1");
+    expect(mocks.embedProjectSearchChunks).toHaveBeenCalledWith("org-1", "project-1");
+    expect(mocks.annotateProjectGraph).toHaveBeenCalledWith("org-1", "project-1");
+    expect(mocks.recordWatermark).not.toHaveBeenCalled();
+  });
+
+  it("continues local indexing stages after a connector reports a partial refresh", async () => {
+    mocks.pollProjectSources.mockResolvedValueOnce({
+      results: [{ source: "confluence", ingested: 0, missing: "fetch_failed" }],
+      health: [],
+    });
+
+    const result = await refreshProjectSearch("org-1", "project-1");
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "project_source_refresh_partial",
+      source_errors: [{ source: "confluence", error: "source_refresh_failed" }],
+    });
+    expect(mocks.backfillProjectSearch).toHaveBeenCalled();
+    expect(mocks.indexProjectKgNodes).toHaveBeenCalled();
+    expect(mocks.embedProjectSearchChunks).toHaveBeenCalled();
+    expect(mocks.annotateProjectGraph).toHaveBeenCalled();
+    expect(mocks.recordWatermark).not.toHaveBeenCalled();
   });
 });

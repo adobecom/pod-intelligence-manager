@@ -163,6 +163,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      entities:
+        specifier: 4.5.0
+        version: 4.5.0
       fastify:
         specifier: ^5.3.3
         version: 5.8.4

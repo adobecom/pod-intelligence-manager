@@ -61,6 +61,26 @@ export { PROJECT_SEARCH_SOURCES } from "./types/project-search.js";
 
 export type { SearchDocument, SearchDocumentSource } from "./types/search-document.js";
 
+export { canonicalizeJson, canonicalJsonSha256, sha256Hex } from "./canonical-json.js";
+
+export {
+  MEMORY_CONTRACT_FIXTURES,
+  MEMORY_CONTRACT_MAX_DEPTH,
+  MEMORY_CONTRACT_MAX_NODES,
+  MEMORY_CONTRACT_SCHEMA,
+  MemoryContractValidationError,
+  memoryContractIssues,
+  parseMemoryContract,
+} from "./contracts/memory-contracts.js";
+
+export type {
+  MemoryContractIssue,
+  MemoryContractName,
+  MemoryContractTypeMap,
+} from "./contracts/memory-contracts.js";
+
+export type * from "./types/memory-contracts.generated.js";
+
 export type {
   OrgConfig,
   OrgScopeDefinition,

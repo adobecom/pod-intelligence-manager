@@ -88,7 +88,7 @@ export interface SearchContextOptions {
 
 export function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string): string {
   const normalized = {
-    cache_policy_version: 2,
+    cache_policy_version: 3,
     org_id: orgId,
     query: req.query.trim().toLowerCase(),
     sources: [...(req.sources ?? CONTEXT_SOURCES)].sort(),

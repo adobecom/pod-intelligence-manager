@@ -3,7 +3,7 @@ import type { ProjectEvidenceSource, ProjectEvidenceVisibility } from "@pim/shar
 import { redactSecrets } from "./secret-scan.js";
 
 /** Bump when deterministic normalization, metadata admission, or redaction rules change. */
-export const PROJECT_EVIDENCE_REDACTION_VERSION = "project-evidence-v1";
+export const PROJECT_EVIDENCE_REDACTION_VERSION = "project-evidence-v2";
 
 const MAX_METADATA_DEPTH = 8;
 const MAX_METADATA_ARRAY_ITEMS = 200;

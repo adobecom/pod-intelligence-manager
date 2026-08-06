@@ -25,6 +25,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
+    "contracts:generate": "node scripts/generate-memory-contracts.mjs",
+    "contracts:check": "node scripts/generate-memory-contracts.mjs --check",
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {

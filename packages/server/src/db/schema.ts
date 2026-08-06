@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import db from "./connection.js";
+import { runSchemaMigrations } from "./migrations.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";
 export const ORG_TUNING_ROW_KEY = "org_tuning";
@@ -1298,4 +1299,9 @@ export function createTables() {
   try {
     db.exec("CREATE INDEX IF NOT EXISTS idx_org_tuning_history_org ON org_tuning_history(org_id, adjusted_at DESC)");
   } catch { /* already exists */ }
+
+  // Canonical memory uses numbered, immutable, fail-fast migrations. Keep this
+  // outside the legacy best-effort ALTER guards above so a partial memory
+  // schema can never be mistaken for a successful deployment.
+  runSchemaMigrations();
 }

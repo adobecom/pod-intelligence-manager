@@ -81,6 +81,20 @@ export async function rebuildProjectSearchAfterCoreRestore(
       const indexed = backfillProjectSearch(project.org_id, project.project_id);
       const kg = indexProjectKgNodes(project.org_id, project.project_id);
       const graph = annotateProjectGraph(project.org_id, project.project_id);
+      if (!indexed.complete) {
+        failedProjects.push(project);
+        log.warn({
+          msg: "Project search recovery partial; rebuild marker retained",
+          ...project,
+          documents: indexed.documents,
+          chunks: indexed.chunks,
+          failed_rows: indexed.failed_rows,
+          failures: indexed.failures,
+          kg_indexed: kg.indexed,
+          graph_annotated: graph.annotated,
+        });
+        continue;
+      }
       rebuilt++;
       log.info({
         msg: "Project search recovered",
@@ -96,7 +110,7 @@ export async function rebuildProjectSearchAfterCoreRestore(
         {
           msg: "Project search recovery failed",
           ...project,
-          error: error instanceof Error ? error.message : "unknown",
+          error: "project_recovery_stage_failed",
         },
         "Project search recovery failed; rebuild marker retained",
       );

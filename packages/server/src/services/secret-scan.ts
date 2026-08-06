@@ -11,7 +11,11 @@ const SECRET_PATTERNS = [
   },
   { name: "Slack Token", pattern: /xox[baprs]-[A-Za-z0-9-]{10,}/ },
   { name: "GitHub Token", pattern: /(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,})/ },
-  { name: "OpenAI Key", pattern: /sk-[A-Za-z0-9_-]{20,}/ },
+  // Explicit token boundaries prevent the `sk-` suffix in ordinary words such
+  // as `risk-analysis-*` and `task-orchestration-*` from starting a match.
+  // Underscore is intentionally allowed as a left-hand delimiter while it
+  // remains part of the token alphabet on the right.
+  { name: "OpenAI Key", pattern: /(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/ },
   { name: "Bearer Token", pattern: /\bBearer\s+[A-Za-z0-9._~+\/-]{12,}/i },
   { name: "Generic Secret", pattern: /(secret|password|token|api[_-]?key)\s*[:=]\s*['"][^'"]{8,}['"]/i },
   { name: "Generic Secret", pattern: /(secret|password|token|api[_-]?key)\s*[:=]\s*[^\s,'";]{8,}/i },

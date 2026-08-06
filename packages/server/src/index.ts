@@ -21,6 +21,16 @@ import agentMemoryRoutes from "./routes/agent-memory.js";
 import skillCatalogRoutes from "./routes/skill-catalog.js";
 import skillCatalogWebhookRoutes from "./routes/skill-catalog-webhooks.js";
 import hostedMcpRoutes from "./routes/hosted-mcp.js";
+import memoryCapabilitiesRoutes from "./routes/memory-capabilities.js";
+import memorySearchRoutes from "./routes/memory-search.js";
+import memoryHarnessSearchRoutes from "./routes/memory-harness-search.js";
+import memoryReceiptRoutes from "./routes/memory-receipts.js";
+import memoryCandidateRoutes from "./routes/memory-candidates.js";
+import memoryAttestationRoutes from "./routes/memory-attestations.js";
+import memoryFeedbackRoutes from "./routes/memory-feedback.js";
+import memoryDecisionRoutes from "./routes/memory-decisions.js";
+import memoryPromptPolicyRoutes from "./routes/memory-prompt-policy.js";
+import memoryReleaseGateRoutes from "./routes/memory-release-gates.js";
 import wsRoutes from "./routes/ws.js";
 import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
@@ -33,25 +43,71 @@ import { runProjectSearchRefreshTick } from "./services/project-search-refresh.j
 import { rebuildProjectSearchAfterCoreRestore } from "./services/project-search-recovery.js";
 import { runSkillCatalogRefPollTick } from "./services/skill-catalog-freshness.js";
 import { runSkillCatalogEmbeddingBackfill } from "./services/skill-catalog-search.js";
+import { runMemoryOutboxPass } from "./services/memory-outbox.js";
+import {
+  runMemoryInboxPass,
+  runMemoryProviderReconciliationPass,
+} from "./services/memory-attestations.js";
+import {
+  assertCanonicalMemoryAuthorityRequired,
+  installLegacySqlWriteBarriers,
+} from "./services/memory-authority.js";
+import { backfillLegacyMemoryTokenBindings } from "./services/service-tokens.js";
 import {
   createCloudWatchSkillCatalogMetricSink,
   setSkillCatalogMetricSink,
 } from "./services/skill-catalog-metrics.js";
+import {
+  createCloudWatchMemoryMetricSink,
+  emitMemoryOperationalMetrics,
+  setMemoryMetricSink,
+} from "./services/memory-metrics.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import { registerJsonBodyParser } from "./middleware/validation.js";
+import { isMemoryApiPath, sendMemoryError, type PimMemoryErrorCode } from "./middleware/memory-errors.js";
 import db from "./db/connection.js";
 
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
 const app = Fastify({ logger: true });
 registerJsonBodyParser(app);
 setSkillCatalogMetricSink(createCloudWatchSkillCatalogMetricSink(app.log));
+setMemoryMetricSink(createCloudWatchMemoryMetricSink(app.log));
 
 // Global error handler — structured errors, no stack traces to clients
 app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
   request.log.error(error);
   if (reply.sent) return;
   const statusCode = error.statusCode ?? 500;
+  if (isMemoryApiPath(request.url)) {
+    const candidateCode = (error as Error & { code?: string }).code;
+    const knownCodes = new Set<PimMemoryErrorCode>([
+      "authentication_required",
+      "contract_version_unsupported",
+      "schema_invalid",
+      "resource_binding_mismatch",
+      "idempotency_conflict",
+      "resource_not_found",
+      "evidence_unresolvable",
+      "evidence_mismatch",
+      "activation_requirement_unsatisfied",
+      "transition_invalid",
+      "rate_limited",
+      "temporarily_unavailable",
+    ]);
+    const code: PimMemoryErrorCode = candidateCode && knownCodes.has(candidateCode as PimMemoryErrorCode)
+      ? candidateCode as PimMemoryErrorCode
+      : statusCode >= 500
+        ? "temporarily_unavailable"
+        : "schema_invalid";
+    sendMemoryError(
+      reply,
+      statusCode,
+      code,
+      statusCode >= 500 ? "Memory service is temporarily unavailable" : error.message,
+    );
+    return;
+  }
   reply.code(statusCode).send({
     error: statusCode >= 500 ? "Internal server error" : error.message,
   });
@@ -59,6 +115,14 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
 
 // Initialize database
 createTables();
+installLegacySqlWriteBarriers();
+assertCanonicalMemoryAuthorityRequired();
+const grandfatheredBindings = backfillLegacyMemoryTokenBindings();
+if (grandfatheredBindings > 0) {
+  app.log.info(
+    `Backfilled ${grandfatheredBindings} repository bindings for pre-binding memory service tokens`,
+  );
+}
 seedDatabase();
 
 // Knowledge graph init.
@@ -184,6 +248,16 @@ app.register(contextSearchRoutes);
 app.register(agentMemoryRoutes);
 app.register(skillCatalogRoutes);
 app.register(skillCatalogWebhookRoutes);
+app.register(memoryCapabilitiesRoutes);
+app.register(memorySearchRoutes);
+app.register(memoryHarnessSearchRoutes);
+app.register(memoryReceiptRoutes);
+app.register(memoryCandidateRoutes);
+app.register(memoryAttestationRoutes);
+app.register(memoryFeedbackRoutes);
+app.register(memoryDecisionRoutes);
+app.register(memoryPromptPolicyRoutes);
+app.register(memoryReleaseGateRoutes);
 app.register(hostedMcpRoutes, {
   apiBaseUrl: `http://127.0.0.1:${PORT}`,
 });
@@ -266,6 +340,19 @@ const SKILL_CATALOG_EMBED_INTERVAL_MS = positiveIntervalMs(
 /** Set to "0" to disable background skill-catalog embedding work. */
 const SKILL_CATALOG_EMBED_ENABLED =
   process.env.SKILL_CATALOG_EMBED_ENABLED !== "0";
+const MEMORY_OUTBOX_INTERVAL_MS = positiveIntervalMs(
+  process.env.MEMORY_OUTBOX_INTERVAL_MS,
+  30_000,
+);
+const MEMORY_RECONCILE_INTERVAL_MS = positiveIntervalMs(
+  process.env.MEMORY_RECONCILE_INTERVAL_MS,
+  5 * 60_000,
+);
+const MEMORY_METRICS_INTERVAL_MS = positiveIntervalMs(
+  process.env.MEMORY_METRICS_INTERVAL_MS,
+  60_000,
+);
+const MEMORY_WORKERS_ENABLED = process.env.MEMORY_WORKERS_ENABLED !== "0";
 
 app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
   if (err) {
@@ -423,6 +510,37 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     );
   }
 
+  if (MEMORY_WORKERS_ENABLED) {
+    const drainMemoryOutbox = () => {
+      try {
+        runMemoryOutboxPass();
+      } catch (error) {
+        app.log.error(error, "Memory outbox pass failed");
+      }
+    };
+    const reconcileMemoryInbox = () => {
+      void runMemoryProviderReconciliationPass()
+        .then(() => runMemoryInboxPass({ forceUnmatched: true }))
+        .catch((error) => {
+          app.log.error(error, "Memory provider reconciliation failed");
+        });
+    };
+    drainMemoryOutbox();
+    reconcileMemoryInbox();
+    setInterval(drainMemoryOutbox, MEMORY_OUTBOX_INTERVAL_MS);
+    setInterval(reconcileMemoryInbox, MEMORY_RECONCILE_INTERVAL_MS);
+  }
+
+  const publishMemoryOperationalMetrics = () => {
+    try {
+      emitMemoryOperationalMetrics();
+    } catch (error) {
+      app.log.error(error, "Memory operational metric collection failed");
+    }
+  };
+  publishMemoryOperationalMetrics();
+  setInterval(publishMemoryOperationalMetrics, MEMORY_METRICS_INTERVAL_MS);
+
   app.log.info(`Escalation check interval: ${ESCALATION_INTERVAL_MS}ms`);
   app.log.info(`Lint pass interval: ${LINT_INTERVAL_MS}ms`);
   app.log.info(`Knowledge graph refresh interval: ${GRAPH_REFRESH_INTERVAL_MS}ms`);
@@ -443,6 +561,12 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
       ? `Skill catalog embedding interval: ${SKILL_CATALOG_EMBED_INTERVAL_MS}ms`
       : "Skill catalog embeddings: disabled (SKILL_CATALOG_EMBED_ENABLED=0)",
   );
+  app.log.info(
+    MEMORY_WORKERS_ENABLED
+      ? `Memory workers: outbox ${MEMORY_OUTBOX_INTERVAL_MS}ms, reconciliation ${MEMORY_RECONCILE_INTERVAL_MS}ms`
+      : "Memory workers: disabled (MEMORY_WORKERS_ENABLED=0)",
+  );
+  app.log.info(`Memory operational metrics interval: ${MEMORY_METRICS_INTERVAL_MS}ms`);
 });
 
 // Graceful shutdown so Docker restarts and ASG replacements don't corrupt SQLite WAL.

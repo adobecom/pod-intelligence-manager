@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import db from "../db/connection.js";
+import { assertLegacyActivationStructure } from "./memory-structural-validator.js";
+import { assertLegacyMemoryWritable } from "./memory-authority.js";
 import type {
   EnhancedPodLearning,
   KnowledgeNodeType,
@@ -390,6 +392,7 @@ export async function promoteProjectMemoryCandidate(
   projectId: string,
   candidateId: string,
 ): Promise<ProjectMemoryCandidate | null> {
+  assertLegacyMemoryWritable("project_memory_candidate_promotion");
   const project = loadProject(projectId, orgId);
   if (!project) return null;
 
@@ -404,6 +407,13 @@ export async function promoteProjectMemoryCandidate(
   // auto-promotion hint. Discussion/wiki evidence must remain evidence-only
   // even when a caller knows the candidate id and requests manual promotion.
   if (!evidence.promotable) return null;
+
+  assertLegacyActivationStructure({
+    type: candidate.type,
+    summary: candidate.summary,
+    details: candidate.details,
+    domains: candidate.domains,
+  });
 
   const learning: EnhancedPodLearning = {
     type: candidate.type,

@@ -48,6 +48,9 @@ export interface RefreshResult {
   poll_ingested?: number;
   index_documents?: number;
   index_chunks?: number;
+  backfill_skipped_ineligible?: number;
+  backfill_failed_rows?: number;
+  backfill_failures?: Array<{ row_id: string; source: string; code: string }>;
   chunks_embedded?: number;
   source_errors?: Array<{ source: string; error: string }>;
 }
@@ -156,19 +159,28 @@ export async function refreshProjectSearch(orgId: string, projectId: string): Pr
     // Step 6: advance the aggregate watermark only when every configured
     // source succeeded. Source-specific attempts/successes are tracked by the
     // connector state and must not be hidden by a partial refresh.
-    if (sourceErrors.length === 0) setLastRefreshAt(orgId, projectId);
+    if (sourceErrors.length === 0 && backfillResult.complete) setLastRefreshAt(orgId, projectId);
+
+    const partialBackfill = !backfillResult.complete;
+    const ok = sourceErrors.length === 0 && !partialBackfill;
 
     return {
       org_id: orgId,
       project_id: projectId,
-      ok: sourceErrors.length === 0,
-      ...(sourceErrors.length > 0
-        ? { error: `Source refresh failed: ${sourceErrors.map((item) => item.source).join(", ")}`, source_errors: sourceErrors }
+      ok,
+      ...(partialBackfill
+        ? { error: "project_backfill_partial" }
+        : sourceErrors.length > 0
+        ? { error: "project_source_refresh_partial" }
         : {}),
+      ...(sourceErrors.length > 0 ? { source_errors: sourceErrors } : {}),
       duration_ms: Date.now() - t0,
       poll_ingested: pollIngested,
       index_documents: backfillResult.documents,
       index_chunks: backfillResult.chunks,
+      backfill_skipped_ineligible: backfillResult.skipped_ineligible,
+      backfill_failed_rows: backfillResult.failed_rows,
+      ...(backfillResult.failures.length > 0 ? { backfill_failures: backfillResult.failures } : {}),
       chunks_embedded: chunksEmbedded,
     };
   } catch {
@@ -266,6 +278,7 @@ export async function runProjectSearchRefreshTick(
         duration_ms: r.duration_ms,
         poll_ingested: r.poll_ingested,
         index_documents: r.index_documents,
+        backfill_skipped_ineligible: r.backfill_skipped_ineligible,
         chunks_embedded: r.chunks_embedded,
       });
     } else {
@@ -274,6 +287,8 @@ export async function runProjectSearchRefreshTick(
         org_id,
         project_id,
         error: r.error,
+        backfill_failed_rows: r.backfill_failed_rows,
+        backfill_failures: r.backfill_failures,
         duration_ms: r.duration_ms,
       });
     }

@@ -202,7 +202,7 @@ afterEach(() => {
 });
 
 describe("indexed project search — retrieval", () => {
-  it("re-stamps stale evidence metadata and ignores legacy operator allowlist changes", async () => {
+  it("stamps derived metadata without rewriting authoritative evidence", async () => {
     const currentVersion = connectorBindingVersion({
       jira: { project_keys: ["EMC", "MWPW"] },
     }, "jira");
@@ -234,7 +234,7 @@ describe("indexed project search — retrieval", () => {
       resource_binding_version: currentVersion,
     });
     expect(JSON.parse(storedEvidence.metadata_json)).toMatchObject({
-      resource_binding_version: currentVersion,
+      resource_binding_version: "resource-binding-v1:obsolete",
     });
 
     process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "UNRELATED,REORDERED";
@@ -594,6 +594,110 @@ describe("indexed project search — retrieval", () => {
 });
 
 describe("indexed project search — backfill + mind map", () => {
+  it.each(["first", "middle", "last"])(
+    "continues valid evidence and update rows when a malformed evidence row is %s",
+    (position) => {
+      const now = new Date().toISOString();
+      const insertEvidence = testDb.prepare(
+        `INSERT INTO project_evidence_items
+           (id, org_id, project_id, source, source_type, source_id, source_title,
+            summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+         VALUES (?, ?, ?, 'project_update', 'progress', ?, ?, ?, ?, ?, ?, ?, 0.7, 'project_visible')`,
+      );
+      const rows = [
+        { id: "evidence-good-a", sourceId: "good-a", metadata: "{}" },
+        { id: "evidence-bad", sourceId: "bad-row", metadata: "{" },
+        { id: "evidence-good-b", sourceId: "good-b", metadata: "{}" },
+      ];
+      if (position === "first") rows.unshift(rows.splice(1, 1)[0]!);
+      if (position === "last") rows.push(rows.splice(1, 1)[0]!);
+      for (const row of rows) {
+        insertEvidence.run(
+          row.id,
+          ORG_ID,
+          PROJECT_ID,
+          row.sourceId,
+          `Title ${row.sourceId}`,
+          `Summary ${row.sourceId}`,
+          `Body ${row.sourceId}`,
+          now,
+          now,
+          row.metadata,
+        );
+      }
+
+      testDb.prepare(
+        `INSERT INTO project_context_updates
+           (id, org_id, project_id, summary, details, type, scope, agent_id, status, timestamp)
+         VALUES ('project-update-after-bad', ?, ?, 'Project update after bad row', 'Still indexed',
+                 'progress', 'backend', 'agent-project', 'active', ?)`,
+      ).run(ORG_ID, PROJECT_ID, now);
+      testDb.prepare(
+        `INSERT INTO pods
+           (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure,
+            milestone_json, project_id, org_id, created_by_user_id)
+         VALUES ('pod-after-bad', 'Pod after bad row', '2026-08-01', '2026-08-07', 1, 7, 0, '{}', ?, ?, ?)`,
+      ).run(PROJECT_ID, ORG_ID, creatorId);
+      testDb.prepare(
+        `INSERT INTO context_updates
+           (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json,
+            status, blocks_json, blocked_by_json, needs_input_from_json, org_id)
+         VALUES ('pod-update-after-bad', 'agent-pod', ?, 'pod-after-bad', 'progress', 'backend',
+                 'Pod update after bad row', 'Also indexed', '[]', 'active', '[]', '[]', '[]', ?)`,
+      ).run(now, ORG_ID);
+
+      const result = backfillProjectSearch(ORG_ID, PROJECT_ID);
+      const sourceIds = (testDb.prepare(
+        `SELECT source_id FROM project_search_documents
+         WHERE org_id = ? AND project_id = ? ORDER BY source_id`,
+      ).all(ORG_ID, PROJECT_ID) as Array<{ source_id: string }>).map((row) => row.source_id);
+
+      expect(result).toMatchObject({
+        failed_rows: 1,
+        complete: false,
+        skipped_ineligible: 0,
+      });
+      expect(result.failures).toEqual([
+        { row_id: "evidence-bad", source: "project_update", code: "metadata_json" },
+      ]);
+      expect(JSON.stringify(result.failures)).not.toContain("Body bad-row");
+      expect(sourceIds).toEqual(expect.arrayContaining([
+        "good-a",
+        "good-b",
+        "project-update-after-bad",
+        "pod-update-after-bad",
+      ]));
+      expect(sourceIds).not.toContain("bad-row");
+    },
+  );
+
+  it("prunes derived evidence whose connector binding was removed and classifies it as ineligible", () => {
+    const now = new Date().toISOString();
+    testDb.prepare(
+      `INSERT INTO project_evidence_items
+         (id, org_id, project_id, source, source_type, source_id, source_title,
+          summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+       VALUES ('stale-binding-row', ?, ?, 'jira', 'issue', 'EMC-REMOVED', 'Removed binding',
+               'Removed binding', 'Authoritative evidence remains', ?, ?, '{}', 0.7, 'project_visible')`,
+    ).run(ORG_ID, PROJECT_ID, now, now);
+    backfillProjectSearch(ORG_ID, PROJECT_ID);
+    expect(testDb.prepare(
+      "SELECT 1 FROM project_search_documents WHERE project_id = ? AND source_id = 'EMC-REMOVED'",
+    ).get(PROJECT_ID)).toBeDefined();
+
+    testDb.prepare("UPDATE projects SET resources_json = '{}' WHERE project_id = ?").run(PROJECT_ID);
+    testDb.prepare("UPDATE project_evidence_items SET metadata_json = '{' WHERE id = 'stale-binding-row'").run();
+    const result = backfillProjectSearch(ORG_ID, PROJECT_ID);
+
+    expect(result).toMatchObject({ skipped_ineligible: 1, failed_rows: 0, complete: true });
+    expect(testDb.prepare(
+      "SELECT 1 FROM project_search_documents WHERE project_id = ? AND source_id = 'EMC-REMOVED'",
+    ).get(PROJECT_ID)).toBeUndefined();
+    expect(testDb.prepare(
+      "SELECT body, metadata_json FROM project_evidence_items WHERE id = 'stale-binding-row'",
+    ).get()).toEqual({ body: "Authoritative evidence remains", metadata_json: "{" });
+  });
+
   it("backfills from linked pod context updates so they become searchable", async () => {
     testDb.prepare(
       "INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

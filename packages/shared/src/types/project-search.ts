@@ -267,4 +267,8 @@ export interface ProjectSearchIndexStats {
   edges_indexed: number;
   chunks_embedded: number;
   embedding_available: boolean;
+  complete: boolean;
+  skipped_ineligible: number;
+  failed_rows: number;
+  failures: Array<{ row_id: string; source: string; code: string }>;
 }

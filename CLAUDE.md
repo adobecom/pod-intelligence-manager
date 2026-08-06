@@ -2,14 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Pod agent requirement
-
-When working **in a pod managed by PIM** (yours or a consumer repo using `@pim/sdk`), you **must**:
-
-1. **Pull session context before substantive work** — use `PimClient.pullSessionContext()`, the MCP tool `get_agent_session_context`, or `pim context` (see `docs/POD_AGENT_PROTOCOL.md`).
-2. **Report to PIM after lock-in** — commits, reverts, or equivalent; use `report()`, `pim report`, MCP `submit_context_update`, or install git hooks with `pim hooks install`.
-
-Full normative text: [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md).
 
 ## Project Status
 

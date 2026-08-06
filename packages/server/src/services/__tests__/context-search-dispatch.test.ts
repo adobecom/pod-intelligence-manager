@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import type { IntegrationResult, IntegrationSearchOpts } from "../../integrations/types.js";
 
@@ -321,5 +323,49 @@ describe("cacheKey", () => {
     const req = { query: "milo block init" } as const;
     const scope = { actor: { email: userEmail } };
     expect(cacheKey(req, scope, "org-a")).not.toBe(cacheKey(req, scope, "org-b"));
+  });
+
+  it.each([
+    "risk-analysis-dashboard-update",
+    "task-orchestration-migration-strategy",
+  ])("preserves ordinary sk-suffix identifiers through the disk-cache round trip: %s", async (value) => {
+    // Live-path request on purpose: a project with indexed documents routes
+    // through the indexed wrapper, which never touches the disk cache. With no
+    // project in scope, searchContext runs the legacy integrations and caches.
+    vi.mocked(searchJira).mockResolvedValueOnce({
+      source: "jira",
+      documents: [{
+        org_id: TEST_ORG_ID,
+        source: "jira",
+        source_id: "MWPW-4242",
+        title: value,
+        snippet: `Rollout notes for ${value}`,
+        timestamp: new Date().toISOString(),
+      }],
+    });
+    const request = {
+      query: value,
+      sources: ["jira" as const],
+      synthesize: false,
+      use_cache: true,
+    };
+    const key = cacheKey(request, {}, TEST_ORG_ID);
+    const cacheFile = path.resolve(process.cwd(), ".data", "context-search-cache", `${key}.json`);
+    try {
+      fs.rmSync(cacheFile, { force: true });
+      const first = await searchContext(request, TEST_ORG_ID);
+      expect(first.hits[0]?.title).toBe(value);
+      // Pre-fix, the OpenAI-key pattern matched the sk- substring inside the
+      // identifier and redacted it out of the payload writeCache persists.
+      expect(fs.readFileSync(cacheFile, "utf8")).toContain(value);
+
+      // The jira mock is empty again, so the identifier can only come back
+      // from the disk cache.
+      const second = await searchContext(request, TEST_ORG_ID);
+      expect(second.from_cache).toBe(true);
+      expect(JSON.stringify(second)).toContain(value);
+    } finally {
+      fs.rmSync(cacheFile, { force: true });
+    }
   });
 });

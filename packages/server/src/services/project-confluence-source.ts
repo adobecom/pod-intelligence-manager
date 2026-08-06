@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { ProjectResources, ProjectSourceCapabilities, ProjectSourceChange } from "@pim/shared";
+import { decodeHTML } from "entities";
 import db from "../db/connection.js";
 import {
   hasConfluenceProjectVisibilityPolicy,
@@ -262,14 +263,9 @@ async function visibilityForPage(
 }
 
 function decodeHtml(value: string): string {
-  return value
-    .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
+  // `decodeHTML` applies the WHATWG text-context rules in one pass. Invalid
+  // numeric references become U+FFFD and text encoded twice stays encoded once.
+  return decodeHTML(value).replace(/\u00a0/g, " ");
 }
 
 function htmlToText(value: string): string {
