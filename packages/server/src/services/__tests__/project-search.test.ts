@@ -47,6 +47,7 @@ import { upsertUserByIms } from "../users.js";
 import { createOrg } from "../orgs.js";
 import {
   backfillProjectSearch,
+  indexEvidenceItem,
   indexProjectDocument,
   reindexProjectSearch,
   type IndexDocumentInput,
@@ -202,6 +203,39 @@ afterEach(() => {
 });
 
 describe("indexed project search — retrieval", () => {
+  it("does not index newly recorded evidence before the project is started", () => {
+    const previous = process.env.PROJECT_SEARCH_INDEXING_ENABLED;
+    process.env.PROJECT_SEARCH_INDEXING_ENABLED = "0";
+    try {
+      const now = new Date().toISOString();
+      const result = indexEvidenceItem({
+        id: "evidence-before-start",
+        org_id: ORG_ID,
+        project_id: PROJECT_ID,
+        source: "jira",
+        source_type: "issue",
+        source_id: "EMC-START-LATER",
+        source_title: "Wait for explicit indexing start",
+        summary: "Wait for explicit indexing start",
+        body: "This evidence should remain outside the search index for now.",
+        occurred_at: now,
+        ingested_at: now,
+        metadata: {},
+        confidence_score: 0.7,
+        promotable: false,
+        visibility: "project_visible",
+      });
+
+      expect(result).toEqual({ indexed: false, code: "indexing_not_started" });
+      expect(testDb.prepare(
+        "SELECT 1 FROM project_search_documents WHERE org_id = ? AND project_id = ? AND source_id = ?",
+      ).get(ORG_ID, PROJECT_ID, "EMC-START-LATER")).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PROJECT_SEARCH_INDEXING_ENABLED;
+      else process.env.PROJECT_SEARCH_INDEXING_ENABLED = previous;
+    }
+  });
+
   it("stamps derived metadata without rewriting authoritative evidence", async () => {
     const currentVersion = connectorBindingVersion({
       jira: { project_keys: ["EMC", "MWPW"] },
@@ -904,6 +938,12 @@ describe("indexed project search — backfill + mind map", () => {
     expect(stats.documents_indexed).toBeGreaterThanOrEqual(1);
     expect(stats.chunks_indexed).toBeGreaterThanOrEqual(1);
     expect(stats.embedding_available).toBe(false);
+    const activation = testDb
+      .prepare(
+        "SELECT cursor_value FROM project_ingestion_cursors WHERE org_id = ? AND project_id = ? AND source = 'project_search' AND cursor_key = 'indexing_enabled'",
+      )
+      .get(ORG_ID, PROJECT_ID) as { cursor_value: string } | undefined;
+    expect(activation?.cursor_value).toBe("1");
     const entity = testDb
       .prepare("SELECT metadata_json FROM project_search_entities WHERE org_id = ? AND project_id = ? LIMIT 1")
       .get(ORG_ID, PROJECT_ID) as { metadata_json: string };

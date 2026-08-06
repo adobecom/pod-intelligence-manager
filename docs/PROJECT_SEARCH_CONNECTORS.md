@@ -1,5 +1,23 @@
 # Project search connectors
 
+## Starting indexing
+
+Project-search indexing is opt-in. Deploying or restarting the server does not
+build an index for any project until an operator explicitly starts that project:
+
+```sh
+pim project reindex <projectId>
+```
+
+That command performs the first build and records the project as started. Future
+startup and six-hour refresh runs include only projects that have been started.
+To deliberately start every configured project at once, set
+`PROJECT_SEARCH_INDEXING_ENABLED=1` before starting the server.
+
+Project evidence can continue to be recorded while indexing is not started. It
+is picked up by the first reindex. A restore rebuild marker is cleared after all
+started projects are rebuilt; projects that have not started remain unindexed.
+
 Slack and Confluence scheduled ingestion are disabled by default. Configure and validate one project/source at a time, then enable its independent flag.
 
 GitHub and Jira service credentials can see more than a PIM project audience. Their indexed and project-live paths are therefore restricted to the canonical repository and Jira-project bindings stored in the project's `resources_json`. Connector bindings are non-secret configuration and may only be changed by an org admin or owner; service credentials remain deployment secrets. Jira projects configured here must not use an issue-security audience narrower than the corresponding PIM project.
@@ -36,6 +54,6 @@ Leave `PROJECT_CONFLUENCE_SEARCH_ENABLED=0` through the initial unrestricted-pag
 
 ## Operations
 
-Adding or changing a binding conservatively purges that source and schedules an immediate refresh. The normal scheduler also runs once at server startup. Inspect `GET /api/projects/:projectId/source-health` or the `source_health` field on project-search responses for attempt/success/reconciliation timestamps, channel watermarks, lag, indexed counts, retries, and generic error codes.
+Adding or changing a binding conservatively purges that source. It schedules an immediate refresh only after indexing has been started for that project. The normal scheduler also runs once at server startup, but it includes only projects whose indexing has been started. Inspect `GET /api/projects/:projectId/source-health` or the `source_health` field on project-search responses for attempt/success/reconciliation timestamps, channel watermarks, lag, indexed counts, retries, and generic error codes.
 
 Before enabling a connector against an existing corpus, follow [PROJECT_SEARCH_SCRUB_RUNBOOK.md](./PROJECT_SEARCH_SCRUB_RUNBOOK.md). Do not restore an unsanitized database, WAL, cache, backup, or replica as a rollback path.

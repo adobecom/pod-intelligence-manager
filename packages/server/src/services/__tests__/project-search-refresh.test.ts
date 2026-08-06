@@ -69,6 +69,10 @@ import {
   refreshProjectSearch,
   getLastRefreshAt,
 } from "../project-search-refresh.js";
+import {
+  enableProjectSearchIndexing,
+  isProjectSearchIndexingEnabled,
+} from "../project-search-control.js";
 import { queryKnowledge } from "../knowledge-graph.js";
 
 const ORG_ID = "org_refresh_test";
@@ -156,6 +160,38 @@ beforeEach(() => {
 // ── 1. listActiveProjectsForRefresh ─────────────────────────────────────────
 
 describe("listActiveProjectsForRefresh", () => {
+  it("does not include a configured project until indexing is explicitly started", () => {
+    const projectId = "proj_waiting_for_start";
+    testDb.prepare(
+      "INSERT OR IGNORE INTO projects (project_id, name, created_at, resources_json, org_id) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      projectId,
+      "Waiting for Start",
+      new Date().toISOString(),
+      JSON.stringify({ jira: { project_keys: ["WAIT"] } }),
+      ORG_ID,
+    );
+
+    const previous = process.env.PROJECT_SEARCH_INDEXING_ENABLED;
+    process.env.PROJECT_SEARCH_INDEXING_ENABLED = "0";
+    try {
+      expect(isProjectSearchIndexingEnabled(ORG_ID, projectId)).toBe(false);
+      expect(listActiveProjectsForRefresh(30).map((project) => project.project_id)).not.toContain(projectId);
+
+      enableProjectSearchIndexing(ORG_ID, projectId);
+
+      expect(isProjectSearchIndexingEnabled(ORG_ID, projectId)).toBe(true);
+      expect(listActiveProjectsForRefresh(30).map((project) => project.project_id)).toContain(projectId);
+    } finally {
+      testDb.prepare(
+        "DELETE FROM project_ingestion_cursors WHERE org_id = ? AND project_id = ? AND source = 'project_search' AND cursor_key = 'indexing_enabled'",
+      ).run(ORG_ID, projectId);
+      testDb.prepare("DELETE FROM projects WHERE org_id = ? AND project_id = ?").run(ORG_ID, projectId);
+      if (previous === undefined) delete process.env.PROJECT_SEARCH_INDEXING_ENABLED;
+      else process.env.PROJECT_SEARCH_INDEXING_ENABLED = previous;
+    }
+  });
+
   it("includes configured projects before they have recent evidence", () => {
     const projects = listActiveProjectsForRefresh(30);
     const ids = projects.map((p) => p.project_id);
