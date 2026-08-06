@@ -40,6 +40,10 @@ import {
   projectResourceEligibilitySql,
   sanitizeProjectResources,
 } from "./project-resource-bindings.js";
+import {
+  enableProjectSearchIndexing,
+  isProjectSearchIndexingEnabled,
+} from "./project-search-control.js";
 
 const EMBEDDING_MODEL = "amazon.titan-embed-text-v2:0";
 const MAX_CHUNKS_PER_DOC = 24;
@@ -1317,6 +1321,10 @@ function rowFailureCode(error: unknown): string {
 /** Live hook: index an evidence item into the search layer. Never throws and
  * returns the same sanitized classification used by bulk backfill. */
 export function indexEvidenceItem(evidence: ProjectEvidenceItem): ProjectSearchRowIndexResult {
+  if (!isProjectSearchIndexingEnabled(evidence.org_id, evidence.project_id)) {
+    return { indexed: false, code: "indexing_not_started" };
+  }
+
   try {
     indexProjectDocument(documentInputFromEvidence(evidence));
     return { indexed: true };
@@ -1850,6 +1858,7 @@ export async function reindexProjectSearch(
   projectId: string,
   opts: ReindexOptions = {},
 ): Promise<ProjectSearchIndexStats> {
+  enableProjectSearchIndexing(orgId, projectId);
   purgeProjectSearch(orgId, projectId);
   const backfill = backfillProjectSearch(orgId, projectId);
   const chunksEmbedded = opts.embed ? await embedProjectSearchChunks(orgId, projectId) : 0;
