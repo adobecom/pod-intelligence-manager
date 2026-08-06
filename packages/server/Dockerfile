@@ -7,7 +7,7 @@
 # The build context intentionally excludes dist, so rebuild both after install.
 
 # ---------- Build / install stage ----------
-FROM --platform=linux/amd64 node:22-alpine AS build
+FROM --platform=linux/amd64 node:24-alpine AS build
 
 WORKDIR /repo
 
@@ -23,7 +23,7 @@ RUN pnpm --filter @pim/shared build
 RUN pnpm --filter @pim/mcp-server build
 
 # ---------- Runtime stage ----------
-FROM --platform=linux/amd64 node:22-alpine AS runtime
+FROM --platform=linux/amd64 node:24-alpine AS runtime
 
 WORKDIR /app
 

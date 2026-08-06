@@ -4,7 +4,8 @@
  * One EC2 instance runs the Fastify server container. SQLite lives on an
  * attached EBS volume mounted at /data. ALB fronts the instance; CloudFront
  * fronts the ALB for API/WS and an S3 bucket for the UI. Secrets come from
- * SSM Parameter Store at /pim/*. Backups mirror to S3 via a cron on the host.
+ * SSM Parameter Store at /pim/*. Portable core backups mirror to S3 via a cron;
+ * AWS Backup takes incremental recovery points of the complete /data volume.
  *
  * Not multi-AZ, not zero-downtime, not IMS-authed. Chosen to ship fast; see
  * pim-stack.ts for the eventual Lambda+DynamoDB design.
@@ -21,6 +22,13 @@ import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as logs from "aws-cdk-lib/aws-logs";
+import * as backup from "aws-cdk-lib/aws-backup";
+import * as events from "aws-cdk-lib/aws-events";
+import * as eventTargets from "aws-cdk-lib/aws-events-targets";
+import * as cloudwatch from "aws-cdk-lib/aws-cloudwatch";
+import * as cloudwatchActions from "aws-cdk-lib/aws-cloudwatch-actions";
+import * as sns from "aws-cdk-lib/aws-sns";
+import * as snsSubscriptions from "aws-cdk-lib/aws-sns-subscriptions";
 
 export interface PimEc2StackProps extends cdk.StackProps {
   /** Owner namespace prefix for all named resources (bucket/repo/log group). */
@@ -33,6 +41,8 @@ export class PimEc2Stack extends cdk.Stack {
     super(scope, id, props);
 
     const owner = props.owner;
+    const dataVolumeBackupTagKey = "PimBackup";
+    const dataVolumeBackupTagValue = `pim-${owner}-data`;
     const instanceType =
       props.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM);
 
@@ -86,10 +96,35 @@ export class PimEc2Stack extends cdk.Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       lifecycleRules: [
         {
-          id: "ia-then-expire",
+          id: "expire-hourly-core-backups",
+          prefix: "backups/hourly/",
+          expiration: cdk.Duration.days(3),
+        },
+        {
+          id: "expire-daily-core-backups",
+          prefix: "backups/daily/",
+          expiration: cdk.Duration.days(35),
+        },
+        {
+          id: "archive-weekly-core-backups",
+          prefix: "backups/weekly/",
           transitions: [
             {
               // STANDARD_IA requires a minimum 30-day transition (AWS enforces)
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(30),
+            },
+          ],
+          expiration: cdk.Duration.days(91),
+        },
+        {
+          // Preserve the retention policy for full dumps created by images that
+          // predate tiered core backups. The prefix deliberately excludes the
+          // new hourly/daily/weekly subdirectories.
+          id: "archive-legacy-full-backups",
+          prefix: "backups/pim-",
+          transitions: [
+            {
               storageClass: s3.StorageClass.INFREQUENT_ACCESS,
               transitionAfter: cdk.Duration.days(30),
             },
@@ -118,6 +153,115 @@ export class PimEc2Stack extends cdk.Stack {
       logGroupName: `/aws/ec2/pim-${owner}-server`,
       retention: logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // Canonical-memory cutover fence. The startup assert, the read-only
+    // knowledge-graph mount, and the KG bucket write revocation must all land
+    // strictly AFTER the offline cutover (`pnpm migrate-legacy-memory`) has
+    // committed the canonical authority transition — deploying them first
+    // crash-loops the server fail-closed and breaks still-live legacy graph
+    // writes. Flip with `cdk deploy -c memoryCutoverComplete=true` once the
+    // cutover has been verified; never as part of the same deploy.
+    const cutoverContext: unknown = this.node.tryGetContext("memoryCutoverComplete");
+    const memoryCutoverComplete = cutoverContext === true
+      || (typeof cutoverContext === "string" && cutoverContext.trim() === "true");
+
+    const operationsAlerts = new sns.Topic(this, "OperationsAlerts", {
+      topicName: `pim-${owner}-operations-alerts`,
+      displayName: `PIM ${owner} operations alerts`,
+    });
+    const alarmEmail = this.node.tryGetContext("alarmEmail");
+    if (typeof alarmEmail === "string" && alarmEmail.trim()) {
+      operationsAlerts.addSubscription(
+        new snsSubscriptions.EmailSubscription(alarmEmail.trim()),
+      );
+    }
+    const operationsAlarmAction = new cloudwatchActions.SnsAction(operationsAlerts);
+    const memoryMetric = (
+      metricName: string,
+      statistic = "Maximum",
+      period = cdk.Duration.minutes(1),
+      dimensionsMap?: Record<string, string>,
+    ) => new cloudwatch.Metric({
+      namespace: "PIM/Memory",
+      metricName,
+      statistic,
+      period,
+      ...(dimensionsMap ? { dimensionsMap } : {}),
+    });
+    const addOperationsAlarm = (
+      id: string,
+      props: cloudwatch.AlarmProps,
+    ): cloudwatch.Alarm => {
+      const alarm = new cloudwatch.Alarm(this, id, props);
+      alarm.addAlarmAction(operationsAlarmAction);
+      return alarm;
+    };
+
+    addOperationsAlarm("MemoryBoundaryLeakageAlarm", {
+      alarmName: `pim-${owner}-memory-boundary-leakage`,
+      alarmDescription: "P1: persisted memory crossed an org/project/plane/repository boundary",
+      metric: memoryMetric("BoundaryLeakageCount"),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    addOperationsAlarm("MemoryActivePointerAlarm", {
+      alarmName: `pim-${owner}-memory-active-pointer-violation`,
+      alarmDescription: "An active candidate does not resolve to its same-scope immutable record version",
+      metric: memoryMetric("ActivePointerViolationCount"),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    addOperationsAlarm("MemoryDeadLetterAlarm", {
+      alarmName: `pim-${owner}-memory-dead-letter`,
+      alarmDescription: "Memory outbox or provider-inbox work reached active dead letter",
+      metric: memoryMetric("DeadLetterCount"),
+      threshold: 0,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    addOperationsAlarm("MemoryOutboxAgeAlarm", {
+      alarmName: `pim-${owner}-memory-outbox-overdue`,
+      alarmDescription: "Oldest due or expired-lease memory job has waited more than five minutes",
+      metric: memoryMetric("OldestOutboxAgeSeconds"),
+      threshold: 300,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    addOperationsAlarm("MemorySearchLatencyAlarm", {
+      alarmName: `pim-${owner}-memory-search-p95-latency`,
+      alarmDescription: "Codebase memory search p95 exceeded the 500 ms SLO",
+      metric: memoryMetric(
+        "SearchLatency",
+        "p95",
+        cdk.Duration.minutes(5),
+        { outcome: "success", plane: "codebase" },
+      ),
+      threshold: 500,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    addOperationsAlarm("LogicalBackupHeartbeatAlarm", {
+      alarmName: `pim-${owner}-logical-backup-heartbeat`,
+      alarmDescription: "Hourly verified logical backup failed or did not publish its heartbeat",
+      metric: new cloudwatch.Metric({
+        namespace: "PIM/Backup",
+        metricName: "LogicalBackupSuccess",
+        dimensionsMap: { Deployment: owner },
+        statistic: "Minimum",
+        period: cdk.Duration.hours(1),
+      }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
     });
 
     // ──────────────────────────────────────
@@ -176,11 +320,27 @@ export class PimEc2Stack extends cdk.Stack {
       }),
     );
 
-    kgBucket.grantReadWrite(ec2Role);
-    // Read + write: cron uploads hourly backups here, and entrypoint.sh restores
-    // the latest backup from here on a fresh instance (restore_db_if_empty).
-    // Write-only would make restore-on-boot fail with AccessDenied on GetObject.
+    // The JSON knowledge graph becomes a read-only legacy projection once the
+    // canonical memory cutover has run. Keep the infrastructure fence aligned
+    // with the database authority state: write access stays until the cutover
+    // is verified, then the post-cutover deploy revokes it so rollback cannot
+    // revive the legacy write path.
+    if (memoryCutoverComplete) {
+      kgBucket.grantRead(ec2Role);
+    } else {
+      // Pre-cutover the server still write-through-mirrors graph saves to S3.
+      kgBucket.grantReadWrite(ec2Role);
+    }
+    // Read + write: cron uploads hourly backups, while bootstrap restores exact
+    // checksummed DB/KG/manifest keys from one pinned recovery generation.
     backupsBucket.grantReadWrite(ec2Role);
+    ec2Role.addToPolicy(new iam.PolicyStatement({
+      actions: ["cloudwatch:PutMetricData"],
+      resources: ["*"],
+      conditions: {
+        StringEquals: { "cloudwatch:namespace": "PIM/Backup" },
+      },
+    }));
     uiBucket.grantRead(ec2Role);
     logGroup.grantWrite(ec2Role);
     ecrRepo.grantPull(ec2Role);
@@ -189,6 +349,30 @@ export class PimEc2Stack extends cdk.Stack {
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
         resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/pim/*`],
+      }),
+    );
+
+    // LaunchTemplate's L2 block-device API cannot tag only one of its EBS
+    // volumes. User data resolves /dev/sdb and applies this constrained tag so
+    // AWS Backup snapshots the stateful data disk, not the disposable root disk.
+    ec2Role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ec2:DescribeVolumes"],
+        resources: ["*"],
+      }),
+    );
+    ec2Role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ec2:CreateTags"],
+        resources: [`arn:${this.partition}:ec2:${this.region}:${this.account}:volume/*`],
+        conditions: {
+          StringEquals: {
+            [`aws:RequestTag/${dataVolumeBackupTagKey}`]: dataVolumeBackupTagValue,
+          },
+          "ForAllValues:StringEquals": {
+            "aws:TagKeys": [dataVolumeBackupTagKey],
+          },
+        },
       }),
     );
 
@@ -210,6 +394,7 @@ export class PimEc2Stack extends cdk.Stack {
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       "set -eu",
+      'echo "[pim-bootstrap] stage=host-packages"',
       "dnf update -y",
       "dnf install -y docker cronie",
 
@@ -247,6 +432,7 @@ export class PimEc2Stack extends cdk.Stack {
       // scratch volume, so never assume nvme1n1 is /dev/sdb. Resolve the original
       // EBS device mapping via ebsnvme-id and persist the filesystem by UUID so an
       // NVMe enumeration change on reboot cannot mount the wrong volume.
+      'echo "[pim-bootstrap] stage=data-volume-mount"',
       'DATA_DEV=""',
       "for ATTEMPT in $(seq 1 60); do",
       "  for CANDIDATE in /dev/nvme*n1 /dev/sdb /dev/xvdb; do",
@@ -269,11 +455,31 @@ export class PimEc2Stack extends cdk.Stack {
       "mount /data",
       "mkdir -p /data/knowledge-graph",
 
+      // Tag the exact EBS volume attached as /dev/sdb. AWS Backup's tag-based
+      // selection is dynamic, so replacement instances are protected without a
+      // stack update or a hard-coded volume ID.
+      'echo "[pim-bootstrap] stage=instance-and-backup-tag"',
+      'INSTANCE_ID_FILE=/sys/devices/virtual/dmi/id/board_asset_tag',
+      '[ -r "$INSTANCE_ID_FILE" ] || { echo "EC2 instance-id sysfs file is unavailable" >&2; exit 1; }',
+      'INSTANCE_ID=$(tr -d "[:space:]" < "$INSTANCE_ID_FILE")',
+      'case "$INSTANCE_ID" in i-*) ;; *) echo "Invalid EC2 instance ID from sysfs" >&2; exit 1 ;; esac',
+      'DATA_VOLUME_ID=""',
+      "for ATTEMPT in $(seq 1 30); do",
+      `  DATA_VOLUME_ID=$(aws ec2 describe-volumes --region ${this.region} --filters "Name=attachment.instance-id,Values=$INSTANCE_ID" "Name=attachment.device,Values=/dev/sdb" --query 'Volumes[0].VolumeId' --output text 2>/dev/null || true)`,
+      '  case "$DATA_VOLUME_ID" in vol-*) break ;; esac',
+      '  DATA_VOLUME_ID=""',
+      "  sleep 2",
+      "done",
+      '[ -n "$DATA_VOLUME_ID" ] || { echo "Unable to resolve /dev/sdb EBS volume ID" >&2; exit 1; }',
+      `aws ec2 create-tags --region ${this.region} --resources "$DATA_VOLUME_ID" --tags Key=${dataVolumeBackupTagKey},Value=${dataVolumeBackupTagValue}`,
+
       // ECR login
+      'echo "[pim-bootstrap] stage=image-pull"',
       `aws ecr get-login-password --region ${this.region} | docker login --username AWS --password-stdin ${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
       `docker pull ${containerImage} || true`,
 
       // systemd unit for the server
+      'echo "[pim-bootstrap] stage=service-install"',
       "cat > /etc/systemd/system/pim-server.service <<'UNIT_EOF'",
       "[Unit]",
       "Description=PIM Server",
@@ -289,6 +495,9 @@ export class PimEc2Stack extends cdk.Stack {
       "ExecStartPre=-/usr/bin/docker rm pim-server",
       `ExecStart=/usr/bin/docker run --rm --name pim-server -p 4000:4000 \\`,
       `  -v /data:/data \\`,
+      ...(memoryCutoverComplete
+        ? [`  -v /data/knowledge-graph:/data/knowledge-graph:ro \\`]
+        : []),
       `  -e PIM_SSM_PATH=/pim/ \\`,
       `  -e AWS_REGION=${this.region} \\`,
       `  -e KG_S3_BUCKET=${kgBucket.bucketName} \\`,
@@ -299,6 +508,9 @@ export class PimEc2Stack extends cdk.Stack {
       `  -e PIM_REQUIRE_RESTORE=true \\`,
       `  -e DB_PATH=/data/pim.db \\`,
       `  -e KG_DATA_DIR=/data/knowledge-graph \\`,
+      ...(memoryCutoverComplete
+        ? [`  -e PIM_MEMORY_REQUIRE_CANONICAL_AUTHORITY=1 \\`]
+        : []),
       `  -e CORS_ORIGIN=* \\`,
       `  --log-driver=awslogs \\`,
       `  --log-opt awslogs-region=${this.region} \\`,
@@ -314,6 +526,7 @@ export class PimEc2Stack extends cdk.Stack {
       "systemctl enable --now pim-server",
 
       // Hourly SQLite backup via cron (runs inside the container where sqlite3 + aws-cli live)
+      'echo "[pim-bootstrap] stage=cron-install"',
       `cat > /etc/cron.d/pim-backup <<'CRON_EOF'`,
       `0 * * * * root /usr/bin/docker exec pim-server /app/packages/server/scripts/backup.sh >> /var/log/pim-backup.log 2>&1`,
       ``,
@@ -375,6 +588,60 @@ export class PimEc2Stack extends cdk.Stack {
       healthCheck: autoscaling.HealthCheck.elb({ grace: cdk.Duration.minutes(5) }),
     });
 
+    // Full-volume recovery points are incremental at the EBS layer: after the
+    // first snapshot, AWS stores only changed blocks. Keep dense recent points
+    // for operational recovery and progressively thinner long-lived points.
+    const dataBackupVault = new backup.BackupVault(this, "DataBackupVault", {
+      backupVaultName: `pim-${owner}-data`,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const dataBackupPlan = new backup.BackupPlan(this, "DataBackupPlan", {
+      backupPlanName: `pim-${owner}-data`,
+      backupVault: dataBackupVault,
+      backupPlanRules: [
+        new backup.BackupPlanRule({
+          ruleName: "hourly-2-days",
+          scheduleExpression: events.Schedule.cron({ minute: "15" }),
+          deleteAfter: cdk.Duration.days(2),
+          startWindow: cdk.Duration.hours(1),
+          completionWindow: cdk.Duration.hours(6),
+          recoveryPointTags: { PimBackupTier: "hourly" },
+        }),
+        new backup.BackupPlanRule({
+          ruleName: "daily-30-days",
+          scheduleExpression: events.Schedule.cron({ minute: "30", hour: "2" }),
+          deleteAfter: cdk.Duration.days(30),
+          startWindow: cdk.Duration.hours(1),
+          completionWindow: cdk.Duration.hours(6),
+          recoveryPointTags: { PimBackupTier: "daily" },
+        }),
+        new backup.BackupPlanRule({
+          ruleName: "weekly-12-weeks",
+          scheduleExpression: events.Schedule.cron({ minute: "30", hour: "3", weekDay: "SUN" }),
+          deleteAfter: cdk.Duration.days(84),
+          startWindow: cdk.Duration.hours(1),
+          completionWindow: cdk.Duration.hours(6),
+          recoveryPointTags: { PimBackupTier: "weekly" },
+        }),
+      ],
+    });
+    dataBackupPlan.addSelection("DataVolumeSelection", {
+      backupSelectionName: `pim-${owner}-data-volumes`,
+      resources: [
+        backup.BackupResource.fromTag(dataVolumeBackupTagKey, dataVolumeBackupTagValue),
+      ],
+      allowRestores: true,
+    });
+    new events.Rule(this, "BackupJobFailureRule", {
+      description: "Route terminal AWS Backup job failures to PIM operations alerts",
+      eventPattern: {
+        source: ["aws.backup"],
+        detailType: ["Backup Job State Change"],
+        detail: { state: ["ABORTED", "EXPIRED", "FAILED"] },
+      },
+      targets: [new eventTargets.SnsTopic(operationsAlerts)],
+    });
+
     // ──────────────────────────────────────
     // Application Load Balancer
     // ──────────────────────────────────────
@@ -410,6 +677,19 @@ export class PimEc2Stack extends cdk.Stack {
       // via the CloudFront prefix list. The auto-added rule trips Adobe's
       // ELB-quarantine remediation.
       open: false,
+    });
+
+    addOperationsAlarm("ServerUnhealthyTargetAlarm", {
+      alarmName: `pim-${owner}-server-unhealthy-target`,
+      alarmDescription: "The single PIM target is unhealthy or unavailable",
+      metric: targetGroup.metrics.unhealthyHostCount({
+        statistic: "Maximum",
+        period: cdk.Duration.minutes(1),
+      }),
+      threshold: 0,
+      evaluationPeriods: 2,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.BREACHING,
     });
 
     // ──────────────────────────────────────
@@ -481,6 +761,9 @@ function handler(event) {
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "KnowledgeGraphBucketName", { value: kgBucket.bucketName });
     new cdk.CfnOutput(this, "BackupsBucketName", { value: backupsBucket.bucketName });
+    new cdk.CfnOutput(this, "OperationsAlertTopicArn", { value: operationsAlerts.topicArn });
+    new cdk.CfnOutput(this, "DataBackupVaultName", { value: dataBackupVault.backupVaultName });
+    new cdk.CfnOutput(this, "DataBackupPlanId", { value: dataBackupPlan.backupPlanId });
     new cdk.CfnOutput(this, "EcrRepoUri", { value: ecrRepo.repositoryUri });
     new cdk.CfnOutput(this, "AutoScalingGroupName", { value: asg.autoScalingGroupName });
     new cdk.CfnOutput(this, "LogGroupName", { value: logGroup.logGroupName });

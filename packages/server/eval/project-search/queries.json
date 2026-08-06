@@ -1,0 +1,181 @@
+{
+  "fixture_version": "2026-07-19.v1",
+  "review_status": "candidate_requires_human_review",
+  "queries": [
+    {
+      "id": "q-exact-01",
+      "query": "ACME-142",
+      "stratum": "exact_identifier",
+      "intent": "Locate the Jira issue identified by the exact ACME-142 key.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-exact-02",
+      "query": "acme/search#418",
+      "stratum": "exact_identifier",
+      "intent": "Locate pull request 418 in the acme/search repository.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-exact-03",
+      "query": "7f3c9a1",
+      "stratum": "exact_identifier",
+      "intent": "Locate the commit with short hash 7f3c9a1.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-exact-04",
+      "query": "slack:C-eng-search:1705662000.000100",
+      "stratum": "exact_identifier",
+      "intent": "Locate the Slack thread with the exact stable source identifier.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-exact-05",
+      "query": "confluence:SRCH:9003",
+      "stratum": "exact_identifier",
+      "intent": "Locate Confluence page 9003 in the SRCH space by its exact source identifier.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-paraphrase-01",
+      "query": "How does project search blend keyword matches with semantic results?",
+      "stratum": "paraphrase",
+      "intent": "Find implementation and design evidence for reciprocal rank fusion of lexical and vector candidates.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-paraphrase-02",
+      "query": "How do we keep people from seeing connector pages they no longer have access to?",
+      "stratum": "paraphrase",
+      "intent": "Find evidence explaining query-time visibility enforcement and stale-access mitigation.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-paraphrase-03",
+      "query": "How does ingestion pick up again after a connector crashes halfway through a page?",
+      "stratum": "paraphrase",
+      "intent": "Find the durable watermark and idempotent replay design for connector ingestion.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-paraphrase-04",
+      "query": "How are ticket keys with a dash preserved when Slack text is cleaned up?",
+      "stratum": "paraphrase",
+      "intent": "Find the identifier-aware Slack normalization decision and implementation.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-paraphrase-05",
+      "query": "What happens when a misspelled ordinary word would otherwise return nothing?",
+      "stratum": "paraphrase",
+      "intent": "Find the planned bounded typo-recovery behavior for zero-result queries.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-status-01",
+      "query": "What percentage is the beta rollout at, and why is it paused?",
+      "stratum": "current_status",
+      "intent": "Determine the frozen snapshot rollout percentage and the gates preventing expansion.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-status-02",
+      "query": "Is the ACME-173 lexical backfill finished yet?",
+      "stratum": "current_status",
+      "intent": "Determine the frozen snapshot completion state and remaining work for ACME-173.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-status-03",
+      "query": "What is still blocking the relevance launch?",
+      "stratum": "current_status",
+      "intent": "Identify the remaining launch blocker in the frozen snapshot.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-status-04",
+      "query": "What is the latest P95 latency after the ranking regression?",
+      "stratum": "current_status",
+      "intent": "Find the most recent measured P95 after mitigation and its monitoring state.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-status-05",
+      "query": "Has the Confluence ACL sync shipped and been enabled?",
+      "stratum": "current_status",
+      "intent": "Determine whether the visibility-sync guard is deployed in the frozen snapshot.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-slack-01",
+      "query": "Where did the team decide to keep hyphenated Jira keys as one token?",
+      "stratum": "slack_thread",
+      "intent": "Retrieve the Slack decision thread about identifier-aware tokenization.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-slack-02",
+      "query": "Find the release conversation that paused rollout at 35 percent.",
+      "stratum": "slack_thread",
+      "intent": "Retrieve the release-channel thread recording the rollout pause.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-slack-03",
+      "query": "Who reproduced the restricted Confluence leak, and what mitigation did the thread agree on?",
+      "stratum": "slack_thread",
+      "intent": "Retrieve the Slack reproduction thread and its agreed visibility mitigation.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-slack-04",
+      "query": "What did the search channel decide about title-only false positives?",
+      "stratum": "slack_thread",
+      "intent": "Retrieve the Slack decision that caps relevance for generic title-only matches.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-slack-05",
+      "query": "Where was the 10:00 UTC approval window agreed?",
+      "stratum": "slack_thread",
+      "intent": "Retrieve the release-channel thread that records the restart approval time.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-confluence-01",
+      "query": "Which design page explains the RRF k=60 ranking blend?",
+      "stratum": "confluence_doc",
+      "intent": "Retrieve the Confluence architecture page describing reciprocal rank fusion.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-confluence-02",
+      "query": "Where is the 0-to-3 judged relevance scale documented?",
+      "stratum": "confluence_doc",
+      "intent": "Retrieve the Confluence evaluation rubric containing relevance grades.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-confluence-03",
+      "query": "Which page defines project_visible, restricted, and unknown evidence?",
+      "stratum": "confluence_doc",
+      "intent": "Retrieve the Confluence ACL and visibility model.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-confluence-04",
+      "query": "Find the rollback checklist for the search rollout.",
+      "stratum": "confluence_doc",
+      "intent": "Retrieve the Confluence rollout and rollback runbook.",
+      "review_status": "candidate_requires_human_review"
+    },
+    {
+      "id": "q-confluence-05",
+      "query": "Which document defines citation correctness as matching source IDs and URLs?",
+      "stratum": "confluence_doc",
+      "intent": "Retrieve the Confluence rubric that defines citation correctness.",
+      "review_status": "candidate_requires_human_review"
+    }
+  ]
+}

@@ -1,0 +1,872 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pim.local/schemas/memory-contracts.v1.schema.json",
+  "title": "PIM memory v1 contracts",
+  "type": "object",
+  "additionalProperties": false,
+  "$defs": {
+    "TenantV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id"],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "ConsumerV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness_id", "harness_version", "workflow_version", "adapter_version", "consumer_run_id"],
+      "properties": {
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "ProducerV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness_id", "harness_version", "workflow_version", "adapter_version"],
+      "properties": {
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "CodebaseApplicabilityV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_id"],
+      "properties": {
+        "repository_id": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "components": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "paths": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
+        "symbols": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "task_classes": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      }
+    },
+    "HarnessApplicabilityV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness_id"],
+      "properties": {
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_ids": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "model_ids": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "tool_ids": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
+      }
+    },
+    "OrgApplicabilityV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["audience", "policy_owner", "effective_from"],
+      "properties": {
+        "audience": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "policy_owner": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "effective_from": { "type": "string", "format": "date-time" },
+        "effective_until": { "type": ["string", "null"], "format": "date-time" },
+        "project_ids": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "repository_ids": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 } }
+      }
+    },
+    "MemoryContentV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "details", "rationale"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 10, "maxLength": 500 },
+        "details": { "type": "string", "minLength": 30, "maxLength": 8000 },
+        "rationale": { "type": "string", "minLength": 10, "maxLength": 4000 }
+      }
+    },
+    "CompatibilityV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness_version_range", "workflow_version_range"],
+      "properties": {
+        "harness_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version_range": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "AnchorRefV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "value", "digest"],
+      "properties": {
+        "type": { "type": "string", "enum": ["path", "symbol", "commit", "test"] },
+        "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "ValidationV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy"],
+      "properties": {
+        "strategy": { "type": "string", "enum": ["repository_anchors", "stable_failure_fingerprint", "policy_owner_review"] },
+        "anchor_refs": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/AnchorRefV1" } },
+        "failure_fingerprint": { "type": "string", "minLength": 8, "maxLength": 512 }
+      }
+    },
+    "EvidenceSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength", "ref_count"],
+      "properties": {
+        "strength": { "type": "string", "enum": ["observed", "reviewed", "verified_merge", "verified_merge_and_test", "verified_runtime"] },
+        "ref_count": { "type": "integer", "minimum": 0, "maximum": 256 }
+      }
+    },
+    "FreshnessV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["last_confirmed_at"],
+      "properties": {
+        "last_confirmed_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "LifecycleV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["active", "stale", "superseded", "revoked", "expired"] }
+      }
+    },
+    "MemoryEvaluationArmV1": {
+      "type": "string",
+      "enum": ["shadow", "memory_off", "memory_on"]
+    },
+    "MemorySearchItemV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "record_version", "plane", "kind", "summary", "lifecycle", "applicability", "exceptions", "compatibility", "validation", "evidence_summary", "freshness", "prompt_eligible", "detail_href", "match_reasons"],
+      "properties": {
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "plane": { "const": "codebase" },
+        "kind": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] },
+        "summary": { "type": "string", "minLength": 10, "maxLength": 500 },
+        "lifecycle": { "$ref": "#/$defs/LifecycleV1" },
+        "applicability": { "$ref": "#/$defs/CodebaseApplicabilityV1" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "compatibility": { "$ref": "#/$defs/CompatibilityV1" },
+        "validation": { "$ref": "#/$defs/ValidationV1" },
+        "evidence_summary": { "$ref": "#/$defs/EvidenceSummaryV1" },
+        "freshness": { "$ref": "#/$defs/FreshnessV1" },
+        "prompt_eligible": { "type": "boolean" },
+        "detail_href": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "match_reasons": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      }
+    },
+    "MemoryCandidateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "client_candidate_id", "plane", "kind", "content", "applicability", "validation", "exceptions", "source_run_ids", "evidence_refs", "extraction", "activation_requirement_requested"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate.v1" },
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plane": { "type": "string", "enum": ["codebase", "harness", "org"] },
+        "kind": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] },
+        "content": { "$ref": "#/$defs/MemoryContentV1" },
+        "applicability": { "oneOf": [{ "$ref": "#/$defs/CodebaseApplicabilityV1" }, { "$ref": "#/$defs/HarnessApplicabilityV1" }, { "$ref": "#/$defs/OrgApplicabilityV1" }] },
+        "validation": { "$ref": "#/$defs/ValidationV1" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "source_run_ids": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "extraction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "extractor_version", "confidence"],
+          "properties": {
+            "method": { "type": "string", "enum": ["deterministic", "model_then_deterministic_validation", "authorized_review"] },
+            "extractor_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "activation_requirement_requested": { "type": "string", "enum": ["verified_merge", "authorized_review", "manual_policy_owner"] },
+        "extensions": { "type": "object", "maxProperties": 16, "additionalProperties": { "type": ["string", "number", "boolean", "null"] } }
+      }
+    },
+    "EvidenceRefV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "uri", "digest", "origin_id", "occurred_at", "source_authority"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["git_diff", "test_run", "failure", "review", "incident", "policy_decision"] },
+        "uri": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "origin_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "source_authority": { "type": "string", "enum": ["observed", "verified", "authorized_review"] }
+      }
+    },
+    "FiestaCodeEvidenceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id", "digest", "refs"],
+      "properties": {
+        "schema_version": { "const": "fiesta.code-evidence.v2" },
+        "manifest_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "refs": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/EvidenceRefV2" } }
+      }
+    },
+    "MemoryCapabilitiesV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "contract_revision", "server_build", "supported_schemas", "planes", "kinds", "limits", "evidence_resolver_types", "activation_policies", "feedback_version", "temporal_modes", "deprecations"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-capabilities.v1" },
+        "contract_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "server_build": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "supported_schemas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requests", "responses"],
+          "properties": {
+            "requests": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+            "responses": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+          }
+        },
+        "planes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["codebase", "harness", "org"] } },
+        "kinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] } },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_receipt_bytes", "max_candidate_bytes", "max_evidence_refs", "max_feedback_items", "max_search_tokens", "max_search_items"],
+          "properties": {
+            "max_receipt_bytes": { "type": "integer", "minimum": 1 },
+            "max_candidate_bytes": { "type": "integer", "minimum": 1 },
+            "max_evidence_refs": { "type": "integer", "minimum": 1 },
+            "max_feedback_items": { "type": "integer", "minimum": 1 },
+            "max_search_tokens": { "type": "integer", "minimum": 1 },
+            "max_search_items": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "evidence_resolver_types": { "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["github", "ci", "https_immutable"] } },
+        "activation_policies": { "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["verified_merge", "authorized_review", "manual_policy_owner"] } },
+        "feedback_version": { "const": "pim.memory-feedback.v1" },
+        "temporal_modes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "const": "current" } },
+        "deprecations": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schema_version", "deprecated_at", "sunset_at"],
+            "properties": {
+              "schema_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "deprecated_at": { "type": "string", "format": "date-time" },
+              "sunset_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      }
+    },
+    "MemoryPromptPolicyUpdateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "expected_revision", "enabled", "kill_switch", "automatic_activation_enabled", "canary_percentage", "allowed_repository_ids", "allowed_kinds", "max_prompt_items", "max_prompt_tokens"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-prompt-policy-update.v1" },
+        "expected_revision": { "type": "integer", "minimum": 0 },
+        "enabled": { "type": "boolean" },
+        "kill_switch": { "type": "boolean" },
+        "automatic_activation_enabled": { "type": "boolean" },
+        "canary_percentage": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "allowed_repository_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 }
+        },
+        "allowed_kinds": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] }
+        },
+        "max_prompt_items": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "max_prompt_tokens": { "type": "integer", "minimum": 1, "maximum": 1200 }
+      }
+    },
+    "MemoryPromptPolicyV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "project_id", "policy_revision", "enabled", "kill_switch", "automatic_activation_enabled", "canary_percentage", "allowed_repository_ids", "allowed_kinds", "max_prompt_items", "max_prompt_tokens", "global_enabled", "effective_enabled", "updated_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-prompt-policy.v1" },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policy_revision": { "type": "integer", "minimum": 0 },
+        "enabled": { "type": "boolean" },
+        "kill_switch": { "type": "boolean" },
+        "automatic_activation_enabled": { "type": "boolean" },
+        "canary_percentage": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "allowed_repository_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 }
+        },
+        "allowed_kinds": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] }
+        },
+        "max_prompt_items": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "max_prompt_tokens": { "type": "integer", "minimum": 1, "maximum": 1200 },
+        "global_enabled": { "type": "boolean" },
+        "effective_enabled": { "type": "boolean" },
+        "updated_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "MemoryReleaseGateSnapshotV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representative_sample_count", "reviewed_candidate_count", "known_boundary_leakage_count", "provenance_completeness_rate", "typed_round_trip_conformance_rate", "unresolved_active_pointer_count", "extraction_precision_rate", "resolvable_evidence_rate", "harmful_or_stale_prompt_exposure_rate", "critical_policy_violation_count", "evidence_bypass_incident_count", "critical_harm_incident_count", "pim_outage_blocked_execution_count", "pim_outage_lost_queued_receipt_count", "memory_on_off_pair_count", "task_pass_lift_percentage_points", "paired_95ci_lower_percentage_points", "pass_rate_delta_percentage_points", "noninferiority_margin_percentage_points", "efficiency_reduction_rate", "same_record_helpful_independent_runs", "latency_or_cost_increase_rate", "disciplined_no_lift_cycles"],
+      "properties": {
+        "representative_sample_count": { "type": "integer", "minimum": 0 },
+        "reviewed_candidate_count": { "type": "integer", "minimum": 0 },
+        "known_boundary_leakage_count": { "type": "integer", "minimum": 0 },
+        "provenance_completeness_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "typed_round_trip_conformance_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "unresolved_active_pointer_count": { "type": "integer", "minimum": 0 },
+        "extraction_precision_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "resolvable_evidence_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "harmful_or_stale_prompt_exposure_rate": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "critical_policy_violation_count": { "type": "integer", "minimum": 0 },
+        "evidence_bypass_incident_count": { "type": "integer", "minimum": 0 },
+        "critical_harm_incident_count": { "type": "integer", "minimum": 0 },
+        "pim_outage_blocked_execution_count": { "type": ["integer", "null"], "minimum": 0 },
+        "pim_outage_lost_queued_receipt_count": { "type": ["integer", "null"], "minimum": 0 },
+        "memory_on_off_pair_count": { "type": ["integer", "null"], "minimum": 0 },
+        "task_pass_lift_percentage_points": { "type": ["number", "null"], "minimum": -100, "maximum": 100 },
+        "paired_95ci_lower_percentage_points": { "type": ["number", "null"], "minimum": -100, "maximum": 100 },
+        "pass_rate_delta_percentage_points": { "type": ["number", "null"], "minimum": -100, "maximum": 100 },
+        "noninferiority_margin_percentage_points": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+        "efficiency_reduction_rate": { "type": ["number", "null"], "minimum": -1, "maximum": 1 },
+        "same_record_helpful_independent_runs": { "type": ["integer", "null"], "minimum": 0 },
+        "latency_or_cost_increase_rate": { "type": ["number", "null"], "minimum": -1, "maximum": 10 },
+        "disciplined_no_lift_cycles": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "MemoryReleaseGateEvaluationV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "stage", "dataset_digest", "metric_snapshot"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-release-gate-evaluation.v1" },
+        "stage": { "type": "string", "enum": ["pre_canary", "expansion"] },
+        "dataset_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "metric_snapshot": { "$ref": "#/$defs/MemoryReleaseGateSnapshotV1" }
+      }
+    },
+    "MemoryReleaseGateDecisionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "project_id", "decision_id", "stage", "decision", "status", "dataset_digest", "metric_snapshot_digest", "reasons", "created_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-release-gate-decision.v1" },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "decision_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "stage": { "type": "string", "enum": ["pre_canary", "expansion"] },
+        "decision": { "type": "string", "enum": ["continue", "pause"] },
+        "status": { "type": "string", "enum": ["pass", "fail", "insufficient_data"] },
+        "dataset_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "metric_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "reasons": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemorySearchV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "tenant", "plane", "applicability", "task", "temporal", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search.v1" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/ConsumerV1" },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "plane": { "type": "string", "enum": ["codebase", "harness", "org"] },
+        "applicability": { "oneOf": [{ "$ref": "#/$defs/CodebaseApplicabilityV1" }, { "$ref": "#/$defs/HarnessApplicabilityV1" }, { "$ref": "#/$defs/OrgApplicabilityV1" }] },
+        "task": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query", "task_class"],
+          "properties": {
+            "query": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "task_class": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        "temporal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["current", "as_of"] },
+            "valid_at": { "type": "string", "format": "date-time" },
+            "recorded_at": { "type": "string", "format": "date-time" }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_tokens", "max_items"],
+          "properties": {
+            "max_tokens": { "type": "integer", "minimum": 1, "maximum": 8000 },
+            "max_items": { "type": "integer", "minimum": 1, "maximum": 32 }
+          }
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["include_explanations"],
+          "properties": {
+            "include_explanations": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "MemorySearchResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "retrieval_pack_id", "policy_version", "tenant", "plane", "repository_id", "token_count", "prompt_eligible", "evaluation_arm", "items", "omitted_count", "expires_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search-result.v1" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "plane": { "const": "codebase" },
+        "repository_id": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "prompt_eligible": { "type": "boolean" },
+        "evaluation_arm": { "$ref": "#/$defs/MemoryEvaluationArmV1" },
+        "items": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/MemorySearchItemV1" } },
+        "omitted_count": { "type": "integer", "minimum": 0 },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryHarnessSearchItemV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "record_version", "plane", "kind", "summary", "lifecycle", "applicability", "exceptions", "compatibility", "validation", "evidence_summary", "freshness", "prompt_eligible", "match_reasons"],
+      "properties": {
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "plane": { "const": "harness" },
+        "kind": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] },
+        "summary": { "type": "string", "minLength": 10, "maxLength": 500 },
+        "lifecycle": { "$ref": "#/$defs/LifecycleV1" },
+        "applicability": { "$ref": "#/$defs/HarnessApplicabilityV1" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "compatibility": { "$ref": "#/$defs/CompatibilityV1" },
+        "validation": { "$ref": "#/$defs/ValidationV1" },
+        "evidence_summary": { "$ref": "#/$defs/EvidenceSummaryV1" },
+        "freshness": { "$ref": "#/$defs/FreshnessV1" },
+        "prompt_eligible": { "const": false },
+        "match_reasons": { "type": "array", "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } }
+      }
+    },
+    "MemoryHarnessSearchV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "tenant", "plane", "applicability", "task", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-harness-search.v1" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/ConsumerV1" },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "plane": { "const": "harness" },
+        "applicability": { "$ref": "#/$defs/HarnessApplicabilityV1" },
+        "task": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["query", "task_class"],
+          "properties": {
+            "query": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "task_class": { "type": "string", "minLength": 1, "maxLength": 64 }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_tokens", "max_items"],
+          "properties": {
+            "max_tokens": { "type": "integer", "minimum": 1, "maximum": 8000 },
+            "max_items": { "type": "integer", "minimum": 1, "maximum": 32 }
+          }
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["include_explanations"],
+          "properties": {
+            "include_explanations": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "MemoryHarnessSearchResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "retrieval_pack_id", "policy_version", "tenant", "plane", "harness_id", "shadow_only", "routing_influence", "prompt_eligible", "evaluation_arm", "token_count", "items", "omitted_count", "expires_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-harness-search-result.v1" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "plane": { "const": "harness" },
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "shadow_only": { "const": true },
+        "routing_influence": { "const": false },
+        "prompt_eligible": { "const": false },
+        "evaluation_arm": { "const": "shadow" },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/MemoryHarnessSearchItemV1" } },
+        "omitted_count": { "type": "integer", "minimum": 0 },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ReceiptFeedbackItemV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "record_version", "checkout_validation", "terminal_outcome"],
+      "properties": {
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "checkout_validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["disposition", "reason_code"],
+          "properties": {
+            "disposition": { "type": "string", "enum": ["validated", "stale", "unresolved", "conflicting", "rejected"] },
+            "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "terminal_outcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exposure", "use_disposition", "use_attribution_confidence", "utility", "utility_source", "reason_code"],
+          "properties": {
+            "exposure": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "consumer_phase"],
+              "properties": {
+                "status": { "type": "string", "enum": ["not_exposed", "exposed"] },
+                "consumer_phase": { "type": "string", "minLength": 1, "maxLength": 64 }
+              }
+            },
+            "use_disposition": { "type": "string", "enum": ["applied", "ignored", "not_applicable", "unknown", "not_attributable"] },
+            "use_attribution_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "utility": { "type": "string", "enum": ["helpful", "neutral", "harmful", "unknown"] },
+            "utility_source": { "type": "string", "enum": ["deterministic_outcome", "human", "evaluation", "model_inference", "unknown"] },
+            "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        }
+      }
+    },
+    "RunReceiptV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "producer", "tenant", "task", "outcome", "candidates"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt.v1" },
+        "external_session_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/ProducerV1" },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "repository": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository_id", "display_slug", "base_sha"],
+          "properties": {
+            "repository_id": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 },
+            "display_slug": { "type": "string", "minLength": 3, "maxLength": 256 },
+            "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+            "candidate_tree_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+            "provider_pull_request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "pr_head_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+            "pull_request_url": { "type": "string", "format": "uri", "maxLength": 2048 }
+          }
+        },
+        "task": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["task_class", "summary"],
+          "properties": {
+            "task_class": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1000 }
+          }
+        },
+        "outcome": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "terminal_stage", "reason_code", "verification_status", "publication_status", "gate_attestation_ids", "failure_fingerprint"],
+          "properties": {
+            "status": { "type": "string", "enum": ["completed", "failed", "cancelled"] },
+            "terminal_stage": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "verification_status": { "type": "string", "enum": ["passed", "failed", "not_run", "unknown"] },
+            "publication_status": { "type": "string", "enum": ["none", "draft_pr_created", "pr_open", "merged", "failed"] },
+            "gate_attestation_ids": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+            "failure_fingerprint": { "type": ["string", "null"], "minLength": 8, "maxLength": 512 }
+          }
+        },
+        "retrieval_feedback": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["retrieval_pack_id", "items"],
+            "properties": {
+              "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "items": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/ReceiptFeedbackItemV1" } }
+            }
+          }
+        },
+        "evidence_manifest": { "$ref": "#/$defs/FiestaCodeEvidenceV2" },
+        "candidates": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/MemoryCandidateV1" } }
+      }
+    },
+    "CandidateResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_candidate_id", "candidate_id", "status", "blockers"],
+      "properties": {
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["received", "validating", "pending_merge", "pending_review", "rejected", "quarantined", "validation_failed"] },
+        "blockers": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      }
+    },
+    "RunReceiptResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "receipt_id", "producer_run_id", "request_digest", "status", "candidate_results"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt-result.v1" },
+        "receipt_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "request_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "status": { "const": "accepted" },
+        "candidate_results": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/CandidateResultV1" } }
+      }
+    },
+    "TransitionSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition_id", "from_status", "to_status", "reason_code", "committed_at"],
+      "properties": {
+        "transition_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "from_status": { "type": ["string", "null"], "maxLength": 64 },
+        "to_status": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "committed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryCandidateStatusV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "candidate_id", "client_candidate_id", "plane", "kind", "status", "activation_requirement", "blockers", "latest_transition", "created_at", "updated_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-status.v1" },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plane": { "type": "string", "enum": ["codebase", "harness", "org"] },
+        "kind": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] },
+        "status": { "type": "string", "enum": ["received", "validating", "pending_merge", "pending_review", "rejected", "quarantined", "validation_failed", "active", "activation_failed"] },
+        "activation_requirement": { "type": "string", "enum": ["verified_merge", "authorized_review", "manual_policy_owner"] },
+        "blockers": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "active_record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["record_id", "record_version"],
+          "properties": {
+            "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "record_version": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "latest_transition": { "$ref": "#/$defs/TransitionSummaryV1" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "EvidenceHandleV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_ref_id", "type", "digest", "origin_id", "source_authority"],
+      "properties": {
+        "evidence_ref_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "origin_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "source_authority": { "type": "string", "enum": ["observed", "verified", "authorized_review"] }
+      }
+    },
+    "MemoryRecordV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_id", "record_version", "tenant", "plane", "kind", "content", "applicability", "exceptions", "compatibility", "validation", "evidence", "evidence_summary", "freshness", "lifecycle", "prompt_eligible", "transition_summary", "recorded_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-record.v1" },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "tenant": { "$ref": "#/$defs/TenantV1" },
+        "plane": { "const": "codebase" },
+        "kind": { "type": "string", "enum": ["decision", "constraint", "anti_pattern", "test_strategy"] },
+        "content": { "$ref": "#/$defs/MemoryContentV1" },
+        "applicability": { "$ref": "#/$defs/CodebaseApplicabilityV1" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "compatibility": { "$ref": "#/$defs/CompatibilityV1" },
+        "validation": { "$ref": "#/$defs/ValidationV1" },
+        "evidence": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/EvidenceHandleV1" } },
+        "evidence_summary": { "$ref": "#/$defs/EvidenceSummaryV1" },
+        "freshness": { "$ref": "#/$defs/FreshnessV1" },
+        "lifecycle": { "$ref": "#/$defs/LifecycleV1" },
+        "prompt_eligible": { "type": "boolean" },
+        "transition_summary": { "$ref": "#/$defs/TransitionSummaryV1" },
+        "recorded_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryFeedbackV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feedback_revision", "retrieval_pack_id", "record_id", "record_version", "producer_run_id", "repository_id", "base_sha", "disposition", "reason_code", "event_time"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-feedback.v1" },
+        "feedback_revision": { "type": "integer", "minimum": 1 },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "repository_id": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "disposition": { "type": "string", "enum": ["helpful", "neutral", "harmful", "stale", "corrected"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "outcome_evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "event_time": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryFeedbackResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feedback_id", "feedback_revision", "duplicate", "review_signal_ids"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-feedback-result.v1" },
+        "feedback_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "feedback_revision": { "type": "integer", "minimum": 1 },
+        "duplicate": { "type": "boolean" },
+        "review_signal_ids": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      }
+    },
+    "MemoryCandidateDecisionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "decision_revision", "decision", "reason_code", "event_time"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-decision.v1" },
+        "decision_revision": { "type": "integer", "minimum": 1 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "event_time": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryCandidateDecisionResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "decision_id", "candidate_id", "decision_revision", "decision", "candidate_status", "duplicate"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-decision-result.v1" },
+        "decision_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "decision_revision": { "type": "integer", "minimum": 1 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "candidate_status": { "type": "string", "enum": ["active", "rejected"] },
+        "active_record": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["record_id", "record_version"],
+          "properties": {
+            "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "record_version": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "duplicate": { "type": "boolean" }
+      }
+    },
+    "MemoryAttestationV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "attestation_id", "provider_event_id", "type", "repository_id", "manifest_digest", "occurred_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-attestation.v1" },
+        "attestation_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "type": { "type": "string", "enum": ["github_merge", "github_revert", "ci_gate", "authorized_review"] },
+        "repository_id": { "type": "string", "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$", "maxLength": 256 },
+        "provider_pull_request_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "merge_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "occurred_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryAttestationResultV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "accepted", "duplicate", "inbox_event_id", "status", "candidate_ids", "record_ids"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-attestation-result.v1" },
+        "accepted": { "const": true },
+        "duplicate": { "type": "boolean" },
+        "inbox_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "status": { "type": "string", "enum": ["activated", "reverted", "unmatched"] },
+        "candidate_ids": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "record_ids": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      }
+    },
+    "PimErrorV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "code", "message"],
+      "properties": {
+        "schema_version": { "const": "pim.error.v1" },
+        "code": { "type": "string", "enum": ["authentication_required", "contract_version_unsupported", "schema_invalid", "resource_binding_mismatch", "idempotency_conflict", "resource_not_found", "evidence_unresolvable", "evidence_mismatch", "activation_requirement_unsatisfied", "transition_invalid", "rate_limited", "temporarily_unavailable"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "details": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "reason"],
+            "properties": {
+              "path": { "type": "string", "maxLength": 512 },
+              "reason": { "type": "string", "minLength": 1, "maxLength": 256 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

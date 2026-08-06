@@ -7,6 +7,8 @@ import type {
   ProjectResources,
 } from "@pim/shared";
 import { queryKnowledge } from "./knowledge-graph.js";
+import { searchProject } from "./project-search.js";
+import { redactProjectText } from "./project-evidence-normalization.js";
 
 interface ProjectRow {
   project_id: string;
@@ -241,21 +243,46 @@ function renderAnswer(intent: ProjectAnswerIntent, query: string, hits: ProjectA
   return [`## ${heading}`, ...lines].join("\n");
 }
 
-export function answerProjectQuestion(
+export async function answerProjectQuestion(
   orgId: string,
   projectId: string,
   query: string,
-): ProjectAnswerResponse | null {
+): Promise<ProjectAnswerResponse | null> {
   const project = loadProject(orgId, projectId);
   if (!project) return null;
-  const resources = parseResources(project.resources_json);
-  const expanded = expandWithGlossary(query, resources);
-  const words = keywords(expanded);
   const intent = classifyIntent(query);
+  const response = await searchProject(orgId, projectId, {
+    query,
+    max_hits: 20,
+    include_kg: true,
+    include_mind_map: false,
+    graph_expansion: true,
+    synthesize: false,
+    use_live: false,
+  });
+  if (!response) return null;
 
-  const evidenceHits = retrieveEvidence(orgId, projectId, words);
-  const kgHits = retrieveKg(orgId, projectId, expanded);
-  const updateHits = retrieveUpdates(orgId, projectId, words);
+  const indexedHits: ProjectAnswerRawHit[] = response.hits.map((hit) => ({
+    id: hit.source_id,
+    source: hit.source === "git" ? "commit" : hit.source as ProjectAnswerRawHit["source"],
+    title: hit.title,
+    snippet: hit.snippet,
+    ...(hit.url ? { url: hit.url } : {}),
+    ...(hit.occurred_at ? { timestamp: hit.occurred_at } : {}),
+    confidence_score: Math.max(0.2, Math.min(0.95, hit.score)),
+  }));
+  const kgHits: ProjectAnswerRawHit[] = (response.kg_overlay ?? []).map((hit) => ({
+    id: hit.id,
+    source: "kg",
+    title: hit.summary,
+    snippet: hit.snippet,
+    url: hit.url,
+    confidence_score: hit.confidence_score,
+  }));
+  const evidenceHits = indexedHits.filter((hit) =>
+    hit.source !== "kg" && hit.source !== "project_update" && hit.source !== "pod_update");
+  const updateHits = indexedHits.filter((hit) =>
+    hit.source === "project_update" || hit.source === "pod_update");
 
   const unavailable_sources: ProjectAnswerResponse["unavailable_sources"] = [];
   if (evidenceHits.length === 0) {
@@ -273,13 +300,12 @@ export function answerProjectQuestion(
   if (kgHits.length > 0) sources_used.push("project_kg");
   if (updateHits.length > 0) sources_used.push("project_updates");
 
-  const collapsed = [...evidenceHits, ...kgHits, ...updateHits]
-    .sort((a, b) => sourcePriority(b) - sourcePriority(a) || (b.confidence_score ?? 0) - (a.confidence_score ?? 0))
-    .slice(0, 12);
+  const collapsed = [...evidenceHits, ...kgHits, ...updateHits].slice(0, 12);
+  const safeQuery = redactProjectText(query).text;
 
   return {
     intent,
-    answer_markdown: renderAnswer(intent, query, collapsed),
+    answer_markdown: redactProjectText(renderAnswer(intent, safeQuery, collapsed)).text,
     confidence: confidenceFromHits(collapsed),
     citations: collapsed.slice(0, 8).map((hit) => ({
       id: hit.id,

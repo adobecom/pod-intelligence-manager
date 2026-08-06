@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --test test/*.test.mjs",
     "synth": "cdk synth",
     "deploy": "cdk deploy"
   },

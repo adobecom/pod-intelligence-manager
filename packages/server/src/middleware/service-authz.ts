@@ -2,6 +2,16 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import db from "../db/connection.js";
 import { atLeast } from "../services/org-permissions.js";
 import type { ServiceTokenScope } from "../services/service-tokens.js";
+import type { ServiceTokenAuthMetadata } from "../services/service-tokens.js";
+import {
+  resolveMemoryRepository,
+  type MemoryRepositoryBinding,
+} from "../services/memory-repository-registry.js";
+import { sendMemoryError } from "./memory-errors.js";
+import {
+  resolveMemoryHarnessPrincipalBinding,
+  type MemoryHarnessPrincipalBinding,
+} from "../services/memory-harness-bindings.js";
 
 function serviceAuth(req: FastifyRequest) {
   return req.auth?.kind === "service_token" ? req.auth : null;
@@ -102,4 +112,124 @@ export function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean 
     return forbidden(reply, "Only admins and owners can perform this action");
   }
   return true;
+}
+
+export function requireMemoryServiceScope(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  scope: ServiceTokenScope,
+): ServiceTokenAuthMetadata | null {
+  const auth = serviceAuth(req);
+  if (!auth || !auth.scopes.includes(scope)) {
+    sendMemoryError(reply, 403, "resource_binding_mismatch", `Authenticated service principal lacks ${scope}`);
+    return null;
+  }
+  return auth;
+}
+
+export function requireMemoryServicePrincipal(
+  req: FastifyRequest,
+  reply: FastifyReply,
+): ServiceTokenAuthMetadata | null {
+  const auth = serviceAuth(req);
+  if (!auth) {
+    sendMemoryError(reply, 403, "resource_binding_mismatch", "A memory service principal is required");
+    return null;
+  }
+  return auth;
+}
+
+export function requireMemoryProjectBinding(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+): ServiceTokenAuthMetadata | null {
+  const auth = serviceAuth(req);
+  if (!auth || !auth.projectId || auth.podId || auth.projectId !== projectId) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Request project does not match the authenticated project binding",
+    );
+    return null;
+  }
+  return auth;
+}
+
+export function requireMemoryRepositoryBinding(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+  repositoryId: string,
+): MemoryRepositoryBinding | null {
+  const auth = requireMemoryProjectBinding(req, reply, projectId);
+  if (!auth) return null;
+  const binding = resolveMemoryRepository(auth.orgId, projectId, repositoryId);
+  if (!binding) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Request repository does not match an authenticated project repository binding",
+    );
+    return null;
+  }
+  if (!auth.repositoryBindings?.some((allowed) => (
+    allowed.repositoryRowId === binding.repository_row_id
+  ))) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Request repository is outside the authenticated service-token bindings",
+    );
+    return null;
+  }
+  return binding;
+}
+
+export function requireAnyMemoryRepositoryBinding(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+): ServiceTokenAuthMetadata | null {
+  const auth = requireMemoryProjectBinding(req, reply, projectId);
+  if (!auth) return null;
+  if (!auth.repositoryBindings?.length) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Authenticated service token has no repository bindings",
+    );
+    return null;
+  }
+  return auth;
+}
+
+export function requireMemoryHarnessBinding(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+  harnessId: string,
+): MemoryHarnessPrincipalBinding | null {
+  const auth = requireMemoryProjectBinding(req, reply, projectId);
+  if (!auth) return null;
+  const binding = resolveMemoryHarnessPrincipalBinding({
+    servicePrincipalId: auth.servicePrincipalId,
+    orgId: auth.orgId,
+    projectId,
+    harnessId,
+  });
+  if (!binding || !auth.harnessBindings?.some((allowed) => allowed.bindingId === binding.bindingId)) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Request harness is outside the authenticated service-token bindings",
+    );
+    return null;
+  }
+  return binding;
 }

@@ -1,11 +1,13 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import {
+  findOrgById,
   findOrgBySlug,
   getMembership,
   listOrgsForUser,
   type OrgRecord,
   type MembershipRecord,
 } from "../services/orgs.js";
+import { isMemoryApiPath, sendMemoryError } from "./memory-errors.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -42,6 +44,32 @@ export async function resolveRequestOrg(req: FastifyRequest, reply: FastifyReply
   const slug = Array.isArray(headerVal) ? headerVal[0] : headerVal;
 
   if (req.auth?.kind === "service_token") {
+    if (isMemoryApiPath(req.url)) {
+      const org = findOrgById(req.auth.orgId);
+      if (!org) {
+        return sendMemoryError(reply, 404, "resource_not_found", "Organization is unavailable");
+      }
+      if (slug && slug !== org.slug) {
+        return sendMemoryError(
+          reply,
+          403,
+          "resource_binding_mismatch",
+          "Authenticated organization binding does not match the request",
+        );
+      }
+      const membership = getMembership(org.org_id, req.userRecord.user_id);
+      if (!membership) {
+        return sendMemoryError(
+          reply,
+          403,
+          "resource_binding_mismatch",
+          "Service principal is not a member of the authenticated organization",
+        );
+      }
+      req.org = org;
+      req.membership = membership;
+      return;
+    }
     if (!slug) {
       return reply.code(400).send({ error: "X-Pim-Org is required for PIM service tokens" });
     }

@@ -1,0 +1,503 @@
+{
+  "fixture_version": "2026-07-19.v1",
+  "review_status": "candidate_requires_human_review",
+  "project": {
+    "name": "Acme Search Modernization",
+    "resources": {
+      "jira": {
+        "project_keys": ["ACME"],
+        "components": ["Project Search"]
+      },
+      "github": {
+        "repos": ["acme/search"],
+        "default_branches": {
+          "acme/search": "main"
+        }
+      },
+      "slack": {
+        "channels": ["C-eng-search", "C-release"],
+        "thread_urls": [
+          "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100",
+          "https://eval.invalid/slack/archives/C-release/p1705748400000200",
+          "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300",
+          "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400",
+          "https://eval.invalid/slack/archives/C-release/p1706007600000500"
+        ]
+      },
+      "confluence": {
+        "space_keys": ["SRCH"],
+        "page_ids": ["9001", "9002", "9003", "9004"],
+        "page_urls": [
+          "https://eval.invalid/confluence/spaces/SRCH/pages/9001",
+          "https://eval.invalid/confluence/spaces/SRCH/pages/9002",
+          "https://eval.invalid/confluence/spaces/SRCH/pages/9003",
+          "https://eval.invalid/confluence/spaces/SRCH/pages/9004"
+        ]
+      },
+      "aliases": ["PIM search", "project finder"],
+      "glossary": [
+        {
+          "term": "RRF",
+          "definition": "Reciprocal rank fusion of lexical and semantic result lists.",
+          "aliases": ["reciprocal rank fusion"]
+        },
+        {
+          "term": "visibility gate",
+          "definition": "The query-time filter that removes evidence outside the requesting project."
+        }
+      ]
+    }
+  },
+  "documents": [
+    {
+      "source": "jira",
+      "source_type": "issue",
+      "source_id": "ACME-142",
+      "source_url": "https://eval.invalid/jira/browse/ACME-142",
+      "title": "ACME-142 Prevent stale authorization cache entries in project search",
+      "author": "Mina Chen",
+      "status": "Done",
+      "occurred_at": "2024-01-08T16:00:00.000Z",
+      "body": "A project membership change could leave an authorization cache entry valid for five minutes. The fix invalidates the cache on membership updates and applies the visibility gate before ranking. Verification covered project_visible, restricted, and unknown evidence.",
+      "comments": [
+        "Security review confirmed that restricted connector results are filtered before snippets or citations are returned."
+      ],
+      "metadata": {
+        "project_key": "ACME",
+        "issue_key": "ACME-142",
+        "components": ["Project Search"],
+        "labels": ["security", "authorization"]
+      }
+    },
+    {
+      "source": "jira",
+      "source_type": "issue",
+      "source_id": "ACME-155",
+      "source_url": "https://eval.invalid/jira/browse/ACME-155",
+      "title": "ACME-155 Relevance launch readiness",
+      "author": "Noah Patel",
+      "status": "Blocked",
+      "occurred_at": "2024-01-16T15:30:00.000Z",
+      "body": "The relevance launch remains blocked on security sign-off for the citation ACL test matrix. Offline ranking thresholds have passed. Do not increase rollout beyond 35 percent until the sign-off is recorded.",
+      "comments": [
+        "Owner: Security Platform. Expected decision after the restricted-document citation audit."
+      ],
+      "metadata": {
+        "project_key": "ACME",
+        "issue_key": "ACME-155",
+        "components": ["Project Search"],
+        "labels": ["launch", "blocked"]
+      }
+    },
+    {
+      "source": "jira",
+      "source_type": "issue",
+      "source_id": "ACME-173",
+      "source_url": "https://eval.invalid/jira/browse/ACME-173",
+      "title": "ACME-173 Backfill the lexical index",
+      "author": "Priya Shah",
+      "status": "In Progress",
+      "occurred_at": "2024-01-22T17:15:00.000Z",
+      "body": "The production backfill is 82 percent complete. Two legacy repositories still fail on malformed UTF-8 commit messages. The job is resumable and no indexed projects need to be restarted.",
+      "comments": [
+        "Next checkpoint is after the two legacy repositories are scrubbed; this ticket is not complete."
+      ],
+      "metadata": {
+        "project_key": "ACME",
+        "issue_key": "ACME-173",
+        "components": ["Project Search"],
+        "labels": ["indexing", "backfill"]
+      }
+    },
+    {
+      "source": "jira",
+      "source_type": "issue",
+      "source_id": "ACME-201",
+      "source_url": "https://eval.invalid/jira/browse/ACME-201",
+      "title": "ACME-201 Define search audit retention",
+      "author": "Eli Romero",
+      "status": "Open",
+      "occurred_at": "2024-01-10T19:00:00.000Z",
+      "body": "Define retention for query audit records without storing raw restricted snippets. The proposed policy keeps aggregate latency and source counts for 30 days and deletes query text after seven days.",
+      "metadata": {
+        "project_key": "ACME",
+        "issue_key": "ACME-201",
+        "components": ["Project Search"],
+        "labels": ["compliance", "audit"]
+      }
+    },
+    {
+      "source": "jira",
+      "source_type": "issue",
+      "source_id": "ACME-233",
+      "source_url": "https://eval.invalid/jira/browse/ACME-233",
+      "title": "ACME-233 Add typo recovery for zero-result searches",
+      "author": "June Park",
+      "status": "Planned",
+      "occurred_at": "2024-01-12T14:20:00.000Z",
+      "body": "When an exact lexical query returns no documents, retry with bounded edit-distance correction for ordinary words. Never rewrite ticket keys, commit hashes, repository names, or other exact identifiers.",
+      "metadata": {
+        "project_key": "ACME",
+        "issue_key": "ACME-233",
+        "components": ["Project Search"],
+        "labels": ["relevance", "typo-tolerance"]
+      }
+    },
+    {
+      "source": "github",
+      "source_type": "pull_request",
+      "source_id": "acme/search#418",
+      "source_url": "https://eval.invalid/github/acme/search/pull/418",
+      "title": "acme/search#418 Combine lexical and semantic rankings with RRF",
+      "author": "slopez",
+      "status": "Merged",
+      "occurred_at": "2024-01-09T18:45:00.000Z",
+      "body": "Implements reciprocal rank fusion for BM25 and vector candidates. The selected constant is k=60; exact identifier hits receive a separate deterministic boost after fusion. The query path can run lexical-only when embeddings are unavailable.",
+      "comments": [
+        "Review note: keep source authority as a small tie-breaker rather than allowing it to overwhelm relevance."
+      ],
+      "metadata": {
+        "repo": "acme/search",
+        "number": 418,
+        "base_branch": "main",
+        "head_branch": "feature/rrf-ranking"
+      }
+    },
+    {
+      "source": "github",
+      "source_type": "issue",
+      "source_id": "acme/search#427",
+      "source_url": "https://eval.invalid/github/acme/search/issues/427",
+      "title": "acme/search#427 Restricted Confluence page appeared in project search",
+      "author": "mchen",
+      "status": "Closed",
+      "occurred_at": "2024-01-18T20:10:00.000Z",
+      "body": "A stale visibility snapshot allowed a restricted Confluence page to enter the candidate set. The patch moves project visibility filtering before scoring and purges stale chunks when a page becomes restricted.",
+      "comments": [
+        "The reproduction used page 9003 and a user removed from the search project. The regression test now covers that membership transition."
+      ],
+      "metadata": {
+        "repo": "acme/search",
+        "number": 427,
+        "labels": ["security", "confluence"]
+      }
+    },
+    {
+      "source": "github",
+      "source_type": "pull_request",
+      "source_id": "acme/search#431",
+      "source_url": "https://eval.invalid/github/acme/search/pull/431",
+      "title": "acme/search#431 Resume connector ingestion from durable watermarks",
+      "author": "pshah",
+      "status": "Merged",
+      "occurred_at": "2024-01-20T11:40:00.000Z",
+      "body": "Persists a per-source high-water mark only after a page of changes commits. After a crash, ingestion resumes from the last committed cursor and idempotently replays the incomplete page.",
+      "comments": [
+        "The cursor is scoped by project, connector instance, and native source."
+      ],
+      "metadata": {
+        "repo": "acme/search",
+        "number": 431,
+        "base_branch": "main",
+        "head_branch": "feature/durable-watermarks"
+      }
+    },
+    {
+      "source": "github",
+      "source_type": "issue",
+      "source_id": "acme/search#445",
+      "source_url": "https://eval.invalid/github/acme/search/issues/445",
+      "title": "acme/search#445 P95 latency regression after ranking change",
+      "author": "npatel",
+      "status": "Monitoring",
+      "occurred_at": "2024-01-23T16:55:00.000Z",
+      "body": "P95 search latency rose from 410 ms to 690 ms when candidate depth increased. Reducing the lexical candidate cap restored P95 to 445 ms in the 35 percent cohort. Continue monitoring before rollout resumes.",
+      "metadata": {
+        "repo": "acme/search",
+        "number": 445,
+        "labels": ["performance", "rollout"]
+      }
+    },
+    {
+      "source": "git",
+      "source_type": "default_branch_commit",
+      "source_id": "git:acme/search:7f3c9a1",
+      "source_url": "https://eval.invalid/git/acme/search/commit/7f3c9a1",
+      "title": "7f3c9a1 Stabilize BM25 tie-breaking",
+      "author": "Sam Lopez",
+      "status": "on main",
+      "occurred_at": "2024-01-11T09:25:00.000Z",
+      "body": "Sort equal BM25 scores by exact identifier match, then source authority, then stable document ID. This removes rank drift between repeated lexical-only evaluations.",
+      "metadata": {
+        "repo": "acme/search",
+        "branch": "main",
+        "commit": "7f3c9a1"
+      }
+    },
+    {
+      "source": "git",
+      "source_type": "default_branch_commit",
+      "source_id": "git:acme/search:b82d4e6",
+      "source_url": "https://eval.invalid/git/acme/search/commit/b82d4e6",
+      "title": "b82d4e6 Preserve hyphenated Jira keys in Slack normalization",
+      "author": "June Park",
+      "status": "on main",
+      "occurred_at": "2024-01-19T13:05:00.000Z",
+      "body": "Treat ACME-142-style values as one identifier token while normalizing Slack thread text. Ordinary punctuation is still discarded. The change follows the decision in the engineering search channel.",
+      "metadata": {
+        "repo": "acme/search",
+        "branch": "main",
+        "commit": "b82d4e6"
+      }
+    },
+    {
+      "source": "git",
+      "source_type": "default_branch_commit",
+      "source_id": "git:acme/search:c01a7bd",
+      "source_url": "https://eval.invalid/git/acme/search/commit/c01a7bd",
+      "title": "c01a7bd Enforce Confluence visibility during incremental sync",
+      "author": "Mina Chen",
+      "status": "on main",
+      "occurred_at": "2024-01-24T10:30:00.000Z",
+      "body": "Ship the Confluence ACL sync guard. Restricted and unknown pages are rejected before indexing, and a visibility downgrade removes existing chunks. The guard is enabled in the production connector.",
+      "metadata": {
+        "repo": "acme/search",
+        "branch": "main",
+        "commit": "c01a7bd"
+      }
+    },
+    {
+      "source": "project_update",
+      "source_type": "progress",
+      "source_id": "project-update:search:2024-01-15",
+      "source_url": "https://eval.invalid/pim/project-updates/search-2024-01-15",
+      "title": "Project search beta at 35 percent",
+      "author": "release-agent",
+      "status": "Blocked",
+      "occurred_at": "2024-01-15T21:00:00.000Z",
+      "body": "The beta cohort is fixed at 35 percent. Expansion is paused pending security sign-off for citation ACL coverage and confirmation that P95 remains below 500 ms.",
+      "metadata": {
+        "scope": "project",
+        "status": "Blocked",
+        "domains": ["rollout", "relevance"]
+      }
+    },
+    {
+      "source": "project_update",
+      "source_type": "blocker",
+      "source_id": "project-update:search:2024-01-22",
+      "source_url": "https://eval.invalid/pim/project-updates/search-2024-01-22",
+      "title": "Security sign-off is the remaining launch blocker",
+      "author": "program-agent",
+      "status": "Blocked",
+      "occurred_at": "2024-01-22T22:00:00.000Z",
+      "body": "Ranking quality and load-test gates are green. The only remaining launch blocker is Security Platform approval of the restricted citation matrix tracked in ACME-155.",
+      "metadata": {
+        "scope": "project",
+        "status": "Blocked",
+        "domains": ["security", "launch"]
+      }
+    },
+    {
+      "source": "pod_update",
+      "source_type": "progress",
+      "source_id": "pod-update:retrieval:2024-01-18",
+      "source_url": "https://eval.invalid/pim/pod-updates/retrieval-2024-01-18",
+      "title": "Retrieval evaluation and latency checkpoint",
+      "author": "retrieval-pod-agent",
+      "status": "In Progress",
+      "occurred_at": "2024-01-18T23:30:00.000Z",
+      "body": "The judged set clears the relevance threshold. After lowering lexical candidate depth, measured P95 is 445 ms and P50 is 118 ms. The team will keep the issue in monitoring through the next checkpoint.",
+      "metadata": {
+        "scope": "search-retrieval",
+        "status": "In Progress",
+        "domains": ["evaluation", "latency"]
+      }
+    },
+    {
+      "source": "pod_update",
+      "source_type": "progress",
+      "source_id": "pod-update:connectors:2024-01-24",
+      "source_url": "https://eval.invalid/pim/pod-updates/connectors-2024-01-24",
+      "title": "Connector backfill and visibility sync checkpoint",
+      "author": "connectors-pod-agent",
+      "status": "In Progress",
+      "occurred_at": "2024-01-24T19:45:00.000Z",
+      "body": "Durable cursor resume is deployed. The lexical backfill is 82 percent complete because two legacy repositories need UTF-8 cleanup. Confluence ACL sync shipped and is enabled.",
+      "metadata": {
+        "scope": "search-connectors",
+        "status": "In Progress",
+        "domains": ["connectors", "indexing", "visibility"]
+      }
+    },
+    {
+      "source": "slack",
+      "source_type": "thread",
+      "source_id": "slack:C-eng-search:1705662000.000100",
+      "source_url": "https://eval.invalid/slack/archives/C-eng-search/p1705662000000100",
+      "title": "Slack thread: hyphenated Jira key tokenization",
+      "author": "June Park",
+      "status": "resolved",
+      "occurred_at": "2024-01-19T10:00:00.000Z",
+      "body": "In C-eng-search, June proposed keeping a hyphenated Jira key such as ACME-142 as one token. Sam agreed that ordinary hyphens can split, but recognized ticket keys and commit hashes must remain exact. The thread decision was to implement identifier-aware normalization.",
+      "comments": [
+        "Sam Lopez: I will land this as b82d4e6 and add a regression case for a ticket key next to punctuation.",
+        "June Park: Decision recorded — preserve the entire ACME-123 form as one token."
+      ],
+      "metadata": {
+        "channel_id": "C-eng-search",
+        "channel_name": "eng-search",
+        "thread_ts": "1705662000.000100",
+        "reply_count": 2
+      }
+    },
+    {
+      "source": "slack",
+      "source_type": "thread",
+      "source_id": "slack:C-release:1705748400.000200",
+      "source_url": "https://eval.invalid/slack/archives/C-release/p1705748400000200",
+      "title": "Slack thread: pause search rollout at 35 percent",
+      "author": "Noah Patel",
+      "status": "decision",
+      "occurred_at": "2024-01-20T10:00:00.000Z",
+      "body": "In C-release, Noah reported that the cohort had reached 35 percent. Mina asked to pause expansion until citation ACL sign-off and the P95 latency follow-up were complete. The release captain confirmed the rollout would remain at 35 percent.",
+      "comments": [
+        "Release captain: Holding at 35 percent; no further ramp today.",
+        "Mina Chen: Resume only after Security Platform signs ACME-155."
+      ],
+      "metadata": {
+        "channel_id": "C-release",
+        "channel_name": "release",
+        "thread_ts": "1705748400.000200",
+        "reply_count": 2
+      }
+    },
+    {
+      "source": "slack",
+      "source_type": "thread",
+      "source_id": "slack:C-eng-search:1705834800.000300",
+      "source_url": "https://eval.invalid/slack/archives/C-eng-search/p1705834800000300",
+      "title": "Slack thread: restricted Confluence page reproduction",
+      "author": "Mina Chen",
+      "status": "resolved",
+      "occurred_at": "2024-01-21T10:00:00.000Z",
+      "body": "Mina reproduced the ACL leak after removing a test user from the project while a stale Confluence visibility snapshot remained cached. Priya confirmed the mitigation: filter visibility before scoring and purge chunks on a visibility downgrade.",
+      "comments": [
+        "Mina Chen: Repro confirmed with page 9003 and the removed test user.",
+        "Priya Shah: Patch is in acme/search#427; the stale chunks are now deleted."
+      ],
+      "metadata": {
+        "channel_id": "C-eng-search",
+        "channel_name": "eng-search",
+        "thread_ts": "1705834800.000300",
+        "reply_count": 2
+      }
+    },
+    {
+      "source": "slack",
+      "source_type": "thread",
+      "source_id": "slack:C-eng-search:1705921200.000400",
+      "source_url": "https://eval.invalid/slack/archives/C-eng-search/p1705921200000400",
+      "title": "Slack thread: title-only ranking false positives",
+      "author": "Sam Lopez",
+      "status": "decision",
+      "occurred_at": "2024-01-22T10:00:00.000Z",
+      "body": "The search channel reviewed false positives where a query matched only a generic title. The decision was to require supporting body or comment evidence for a relevance grade of 3. A title-only match may receive at most grade 1 in the judged set.",
+      "comments": [
+        "June Park: This should be written into the evaluation rubric.",
+        "Sam Lopez: Agreed; a generic title alone cannot be highly relevant."
+      ],
+      "metadata": {
+        "channel_id": "C-eng-search",
+        "channel_name": "eng-search",
+        "thread_ts": "1705921200.000400",
+        "reply_count": 2
+      }
+    },
+    {
+      "source": "slack",
+      "source_type": "thread",
+      "source_id": "slack:C-release:1706007600.000500",
+      "source_url": "https://eval.invalid/slack/archives/C-release/p1706007600000500",
+      "title": "Slack thread: approval window for rollout restart",
+      "author": "Eli Romero",
+      "status": "decision",
+      "occurred_at": "2024-01-23T10:00:00.000Z",
+      "body": "The release channel agreed that, after all gates turn green, the restart approval window will be 10:00 UTC on the following business day. The release captain owns the go or no-go post and must link the dashboard snapshot.",
+      "comments": [
+        "Release captain: 10:00 UTC is the agreed approval window.",
+        "Eli Romero: Use the rollback checklist before increasing the cohort."
+      ],
+      "metadata": {
+        "channel_id": "C-release",
+        "channel_name": "release",
+        "thread_ts": "1706007600.000500",
+        "reply_count": 2
+      }
+    },
+    {
+      "source": "confluence",
+      "source_type": "page",
+      "source_id": "confluence:SRCH:9001",
+      "source_url": "https://eval.invalid/confluence/spaces/SRCH/pages/9001",
+      "title": "SRCH-9001 Project Search v2 Architecture",
+      "author": "Sam Lopez",
+      "status": "current",
+      "occurred_at": "2024-01-05T12:00:00.000Z",
+      "body": "The query service retrieves lexical BM25 and semantic vector candidates, then combines their ranks with reciprocal rank fusion. RRF uses k=60. Exact identifiers are boosted after fusion. The architecture supports a deterministic lexical-only path when embeddings or synthesis are disabled.",
+      "metadata": {
+        "space_key": "SRCH",
+        "page_id": "9001",
+        "version": 7
+      }
+    },
+    {
+      "source": "confluence",
+      "source_type": "page",
+      "source_id": "confluence:SRCH:9002",
+      "source_url": "https://eval.invalid/confluence/spaces/SRCH/pages/9002",
+      "title": "SRCH-9002 Relevance Evaluation Rubric",
+      "author": "June Park",
+      "status": "current",
+      "occurred_at": "2024-01-06T12:00:00.000Z",
+      "body": "Judgments use a four-point scale: 3 directly answers the intent with supporting evidence, 2 provides substantial supporting context, 1 is topically related, and 0 is not relevant. Title-only generic matches cannot exceed 1. Citation correctness requires the returned source identifier and URL to resolve to the judged evidence.",
+      "metadata": {
+        "space_key": "SRCH",
+        "page_id": "9002",
+        "version": 5
+      }
+    },
+    {
+      "source": "confluence",
+      "source_type": "page",
+      "source_id": "confluence:SRCH:9003",
+      "source_url": "https://eval.invalid/confluence/spaces/SRCH/pages/9003",
+      "title": "SRCH-9003 Project Search ACL and Visibility Model",
+      "author": "Mina Chen",
+      "status": "current",
+      "occurred_at": "2024-01-07T12:00:00.000Z",
+      "body": "project_visible evidence may be indexed and returned to any member of the bound project. restricted evidence must not be indexed or returned. unknown evidence is denied by default until a connector provides an authoritative visibility snapshot. Visibility filtering occurs before ranking and citation assembly.",
+      "metadata": {
+        "space_key": "SRCH",
+        "page_id": "9003",
+        "version": 9
+      }
+    },
+    {
+      "source": "confluence",
+      "source_type": "page",
+      "source_id": "confluence:SRCH:9004",
+      "source_url": "https://eval.invalid/confluence/spaces/SRCH/pages/9004",
+      "title": "SRCH-9004 Search Rollout and Rollback Runbook",
+      "author": "Eli Romero",
+      "status": "current",
+      "occurred_at": "2024-01-08T12:00:00.000Z",
+      "body": "Before increasing the cohort, confirm relevance, citation ACL, error-rate, and P95 latency gates. To roll back: freeze the cohort, disable semantic fusion, restore the previous candidate cap, verify lexical-only search, and post the dashboard snapshot. Restart approval occurs at the release window recorded in C-release.",
+      "metadata": {
+        "space_key": "SRCH",
+        "page_id": "9004",
+        "version": 6
+      }
+    }
+  ]
+}

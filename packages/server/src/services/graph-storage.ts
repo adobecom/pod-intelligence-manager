@@ -6,7 +6,7 @@
  * initial restore from S3 runs if the local directory is empty.
  *
  * Config:
- *   KG_DATA_DIR    — base directory (default: <cwd>/.data/knowledge-graph; prod: /data/knowledge-graph)
+ *   KG_DATA_DIR    — base directory (default: <repository>/.data/knowledge-graph; prod: /data/knowledge-graph)
  *   KG_S3_BUCKET   — optional S3 bucket for writethrough + restore
  *   KG_S3_PREFIX   — key prefix in the bucket (default: "knowledge-graph")
  *   AWS_REGION     — region for the S3 client
@@ -14,6 +14,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { KnowledgeGraph } from "@pim/shared";
 import {
   S3Client,
@@ -23,10 +24,15 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
+import {
+  assertLegacyMemoryWritable,
+  legacyMemoryWritesFrozen,
+} from "./memory-authority.js";
 
-const DATA_ROOT = process.env.KG_DATA_DIR
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+export const graphDataRoot = process.env.KG_DATA_DIR
   ? path.resolve(process.env.KG_DATA_DIR)
-  : path.resolve(process.cwd(), ".data", "knowledge-graph");
+  : path.resolve(moduleDir, "../../../../.data/knowledge-graph");
 
 const S3_BUCKET = process.env.KG_S3_BUCKET;
 const S3_PREFIX = process.env.KG_S3_PREFIX ?? "knowledge-graph";
@@ -38,7 +44,7 @@ function getS3(): S3Client {
 }
 
 function orgDir(orgId: string): string {
-  return path.join(DATA_ROOT, orgId);
+  return path.join(graphDataRoot, orgId);
 }
 
 function ensureDir(dir: string): void {
@@ -97,6 +103,7 @@ export function loadGraph(orgId: string): KnowledgeGraph | null {
 }
 
 export function saveGraph(orgId: string, graph: KnowledgeGraph): void {
+  assertLegacyMemoryWritable("knowledge_graph_save");
   const dir = orgDir(orgId);
   ensureDir(dir);
 
@@ -127,6 +134,22 @@ export function saveGraph(orgId: string, graph: KnowledgeGraph): void {
   }
 }
 
+/** Destructive scrub helper: remove local historical graph snapshots after a
+ * canonical rewrite. `graph-latest.json` is retained as the sanitized active
+ * graph; remote mirrors/backups are handled by the deployment runbook. */
+export function purgeLocalGraphHistory(orgId: string): number {
+  if (legacyMemoryWritesFrozen()) return 0;
+  const dir = orgDir(orgId);
+  if (!fs.existsSync(dir)) return 0;
+  let removed = 0;
+  for (const file of fs.readdirSync(dir)) {
+    if (!VERSION_FILE_RE.test(file)) continue;
+    fs.unlinkSync(path.join(dir, file));
+    removed++;
+  }
+  return removed;
+}
+
 export function getGraphVersion(orgId: string): number {
   const graph = loadGraph(orgId);
   return graph?.version ?? 0;
@@ -135,6 +158,7 @@ export function getGraphVersion(orgId: string): number {
 async function writeThroughToS3(orgId: string, version: number, body: string): Promise<void> {
   if (!S3_BUCKET) return;
   const client = getS3();
+  assertLegacyMemoryWritable("knowledge_graph_s3_write");
   await Promise.all([
     client.send(
       new PutObjectCommand({
@@ -171,6 +195,7 @@ async function writeThroughToS3(orgId: string, version: number, body: string): P
 const LEGACY_ORG_ID = "default";
 export async function migrateLegacyDefaultGraph(targetOrgId: string): Promise<void> {
   if (!targetOrgId || targetOrgId === LEGACY_ORG_ID) return;
+  if (legacyMemoryWritesFrozen()) return;
 
   const legacyDir = orgDir(LEGACY_ORG_ID);
   const targetDir = orgDir(targetOrgId);
@@ -184,6 +209,7 @@ export async function migrateLegacyDefaultGraph(targetOrgId: string): Promise<vo
     // Already migrated — leave things alone.
     return;
   }
+  if (legacyMemoryWritesFrozen()) return;
 
   console.log(
     `[graph-storage] Migrating legacy "default" graph → org "${targetOrgId}" (local=${legacyExists}, s3=${Boolean(S3_BUCKET)})`,
@@ -209,6 +235,7 @@ export async function migrateLegacyDefaultGraph(targetOrgId: string): Promise<vo
   }
 
   if (S3_BUCKET) {
+    if (legacyMemoryWritesFrozen()) return;
     await migrateS3Prefix(LEGACY_ORG_ID, targetOrgId);
   }
 }
@@ -228,6 +255,7 @@ async function s3HasOrgPrefix(orgId: string): Promise<boolean> {
 
 async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void> {
   if (!S3_BUCKET) return;
+  if (legacyMemoryWritesFrozen()) return;
   const client = getS3();
   const fromPrefix = `${S3_PREFIX}/${fromOrgId}/`;
   const toPrefix = `${S3_PREFIX}/${toOrgId}/`;
@@ -235,10 +263,12 @@ async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void
   const listRes = await client.send(
     new ListObjectsV2Command({ Bucket: S3_BUCKET, Prefix: fromPrefix }),
   );
+  if (legacyMemoryWritesFrozen()) return;
   const objects = listRes.Contents ?? [];
   if (objects.length === 0) return;
 
   for (const obj of objects) {
+    if (legacyMemoryWritesFrozen()) return;
     if (!obj.Key) continue;
     const newKey = toPrefix + obj.Key.slice(fromPrefix.length);
     const isLatest = obj.Key.endsWith("graph-latest.json");
@@ -248,6 +278,7 @@ async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void
       // Rewrite org_id in the latest snapshot's body so query metadata reflects the new owner.
       const get = await client.send(new GetObjectCommand({ Bucket: S3_BUCKET, Key: obj.Key }));
       const raw = await get.Body?.transformToString();
+      if (legacyMemoryWritesFrozen()) return;
       if (raw) {
         try {
           const parsed = JSON.parse(raw) as KnowledgeGraph;
@@ -259,6 +290,7 @@ async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void
       }
     }
 
+    if (legacyMemoryWritesFrozen()) return;
     if (body !== undefined) {
       await client.send(
         new PutObjectCommand({
@@ -278,6 +310,7 @@ async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void
       );
     }
 
+    if (legacyMemoryWritesFrozen()) return;
     await client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: obj.Key }));
   }
 
@@ -291,6 +324,7 @@ async function migrateS3Prefix(fromOrgId: string, toOrgId: string): Promise<void
  */
 export async function restoreGraphFromS3IfEmpty(orgId: string): Promise<void> {
   if (!S3_BUCKET) return;
+  if (legacyMemoryWritesFrozen()) return;
   if (fs.existsSync(latestPath(orgId))) return;
 
   const client = getS3();
@@ -309,6 +343,7 @@ export async function restoreGraphFromS3IfEmpty(orgId: string): Promise<void> {
     );
     const body = await obj.Body?.transformToString();
     if (!body) return;
+    if (legacyMemoryWritesFrozen()) return;
 
     ensureDir(orgDir(orgId));
     fs.writeFileSync(latestPath(orgId), body, "utf-8");

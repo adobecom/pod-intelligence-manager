@@ -34,11 +34,32 @@ import { isProjectSearchFtsAvailable } from "./project-search-index.js";
 import { queryKnowledge } from "./knowledge-graph.js";
 import { scrubHits, redactSecrets } from "./search-core/scrub.js";
 import { synthesizeSearch } from "./search-core/synthesizer.js";
-import { INDEXED_SOURCE_AUTHORITY, INDEXED_RECENCY_DAYS, INDEXED_RECENCY_MAX } from "./search-core/weights.js";
+import {
+  INDEXED_RECENCY_DAYS,
+  INDEXED_RECENCY_MAX,
+  INDEXED_SCOPE_BONUS,
+  INDEXED_SOURCE_AGE_HALF_LIFE_DAYS,
+  INDEXED_SOURCE_AUTHORITY,
+  INDEXED_STALE_PENALTY,
+  RRF_K,
+} from "./search-core/weights.js";
 import { searchJira } from "../integrations/jira.js";
 import { searchGithub } from "../integrations/github.js";
 import { searchConfluence } from "../integrations/confluence.js";
 import { searchGit } from "../integrations/git.js";
+import {
+  getProjectSourceHealth,
+  isProjectEvidenceReadable,
+} from "./project-memory.js";
+import {
+  configuredConfluenceSourceInstance,
+  confluenceProjectVisibilityPolicy,
+} from "../integrations/confluence-visibility.js";
+import {
+  projectResourceEligibilitySql,
+  sanitizeProjectResources,
+} from "./project-resource-bindings.js";
+import { redactProjectText } from "./project-evidence-normalization.js";
 
 const SYNTHESIS_PROMPT_PATH = path.resolve(
   new URL(".", import.meta.url).pathname,
@@ -144,8 +165,12 @@ async function synthesizeAnswer(
   });
 }
 
-const RRF_K = 60;
 const CANDIDATE_K = 200;
+// The indexer emits at most 40 chunks per document. Over-fetch chunk lanes by
+// that factor, then assign dense document ranks before applying the candidate
+// cap. Otherwise one long document can consume the entire lexical top-k.
+const MAX_CHUNKS_PER_DOCUMENT = 40;
+const CHUNK_CANDIDATE_K = CANDIDATE_K * MAX_CHUNKS_PER_DOCUMENT;
 const DEFAULT_MAX_HITS = 10;
 const GRAPH_MAX_CONTRIBUTION = 0.22;
 const GRAPH_HUB_DEGREE = 24;
@@ -203,6 +228,26 @@ interface ChunkTextRow {
   embedding_json: string | null;
 }
 
+interface AdjacentChunkRow {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  text: string;
+}
+
+interface ConfluenceContextDocumentRow {
+  id: string;
+  org_id: string;
+  project_id: string;
+  source_instance: string;
+  title: string;
+  metadata_json: string;
+}
+
+interface ConfluenceContextChunkRow extends AdjacentChunkRow {
+  chunk_kind: string;
+}
+
 interface GraphEntityRow {
   id: string;
   entity_type: ProjectSearchEntityType;
@@ -222,7 +267,6 @@ interface GraphEdgeRow {
 
 interface GraphExpansion {
   docScores: Map<string, number>;
-  entityIdsByDocument: Map<string, Set<string>>;
   seedEntityIds: string[];
   focusFeature?: ProjectSearchFocusFeature;
   focusFeatureEntityId?: string;
@@ -231,7 +275,7 @@ interface GraphExpansion {
 function parseResources(raw: string | null): ProjectResources {
   if (!raw) return {};
   try {
-    return JSON.parse(raw) as ProjectResources;
+    return sanitizeProjectResources(JSON.parse(raw) as ProjectResources);
   } catch {
     return {};
   }
@@ -244,6 +288,169 @@ function parseJson<T>(raw: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+interface ExpandedProjectQuery {
+  /** Original query plus matched project/glossary synonyms. */
+  lexical: string;
+  /** Lexical expansion plus glossary definitions for the embedding lane. */
+  semantic: string;
+}
+
+function normalizedPhrase(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function containsWholePhrase(query: string, candidate: string): boolean {
+  const normalizedCandidate = normalizedPhrase(candidate);
+  if (!normalizedCandidate) return false;
+  return ` ${normalizedPhrase(query)} `.includes(` ${normalizedCandidate} `);
+}
+
+function appendUniqueTerms(base: string, additions: string[], maxChars = 1_600): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const value of [base, ...additions]) {
+    const trimmed = value.trim();
+    const key = normalizedPhrase(trimmed);
+    if (!key || seen.has(key)) continue;
+    if (parts.length > 0 && parts.join(" ").length + trimmed.length + 1 > maxChars) break;
+    seen.add(key);
+    parts.push(trimmed);
+  }
+  return parts.join(" ");
+}
+
+/** Deterministic, bounded expansion. A project synonym group is activated only
+ * when the query contains the project name or one of its aliases. Glossary
+ * groups use whole normalized phrases, never substring matching ("ai" must not
+ * activate inside "chair"). */
+function expandProjectQuery(query: string, projectName: string, resources: ProjectResources): ExpandedProjectQuery {
+  const lexicalAdditions: string[] = [];
+  const semanticAdditions: string[] = [];
+  const projectTerms = [projectName, ...(resources.aliases ?? [])].filter(Boolean);
+  if (projectTerms.some((term) => containsWholePhrase(query, term))) {
+    lexicalAdditions.push(...projectTerms);
+  }
+
+  for (const entry of resources.glossary ?? []) {
+    const terms = [entry.term, ...(entry.aliases ?? [])].filter(Boolean);
+    if (!terms.some((term) => containsWholePhrase(query, term))) continue;
+    lexicalAdditions.push(...terms);
+    semanticAdditions.push(...terms);
+    if (entry.definition) semanticAdditions.push(entry.definition);
+  }
+
+  const lexical = appendUniqueTerms(query, lexicalAdditions);
+  return {
+    lexical,
+    semantic: appendUniqueTerms(lexical, semanticAdditions),
+  };
+}
+
+interface CandidateFilters {
+  orgId: string;
+  projectId: string;
+  sources: ProjectSearchSource[] | null;
+  entityTypes: ProjectSearchEntityType[] | null;
+  cutoff: string | null;
+  slackReadEnabled: boolean;
+  confluenceReadEnabled: boolean;
+  confluenceSourceInstance: string | null;
+  confluenceSpaceKeys: string[];
+  confluencePageIds: string[];
+  resources: ProjectResources;
+}
+
+interface SqlFragment {
+  sql: string;
+  params: Array<string | number | null>;
+}
+
+/** Eligibility shared by every candidate lane. Keeping this predicate on the
+ * document join prevents a global top-k from being consumed by candidates that
+ * a later source/entity/time/freshness pass would discard. Null timestamps keep
+ * the prior API behavior: an unknown date is not treated as provably old. */
+function documentEligibilitySql(alias: string, filters: CandidateFilters): SqlFragment {
+  const clauses = [
+    `${alias}.org_id = ?`,
+    `${alias}.project_id = ?`,
+    `${alias}.freshness_state != 'deleted'`,
+    `${alias}.visibility = 'project_visible'`,
+  ];
+  const params: Array<string | number | null> = [filters.orgId, filters.projectId];
+  const resourceEligibility = projectResourceEligibilitySql(alias, filters.resources);
+  clauses.push(resourceEligibility.sql);
+  params.push(...resourceEligibility.params);
+
+  if (!filters.slackReadEnabled) clauses.push(`${alias}.source != 'slack'`);
+  if (!filters.confluenceReadEnabled) {
+    clauses.push(`${alias}.source != 'confluence'`);
+  } else {
+    const policyTerms: string[] = [];
+    const policyParams: string[] = [];
+    const safeMetadata = `CASE WHEN json_valid(${alias}.metadata_json) THEN ${alias}.metadata_json ELSE '{}' END`;
+    if (filters.confluenceSpaceKeys.length > 0) {
+      policyTerms.push(
+        `upper(CAST(json_extract(${safeMetadata}, '$.space_key') AS TEXT)) IN (${filters.confluenceSpaceKeys.map(() => "?").join(", ")})`,
+      );
+      policyParams.push(...filters.confluenceSpaceKeys);
+    }
+    if (filters.confluencePageIds.length > 0) {
+      policyTerms.push(
+        `CAST(json_extract(${safeMetadata}, '$.page_id') AS TEXT) IN (${filters.confluencePageIds.map(() => "?").join(", ")})`,
+      );
+      policyParams.push(...filters.confluencePageIds);
+    }
+    clauses.push(
+      `(${alias}.source != 'confluence' OR (${alias}.source_instance = ? AND (${policyTerms.join(" OR ")})))`,
+    );
+    params.push(filters.confluenceSourceInstance, ...policyParams);
+  }
+
+  if (filters.sources && filters.sources.length > 0) {
+    clauses.push(`${alias}.source IN (${filters.sources.map(() => "?").join(", ")})`);
+    params.push(...filters.sources);
+  }
+  if (filters.cutoff) {
+    clauses.push(`(${alias}.occurred_at IS NULL OR ${alias}.occurred_at >= ?)`);
+    params.push(filters.cutoff);
+  }
+  if (filters.entityTypes && filters.entityTypes.length > 0) {
+    const placeholders = filters.entityTypes.map(() => "?").join(", ");
+    clauses.push(
+      `(EXISTS (
+         SELECT 1 FROM project_search_entities de
+         WHERE de.org_id = ${alias}.org_id
+           AND de.project_id = ${alias}.project_id
+           AND de.source_document_id = ${alias}.id
+           AND de.entity_type IN (${placeholders})
+       ) OR EXISTS (
+         SELECT 1
+         FROM project_search_edges ee
+         JOIN project_search_entities se ON se.id = ee.source_entity_id
+         JOIN project_search_entities te ON te.id = ee.target_entity_id
+         WHERE ee.org_id = ${alias}.org_id
+           AND ee.project_id = ${alias}.project_id
+           AND ee.evidence_document_id = ${alias}.id
+           AND (se.entity_type IN (${placeholders}) OR te.entity_type IN (${placeholders}))
+       ))`,
+    );
+    params.push(...filters.entityTypes, ...filters.entityTypes, ...filters.entityTypes);
+  }
+  return { sql: clauses.join(" AND "), params };
+}
+
+function eligibleDocumentIds(filters: CandidateFilters): Set<string> {
+  const eligibility = documentEligibilitySql("d", filters);
+  const rows = db
+    .prepare(`SELECT d.id FROM project_search_documents d WHERE ${eligibility.sql}`)
+    .all(...eligibility.params) as Array<{ id: string }>;
+  return new Set(rows.map((row) => row.id));
 }
 
 function loadProject(orgId: string, projectId: string): ProjectRow | null {
@@ -276,6 +483,22 @@ function snippet(text: string, max = 280): string {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
 }
 
+function slackMessagePermalink(text: string, query: string): string | undefined {
+  const terms = queryTerms(query);
+  const blocks = text.split(/\n\n(?=\[[^\]]+\]\s+<@)/);
+  let best: { url: string; score: number; index: number } | undefined;
+  for (const [index, block] of blocks.entries()) {
+    const match = block.match(/(?:^|\n)Permalink:\s+(https:\/\/[^\s]+)/i);
+    if (!match?.[1]) continue;
+    const lower = block.toLowerCase();
+    const score = terms.reduce((sum, term) => sum + (lower.includes(term.toLowerCase()) ? 1 : 0), 0);
+    if (!best || score > best.score || (score === best.score && index < best.index)) {
+      best = { url: match[1], score, index };
+    }
+  }
+  return best?.url;
+}
+
 interface ChunkHit {
   chunk_id: string;
   document_id: string;
@@ -283,73 +506,129 @@ interface ChunkHit {
   raw: number;
 }
 
-function lexicalSearch(orgId: string, projectId: string, matchExpr: string): ChunkHit[] {
+function denseDocumentRanks(
+  rows: Array<{ chunk_id: string; document_id: string; raw: number }>,
+): ChunkHit[] {
+  const seen = new Set<string>();
+  const ranked: ChunkHit[] = [];
+  for (const row of rows) {
+    if (seen.has(row.document_id)) continue;
+    seen.add(row.document_id);
+    ranked.push({ ...row, rank: ranked.length + 1 });
+    if (ranked.length >= CANDIDATE_K) break;
+  }
+  return ranked;
+}
+
+function lexicalSearch(filters: CandidateFilters, matchExpr: string): ChunkHit[] {
   if (!matchExpr) return [];
+  const eligibility = documentEligibilitySql("d", filters);
   if (isProjectSearchFtsAvailable()) {
     try {
       const rows = db
         .prepare(
-          `SELECT chunk_id, document_id, bm25(project_search_fts) AS score
+          `SELECT project_search_fts.chunk_id, project_search_fts.document_id,
+                  bm25(project_search_fts) AS score
            FROM project_search_fts
-           WHERE project_search_fts MATCH ? AND org_id = ? AND project_id = ?
-           ORDER BY score
+           JOIN project_search_documents d ON d.id = project_search_fts.document_id
+           JOIN project_search_chunks c ON c.id = project_search_fts.chunk_id
+           WHERE project_search_fts MATCH ? AND ${eligibility.sql}
+           ORDER BY score, d.source, d.source_id, c.chunk_index, c.id
            LIMIT ?`,
         )
-        .all(matchExpr, orgId, projectId, CANDIDATE_K) as Array<{ chunk_id: string; document_id: string; score: number }>;
-      // bm25 returns more-negative = better; rank ascending.
-      return rows.map((r, i) => ({ chunk_id: r.chunk_id, document_id: r.document_id, rank: i + 1, raw: -r.score }));
+        .all(matchExpr, ...eligibility.params, CHUNK_CANDIDATE_K) as Array<{
+          chunk_id: string;
+          document_id: string;
+          score: number;
+        }>;
+      // bm25 returns more-negative = better. Collapse chunks first so RRF ranks
+      // source evidence (documents), not arbitrary window count.
+      return denseDocumentRanks(rows.map((r) => ({
+        chunk_id: r.chunk_id,
+        document_id: r.document_id,
+        raw: -r.score,
+      })));
     } catch {
       // Malformed MATCH or FTS issue — fall through to LIKE.
     }
   }
-  return lexicalLikeSearch(orgId, projectId, matchExpr);
+  return lexicalLikeSearch(filters, matchExpr);
 }
 
 /** Keyword-LIKE fallback when FTS5 is unavailable. Scores by distinct term hits. */
-function lexicalLikeSearch(orgId: string, projectId: string, matchExpr: string): ChunkHit[] {
+function lexicalLikeSearch(filters: CandidateFilters, matchExpr: string): ChunkHit[] {
   const terms = [...matchExpr.matchAll(/"((?:[^"]|"")+)"/g)].map((m) => m[1].replace(/""/g, '"'));
   if (terms.length === 0) return [];
-  const clauses = terms.map(() => "(lower(text) LIKE ? OR lower(retrieval_text) LIKE ?)");
+  const eligibility = documentEligibilitySql("d", filters);
+  const clauses = terms.map(() => "(lower(c.text) LIKE ? OR lower(c.retrieval_text) LIKE ?)");
   const score = terms
-    .map(() => "(CASE WHEN lower(text) LIKE ? OR lower(retrieval_text) LIKE ? THEN 1 ELSE 0 END)")
+    .map(() => "(CASE WHEN lower(c.text) LIKE ? OR lower(c.retrieval_text) LIKE ? THEN 1 ELSE 0 END)")
     .join(" + ");
   const likeParams = terms.flatMap((t) => [`%${t.toLowerCase()}%`, `%${t.toLowerCase()}%`]);
   const rows = db
     .prepare(
-      `SELECT id AS chunk_id, document_id, (${score}) AS hits
-       FROM project_search_chunks
-       WHERE org_id = ? AND project_id = ? AND (${clauses.join(" OR ")})
-       ORDER BY hits DESC
+      `SELECT c.id AS chunk_id, c.document_id, (${score}) AS hits
+       FROM project_search_chunks c
+       JOIN project_search_documents d ON d.id = c.document_id
+       WHERE ${eligibility.sql} AND (${clauses.join(" OR ")})
+       ORDER BY hits DESC, d.source, d.source_id, c.chunk_index, c.id
        LIMIT ?`,
     )
-    .all(...likeParams, orgId, projectId, ...likeParams, CANDIDATE_K) as Array<{
+    .all(...likeParams, ...eligibility.params, ...likeParams, CHUNK_CANDIDATE_K) as Array<{
     chunk_id: string;
     document_id: string;
     hits: number;
   }>;
-  return rows.map((r, i) => ({ chunk_id: r.chunk_id, document_id: r.document_id, rank: i + 1, raw: r.hits }));
+  return denseDocumentRanks(rows.map((r) => ({
+    chunk_id: r.chunk_id,
+    document_id: r.document_id,
+    raw: r.hits,
+  })));
 }
 
-function semanticSearch(orgId: string, projectId: string, queryVec: number[]): ChunkHit[] {
+function semanticSearch(filters: CandidateFilters, queryVec: number[]): ChunkHit[] {
+  const eligibility = documentEligibilitySql("d", filters);
   const rows = db
     .prepare(
-      `SELECT id, document_id, embedding_json
-       FROM project_search_chunks
-       WHERE org_id = ? AND project_id = ? AND embedding_json IS NOT NULL`,
+      `SELECT c.id, c.document_id, c.embedding_json, d.source, d.source_id
+       FROM project_search_chunks c
+       JOIN project_search_documents d ON d.id = c.document_id
+       WHERE ${eligibility.sql} AND c.embedding_json IS NOT NULL`,
     )
-    .all(orgId, projectId) as Array<{ id: string; document_id: string; embedding_json: string }>;
-  const scored = rows
-    .map((r) => {
-      let vec: number[];
-      try {
-        vec = JSON.parse(r.embedding_json) as number[];
-      } catch {
-        return null;
-      }
-      return { chunk_id: r.id, document_id: r.document_id, sim: cosineSimilarity(queryVec, vec) };
-    })
-    .filter((x): x is { chunk_id: string; document_id: string; sim: number } => x !== null && x.sim > 0)
-    .sort((a, b) => b.sim - a.sim)
+    .all(...eligibility.params) as Array<{
+      id: string;
+      document_id: string;
+      embedding_json: string;
+      source: string;
+      source_id: string;
+    }>;
+  const bestByDocument = new Map<string, {
+    chunk_id: string;
+    document_id: string;
+    sim: number;
+    stable_key: string;
+  }>();
+  for (const row of rows) {
+    let vec: number[];
+    try {
+      vec = JSON.parse(row.embedding_json) as number[];
+    } catch {
+      continue;
+    }
+    const sim = cosineSimilarity(queryVec, vec);
+    if (sim <= 0) continue;
+    const prior = bestByDocument.get(row.document_id);
+    if (!prior || sim > prior.sim) {
+      bestByDocument.set(row.document_id, {
+        chunk_id: row.id,
+        document_id: row.document_id,
+        sim,
+        stable_key: `${row.source}\0${row.source_id}`,
+      });
+    }
+  }
+  const scored = [...bestByDocument.values()]
+    .sort((a, b) => b.sim - a.sim || a.stable_key.localeCompare(b.stable_key))
     .slice(0, CANDIDATE_K);
   return scored.map((s, i) => ({ chunk_id: s.chunk_id, document_id: s.document_id, rank: i + 1, raw: s.sim }));
 }
@@ -361,22 +640,74 @@ function isReferenceIdentifier(id: string): boolean {
   return /\d/.test(id) || id.includes("/") || id.includes("#") || id.includes(".");
 }
 
-/** Documents whose identity (source_id / title) directly contains a detected identifier. */
-function identifierMatches(orgId: string, projectId: string, identifiers: string[]): Set<string> {
-  const docIds = new Set<string>();
-  const refs = identifiers.filter(isReferenceIdentifier);
-  if (refs.length === 0) return docIds;
-  const clauses = refs.map(() => "(instr(lower(source_id), ?) > 0 OR instr(lower(title), ?) > 0)");
-  const params = refs.flatMap((id) => [id.toLowerCase(), id.toLowerCase()]);
+function normalizeIdentifierToken(value: string): string {
+  return value
+    .normalize("NFKC")
+    .trim()
+    .toLowerCase()
+    .replace(/^[`"'([{]+/, "")
+    .replace(/[`"',.;)\]}]+$/, "");
+}
+
+/** Exact identity tokens from a native id/title. Tail PR tokens are included so
+ * `#12` can match `owner/repo#12`, while equality ensures `#12` never matches
+ * `#120`. */
+function identifierTokens(value: string): Set<string> {
+  const tokens = new Set<string>();
+  for (const extracted of extractIdentifiers(value)) {
+    const normalized = normalizeIdentifierToken(extracted);
+    if (normalized) tokens.add(normalized);
+  }
+  for (const match of value.match(/#[0-9]+\b/g) ?? []) tokens.add(normalizeIdentifierToken(match));
+  for (const match of value.match(/\b[A-Z][A-Z0-9]+-[0-9]+\b/gi) ?? []) {
+    tokens.add(normalizeIdentifierToken(match));
+  }
+  const whole = normalizeIdentifierToken(value);
+  if (isReferenceIdentifier(whole) && !/\s/.test(whole)) tokens.add(whole);
+  return tokens;
+}
+
+/** Documents whose identity contains the same normalized identifier token.
+ * Candidate eligibility is applied in SQL and token equality in memory before
+ * the exact-lane cap; no substring predicate is involved. */
+function identifierMatches(filters: CandidateFilters, identifiers: string[]): Map<string, "native" | "title"> {
+  const matches = new Map<string, "native" | "title">();
+  const refs = new Set(
+    identifiers
+      .filter(isReferenceIdentifier)
+      .map(normalizeIdentifierToken)
+      .filter(Boolean),
+  );
+  if (refs.size === 0) return matches;
+  const eligibility = documentEligibilitySql("d", filters);
   const rows = db
     .prepare(
-      `SELECT id FROM project_search_documents
-       WHERE org_id = ? AND project_id = ? AND (${clauses.join(" OR ")})
-       LIMIT 50`,
+      `SELECT d.id, d.source_id, d.title
+       FROM project_search_documents d
+       WHERE ${eligibility.sql}
+       ORDER BY d.source_id, d.id`,
     )
-    .all(orgId, projectId, ...params) as Array<{ id: string }>;
-  for (const r of rows) docIds.add(r.id);
-  return docIds;
+    .all(...eligibility.params) as Array<{ id: string; source_id: string; title: string }>;
+  const nativeMatches: string[] = [];
+  const titleMatches: string[] = [];
+  for (const row of rows) {
+    const sourceTokens = identifierTokens(row.source_id);
+    if ([...refs].some((ref) => sourceTokens.has(ref))) {
+      nativeMatches.push(row.id);
+      continue;
+    }
+    const titleTokens = identifierTokens(row.title);
+    if ([...refs].some((ref) => titleTokens.has(ref))) titleMatches.push(row.id);
+  }
+  for (const id of nativeMatches) {
+    if (matches.size >= 50) break;
+    matches.set(id, "native");
+  }
+  for (const id of titleMatches) {
+    if (matches.size >= 50) break;
+    if (!matches.has(id)) matches.set(id, "title");
+  }
+  return matches;
 }
 
 function normalizeRepoPath(value: string): string {
@@ -411,8 +742,29 @@ function inScope(doc: DocRow, resources: ProjectResources): boolean {
     }
     case "confluence": {
       const spaces = resources.confluence?.space_keys ?? [];
-      const space = typeof doc.source_id === "string" ? doc.source_id : "";
-      return spaces.some((s) => space.includes(s));
+      const metadata = parseJson<Record<string, unknown>>(doc.metadata_json, {});
+      const spaceKey = typeof metadata.space_key === "string" ? metadata.space_key : "";
+      if (spaces.some((space) => space.toUpperCase() === spaceKey.toUpperCase())) return true;
+      const pageId = typeof metadata.page_id === "string" || typeof metadata.page_id === "number"
+        ? String(metadata.page_id)
+        : "";
+      const configuredPageIds = new Set((resources.confluence?.page_ids ?? []).map(String));
+      for (const rawUrl of resources.confluence?.page_urls ?? []) {
+        try {
+          const url = new URL(rawUrl);
+          const match = url.pathname.match(/\/pages\/(\d+)/i) ?? url.search.match(/[?&]pageId=(\d+)/i);
+          if (match?.[1]) configuredPageIds.add(match[1]);
+        } catch {
+          // Invalid bindings do not widen scope.
+        }
+      }
+      return !!pageId && configuredPageIds.has(pageId);
+    }
+    case "slack": {
+      const metadata = parseJson<Record<string, unknown>>(doc.metadata_json, {});
+      const channelId = typeof metadata.channel_id === "string" ? metadata.channel_id : "";
+      if ((resources.slack?.channels ?? []).some((binding) => binding.split(":").at(-1) === channelId)) return true;
+      return !!doc.source_url && (resources.slack?.thread_urls ?? []).includes(doc.source_url);
     }
     case "kg":
       // KG docs are project-scoped by construction (indexed via indexProjectKgNodes
@@ -436,23 +788,31 @@ function intentBoost(query: string, doc: DocRow): number {
   const wantsImplementation = /\b(implemented|implementation|built|coded|code|merged|pr|commit|where is|how is)\b/.test(q);
   let b = 0;
   if (doc.source_type === "release") {
-    if (wantsRelease) b += 0.4;
-    if (wantsNext && /upcoming/i.test(doc.title)) b += 0.3;
+    if (wantsRelease) b += 0.012;
+    if (wantsNext && /upcoming/i.test(doc.title)) b += 0.006;
   }
-  if (wantsBacklog && doc.source_type === "backlog_issue") b += 0.3;
-  if (wantsActive && doc.source_type === "active_issue") b += 0.3;
-  if (wantsDone && doc.source_type === "resolved_issue") b += 0.2;
+  if (wantsBacklog && doc.source_type === "backlog_issue") b += 0.008;
+  if (wantsActive && doc.source_type === "active_issue") b += 0.008;
+  if (wantsDone && doc.source_type === "resolved_issue") b += 0.006;
   if (wantsImplementation && (doc.source === "github" || doc.source === "git")) {
-    if (["merged_pr", "updated_pr", "default_branch_commit", "commit", "file_summary"].includes(doc.source_type)) b += 0.35;
-    else b += 0.15;
+    if (["merged_pr", "updated_pr", "default_branch_commit", "commit", "file_summary"].includes(doc.source_type)) b += 0.009;
+    else b += 0.004;
   }
   return b;
+}
+
+function indexedAgeBoost(doc: DocRow, now = Date.now()): number {
+  if (!doc.occurred_at) return 0;
+  const occurredAt = new Date(doc.occurred_at).getTime();
+  if (Number.isNaN(occurredAt)) return 0;
+  const ageDays = Math.max(0, (now - occurredAt) / 864e5);
+  const halfLife = INDEXED_SOURCE_AGE_HALF_LIFE_DAYS[doc.source] ?? INDEXED_RECENCY_DAYS;
+  return INDEXED_RECENCY_MAX * Math.pow(0.5, ageDays / Math.max(1, halfLife));
 }
 
 function emptyGraphExpansion(): GraphExpansion {
   return {
     docScores: new Map(),
-    entityIdsByDocument: new Map(),
     seedEntityIds: [],
   };
 }
@@ -464,15 +824,9 @@ function graphContribution(edge: GraphEdgeRow, hop: 1 | 2): number {
   return Math.min(GRAPH_MAX_CONTRIBUTION, GRAPH_MAX_CONTRIBUTION * priorityFactor * edge.confidence_score * hopFactor);
 }
 
-function addGraphDocScore(expansion: GraphExpansion, documentId: string, entityId: string, score: number): void {
+function addGraphDocScore(expansion: GraphExpansion, documentId: string, score: number): void {
   const prior = expansion.docScores.get(documentId) ?? 0;
   if (score > prior) expansion.docScores.set(documentId, score);
-  let entityIds = expansion.entityIdsByDocument.get(documentId);
-  if (!entityIds) {
-    entityIds = new Set();
-    expansion.entityIdsByDocument.set(documentId, entityIds);
-  }
-  entityIds.add(entityId);
 }
 
 function loadGraphEntitiesByIds(ids: string[]): Map<string, GraphEntityRow> {
@@ -515,22 +869,31 @@ function adjacentGraphEdges(orgId: string, projectId: string, entityIds: string[
     .all(orgId, projectId, ...entityIds, ...entityIds) as unknown as GraphEdgeRow[];
 }
 
-function graphSeedEntitiesForIdentifiers(orgId: string, projectId: string, identifiers: string[]): GraphEntityRow[] {
-  const refs = identifiers.filter(isReferenceIdentifier);
-  if (refs.length === 0) return [];
-  const clauses = refs.map(() => "(lower(entity_key) = ? OR instr(lower(entity_key), ?) > 0 OR lower(label) = ?)");
-  const params = refs.flatMap((id) => {
-    const ref = id.toLowerCase();
-    return [ref, ref, ref];
-  });
-  return db
+function graphSeedEntitiesForIdentifiers(
+  orgId: string,
+  projectId: string,
+  identifiers: string[],
+  eligibleDocuments: Set<string>,
+): GraphEntityRow[] {
+  const refs = new Set(
+    identifiers
+      .filter(isReferenceIdentifier)
+      .map(normalizeIdentifierToken)
+      .filter(Boolean),
+  );
+  if (refs.size === 0) return [];
+  const rows = db
     .prepare(
       `SELECT id, entity_type, entity_key, label, source_document_id, metadata_json
        FROM project_search_entities
-       WHERE org_id = ? AND project_id = ? AND (${clauses.join(" OR ")})
-       LIMIT 40`,
+       WHERE org_id = ? AND project_id = ?`,
     )
-    .all(orgId, projectId, ...params) as unknown as GraphEntityRow[];
+    .all(orgId, projectId) as unknown as GraphEntityRow[];
+  return rows.filter((row) => {
+    if (row.source_document_id && !eligibleDocuments.has(row.source_document_id)) return false;
+    const tokens = new Set([...identifierTokens(row.entity_key), ...identifierTokens(row.label)]);
+    return [...refs].some((ref) => tokens.has(ref));
+  }).slice(0, 40);
 }
 
 function graphSelfEntitiesForDocuments(orgId: string, projectId: string, documentIds: string[]): GraphEntityRow[] {
@@ -542,35 +905,6 @@ function graphSelfEntitiesForDocuments(orgId: string, projectId: string, documen
        WHERE org_id = ? AND project_id = ? AND source_document_id IN (${documentIds.map(() => "?").join(", ")})`,
     )
     .all(orgId, projectId, ...documentIds) as unknown as GraphEntityRow[];
-}
-
-function documentIdsForEntityTypes(
-  orgId: string,
-  projectId: string,
-  entityTypes: ProjectSearchEntityType[],
-): Set<string> {
-  if (entityTypes.length === 0) return new Set();
-  const placeholders = entityTypes.map(() => "?").join(", ");
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT source_document_id AS document_id
-       FROM project_search_entities
-       WHERE org_id = ? AND project_id = ?
-         AND source_document_id IS NOT NULL
-         AND entity_type IN (${placeholders})
-       UNION
-       SELECT DISTINCT e.evidence_document_id AS document_id
-       FROM project_search_edges e
-       JOIN project_search_entities se ON se.id = e.source_entity_id
-       JOIN project_search_entities te ON te.id = e.target_entity_id
-       WHERE e.org_id = ? AND e.project_id = ?
-         AND e.evidence_document_id IS NOT NULL
-         AND (se.entity_type IN (${placeholders}) OR te.entity_type IN (${placeholders}))`,
-    )
-    .all(orgId, projectId, ...entityTypes, orgId, projectId, ...entityTypes, ...entityTypes) as Array<{
-    document_id: string | null;
-  }>;
-  return new Set(rows.map((row) => row.document_id).filter((id): id is string => !!id));
 }
 
 function normalizedWords(value: string): string[] {
@@ -591,7 +925,12 @@ function featureMatchesQuery(query: string, feature: GraphEntityRow): boolean {
   return labelWords.every((word) => queryWords.has(word));
 }
 
-function graphFeatureSeeds(orgId: string, projectId: string, query: string): GraphEntityRow[] {
+function graphFeatureSeeds(
+  orgId: string,
+  projectId: string,
+  query: string,
+  eligibleDocuments: Set<string>,
+): GraphEntityRow[] {
   const rows = db
     .prepare(
       `SELECT id, entity_type, entity_key, label, source_document_id, metadata_json
@@ -600,7 +939,13 @@ function graphFeatureSeeds(orgId: string, projectId: string, query: string): Gra
        LIMIT 5000`,
     )
     .all(orgId, projectId) as unknown as GraphEntityRow[];
-  return rows.filter((row) => featureMatchesQuery(query, row)).slice(0, 8);
+  return rows.filter((row) => {
+    if (row.source_document_id && !eligibleDocuments.has(row.source_document_id)) return false;
+    if (!featureMatchesQuery(query, row)) return false;
+    return adjacentGraphEdges(orgId, projectId, [row.id]).some(
+      (edge) => !!edge.evidence_document_id && eligibleDocuments.has(edge.evidence_document_id),
+    );
+  }).slice(0, 8);
 }
 
 function bestCandidateRank(a: DocAccumulator): number {
@@ -616,8 +961,14 @@ function graphSeedDocumentIds(acc: Map<string, DocAccumulator>): string[] {
     .slice(0, GRAPH_SEED_DOCUMENTS);
 }
 
-function buildFocusFeature(orgId: string, projectId: string, feature: GraphEntityRow): ProjectSearchFocusFeature {
+function buildFocusFeature(
+  orgId: string,
+  projectId: string,
+  feature: GraphEntityRow,
+  eligibleDocuments: Set<string>,
+): ProjectSearchFocusFeature {
   const edges = adjacentGraphEdges(orgId, projectId, [feature.id])
+    .filter((edge) => !!edge.evidence_document_id && eligibleDocuments.has(edge.evidence_document_id))
     .sort((a, b) => {
       const priority = (EDGE_PRIORITY[b.edge_type] ?? 0) - (EDGE_PRIORITY[a.edge_type] ?? 0);
       return priority || b.confidence_score - a.confidence_score;
@@ -631,7 +982,7 @@ function buildFocusFeature(orgId: string, projectId: string, feature: GraphEntit
     .map((edge) => {
       const otherId = edge.source_entity_id === feature.id ? edge.target_entity_id : edge.source_entity_id;
       const entity = membersById.get(otherId);
-      if (!entity) return null;
+      if (!entity || (entity.source_document_id && !eligibleDocuments.has(entity.source_document_id))) return null;
       return {
         entity_id: entity.id,
         entity_type: entity.entity_type,
@@ -658,19 +1009,22 @@ function expandProjectGraph(
   query: string,
   identifiers: string[],
   acc: Map<string, DocAccumulator>,
+  eligibleDocuments: Set<string>,
 ): GraphExpansion {
   const expansion = emptyGraphExpansion();
   const seeds = new Map<string, GraphEntityRow>();
-  for (const entity of graphSeedEntitiesForIdentifiers(orgId, projectId, identifiers)) seeds.set(entity.id, entity);
+  for (const entity of graphSeedEntitiesForIdentifiers(orgId, projectId, identifiers, eligibleDocuments)) {
+    seeds.set(entity.id, entity);
+  }
   for (const entity of graphSelfEntitiesForDocuments(orgId, projectId, graphSeedDocumentIds(acc))) seeds.set(entity.id, entity);
-  const featureSeeds = graphFeatureSeeds(orgId, projectId, query);
+  const featureSeeds = graphFeatureSeeds(orgId, projectId, query, eligibleDocuments);
   for (const entity of featureSeeds) seeds.set(entity.id, entity);
   if (seeds.size === 0) return expansion;
 
   expansion.seedEntityIds = [...seeds.keys()];
   if (featureSeeds.length > 0) {
     expansion.focusFeatureEntityId = featureSeeds[0].id;
-    expansion.focusFeature = buildFocusFeature(orgId, projectId, featureSeeds[0]);
+    expansion.focusFeature = buildFocusFeature(orgId, projectId, featureSeeds[0], eligibleDocuments);
   }
 
   const degrees = graphDegrees(orgId, projectId);
@@ -684,7 +1038,9 @@ function expandProjectGraph(
       const isSeedOrFocus = seedIds.has(id) || id === focusId;
       return isSeedOrFocus || (degrees.get(id) ?? 0) < GRAPH_HUB_DEGREE;
     });
-    const edges = adjacentGraphEdges(orgId, projectId, expandableFrontier);
+    const edges = adjacentGraphEdges(orgId, projectId, expandableFrontier).filter(
+      (edge) => !edge.evidence_document_id || eligibleDocuments.has(edge.evidence_document_id),
+    );
     const endpointIds = new Set<string>();
     for (const edge of edges) {
       endpointIds.add(edge.source_entity_id);
@@ -703,8 +1059,8 @@ function expandProjectGraph(
         const otherId = currentId === edge.source_entity_id ? edge.target_entity_id : edge.source_entity_id;
         const other = entities.get(otherId);
         if (!other) continue;
-        if (other.source_document_id) {
-          addGraphDocScore(expansion, other.source_document_id, other.id, graphContribution(edge, hop));
+        if (other.source_document_id && eligibleDocuments.has(other.source_document_id)) {
+          addGraphDocScore(expansion, other.source_document_id, graphContribution(edge, hop));
         }
         if (!visited.has(otherId)) {
           visited.add(otherId);
@@ -735,29 +1091,39 @@ function kgOverlay(
       query_text: query,
       ...(queryEmbedding ? { query_embedding: queryEmbedding } : {}),
     });
-    return result.nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      summary: node.summary,
-      snippet: snippet(node.details || node.summary),
-      confidence_score: node.confidence_score,
-      curated: node.curated,
-      url: `/knowledge#${node.id}`,
-    }));
+    return result.nodes
+      .filter((node) => node.ingestion_provenance?.kind !== "project_evidence"
+        || (node.ingestion_provenance.evidence_item_ids ?? [])
+          .some((evidenceId) => isProjectEvidenceReadable(orgId, projectId, evidenceId)))
+      .map((node) => {
+      const id = redactProjectText(node.id).text;
+      const summary = redactProjectText(node.summary).text;
+      const details = redactProjectText(node.details || node.summary).text;
+      return {
+        id,
+        type: node.type,
+        summary,
+        snippet: snippet(details || summary),
+        confidence_score: node.confidence_score,
+        curated: node.curated,
+        url: `/knowledge#${encodeURIComponent(id)}`,
+      };
+    });
   } catch {
     return [];
   }
 }
 
-function documentsBySource(orgId: string, projectId: string): Partial<Record<ProjectSearchSource, number>> {
+function documentsBySource(filters: CandidateFilters): Partial<Record<ProjectSearchSource, number>> {
+  const eligibility = documentEligibilitySql("d", filters);
   const rows = db
     .prepare(
-      `SELECT source, COUNT(*) AS count
-       FROM project_search_documents
-       WHERE org_id = ? AND project_id = ? AND freshness_state != 'deleted'
-       GROUP BY source`,
+      `SELECT d.source, COUNT(*) AS count
+       FROM project_search_documents d
+       WHERE ${eligibility.sql}
+       GROUP BY d.source`,
     )
-    .all(orgId, projectId) as Array<{ source: ProjectSearchSource; count: number }>;
+    .all(...eligibility.params) as Array<{ source: ProjectSearchSource; count: number }>;
   const counts: Partial<Record<ProjectSearchSource, number>> = {};
   for (const row of rows) counts[row.source] = row.count;
   return counts;
@@ -805,12 +1171,16 @@ function mindMapNeighborhood(
   orgId: string,
   projectId: string,
   documentIds: string[],
+  eligibleDocuments: Set<string>,
   explicitEntityIds: string[] = [],
 ): ProjectSearchMindMap | undefined {
   if (documentIds.length === 0 && explicitEntityIds.length === 0) return undefined;
 
   const selfEntities = graphSelfEntitiesForDocuments(orgId, projectId, documentIds);
-  const explicitEntities = loadGraphEntitiesByIds(explicitEntityIds);
+  const explicitEntities = new Map(
+    [...loadGraphEntitiesByIds(explicitEntityIds)].filter(([, entity]) =>
+      !entity.source_document_id || eligibleDocuments.has(entity.source_document_id)),
+  );
   const seedEntityIds = new Set<string>();
   for (const id of explicitEntities.keys()) {
     if (seedEntityIds.size >= MIND_MAP_NODE_LIMIT) break;
@@ -824,7 +1194,9 @@ function mindMapNeighborhood(
 
   const degrees = graphDegrees(orgId, projectId);
   const seedIds = [...seedEntityIds];
-  const oneHop = adjacentGraphEdges(orgId, projectId, seedIds);
+  const eligibleEdge = (edge: GraphEdgeRow): boolean =>
+    !!edge.evidence_document_id && eligibleDocuments.has(edge.evidence_document_id);
+  const oneHop = adjacentGraphEdges(orgId, projectId, seedIds).filter(eligibleEdge);
   const firstNeighbors = new Set<string>();
   for (const edge of oneHop) {
     if (seedEntityIds.has(edge.source_entity_id) && !seedEntityIds.has(edge.target_entity_id)) {
@@ -840,7 +1212,7 @@ function mindMapNeighborhood(
   const candidateEdges = uniqueEdges([
     ...evidenceEdgesForDocuments(orgId, projectId, documentIds),
     ...oneHop,
-    ...adjacentGraphEdges(orgId, projectId, secondHopSeeds),
+    ...adjacentGraphEdges(orgId, projectId, secondHopSeeds).filter(eligibleEdge),
   ]).sort((a, b) => {
     const aSeed = seedEntityIds.has(a.source_entity_id) || seedEntityIds.has(a.target_entity_id) ? 1 : 0;
     const bSeed = seedEntityIds.has(b.source_entity_id) || seedEntityIds.has(b.target_entity_id) ? 1 : 0;
@@ -870,7 +1242,8 @@ function mindMapNeighborhood(
   const rowsById = loadGraphEntitiesByIds([...entityIds]);
   const entities = [...entityIds]
     .map((id) => rowsById.get(id))
-    .filter((row): row is GraphEntityRow => row !== undefined)
+    .filter((row): row is GraphEntityRow => row !== undefined
+      && (!row.source_document_id || eligibleDocuments.has(row.source_document_id)))
     .slice(0, MIND_MAP_NODE_LIMIT)
     .map((row) => ({
       id: row.id,
@@ -881,17 +1254,24 @@ function mindMapNeighborhood(
       metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
     }));
 
-  return { entities, edges };
+  // An endpoint can disappear above when its source document becomes
+  // ineligible. Never expose a dangling edge that can indirectly disclose the
+  // existence of a restricted or stale entity.
+  const visibleEntityIds = new Set(entities.map((entity) => entity.id));
+  const visibleEdges = edges.filter((edge) =>
+    visibleEntityIds.has(edge.source_entity_id) && visibleEntityIds.has(edge.target_entity_id));
+
+  return { entities, edges: visibleEdges };
 }
 
 interface DocAccumulator {
   lexRank?: number;
   semRank?: number;
+  graphRank?: number;
   bestLexChunk?: string;
   bestSemChunk?: string;
   identifier: boolean;
-  graphScore?: number;
-  graphEntityIds?: Set<string>;
+  nativeIdentifier?: boolean;
 }
 
 // ── Live fallback (indexed → live) ───────────────────────────────────────────
@@ -942,7 +1322,7 @@ async function liveFallbackHits(
   maxHits: number,
 ): Promise<ProjectSearchHit[]> {
   const opts = {
-    query: req.query,
+    query: redactProjectText(req.query).text,
     org_id: orgId,
     project_id: projectId,
     project_resources: resources,
@@ -971,6 +1351,107 @@ async function liveFallbackHits(
   return scrubbed.slice(0, maxHits).map((doc, i) => liveDocToHit(doc, 1 / (1 + i)));
 }
 
+/** Expand only selected source-native conversational/document context. Candidate
+ * generation and ranking always operate on the matched chunk alone. Slack gets
+ * one neighboring window on either side; Confluence gets up to two, matching
+ * the section-adjacency contract once heading-aware chunks are ingested. */
+function confluenceSectionCoordinate(metadataJson: string): { pageId: string; sectionIndex: number } | null {
+  const metadata = parseJson<Record<string, unknown>>(metadataJson, {});
+  const pageId = metadata.page_id;
+  const sectionIndex = metadata.section_index;
+  if ((typeof pageId !== "string" && typeof pageId !== "number")
+    || typeof sectionIndex !== "number"
+    || !Number.isInteger(sectionIndex)) return null;
+  return { pageId: String(pageId), sectionIndex };
+}
+
+/** Confluence stores one document per heading section. Expand across sibling
+ * section documents on the same site/page, while retaining a bounded excerpt
+ * from every selected neighbor so the matched section cannot be truncated out. */
+function expandConfluenceSectionContext(hit: ProjectSearchHit): boolean {
+  const matchedDocument = db.prepare(
+    `SELECT id, org_id, project_id, source_instance, title, metadata_json
+     FROM project_search_documents
+     WHERE id = ? AND source = 'confluence'`,
+  ).get(hit.document_id) as ConfluenceContextDocumentRow | undefined;
+  if (!matchedDocument) return false;
+  const matchedCoordinate = confluenceSectionCoordinate(matchedDocument.metadata_json);
+  if (!matchedCoordinate) return false;
+
+  const documents = (db.prepare(
+    `SELECT id, org_id, project_id, source_instance, title, metadata_json
+     FROM project_search_documents
+     WHERE org_id = ? AND project_id = ? AND source = 'confluence'
+       AND source_instance = ? AND freshness_state <> 'deleted'
+       AND visibility = 'project_visible'
+     ORDER BY id`,
+  ).all(
+    matchedDocument.org_id,
+    matchedDocument.project_id,
+    matchedDocument.source_instance,
+  ) as unknown as ConfluenceContextDocumentRow[])
+    .map((document) => ({ document, coordinate: confluenceSectionCoordinate(document.metadata_json) }))
+    .filter((entry): entry is { document: ConfluenceContextDocumentRow; coordinate: { pageId: string; sectionIndex: number } } =>
+      entry.coordinate !== null
+      && entry.coordinate.pageId === matchedCoordinate.pageId
+      && Math.abs(entry.coordinate.sectionIndex - matchedCoordinate.sectionIndex) <= 2)
+    .sort((a, b) => a.coordinate.sectionIndex - b.coordinate.sectionIndex || a.document.id.localeCompare(b.document.id));
+  if (documents.length <= 1) return false;
+
+  const documentIds = documents.map(({ document }) => document.id);
+  const chunks = db.prepare(
+    `SELECT id, document_id, chunk_index, chunk_kind, text
+     FROM project_search_chunks
+     WHERE document_id IN (${documentIds.map(() => "?").join(", ")})
+     ORDER BY document_id, chunk_index`,
+  ).all(...documentIds) as unknown as ConfluenceContextChunkRow[];
+  const chunksByDocument = new Map<string, ConfluenceContextChunkRow[]>();
+  for (const chunk of chunks) {
+    const existing = chunksByDocument.get(chunk.document_id) ?? [];
+    existing.push(chunk);
+    chunksByDocument.set(chunk.document_id, existing);
+  }
+
+  const separatorChars = Math.max(0, documents.length - 1) * 2;
+  const perSectionLimit = Math.max(180, Math.floor((1_600 - separatorChars) / documents.length));
+  const sections = documents.map(({ document }) => {
+    const documentChunks = chunksByDocument.get(document.id) ?? [];
+    const bodyChunks = documentChunks.filter((chunk) => chunk.chunk_kind !== "title");
+    const text = (bodyChunks.length > 0 ? bodyChunks : documentChunks)
+      .map((chunk) => chunk.text)
+      .filter(Boolean)
+      .join("\n\n");
+    return snippet(`${document.title}\n${text}`.trim(), perSectionLimit);
+  }).filter(Boolean);
+  if (sections.length <= 1) return false;
+  hit.snippet = sections.join("\n\n");
+  return true;
+}
+
+function expandSelectedContext(hits: ProjectSearchHit[]): void {
+  const loadMatch = db.prepare(
+    `SELECT id, document_id, chunk_index, text
+     FROM project_search_chunks WHERE id = ? AND document_id = ?`,
+  );
+  for (const hit of hits) {
+    if (!hit.chunk_id || (hit.source !== "slack" && hit.source !== "confluence")) continue;
+    if (hit.source === "confluence" && expandConfluenceSectionContext(hit)) continue;
+    const matched = loadMatch.get(hit.chunk_id, hit.document_id) as AdjacentChunkRow | undefined;
+    if (!matched) continue;
+    const radius = hit.source === "confluence" ? 2 : 1;
+    const rows = db
+      .prepare(
+        `SELECT id, document_id, chunk_index, text
+         FROM project_search_chunks
+         WHERE document_id = ? AND chunk_index BETWEEN ? AND ?
+         ORDER BY chunk_index`,
+      )
+      .all(matched.document_id, Math.max(0, matched.chunk_index - radius), matched.chunk_index + radius) as unknown as AdjacentChunkRow[];
+    if (rows.length <= 1) continue;
+    hit.snippet = snippet(rows.map((row) => row.text).filter(Boolean).join("\n\n"), 1_600);
+  }
+}
+
 /**
  * Runs a hybrid search over one project's index. Returns null when the project
  * does not exist for the org (so the route can 404).
@@ -983,28 +1464,68 @@ export async function searchProject(
   const project = loadProject(orgId, projectId);
   if (!project) return null;
   const resources = parseResources(project.resources_json);
-  const documentCounts = documentsBySource(orgId, projectId);
+  const safeQuery = redactProjectText(req.query).text;
 
   const maxHits = Math.min(Math.max(req.max_hits ?? DEFAULT_MAX_HITS, 1), 50);
-  const includeKg = req.include_kg ?? true;
+  const includeKg = req.include_kg ?? (req.sources ? req.sources.includes("kg") : true);
   const includeMindMap = req.include_mind_map ?? false;
   const graphExpansionEnabled = req.graph_expansion ?? true;
-  const sourceFilter = req.sources && req.sources.length > 0 ? new Set(req.sources) : null;
+  const sourceFilter: Set<ProjectSearchSource> | null = req.sources && req.sources.length > 0
+    ? new Set(req.sources)
+    : null;
+  const enabledFlag = (name: string): boolean =>
+    ["1", "true", "yes", "on"].includes((process.env[name] ?? "").trim().toLowerCase());
+  const confluencePolicy = confluenceProjectVisibilityPolicy();
+  const confluenceSourceInstance = configuredConfluenceSourceInstance();
+  const confluenceSpaceKeys = [...confluencePolicy.space_keys].sort();
+  const confluencePageIds = [...confluencePolicy.page_ids].sort();
   const entityTypes = req.entity_types && req.entity_types.length > 0 ? [...new Set(req.entity_types)] : null;
-  const entityFilteredDocumentIds = entityTypes ? documentIdsForEntityTypes(orgId, projectId, entityTypes) : null;
   const cutoff = req.time_window_days
     ? new Date(Date.now() - req.time_window_days * 864e5).toISOString()
     : null;
+  const filters: CandidateFilters = {
+    orgId,
+    projectId,
+    sources: sourceFilter ? [...sourceFilter] : null,
+    entityTypes,
+    cutoff,
+    slackReadEnabled: enabledFlag("PROJECT_SLACK_SEARCH_ENABLED"),
+    confluenceReadEnabled: enabledFlag("PROJECT_CONFLUENCE_SEARCH_ENABLED")
+      && !!confluenceSourceInstance
+      && (confluenceSpaceKeys.length > 0 || confluencePageIds.length > 0),
+    confluenceSourceInstance,
+    confluenceSpaceKeys,
+    confluencePageIds,
+    resources,
+  };
+  const documentCounts = documentsBySource(filters);
+  const eligibleDocuments = eligibleDocumentIds(filters);
 
-  const identifiers = [...extractIdentifiers(req.query)];
-  const terms = queryTerms(req.query);
+  const expandedQuery = expandProjectQuery(req.query, project.name, resources);
+  const detectedIdentifierSet = extractIdentifiers(req.query);
+  const wholeQueryIdentifier = normalizeIdentifierToken(req.query);
+  if (isReferenceIdentifier(wholeQueryIdentifier) && !/\s/.test(wholeQueryIdentifier)) {
+    detectedIdentifierSet.add(wholeQueryIdentifier);
+  }
+  const detectedIdentifiers = [...detectedIdentifierSet];
+  const identifierSet = extractIdentifiers(expandedQuery.lexical);
+  for (const identifier of detectedIdentifierSet) identifierSet.add(identifier);
+  const identifiers = [...identifierSet];
+  const terms = queryTerms(expandedQuery.lexical);
   const matchExpr = buildMatchExpression(terms, identifiers);
 
   // ---- candidate generation ----
-  const lexical = lexicalSearch(orgId, projectId, matchExpr);
-  const queryVec = isEmbeddingAvailable() ? await generateEmbedding(req.query) : null;
-  const semantic = queryVec ? semanticSearch(orgId, projectId, queryVec) : [];
-  const identifierDocs = identifierMatches(orgId, projectId, identifiers);
+  const lexical = lexicalSearch(filters, matchExpr);
+  let queryVec: number[] | null = null;
+  if (isEmbeddingAvailable()) {
+    try {
+      queryVec = await generateEmbedding(redactProjectText(expandedQuery.semantic).text);
+    } catch {
+      queryVec = null;
+    }
+  }
+  const semantic = queryVec ? semanticSearch(filters, queryVec) : [];
+  const identifierDocs = identifierMatches(filters, identifiers);
 
   const acc = new Map<string, DocAccumulator>();
   const ensure = (docId: string): DocAccumulator => {
@@ -1029,19 +1550,37 @@ export async function searchProject(
       a.bestSemChunk = hit.chunk_id;
     }
   }
-  for (const docId of identifierDocs) ensure(docId).identifier = true;
+  for (const [docId, kind] of identifierDocs) {
+    const candidate = ensure(docId);
+    candidate.identifier = true;
+    if (kind === "native") candidate.nativeIdentifier = true;
+  }
 
-  const graphExpansion = graphExpansionEnabled
-    ? expandProjectGraph(orgId, projectId, req.query, identifiers, acc)
-    : emptyGraphExpansion();
-  for (const [docId, graphScore] of graphExpansion.docScores) {
-    const a = ensure(docId);
-    a.graphScore = Math.max(a.graphScore ?? 0, graphScore);
-    const entityIds = graphExpansion.entityIdsByDocument.get(docId);
-    if (entityIds) {
-      a.graphEntityIds = new Set([...(a.graphEntityIds ?? []), ...entityIds]);
+  let graphExpansion = emptyGraphExpansion();
+  if (graphExpansionEnabled) {
+    try {
+      graphExpansion = expandProjectGraph(
+        orgId,
+        projectId,
+        expandedQuery.lexical,
+        identifiers,
+        acc,
+        eligibleDocuments,
+      );
+    } catch {
+      // Graph is an optional retrieval lane. Lexical/exact/semantic evidence
+      // remains available if graph tables are absent or temporarily invalid.
+      graphExpansion = emptyGraphExpansion();
     }
   }
+  const graphRanks = [...graphExpansion.docScores.entries()]
+    .filter(([docId]) => eligibleDocuments.has(docId))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, CANDIDATE_K);
+  graphRanks.forEach(([docId], index) => {
+    const a = ensure(docId);
+    a.graphRank = index + 1;
+  });
 
   if (acc.size === 0) {
     // Live fallback: when the index has no candidates and the caller opted in,
@@ -1050,23 +1589,24 @@ export async function searchProject(
       const liveHits = await liveFallbackHits(orgId, projectId, req, resources, maxHits);
       if (liveHits.length > 0) {
         const coverage = embeddingCoverage(orgId, projectId);
-        const overlay = includeKg ? kgOverlay(orgId, projectId, req.query, queryVec) : [];
+        const overlay = includeKg ? kgOverlay(orgId, projectId, safeQuery, queryVec) : [];
         const response: ProjectSearchResponse = {
-          query: req.query,
+          query: safeQuery,
           project_id: projectId,
           project_name: project.name,
           hits: liveHits,
           sources_used: [...new Set(liveHits.map((h) => h.source))],
           documents_by_source: documentCounts,
-          detected_identifiers: identifiers,
+          detected_identifiers: detectedIdentifiers,
           embedding_coverage: coverage,
           retrieval_mode: "lexical",
           total_documents: totalDocumentCount(documentCounts),
+          source_health: getProjectSourceHealth(orgId, projectId) ?? [],
           generated_at: new Date().toISOString(),
         };
         if (overlay.length > 0) response.kg_overlay = overlay;
         if (req.synthesize) {
-          const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], liveHits, overlay);
+          const summary = await synthesizeAnswer(safeQuery, project.name, resources.aliases ?? [], liveHits, overlay);
           if (summary) response.summary_md = redactSecrets(summary).text;
           const citations = answerCitations(overlay, liveHits);
           if (citations.length > 0) response.answer_citations = citations;
@@ -1078,13 +1618,14 @@ export async function searchProject(
       project,
       resources,
       req,
-      identifiers,
+      detectedIdentifiers,
       queryVec,
       orgId,
       projectId,
       includeKg,
       includeMindMap,
       documentCounts,
+      eligibleDocuments,
       graphExpansion,
     );
   }
@@ -1122,37 +1663,44 @@ export async function searchProject(
   for (const [docId, a] of acc) {
     const doc = docById.get(docId);
     if (!doc) continue;
+    // Defensive checks mirror the candidate-generation predicate. They are not
+    // relied upon for top-k correctness, but protect against inconsistent rows.
     if (doc.freshness_state === "deleted") continue;
     if (sourceFilter && !sourceFilter.has(doc.source)) continue;
-    if (entityFilteredDocumentIds && !entityFilteredDocumentIds.has(doc.id)) continue;
+    if (!eligibleDocuments.has(doc.id)) continue;
     if (cutoff && doc.occurred_at && doc.occurred_at < cutoff) continue;
 
     const lexScore = a.lexRank ? 1 / (RRF_K + a.lexRank) : 0;
     const semScore = a.semRank ? 1 / (RRF_K + a.semRank) : 0;
-    const graphScore = a.graphScore ?? 0;
+    const graphScore = a.graphRank ? 1 / (RRF_K + a.graphRank) : 0;
     const scopeHit = inScope(doc, resources);
     let score = lexScore + semScore + graphScore;
     if (a.identifier) score += 1; // exact identifier lookups dominate
-    if (scopeHit) score += 0.15;
-    if (doc.occurred_at) {
-      const ageDays = (Date.now() - new Date(doc.occurred_at).getTime()) / 864e5;
-      if (!Number.isNaN(ageDays) && ageDays <= INDEXED_RECENCY_DAYS)
-        score += INDEXED_RECENCY_MAX * (1 - ageDays / INDEXED_RECENCY_DAYS);
-    }
+    if (a.nativeIdentifier) score += 0.1; // native identity beats title mentions of the same id
+    if (scopeHit) score += INDEXED_SCOPE_BONUS;
+    score += indexedAgeBoost(doc);
     score += INDEXED_SOURCE_AUTHORITY[doc.source] ?? 0;
     score += intentBoost(req.query, doc);
-    if (doc.freshness_state === "stale") score -= 0.1;
+    if (doc.freshness_state === "stale") score -= INDEXED_STALE_PENALTY;
 
-    const bestChunk = chunkText.get(a.bestLexChunk ?? "") ?? chunkText.get(a.bestSemChunk ?? "");
+    const bestChunkId = a.bestLexChunk && a.bestSemChunk
+      ? (a.lexRank ?? Number.POSITIVE_INFINITY) <= (a.semRank ?? Number.POSITIVE_INFINITY)
+        ? a.bestLexChunk
+        : a.bestSemChunk
+      : a.bestLexChunk ?? a.bestSemChunk;
+    const bestChunk = chunkText.get(bestChunkId ?? "");
+    const sourceUrl = doc.source === "slack"
+      ? slackMessagePermalink(bestChunk?.text ?? "", req.query) ?? doc.source_url ?? undefined
+      : doc.source_url ?? undefined;
     hits.push({
       document_id: doc.id,
-      ...(a.bestLexChunk || a.bestSemChunk ? { chunk_id: a.bestLexChunk ?? a.bestSemChunk } : {}),
+      ...(bestChunkId ? { chunk_id: bestChunkId } : {}),
       source: doc.source,
       source_type: doc.source_type,
       source_id: doc.source_id,
       title: doc.title,
       snippet: snippet(bestChunk?.text ?? doc.title),
-      ...(doc.source_url ? { url: doc.source_url } : {}),
+      ...(sourceUrl ? { url: sourceUrl } : {}),
       ...(doc.author ? { author: doc.author } : {}),
       ...(doc.occurred_at ? { occurred_at: doc.occurred_at } : {}),
       ...(doc.status ? { status: doc.status } : {}),
@@ -1171,7 +1719,7 @@ export async function searchProject(
     });
   }
 
-  hits.sort((x, y) => y.score - x.score);
+  hits.sort((x, y) => y.score - x.score || x.source_id.localeCompare(y.source_id) || x.document_id.localeCompare(y.document_id));
   // Diversity: keep one doc-type/source (e.g. 54 releases or a Jira-only pile)
   // from flooding the answer, so questions still surface supporting implementation
   // artifacts when they exist.
@@ -1206,29 +1754,34 @@ export async function searchProject(
     if (graphOnly) graphOnlyCount++;
   }
 
+  // Source-native context is deliberately expanded after ranking/diversity so
+  // neighboring text cannot influence candidate scores.
+  expandSelectedContext(top);
+
   const sourcesUsed = [...new Set(top.map((h) => h.source))];
   const coverage = embeddingCoverage(orgId, projectId);
   const implementationGuard = implementationEvidenceGuard(documentCounts);
-  const overlay = includeKg ? kgOverlay(orgId, projectId, req.query, queryVec) : [];
+  const overlay = includeKg ? kgOverlay(orgId, projectId, safeQuery, queryVec) : [];
 
   const response: ProjectSearchResponse = {
-    query: req.query,
+    query: safeQuery,
     project_id: projectId,
     project_name: project.name,
     hits: scrubHits(top),
     sources_used: sourcesUsed,
     documents_by_source: documentCounts,
-    detected_identifiers: identifiers,
+    detected_identifiers: detectedIdentifiers,
     embedding_coverage: coverage,
     // "hybrid" only when the query embedded AND there is an embedded corpus to match against.
     retrieval_mode: queryVec && coverage > 0 ? "hybrid" : "lexical",
     total_documents: totalDocumentCount(documentCounts),
+    source_health: getProjectSourceHealth(orgId, projectId) ?? [],
     generated_at: new Date().toISOString(),
   };
   if (overlay.length > 0) response.kg_overlay = overlay;
   if (graphExpansion.focusFeature) response.focus_feature = graphExpansion.focusFeature;
   if (req.synthesize) {
-    const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], top, overlay);
+    const summary = await synthesizeAnswer(safeQuery, project.name, resources.aliases ?? [], top, overlay);
     if (summary || implementationGuard) {
       const scrubbed = summary ? redactSecrets(summary).text : undefined;
       response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
@@ -1237,7 +1790,13 @@ export async function searchProject(
     if (citations.length > 0) response.answer_citations = citations;
   }
   if (includeMindMap) {
-    const map = mindMapNeighborhood(orgId, projectId, top.map((h) => h.document_id), graphExpansion.seedEntityIds);
+    const map = mindMapNeighborhood(
+      orgId,
+      projectId,
+      top.map((h) => h.document_id),
+      eligibleDocuments,
+      graphExpansion.seedEntityIds,
+    );
     if (map) response.mind_map = map;
   }
   return response;
@@ -1264,12 +1823,14 @@ async function emptyResponse(
   includeKg: boolean,
   includeMindMap: boolean,
   documentCounts: Partial<Record<ProjectSearchSource, number>>,
+  eligibleDocuments: Set<string>,
   graphExpansion: GraphExpansion = emptyGraphExpansion(),
 ): Promise<ProjectSearchResponse> {
   const coverage = embeddingCoverage(orgId, projectId);
-  const overlay = includeKg ? kgOverlay(orgId, projectId, req.query, queryEmbedding) : [];
+  const safeQuery = redactProjectText(req.query).text;
+  const overlay = includeKg ? kgOverlay(orgId, projectId, safeQuery, queryEmbedding) : [];
   const response: ProjectSearchResponse = {
-    query: req.query,
+    query: safeQuery,
     project_id: project.project_id,
     project_name: project.name,
     hits: [],
@@ -1279,13 +1840,14 @@ async function emptyResponse(
     embedding_coverage: coverage,
     retrieval_mode: queryEmbedding && coverage > 0 ? "hybrid" : "lexical",
     total_documents: totalDocumentCount(documentCounts),
+    source_health: getProjectSourceHealth(orgId, projectId) ?? [],
     generated_at: new Date().toISOString(),
   };
   if (overlay.length > 0) response.kg_overlay = overlay;
   if (graphExpansion.focusFeature) response.focus_feature = graphExpansion.focusFeature;
   if (req.synthesize) {
     const implementationGuard = implementationEvidenceGuard(documentCounts);
-    const summary = await synthesizeAnswer(req.query, project.name, resources.aliases ?? [], [], overlay);
+    const summary = await synthesizeAnswer(safeQuery, project.name, resources.aliases ?? [], [], overlay);
     if (summary || implementationGuard) {
       const scrubbed = summary ? redactSecrets(summary).text : undefined;
       response.summary_md = [implementationGuard, scrubbed].filter(Boolean).join("\n\n");
@@ -1294,7 +1856,7 @@ async function emptyResponse(
     if (citations.length > 0) response.answer_citations = citations;
   }
   if (includeMindMap) {
-    const map = mindMapNeighborhood(orgId, projectId, [], graphExpansion.seedEntityIds);
+    const map = mindMapNeighborhood(orgId, projectId, [], eligibleDocuments, graphExpansion.seedEntityIds);
     if (map) response.mind_map = map;
   }
   return response;

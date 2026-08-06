@@ -72,7 +72,7 @@ npx cdk synth PimEc2Stack-rkhan
 npx cdk deploy PimEc2Stack-rkhan --require-approval never --outputs-file outputs.json
 ```
 
-Outputs include: `CloudFrontUrl`, `EcrRepoUri`, `UiBucketName`, `KnowledgeGraphBucketName`, `BackupsBucketName`, `AutoScalingGroupName`, `DistributionId`, `LogGroupName`, `AlbDnsName`.
+Outputs include: `CloudFrontUrl`, `EcrRepoUri`, `UiBucketName`, `KnowledgeGraphBucketName`, `BackupsBucketName`, `DataBackupVaultName`, `DataBackupPlanId`, `AutoScalingGroupName`, `DistributionId`, `LogGroupName`, `AlbDnsName`.
 
 After the stack comes up, the EC2 instance starts but has no image to run yet. **Push the initial image:**
 
@@ -155,7 +155,10 @@ The active deployment is at **`https://d1ygncl0yqo6sv.cloudfront.net`** (stack `
 4. Submit a context update; check CloudWatch Logs `/aws/ec2/pim-rkhan-server` for the Bedrock invocation line.
 5. Browser devtools: `/ws?podId=<id>` WebSocket connects.
 6. After 30 min: `aws s3 ls s3://pim-rkhan-kg-<account>/knowledge-graph/default/` should show `graph-latest.json`.
-7. Top of the next hour: `aws s3 ls s3://pim-rkhan-backups-<account>/backups/` should show a dump.
+7. Top of the next hour: `aws s3 ls s3://pim-rkhan-backups-<account>/backups/hourly/` should show a `pim-core-*.sql.gz` dump and `.sha256` sidecar.
+8. After minute 15: AWS Backup should show a completed recovery point for the EBS volume tagged `PimBackup=pim-rkhan-data`.
+
+See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) for retention, restore behavior, and recovery testing.
 
 ## Rollback
 

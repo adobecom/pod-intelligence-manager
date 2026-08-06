@@ -192,11 +192,23 @@ const CreateServiceTokenSchema = z
     scopes: z.array(z.enum(SERVICE_TOKEN_SCOPES)).min(1),
     project_id: z.string().min(1).optional(),
     pod_id: z.string().min(1).optional(),
+    repository_ids: z.array(
+      z.string().regex(/^github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+$/).max(256),
+    ).max(32).default([]),
+    harness_ids: z.array(z.string().min(1).max(64)).max(32).default([]),
     expires_in_days: z.number().int().positive().max(365).default(90),
   })
   .refine((body) => !(body.project_id && body.pod_id), {
     message: "A service token cannot be both project-bound and pod-bound",
     path: ["pod_id"],
+  })
+  .refine((body) => new Set(body.repository_ids).size === body.repository_ids.length, {
+    message: "Repository bindings must be unique",
+    path: ["repository_ids"],
+  })
+  .refine((body) => new Set(body.harness_ids).size === body.harness_ids.length, {
+    message: "Harness bindings must be unique",
+    path: ["harness_ids"],
   });
 
 export default async function orgRoutes(app: FastifyInstance) {
@@ -235,6 +247,8 @@ export default async function orgRoutes(app: FastifyInstance) {
           scopes: req.body.scopes,
           projectId: req.body.project_id,
           podId: req.body.pod_id,
+          repositoryIds: req.body.repository_ids,
+          harnessIds: req.body.harness_ids,
           expiresAt,
           createdByUserId: req.userRecord.user_id,
         });

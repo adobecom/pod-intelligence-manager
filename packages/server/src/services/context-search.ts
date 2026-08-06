@@ -8,6 +8,7 @@ import type {
   ContextSearchResult,
   ContextSource,
   ProjectResources,
+  ProjectSearchSource,
   SearchDocument,
 } from "@pim/shared";
 import { CONTEXT_SOURCES } from "@pim/shared";
@@ -24,6 +25,9 @@ import { searchKG } from "../integrations/kg.js";
 import type { IntegrationResult, IntegrationSearchOpts } from "../integrations/types.js";
 import db from "../db/connection.js";
 import { detectPersonTokens, resolveActor, stripActivityPhrasing } from "./identity-resolver.js";
+import { searchProject } from "./project-search.js";
+import { redactProjectText } from "./project-evidence-normalization.js";
+import { sanitizeProjectResources } from "./project-resource-bindings.js";
 
 const DEFAULT_TIME_WINDOW_DAYS = 90;
 const DEFAULT_MAX_HITS_PER_SOURCE = 10;
@@ -84,6 +88,7 @@ export interface SearchContextOptions {
 
 export function cacheKey(req: ContextSearchRequest, scope: ResolvedScope, orgId: string): string {
   const normalized = {
+    cache_policy_version: 3,
     org_id: orgId,
     query: req.query.trim().toLowerCase(),
     sources: [...(req.sources ?? CONTEXT_SOURCES)].sort(),
@@ -114,15 +119,19 @@ function cachePath(key: string): string {
 }
 
 function readCache(key: string, ttlSec: number): ContextSearchResult | null {
+  const p = cachePath(key);
   try {
-    const p = cachePath(key);
     if (!fs.existsSync(p)) return null;
     const stat = fs.statSync(p);
     const ageSec = (Date.now() - stat.mtimeMs) / 1000;
-    if (ageSec > ttlSec) return null;
+    if (ageSec > ttlSec) {
+      fs.unlinkSync(p);
+      return null;
+    }
     const raw = fs.readFileSync(p, "utf-8");
     return JSON.parse(raw) as ContextSearchResult;
   } catch {
+    try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* best effort derived-cache cleanup */ }
     return null;
   }
 }
@@ -135,7 +144,12 @@ function writeCache(
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     const p = cachePath(key);
-    fs.writeFileSync(p, JSON.stringify(result), "utf-8");
+    // Query text is reconstructed from the active request on a cache hit. It
+    // never needs to cross the disk boundary, and the remainder is scrubbed as
+    // one JSON payload so nested metadata and embedded credential URLs cannot
+    // bypass field-specific output scrubbers.
+    const cacheValue = { ...result, query: "[omitted]" };
+    fs.writeFileSync(p, redactProjectText(JSON.stringify(cacheValue)).text, "utf-8");
     if (opts && opts.effectiveTtlSec < opts.fullTtlSec) {
       // Back-date mtime so the next read sees an older entry and respects
       // the shorter partial-result TTL even though readers compare against
@@ -175,7 +189,7 @@ function loadProjectRow(projectId: string, orgId?: string):
 function parseResources(raw: string | null): ProjectResources | undefined {
   if (!raw) return undefined;
   try {
-    return JSON.parse(raw) as ProjectResources;
+    return sanitizeProjectResources(JSON.parse(raw) as ProjectResources);
   } catch {
     return undefined;
   }
@@ -496,6 +510,89 @@ function dedupe(hits: ContextSearchHit[]): ContextSearchHit[] {
   return [...seen.values()];
 }
 
+const PROJECT_CONTEXT_SOURCES = new Set<ContextSource>([
+  "kg", "slack", "jira", "confluence", "github", "git",
+]);
+
+/** Delegate current, actor-free project context queries to the deterministic
+ * indexed retrieval core. Actor and temporal modes retain their existing live
+ * paths until equivalent pre-candidate filters exist in project search. */
+async function searchIndexedProjectContext(
+  req: ContextSearchRequest,
+  scope: ResolvedScope,
+  orgId: string,
+): Promise<ContextSearchResult | null> {
+  if (!scope.project_id || req.pod_id || scope.actor || (req.query_mode ?? "current") !== "current") return null;
+  const selected = req.sources ?? CONTEXT_SOURCES;
+  const indexedSources = selected.filter((source) => PROJECT_CONTEXT_SOURCES.has(source));
+  if (indexedSources.length === 0) return null;
+
+  const query = scope.cleaned_query?.trim() || req.query;
+  const response = await searchProject(orgId, scope.project_id, {
+    query,
+    sources: indexedSources as ProjectSearchSource[],
+    time_window_days: req.time_window_days ?? DEFAULT_TIME_WINDOW_DAYS,
+    max_hits: Math.min(50, (req.max_hits_per_source ?? DEFAULT_MAX_HITS_PER_SOURCE) * indexedSources.length),
+    include_kg: indexedSources.includes("kg"),
+    synthesize: req.synthesize !== false,
+  });
+  if (!response) return null;
+
+  const hits: ContextSearchHit[] = response.hits.map((hit) => ({
+    source: hit.source as ContextSource,
+    title: hit.title,
+    ...(hit.url ? { url: hit.url } : {}),
+    snippet: hit.snippet,
+    ...(hit.author ? { author: hit.author } : {}),
+    ...(hit.occurred_at ? { timestamp: hit.occurred_at } : {}),
+    metadata: {
+      source_id: hit.source_id,
+      source_type: hit.source_type,
+      freshness: hit.freshness,
+      score: hit.score,
+      matched: hit.matched,
+      ...(hit.status ? { status: hit.status } : {}),
+      ...(hit.chunk_id ? { chunk_id: hit.chunk_id } : {}),
+      document_id: hit.document_id,
+    },
+  }));
+  for (const kg of response.kg_overlay ?? []) {
+    hits.push({
+      source: "kg",
+      title: kg.summary,
+      url: kg.url,
+      snippet: kg.snippet,
+      metadata: {
+        node_id: kg.id,
+        confidence_score: kg.confidence_score,
+        curated: kg.curated === true,
+      },
+    });
+  }
+
+  const actualSources = new Set<ContextSource>();
+  for (const source of response.sources_used) {
+    const contextSource = source as ContextSource;
+    if (PROJECT_CONTEXT_SOURCES.has(contextSource)) actualSources.add(contextSource);
+  }
+  if ((response.kg_overlay?.length ?? 0) > 0) actualSources.add("kg");
+  const explicitlyUnsupported = req.sources?.filter((source) => !PROJECT_CONTEXT_SOURCES.has(source)) ?? [];
+  return {
+    query: redactProjectText(req.query).text,
+    project_id: response.project_id,
+    project_name: response.project_name ?? scope.project_name,
+    summary_md: response.summary_md,
+    hits: dedupe(scrubHits(hits)),
+    sources_used: [...actualSources],
+    missing_sources: explicitlyUnsupported.map((source) => ({
+      source,
+      reason: "Source is not available in indexed project retrieval",
+    })),
+    from_cache: false,
+    generated_at: response.generated_at,
+  };
+}
+
 async function synthesize(
   query: string,
   hits: ContextSearchHit[],
@@ -553,14 +650,25 @@ export async function searchContext(
   opts: SearchContextOptions = {},
 ): Promise<ContextSearchResult> {
   const ttlSec = parseInt(process.env.CONTEXT_SEARCH_CACHE_TTL_SEC ?? String(DEFAULT_CACHE_TTL_SEC), 10);
-  const useCache = req.use_cache !== false;
 
   const scope = await resolveScope(req, orgId, opts.authenticatedUserEmail);
+  const safeQuery = redactProjectText(req.query).text;
+
+  // The indexed project wrapper shares the policy-aware retrieval core and is
+  // deliberately uncached during the deterministic MVP phase.
+  const indexedProjectResult = await searchIndexedProjectContext(req, scope, orgId);
+  if (indexedProjectResult) return indexedProjectResult;
+
+  // Legacy live cache entries cannot safely outlive Slack/Confluence
+  // visibility changes or reconciliation. Keep those sources uncached.
+  const selectedForCache = req.sources ?? CONTEXT_SOURCES;
+  const policySensitive = selectedForCache.includes("slack") || selectedForCache.includes("confluence");
+  const useCache = req.use_cache !== false && !policySensitive;
 
   const key = cacheKey(req, scope, orgId);
   if (useCache) {
     const cached = readCache(key, ttlSec);
-    if (cached) return { ...cached, from_cache: true };
+    if (cached) return { ...cached, query: safeQuery, from_cache: true };
   }
 
   // Build the per-integration query. When an actor is set and the query
@@ -569,7 +677,7 @@ export async function searchContext(
   // text-match clauses don't anchor on words like "recent" or "activity".
   // The KG keeps the unmodified query because semantic ranking benefits
   // from intent words.
-  let perSourceQuery = scope.cleaned_query ?? req.query;
+  let perSourceQuery = redactProjectText(scope.cleaned_query ?? req.query).text;
   if (scope.is_activity_query && scope.actor) {
     perSourceQuery = stripActivityPhrasing(perSourceQuery, scope.actor) || "";
   }
@@ -601,7 +709,7 @@ export async function searchContext(
   // The KG always sees the original query — semantic search benefits from
   // the intent phrasing other integrations have to drop. It also follows
   // the Jira-only-actor rule when the fallback fired.
-  const kgOpts: IntegrationSearchOpts = { ...nonJiraOpts, query: req.query };
+  const kgOpts: IntegrationSearchOpts = { ...nonJiraOpts, query: safeQuery };
 
   const selected = (req.sources ?? CONTEXT_SOURCES).filter((s) => s in INTEGRATIONS);
   const settled = await Promise.allSettled(
@@ -619,12 +727,12 @@ export async function searchContext(
   settled.forEach((r, i) => {
     const source = selected[i];
     if (r.status === "rejected") {
-      missing_sources.push({ source, reason: String(r.reason?.message ?? r.reason) });
+      missing_sources.push({ source, reason: `${source}_connector_failed` });
       return;
     }
     const res = r.value;
     if (res.missing) {
-      missing_sources.push({ source, reason: res.missing });
+      missing_sources.push({ source, reason: `${source}_connector_unavailable` });
       return;
     }
     // Success (no error) → report as used even when 0 hits, so callers
@@ -636,10 +744,10 @@ export async function searchContext(
   const ranked = rankHits(dedupe(scrubHits(allHits)), req.query, scope.project_resources);
 
   const summary_md =
-    req.synthesize !== false ? await synthesize(req.query, ranked, scope) : undefined;
+    req.synthesize !== false ? await synthesize(safeQuery, ranked, scope) : undefined;
 
   const result: ContextSearchResult = {
-    query: req.query,
+    query: safeQuery,
     project_id: scope.project_id,
     project_name: scope.project_name,
     actor: scope.actor,

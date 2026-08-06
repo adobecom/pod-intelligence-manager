@@ -2,9 +2,9 @@ import type { SearchDocument } from "@pim/shared";
 import {
   type IntegrationResult,
   type IntegrationSearchOpts,
-  describeFetchError,
   truncate,
 } from "./types.js";
+import { hasJiraProjectBinding } from "../services/project-resource-bindings.js";
 
 // Jira search with JQL. Supports two Jira flavors:
 //   - Adobe on-prem (jira.corp.adobe.com): Authorization: Bearer <PAT>, REST v2.
@@ -55,16 +55,38 @@ export function extractFixVersions(query: string): { versions: string[]; cleaned
 
 function buildJql(opts: IntegrationSearchOpts): string {
   const clauses: string[] = [];
+  const jira = opts.project_resources?.jira;
 
-  const projectKeys = opts.project_resources?.jira?.project_keys ?? [];
+  const projectKeys = jira?.project_keys ?? [];
   if (projectKeys.length > 0) {
     const keyList = projectKeys.map((k) => `"${escapeJql(k)}"`).join(", ");
     clauses.push(`project in (${keyList})`);
   }
 
-  const team = opts.project_resources?.jira?.team;
+  const team = jira?.team;
   if (team) {
     clauses.push(`"Team" = "${escapeJql(team)}"`);
+  }
+
+  const components = jira?.components ?? [];
+  if (components.length > 0) {
+    clauses.push(`component in (${components.map((value) => `"${escapeJql(value)}"`).join(", ")})`);
+  }
+
+  const epics = jira?.epics ?? [];
+  if (epics.length > 0) {
+    const list = epics.map((value) => `"${escapeJql(value)}"`).join(", ");
+    clauses.push(`("Epic Link" in (${list}) OR parent in (${list}))`);
+  }
+
+  const issueKeys = jira?.issue_keys ?? [];
+  if (issueKeys.length > 0) {
+    clauses.push(`issuekey in (${issueKeys.map((value) => `"${escapeJql(value)}"`).join(", ")})`);
+  }
+
+  const configuredFixVersions = jira?.fix_versions ?? [];
+  if (configuredFixVersions.length > 0) {
+    clauses.push(`fixVersion in (${configuredFixVersions.map((value) => `"${escapeJql(value)}"`).join(", ")})`);
   }
 
   const actor = opts.actor;
@@ -131,6 +153,12 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
   // refused.
   const projectKeys = opts.project_resources?.jira?.project_keys ?? [];
   const team = opts.project_resources?.jira?.team;
+  if (opts.project_id && projectKeys.length === 0 && !team) {
+    return { source: "jira", documents: [], missing: "No Jira project or team is bound to this project" };
+  }
+  if (opts.project_id && opts.project_resources && !hasJiraProjectBinding(opts.project_resources)) {
+    return { source: "jira", documents: [], missing: "Jira project binding is invalid" };
+  }
   const hasActor = !!opts.actor?.email;
   const { versions } = extractFixVersions(opts.query);
   const hasNarrowingScope =
@@ -177,8 +205,7 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
     });
 
     if (!res.ok) {
-      const body = (await res.text().catch(() => "")).slice(0, 200).replace(/\s+/g, " ");
-      return { source: "jira", documents: [], missing: `Jira ${res.status}: ${body}` };
+      return { source: "jira", documents: [], missing: `Jira request failed (${res.status})` };
     }
 
     const data = (await res.json()) as JiraSearchResponse;
@@ -209,11 +236,11 @@ export async function searchJira(opts: IntegrationSearchOpts): Promise<Integrati
     });
 
     return { source: "jira", documents };
-  } catch (err) {
+  } catch {
     return {
       source: "jira",
       documents: [],
-      missing: `Jira error: ${describeFetchError(err, base)}`,
+      missing: "Jira connector request failed",
     };
   } finally {
     clearTimeout(timer);

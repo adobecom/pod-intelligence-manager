@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db, { withImmediateTransaction, withTransaction } from "../db/connection.js";
+import { assertLegacyActivationStructure } from "./memory-structural-validator.js";
+import { assertLegacyMemoryWritable } from "./memory-authority.js";
 import type {
   AgentCheckpoint,
   AgentMemoryRollupPolicy,
@@ -2238,6 +2240,13 @@ function scoreRunEvidenceConfidence(run: RunRow, events: AgentRunEvent[], text: 
 }
 
 async function promoteCandidate(candidate: MemoryCandidate, auto: boolean): Promise<MemoryCandidate> {
+  assertLegacyMemoryWritable("agent_memory_candidate_promotion");
+  assertLegacyActivationStructure({
+    type: candidate.type,
+    summary: candidate.summary,
+    details: candidate.details,
+    domains: candidate.domains,
+  });
   const project = candidate.project_id
     ? loadProject(candidate.org_id, candidate.project_id)
     : null;

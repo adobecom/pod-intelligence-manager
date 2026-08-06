@@ -6,6 +6,7 @@ import {
   verifyServiceToken,
   type ServiceTokenAuthMetadata,
 } from "../services/service-tokens.js";
+import { isMemoryApiPath, sendMemoryError } from "./memory-errors.js";
 
 export type AuthMode = "trust" | "ims";
 
@@ -52,6 +53,9 @@ export function createAuthHook(mode: AuthMode) {
     if (isServiceTokenValue(bearerToken)) {
       const verified = bearerToken ? verifyServiceToken(bearerToken) : null;
       if (!verified) {
+        if (isMemoryApiPath(req.url)) {
+          return sendMemoryError(reply, 401, "authentication_required", "Invalid or expired PIM service token");
+        }
         return reply.code(401).send({ error: "Invalid or expired PIM service token" });
       }
       attach(req, verified.user, verified.auth);
@@ -68,10 +72,16 @@ export function createAuthHook(mode: AuthMode) {
     }
 
     if (!authHeader?.startsWith("Bearer ")) {
+      if (isMemoryApiPath(req.url)) {
+        return sendMemoryError(reply, 401, "authentication_required", "Missing or invalid Authorization header");
+      }
       return reply.code(401).send({ error: "Missing or invalid Authorization header" });
     }
     const token = bearerToken ?? "";
     if (!token) {
+      if (isMemoryApiPath(req.url)) {
+        return sendMemoryError(reply, 401, "authentication_required", "Empty Bearer token");
+      }
       return reply.code(401).send({ error: "Empty Bearer token" });
     }
 
@@ -90,6 +100,9 @@ export function createAuthHook(mode: AuthMode) {
       attach(req, record);
     } catch (err) {
       req.log.warn({ err }, "IMS token verification failed");
+      if (isMemoryApiPath(req.url)) {
+        return sendMemoryError(reply, 401, "authentication_required", "Invalid or expired IMS token");
+      }
       return reply.code(401).send({ error: "Invalid or expired IMS token" });
     }
   };

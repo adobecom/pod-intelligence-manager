@@ -4,6 +4,7 @@ import fs from "node:fs";
 import type { SearchDocument } from "@pim/shared";
 import { type IntegrationResult, type IntegrationSearchOpts, truncate } from "./types.js";
 import db from "../db/connection.js";
+import { isAllowedProjectGitPath } from "../services/project-resource-bindings.js";
 
 const exec = promisify(execFile);
 
@@ -19,7 +20,7 @@ function podRepoPath(podId: string | undefined): string | null {
       .prepare("SELECT repo_path FROM pods WHERE pod_id = ?")
       .get(podId) as { repo_path?: string } | undefined;
     const p = row?.repo_path;
-    if (p && fs.existsSync(p)) return p;
+    if (p && fs.existsSync(p) && isAllowedProjectGitPath(p)) return p;
   } catch {
     // repo_path column may not exist yet — silently fall through
   }
@@ -62,7 +63,7 @@ async function gitLog(
 function resolveRepoPaths(opts: IntegrationSearchOpts): string[] {
   const fromProject = (opts.project_resources?.git?.repo_paths ?? []).filter((p) => {
     try {
-      return fs.existsSync(p);
+      return fs.existsSync(p) && isAllowedProjectGitPath(p);
     } catch {
       return false;
     }

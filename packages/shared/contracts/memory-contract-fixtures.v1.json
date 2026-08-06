@@ -1,0 +1,452 @@
+{
+  "MemoryCapabilitiesV1": {
+    "schema_version": "pim.memory-capabilities.v1",
+    "contract_revision": "memory-contract-2026-08-03",
+    "server_build": "test-build",
+    "supported_schemas": {
+      "requests": ["pim.memory-search.v1", "pim.memory-harness-search.v1", "pim.run-receipt.v1", "pim.memory-feedback.v1", "pim.memory-candidate-decision.v1", "pim.memory-prompt-policy-update.v1", "pim.memory-release-gate-evaluation.v1", "pim.memory-attestation.v1"],
+      "responses": ["pim.memory-capabilities.v1", "pim.memory-search-result.v1", "pim.memory-harness-search-result.v1", "pim.run-receipt-result.v1", "pim.memory-candidate-status.v1", "pim.memory-record.v1", "pim.memory-feedback-result.v1", "pim.memory-candidate-decision-result.v1", "pim.memory-prompt-policy.v1", "pim.memory-release-gate-decision.v1", "pim.memory-attestation-result.v1", "pim.error.v1"]
+    },
+    "planes": ["codebase", "harness"],
+    "kinds": ["decision", "constraint", "anti_pattern", "test_strategy"],
+    "limits": {
+      "max_receipt_bytes": 262144,
+      "max_candidate_bytes": 32768,
+      "max_evidence_refs": 128,
+      "max_feedback_items": 256,
+      "max_search_tokens": 8000,
+      "max_search_items": 32
+    },
+    "evidence_resolver_types": ["github", "ci", "https_immutable"],
+    "activation_policies": ["verified_merge", "authorized_review", "manual_policy_owner"],
+    "feedback_version": "pim.memory-feedback.v1",
+    "temporal_modes": ["current"],
+    "deprecations": []
+  },
+  "MemoryPromptPolicyUpdateV1": {
+    "schema_version": "pim.memory-prompt-policy-update.v1",
+    "expected_revision": 0,
+    "enabled": false,
+    "kill_switch": true,
+    "automatic_activation_enabled": false,
+    "canary_percentage": 0,
+    "allowed_repository_ids": [],
+    "allowed_kinds": [],
+    "max_prompt_items": 3,
+    "max_prompt_tokens": 800
+  },
+  "MemoryPromptPolicyV1": {
+    "schema_version": "pim.memory-prompt-policy.v1",
+    "project_id": "project-checkout",
+    "policy_revision": 0,
+    "enabled": false,
+    "kill_switch": true,
+    "automatic_activation_enabled": false,
+    "canary_percentage": 0,
+    "allowed_repository_ids": [],
+    "allowed_kinds": [],
+    "max_prompt_items": 3,
+    "max_prompt_tokens": 800,
+    "global_enabled": false,
+    "effective_enabled": false,
+    "updated_at": null
+  },
+  "MemoryReleaseGateSnapshotV1": {
+    "representative_sample_count": 100,
+    "reviewed_candidate_count": 100,
+    "known_boundary_leakage_count": 0,
+    "provenance_completeness_rate": 1,
+    "typed_round_trip_conformance_rate": 1,
+    "unresolved_active_pointer_count": 0,
+    "extraction_precision_rate": 0.95,
+    "resolvable_evidence_rate": 0.95,
+    "harmful_or_stale_prompt_exposure_rate": 0.009,
+    "critical_policy_violation_count": 0,
+    "evidence_bypass_incident_count": 0,
+    "critical_harm_incident_count": 0,
+    "pim_outage_blocked_execution_count": 0,
+    "pim_outage_lost_queued_receipt_count": 0,
+    "memory_on_off_pair_count": 50,
+    "task_pass_lift_percentage_points": 5,
+    "paired_95ci_lower_percentage_points": 0,
+    "pass_rate_delta_percentage_points": null,
+    "noninferiority_margin_percentage_points": null,
+    "efficiency_reduction_rate": null,
+    "same_record_helpful_independent_runs": 2,
+    "latency_or_cost_increase_rate": 0.1,
+    "disciplined_no_lift_cycles": 1
+  },
+  "MemoryReleaseGateEvaluationV1": {
+    "schema_version": "pim.memory-release-gate-evaluation.v1",
+    "stage": "expansion",
+    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "metric_snapshot": {
+      "representative_sample_count": 100,
+      "reviewed_candidate_count": 100,
+      "known_boundary_leakage_count": 0,
+      "provenance_completeness_rate": 1,
+      "typed_round_trip_conformance_rate": 1,
+      "unresolved_active_pointer_count": 0,
+      "extraction_precision_rate": 0.95,
+      "resolvable_evidence_rate": 0.95,
+      "harmful_or_stale_prompt_exposure_rate": 0.009,
+      "critical_policy_violation_count": 0,
+      "evidence_bypass_incident_count": 0,
+      "critical_harm_incident_count": 0,
+      "pim_outage_blocked_execution_count": 0,
+      "pim_outage_lost_queued_receipt_count": 0,
+      "memory_on_off_pair_count": 50,
+      "task_pass_lift_percentage_points": 5,
+      "paired_95ci_lower_percentage_points": 0,
+      "pass_rate_delta_percentage_points": null,
+      "noninferiority_margin_percentage_points": null,
+      "efficiency_reduction_rate": null,
+      "same_record_helpful_independent_runs": 2,
+      "latency_or_cost_increase_rate": 0.1,
+      "disciplined_no_lift_cycles": 1
+    }
+  },
+  "MemoryReleaseGateDecisionV1": {
+    "schema_version": "pim.memory-release-gate-decision.v1",
+    "project_id": "project-checkout",
+    "decision_id": "gate_contract_1",
+    "stage": "expansion",
+    "decision": "continue",
+    "status": "pass",
+    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "metric_snapshot_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reasons": [],
+    "created_at": "2026-08-03T20:00:00Z"
+  },
+  "MemorySearchV1": {
+    "schema_version": "pim.memory-search.v1",
+    "request_id": "fiesta-search-contract-1",
+    "consumer": {
+      "harness_id": "fiesta",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "fiesta-pim-adapter.v1",
+      "consumer_run_id": "fiesta:test:thread-1:run-1"
+    },
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "applicability": {
+      "repository_id": "github.com/acme/checkout",
+      "base_sha": "0123456789abcdef0123456789abcdef01234567",
+      "components": ["payments"],
+      "paths": ["src/payments/retry.ts"],
+      "symbols": ["retryCharge"]
+    },
+    "task": { "query": "Prevent duplicate charges during payment retries", "task_class": "bug_fix" },
+    "temporal": { "mode": "current", "valid_at": "2026-08-01T18:00:00Z", "recorded_at": "2026-08-01T18:00:00Z" },
+    "budget": { "max_tokens": 1800, "max_items": 8 },
+    "options": { "include_explanations": true }
+  },
+  "MemorySearchResultV1": {
+    "schema_version": "pim.memory-search-result.v1",
+    "request_id": "fiesta-search-contract-1",
+    "retrieval_pack_id": "pack_contract_1",
+    "policy_version": "retrieval-codebase-v1",
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "repository_id": "github.com/acme/checkout",
+    "token_count": 96,
+    "prompt_eligible": false,
+    "evaluation_arm": "shadow",
+    "items": [
+      {
+        "record_id": "mem_contract_1",
+        "record_version": 1,
+        "plane": "codebase",
+        "kind": "constraint",
+        "summary": "Payment retries must reuse the original idempotency key.",
+        "lifecycle": { "status": "active" },
+        "applicability": { "repository_id": "github.com/acme/checkout", "paths": ["src/payments/retry.ts"], "symbols": ["retryCharge"] },
+        "exceptions": [],
+        "compatibility": { "harness_version_range": "*", "workflow_version_range": "*" },
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": [{ "type": "symbol", "path": "src/payments/retry.ts", "value": "retryCharge", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }]
+        },
+        "evidence_summary": { "strength": "verified_merge_and_test", "ref_count": 2 },
+        "freshness": { "last_confirmed_at": "2026-08-01T17:00:00Z", "expires_at": null },
+        "prompt_eligible": false,
+        "detail_href": "/api/v1/memory/records/mem_contract_1?version=1",
+        "match_reasons": ["exact_path", "exact_symbol"]
+      }
+    ],
+    "omitted_count": 0,
+    "expires_at": "2026-08-01T18:15:00Z"
+  },
+  "MemoryHarnessSearchV1": {
+    "schema_version": "pim.memory-harness-search.v1",
+    "request_id": "fiesta-harness-search-contract-1",
+    "consumer": {
+      "harness_id": "fiesta",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "fiesta-pim-adapter.v1",
+      "consumer_run_id": "fiesta:test:harness-shadow:run-1"
+    },
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "harness",
+    "applicability": {
+      "harness_id": "fiesta",
+      "harness_version_range": "7b6e858",
+      "workflow_version_range": "code-change.v3",
+      "adapter_version_range": "fiesta-pim-adapter.v1",
+      "configuration_ids": ["routing-default-v2"]
+    },
+    "task": { "query": "Recover safely after a tool timeout", "task_class": "recovery" },
+    "budget": { "max_tokens": 1200, "max_items": 4 },
+    "options": { "include_explanations": true }
+  },
+  "MemoryHarnessSearchResultV1": {
+    "schema_version": "pim.memory-harness-search-result.v1",
+    "request_id": "fiesta-harness-search-contract-1",
+    "retrieval_pack_id": "pack_harness_contract_1",
+    "policy_version": "retrieval-harness-shadow-v1",
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "harness",
+    "harness_id": "fiesta",
+    "shadow_only": true,
+    "routing_influence": false,
+    "prompt_eligible": false,
+    "evaluation_arm": "shadow",
+    "token_count": 82,
+    "items": [
+      {
+        "record_id": "mem_harness_contract_1",
+        "record_version": 1,
+        "plane": "harness",
+        "kind": "test_strategy",
+        "summary": "Retry a timed-out tool only after checking its terminal state.",
+        "lifecycle": { "status": "active" },
+        "applicability": {
+          "harness_id": "fiesta",
+          "harness_version_range": "7b6e858",
+          "workflow_version_range": "code-change.v3",
+          "adapter_version_range": "fiesta-pim-adapter.v1",
+          "configuration_ids": ["routing-default-v2"]
+        },
+        "exceptions": ["Do not retry tools whose side effects cannot be checked."],
+        "compatibility": {
+          "harness_version_range": "7b6e858",
+          "workflow_version_range": "code-change.v3",
+          "adapter_version_range": "fiesta-pim-adapter.v1"
+        },
+        "validation": {
+          "strategy": "stable_failure_fingerprint",
+          "failure_fingerprint": "fixture:harness:tool-timeout:v1"
+        },
+        "evidence_summary": { "strength": "reviewed", "ref_count": 2 },
+        "freshness": { "last_confirmed_at": "2026-08-02T18:00:00Z", "expires_at": null },
+        "prompt_eligible": false,
+        "match_reasons": ["exact_configuration", "task_lexical_match"]
+      }
+    ],
+    "omitted_count": 0,
+    "expires_at": "2026-08-02T18:15:00Z"
+  },
+  "MemoryCandidateV1": {
+    "schema_version": "pim.memory-candidate.v1",
+    "client_candidate_id": "fiesta-candidate-contract-1",
+    "plane": "codebase",
+    "kind": "constraint",
+    "content": {
+      "summary": "Provider status checks must use the original merchant account.",
+      "details": "A status request against another account can incorrectly report that the transaction is absent.",
+      "rationale": "This caused a false retry after an ambiguous provider timeout."
+    },
+    "applicability": { "repository_id": "github.com/acme/checkout", "paths": ["src/payments/provider.ts"], "symbols": ["lookupTransaction"] },
+    "validation": { "strategy": "repository_anchors" },
+    "exceptions": [],
+    "source_run_ids": ["fiesta:test:thread-1:run-1"],
+    "evidence_refs": ["diff_contract_1", "test_contract_1"],
+    "extraction": { "method": "model_then_deterministic_validation", "extractor_version": "fiesta-candidate-extractor.v1", "confidence": 0.86 },
+    "activation_requirement_requested": "verified_merge"
+  },
+  "FiestaCodeEvidenceV2": {
+    "schema_version": "fiesta.code-evidence.v2",
+    "manifest_id": "manifest_contract_1",
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "refs": [
+      {
+        "id": "diff_contract_1",
+        "type": "git_diff",
+        "uri": "https://github.com/acme/checkout/pull/814.diff",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "origin_id": "github.com/acme/checkout:pr-814:head-diff",
+        "occurred_at": "2026-08-01T18:42:00Z",
+        "source_authority": "observed"
+      }
+    ]
+  },
+  "RunReceiptV1": {
+    "schema_version": "pim.run-receipt.v1",
+    "external_session_id": "fiesta-thread-contract-1",
+    "producer": { "harness_id": "fiesta", "harness_version": "7b6e858", "workflow_version": "code-change.v3", "adapter_version": "fiesta-pim-adapter.v1" },
+    "tenant": { "project_id": "project-checkout" },
+    "repository": {
+      "repository_id": "github.com/acme/checkout",
+      "display_slug": "Acme/Checkout",
+      "base_sha": "0123456789abcdef0123456789abcdef01234567",
+      "candidate_tree_sha": "89abcdef0123456789abcdef0123456789abcdef",
+      "provider_pull_request_id": "github:acme/checkout#814",
+      "pr_head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+      "pull_request_url": "https://github.com/acme/checkout/pull/814"
+    },
+    "task": { "task_class": "bug_fix", "summary": "Prevent duplicate charges during payment retries" },
+    "outcome": {
+      "status": "completed",
+      "terminal_stage": "close",
+      "reason_code": "completed",
+      "verification_status": "passed",
+      "publication_status": "draft_pr_created",
+      "gate_attestation_ids": [],
+      "failure_fingerprint": null
+    },
+    "retrieval_feedback": [],
+    "candidates": []
+  },
+  "RunReceiptResultV1": {
+    "schema_version": "pim.run-receipt-result.v1",
+    "receipt_id": "receipt_contract_1",
+    "producer_run_id": "fiesta:test:thread-1:run-1",
+    "request_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "status": "accepted",
+    "candidate_results": []
+  },
+  "MemoryCandidateStatusV1": {
+    "schema_version": "pim.memory-candidate-status.v1",
+    "candidate_id": "candidate_contract_1",
+    "client_candidate_id": "fiesta-candidate-contract-1",
+    "plane": "codebase",
+    "kind": "constraint",
+    "status": "pending_merge",
+    "activation_requirement": "verified_merge",
+    "blockers": ["verified_merge_required"],
+    "latest_transition": {
+      "transition_id": "transition_contract_1",
+      "from_status": "validating",
+      "to_status": "pending_merge",
+      "reason_code": "verified_merge_required",
+      "committed_at": "2026-08-01T18:46:00Z"
+    },
+    "created_at": "2026-08-01T18:45:00Z",
+    "updated_at": "2026-08-01T18:46:00Z"
+  },
+  "MemoryRecordV1": {
+    "schema_version": "pim.memory-record.v1",
+    "record_id": "mem_contract_1",
+    "record_version": 1,
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "kind": "constraint",
+    "content": {
+      "summary": "Payment retries must reuse the original idempotency key.",
+      "details": "Every retry for one logical payment must retain the first provider idempotency key.",
+      "rationale": "Changing the key can create a second charge after an ambiguous provider response."
+    },
+    "applicability": { "repository_id": "github.com/acme/checkout", "paths": ["src/payments/retry.ts"], "symbols": ["retryCharge"], "task_classes": ["bug_fix"] },
+    "exceptions": [],
+    "compatibility": { "harness_version_range": "*", "workflow_version_range": "*" },
+    "validation": {
+      "strategy": "repository_anchors",
+      "anchor_refs": [{ "type": "symbol", "path": "src/payments/retry.ts", "value": "retryCharge", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }]
+    },
+    "evidence": [
+      {
+        "evidence_ref_id": "merge_contract_1",
+        "type": "git_diff",
+        "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "origin_id": "github.com/acme/checkout:pr-814:merge",
+        "source_authority": "verified"
+      }
+    ],
+    "evidence_summary": { "strength": "verified_merge_and_test", "ref_count": 1 },
+    "freshness": { "last_confirmed_at": "2026-08-01T17:00:00Z", "expires_at": null },
+    "lifecycle": { "status": "active" },
+    "prompt_eligible": false,
+    "transition_summary": {
+      "transition_id": "transition_record_contract_1",
+      "from_status": null,
+      "to_status": "active",
+      "reason_code": "seed_fixture_imported",
+      "committed_at": "2026-08-01T17:00:00Z"
+    },
+    "recorded_at": "2026-08-01T17:00:00Z"
+  },
+  "MemoryFeedbackV1": {
+    "schema_version": "pim.memory-feedback.v1",
+    "feedback_revision": 1,
+    "retrieval_pack_id": "pack_contract_1",
+    "record_id": "mem_contract_1",
+    "record_version": 1,
+    "producer_run_id": "fiesta:test:thread-2:run-1",
+    "repository_id": "github.com/acme/checkout",
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "disposition": "helpful",
+    "reason_code": "prevented_duplicate_retry",
+    "outcome_evidence_refs": [],
+    "event_time": "2026-08-02T18:00:00Z"
+  },
+  "MemoryFeedbackResultV1": {
+    "schema_version": "pim.memory-feedback-result.v1",
+    "feedback_id": "feedback_contract_1",
+    "feedback_revision": 1,
+    "duplicate": false,
+    "review_signal_ids": []
+  },
+  "MemoryCandidateDecisionV1": {
+    "schema_version": "pim.memory-candidate-decision.v1",
+    "decision_revision": 1,
+    "decision": "approve",
+    "reason_code": "failure_evidence_reviewed",
+    "explanation": "The failure fingerprint and bounded exceptions are supported by the evidence.",
+    "evidence_refs": ["failure_contract_1"],
+    "event_time": "2026-08-02T18:00:00Z"
+  },
+  "MemoryCandidateDecisionResultV1": {
+    "schema_version": "pim.memory-candidate-decision-result.v1",
+    "decision_id": "decision_contract_1",
+    "candidate_id": "candidate_contract_1",
+    "decision_revision": 1,
+    "decision": "approve",
+    "candidate_status": "active",
+    "active_record": {
+      "record_id": "mem_contract_1",
+      "record_version": 1
+    },
+    "duplicate": false
+  },
+  "MemoryAttestationV1": {
+    "schema_version": "pim.memory-attestation.v1",
+    "attestation_id": "attestation_contract_1",
+    "provider_event_id": "github-delivery-contract-1",
+    "type": "github_merge",
+    "repository_id": "github.com/acme/checkout",
+    "provider_pull_request_id": "github:acme/checkout#814",
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "head_sha": "89abcdef0123456789abcdef0123456789abcdef",
+    "merge_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "occurred_at": "2026-08-01T19:00:00Z"
+  },
+  "MemoryAttestationResultV1": {
+    "schema_version": "pim.memory-attestation-result.v1",
+    "accepted": true,
+    "duplicate": false,
+    "inbox_event_id": "inbox_contract_1",
+    "status": "activated",
+    "candidate_ids": ["candidate_contract_1"],
+    "record_ids": ["mem_contract_1"]
+  },
+  "PimErrorV1": {
+    "schema_version": "pim.error.v1",
+    "code": "schema_invalid",
+    "message": "Request does not match pim.memory-search.v1",
+    "request_id": "fiesta-search-contract-1",
+    "details": [{ "path": "/unexpected", "reason": "unknown field" }]
+  }
+}

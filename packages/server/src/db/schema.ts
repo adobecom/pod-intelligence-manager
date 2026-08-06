@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import db from "./connection.js";
+import { runSchemaMigrations } from "./migrations.js";
 
 export const ORG_CONFIG_ROW_KEY = "org_config";
 export const ORG_TUNING_ROW_KEY = "org_tuning";
@@ -298,6 +299,14 @@ export function createTables() {
       confidence_score REAL NOT NULL DEFAULT 0.0,
       promotable INTEGER NOT NULL DEFAULT 0,
       promoted_node_id TEXT,
+      source_instance TEXT NOT NULL DEFAULT 'legacy',
+      native_id TEXT,
+      source_version TEXT,
+      visibility TEXT NOT NULL DEFAULT 'unknown',
+      visibility_version TEXT NOT NULL DEFAULT '1',
+      redaction_version TEXT NOT NULL DEFAULT 'legacy',
+      normalized_content_hash TEXT,
+      source_updated_at TEXT,
       UNIQUE (org_id, project_id, source, source_id)
     );
 
@@ -335,6 +344,37 @@ export function createTables() {
       PRIMARY KEY (org_id, project_id, source, cursor_key)
     );
 
+    CREATE TABLE IF NOT EXISTS project_source_sync_state (
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_instance TEXT NOT NULL,
+      last_attempt_at TEXT,
+      last_success_at TEXT,
+      last_reconciliation_at TEXT,
+      lag_seconds INTEGER,
+      indexed_count INTEGER NOT NULL DEFAULT 0,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      last_error_code TEXT,
+      last_error_message TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (org_id, project_id, source, source_instance)
+    );
+
+    CREATE TABLE IF NOT EXISTS project_source_quarantine (
+      org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      source_instance TEXT NOT NULL,
+      native_id TEXT NOT NULL,
+      source_version TEXT,
+      error_code TEXT NOT NULL,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      first_seen_at TEXT NOT NULL,
+      last_attempt_at TEXT NOT NULL,
+      PRIMARY KEY (org_id, project_id, source, source_instance, native_id)
+    );
+
     -- Indexed Project Search: broad, current project-artifact index (distinct from the org KG).
     CREATE TABLE IF NOT EXISTS project_search_documents (
       id TEXT PRIMARY KEY,
@@ -354,6 +394,15 @@ export function createTables() {
       metadata_json TEXT NOT NULL DEFAULT '{}',
       permissions_json TEXT NOT NULL DEFAULT '{}',
       freshness_state TEXT NOT NULL DEFAULT 'fresh',
+      source_instance TEXT NOT NULL DEFAULT 'legacy',
+      native_id TEXT,
+      source_version TEXT,
+      visibility TEXT NOT NULL DEFAULT 'unknown',
+      visibility_version TEXT NOT NULL DEFAULT '1',
+      redaction_version TEXT NOT NULL DEFAULT 'legacy',
+      normalized_content_hash TEXT,
+      source_updated_at TEXT,
+      graph_enabled INTEGER NOT NULL DEFAULT 1,
       UNIQUE (org_id, project_id, source, source_id)
     );
 
@@ -723,6 +772,62 @@ export function createTables() {
   try { db.exec("ALTER TABLE knowledge_nodes ADD COLUMN last_retrieved_at TEXT"); } catch { /* already exists */ }
   try { db.exec("ALTER TABLE agent_sessions ADD COLUMN last_compacted_event_rowid INTEGER NOT NULL DEFAULT 0"); } catch { /* already exists */ }
 
+  // Safe project-evidence ingestion provenance. These ALTERs are required for
+  // deployed databases because CREATE TABLE IF NOT EXISTS does not add columns.
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN source_instance TEXT NOT NULL DEFAULT 'legacy'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN native_id TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN source_version TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN visibility TEXT NOT NULL DEFAULT 'unknown'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN visibility_version TEXT NOT NULL DEFAULT '1'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN redaction_version TEXT NOT NULL DEFAULT 'legacy'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN normalized_content_hash TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_evidence_items ADD COLUMN source_updated_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN source_instance TEXT NOT NULL DEFAULT 'legacy'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN native_id TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN source_version TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN visibility TEXT NOT NULL DEFAULT 'unknown'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN visibility_version TEXT NOT NULL DEFAULT '1'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN redaction_version TEXT NOT NULL DEFAULT 'legacy'"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN normalized_content_hash TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN source_updated_at TEXT"); } catch { /* already exists */ }
+  try { db.exec("ALTER TABLE project_search_documents ADD COLUMN graph_enabled INTEGER NOT NULL DEFAULT 1"); } catch { /* already exists */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_project_evidence_source_identity ON project_evidence_items(org_id, project_id, source, source_instance, native_id)"); } catch { /* table repaired below */ }
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_project_search_docs_source_identity ON project_search_documents(org_id, project_id, source, source_instance, native_id)"); } catch { /* already exists */ }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS project_source_sync_state (
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        source_instance TEXT NOT NULL,
+        last_attempt_at TEXT,
+        last_success_at TEXT,
+        last_reconciliation_at TEXT,
+        lag_seconds INTEGER,
+        indexed_count INTEGER NOT NULL DEFAULT 0,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error_code TEXT,
+        last_error_message TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (org_id, project_id, source, source_instance)
+      );
+      CREATE TABLE IF NOT EXISTS project_source_quarantine (
+        org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        source_instance TEXT NOT NULL,
+        native_id TEXT NOT NULL,
+        source_version TEXT,
+        error_code TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        first_seen_at TEXT NOT NULL,
+        last_attempt_at TEXT NOT NULL,
+        PRIMARY KEY (org_id, project_id, source, source_instance, native_id)
+      );
+    `);
+  } catch { /* already exists */ }
+
   // FTS5 lexical index for project search chunks. Guarded: if the SQLite build
   // lacks FTS5, the index service falls back to keyword scoring (isProjectSearchFtsAvailable()).
   try {
@@ -946,10 +1051,20 @@ export function createTables() {
         confidence_score REAL NOT NULL DEFAULT 0.0,
         promotable INTEGER NOT NULL DEFAULT 0,
         promoted_node_id TEXT,
+        source_instance TEXT NOT NULL DEFAULT 'legacy',
+        native_id TEXT,
+        source_version TEXT,
+        visibility TEXT NOT NULL DEFAULT 'unknown',
+        visibility_version TEXT NOT NULL DEFAULT '1',
+        redaction_version TEXT NOT NULL DEFAULT 'legacy',
+        normalized_content_hash TEXT,
+        source_updated_at TEXT,
         UNIQUE (org_id, project_id, source, source_id)
       );
       CREATE INDEX IF NOT EXISTS idx_project_evidence_project_time
         ON project_evidence_items(org_id, project_id, occurred_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_project_evidence_source_identity
+        ON project_evidence_items(org_id, project_id, source, source_instance, native_id);
       CREATE TABLE IF NOT EXISTS project_memory_candidates (
         id TEXT PRIMARY KEY,
         org_id TEXT NOT NULL REFERENCES orgs(org_id) ON DELETE CASCADE,
@@ -1184,4 +1299,9 @@ export function createTables() {
   try {
     db.exec("CREATE INDEX IF NOT EXISTS idx_org_tuning_history_org ON org_tuning_history(org_id, adjusted_at DESC)");
   } catch { /* already exists */ }
+
+  // Canonical memory uses numbered, immutable, fail-fast migrations. Keep this
+  // outside the legacy best-effort ALTER guards above so a partial memory
+  // schema can never be mistaken for a successful deployment.
+  runSchemaMigrations();
 }

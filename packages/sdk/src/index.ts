@@ -1,4 +1,34 @@
 export { PimClient, searchContext } from "./client.js";
+export { PimMemoryApiError, PimMemoryClient } from "./memory-client.js";
+export type { PimMemoryClientConfig } from "./memory-client.js";
+export type {
+  CodebaseApplicabilityV1,
+  MemoryCapabilitiesV1,
+  MemoryCandidateStatusV1,
+  MemoryCandidateDecisionResultV1,
+  MemoryCandidateDecisionV1,
+  MemoryEvaluationArmV1,
+  MemoryAttestationResultV1,
+  MemoryFeedbackResultV1,
+  MemoryFeedbackV1,
+  MemoryHarnessSearchItemV1,
+  MemoryHarnessSearchResultV1,
+  MemoryHarnessSearchV1,
+  HarnessApplicabilityV1,
+  MemoryCandidateV1,
+  MemoryRecordV1,
+  MemoryPromptPolicyUpdateV1,
+  MemoryPromptPolicyV1,
+  MemoryReleaseGateDecisionV1,
+  MemoryReleaseGateEvaluationV1,
+  MemoryReleaseGateSnapshotV1,
+  MemorySearchItemV1,
+  MemorySearchResultV1,
+  MemorySearchV1,
+  PimErrorV1,
+  RunReceiptResultV1,
+  RunReceiptV1,
+} from "@pim/shared";
 export type {
   PimClientConfig,
   ReportInput,

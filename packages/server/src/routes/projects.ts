@@ -11,6 +11,7 @@ import {
 import { validateBody } from "../middleware/validation.js";
 import {
   rejectServiceToken,
+  requireAdmin,
   requireProjectBinding,
   requireServiceScope,
 } from "../middleware/service-authz.js";
@@ -30,6 +31,15 @@ import {
 import { answerProjectQuestion } from "../services/project-answers.js";
 import { searchProject } from "../services/project-search.js";
 import { purgeProjectSearch, reindexProjectSearch } from "../services/project-search-index.js";
+import { scheduleProjectSearchRefresh } from "../services/project-search-refresh.js";
+import {
+  purgeProjectEvidenceIdentity,
+  purgeProjectEvidenceSource,
+} from "../services/project-source-change.js";
+import {
+  changedConnectorSources,
+  sanitizeProjectResources,
+} from "../services/project-resource-bindings.js";
 
 const ResourcesSchema = z.object({
   jira: z
@@ -108,7 +118,7 @@ const AnswerProjectSchema = z.object({
 const SearchProjectSchema = z.object({
   query: z.string().min(1).transform((s) => s.trim()),
   sources: z
-    .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update"]))
+    .array(z.enum(["jira", "github", "confluence", "slack", "git", "project_update", "pod_update", "kg"]))
     .optional(),
   entity_types: z
     .array(
@@ -124,6 +134,7 @@ const SearchProjectSchema = z.object({
   graph_expansion: z.boolean().optional(),
   max_hits: z.number().int().positive().max(50).optional(),
   synthesize: z.boolean().optional(),
+  use_live: z.boolean().optional(),
 });
 
 const ReindexProjectSchema = z.object({
@@ -133,7 +144,7 @@ const ReindexProjectSchema = z.object({
 function parseResources(raw: string | null | undefined): ProjectResources | undefined {
   if (!raw) return undefined;
   try {
-    return JSON.parse(raw) as ProjectResources;
+    return sanitizeProjectResources(JSON.parse(raw) as ProjectResources);
   } catch {
     return undefined;
   }
@@ -197,10 +208,27 @@ function projectResourceRow(projectId: string, orgId: string): { resources_json:
 
 function saveProjectResources(projectId: string, orgId: string, resources: ProjectResources): void {
   db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ? AND org_id = ?").run(
-    JSON.stringify(resources),
+    JSON.stringify(sanitizeProjectResources(resources)),
     projectId,
     orgId,
   );
+}
+
+/** Binding changes are security-boundary changes. Persist the new boundary and
+ * conservatively purge the affected source in one transaction; remaining
+ * bindings are repopulated by the immediate refresh. */
+function replaceProjectResources(
+  projectId: string,
+  orgId: string,
+  previous: ProjectResources,
+  next: ProjectResources,
+): void {
+  const changed = changedConnectorSources(previous, next);
+  withTransaction(() => {
+    saveProjectResources(projectId, orgId, next);
+    for (const source of changed) purgeProjectEvidenceSource(orgId, projectId, source);
+  });
+  scheduleProjectSearchRefresh(orgId, projectId);
 }
 
 function bindingArray(resources: ProjectResources, source: string, field: string): string[] | null {
@@ -322,21 +350,22 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources",
     { preHandler: validateBody(ResourcesSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
-      const exists = db
-        .prepare("SELECT project_id FROM projects WHERE project_id = ? AND org_id = ?")
-        .get(req.params.projectId, req.org!.org_id);
-      if (!exists) {
+      if (!requireAdmin(req, reply)) return;
+      const row = db
+        .prepare("SELECT resources_json FROM projects WHERE project_id = ? AND org_id = ?")
+        .get(req.params.projectId, req.org!.org_id) as { resources_json: string | null } | undefined;
+      if (!row) {
         reply.code(404);
         return { error: "Project not found" };
       }
-      const json = JSON.stringify(req.body);
-      db.prepare("UPDATE projects SET resources_json = ? WHERE project_id = ? AND org_id = ?").run(
-        json,
+      const resources = sanitizeProjectResources(req.body);
+      replaceProjectResources(
         req.params.projectId,
         req.org!.org_id,
+        parseResources(row.resources_json) ?? {},
+        resources,
       );
-      return req.body;
+      return resources;
     },
   );
 
@@ -354,14 +383,15 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/profile",
     { preHandler: validateBody(ResourcesPatchSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
         return { error: "Project not found" };
       }
-      const merged = mergeProfile(parseResources(row.resources_json) ?? {}, req.body);
-      saveProjectResources(req.params.projectId, req.org!.org_id, merged);
+      const previous = parseResources(row.resources_json) ?? {};
+      const merged = sanitizeProjectResources(mergeProfile(previous, req.body));
+      replaceProjectResources(req.params.projectId, req.org!.org_id, previous, merged);
       return merged;
     },
   );
@@ -370,20 +400,22 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
         return { error: "Project not found" };
       }
       const current = parseResources(row.resources_json) ?? {};
-      const next = addBinding(current, req.body.source, req.body.field, req.body.value);
+      const binding = sanitizeProjectResources(req.body as unknown as ProjectResources) as unknown as typeof req.body;
+      const next = addBinding(structuredClone(current), binding.source, binding.field, binding.value);
       if (!next) {
         reply.code(400);
-        return { error: `Unsupported resource binding ${req.body.source}.${req.body.field}` };
+        return { error: `Unsupported resource binding ${binding.source}.${binding.field}` };
       }
-      saveProjectResources(req.params.projectId, req.org!.org_id, next);
-      return next;
+      const safeNext = sanitizeProjectResources(next);
+      replaceProjectResources(req.params.projectId, req.org!.org_id, current, safeNext);
+      return safeNext;
     },
   );
 
@@ -391,20 +423,22 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects/:projectId/resources/bindings",
     { preHandler: validateBody(ResourceBindingSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
+      if (!requireAdmin(req, reply)) return;
       const row = projectResourceRow(req.params.projectId, req.org!.org_id);
       if (!row) {
         reply.code(404);
         return { error: "Project not found" };
       }
       const current = parseResources(row.resources_json) ?? {};
-      const next = removeBinding(current, req.body.source, req.body.field, req.body.value);
+      const binding = sanitizeProjectResources(req.body as unknown as ProjectResources) as unknown as typeof req.body;
+      const next = removeBinding(structuredClone(current), binding.source, binding.field, binding.value);
       if (!next) {
         reply.code(400);
-        return { error: `Unsupported resource binding ${req.body.source}.${req.body.field}` };
+        return { error: `Unsupported resource binding ${binding.source}.${binding.field}` };
       }
-      saveProjectResources(req.params.projectId, req.org!.org_id, next);
-      return next;
+      const safeNext = sanitizeProjectResources(next);
+      replaceProjectResources(req.params.projectId, req.org!.org_id, current, safeNext);
+      return safeNext;
     },
   );
 
@@ -412,18 +446,19 @@ export default async function projectRoutes(app: FastifyInstance) {
     "/api/projects",
     { preHandler: validateBody(CreateProjectSchema) },
     async (req, reply) => {
-      if (!rejectServiceToken(req, reply)) return;
       const { name, description, resources } = req.body;
+      if (resources ? !requireAdmin(req, reply) : !rejectServiceToken(req, reply)) return;
       const orgId = req.org!.org_id;
       const projectId = allocateUniqueResourceId("project", name, (id) =>
         Boolean(db.prepare("SELECT project_id FROM projects WHERE project_id = ?").get(id)),
       );
       const created_at = new Date().toISOString();
       const anatomyJson = JSON.stringify(EMPTY_PROJECT_ANATOMY);
-      const resourcesJson = resources ? JSON.stringify(resources) : null;
+      const resourcesJson = resources ? JSON.stringify(sanitizeProjectResources(resources)) : null;
       db.prepare(
         "INSERT INTO projects (project_id, name, description, created_at, anatomy_json, resources_json, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       ).run(projectId, name, description ?? null, created_at, anatomyJson, resourcesJson, orgId, req.userRecord.user_id);
+      if (resources) scheduleProjectSearchRefresh(orgId, projectId);
       reply.code(201);
       return rowToProject({
         project_id: projectId,
@@ -574,7 +609,12 @@ export default async function projectRoutes(app: FastifyInstance) {
     }
 
     const now = new Date().toISOString();
-    db.prepare("UPDATE project_context_updates SET retracted_at = ? WHERE id = ?").run(now, updateId);
+    withTransaction(() => {
+      db.prepare(
+        "UPDATE project_context_updates SET retracted_at = ? WHERE id = ? AND project_id = ? AND org_id = ?",
+      ).run(now, updateId, projectId, req.org!.org_id);
+      purgeProjectEvidenceIdentity(req.org!.org_id, projectId, "project_update", "pim", updateId);
+    });
 
     broadcastToAll({ type: "update_retracted", podId: projectId, payload: { updateId, retracted_at: now } });
 
@@ -669,7 +709,7 @@ export default async function projectRoutes(app: FastifyInstance) {
     { preHandler: validateBody(AnswerProjectSchema) },
     async (req, reply) => {
       if (!rejectServiceToken(req, reply)) return;
-      const answer = answerProjectQuestion(req.org!.org_id, req.params.projectId, req.body.query);
+      const answer = await answerProjectQuestion(req.org!.org_id, req.params.projectId, req.body.query);
       if (!answer) {
         reply.code(404);
         return { error: "Project not found" };

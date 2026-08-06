@@ -44,6 +44,11 @@ import {
   cosineSimilarity,
   isEmbeddingAvailable,
 } from "./embeddings.js";
+import { assertLegacyActivationStructure } from "./memory-structural-validator.js";
+import {
+  assertLegacyMemoryWritable,
+  legacyMemoryWritesFrozen,
+} from "./memory-authority.js";
 import { getGraphAnalysisPool, isGraphWorkerEnabled } from "./graph-analysis-pool.js";
 import { buildKnowledgeNodeMemory } from "./memory-enrichment.js";
 
@@ -238,11 +243,22 @@ export function initializeKnowledgeGraph(orgId: string): void {
   );
 
   const staleEmbeddingCount = graph.nodes.filter((n) => !n.embedding || n.embedding_text_hash !== embeddingTextHash(embedText(n))).length;
-  if (staleEmbeddingCount > 0 && isEmbeddingAvailable()) {
+  if (!legacyMemoryWritesFrozen() && staleEmbeddingCount > 0 && isEmbeddingAvailable()) {
     console.log(`[knowledge-graph] Scheduling background embedding backfill for ${staleEmbeddingCount} nodes (org "${orgId}")`);
+    const stagedNodes = graph.nodes.map((node) => ({ ...node }));
     // Fire-and-forget: does not block server startup
-    batchEmbedWithRateLimit(graph.nodes, () => {
-      persistGraph(orgId, state);
+    batchEmbedWithRateLimit(stagedNodes, () => {
+      if (legacyMemoryWritesFrozen()) return;
+      let changed = false;
+      for (const stagedNode of stagedNodes) {
+        const liveNode = state.nodeById.get(stagedNode.id);
+        if (!liveNode || !stagedNode.embedding || !stagedNode.embedding_text_hash) continue;
+        if (stagedNode.embedding_text_hash !== embeddingTextHash(embedText(liveNode))) continue;
+        liveNode.embedding = stagedNode.embedding;
+        liveNode.embedding_text_hash = stagedNode.embedding_text_hash;
+        changed = true;
+      }
+      if (changed) persistGraph(orgId, state);
     }).catch((err) => console.error(`[knowledge-graph] Backfill failed for org "${orgId}":`, err));
   }
 }
@@ -480,6 +496,7 @@ export async function addLearningsToGraph(
   project?: { project_id: string; project_name: string },
   options: AddLearningsOptions = {},
 ): Promise<{ nodesAdded: number; edgesAdded: number; nodeIds: string[] }> {
+  assertLegacyMemoryWritable("knowledge_graph_ingestion");
   const state = getOrgState(orgId);
   const { graph } = state;
 
@@ -577,6 +594,8 @@ export async function addLearningsToGraph(
   if (newNodes.length === 0) {
     return { nodesAdded: 0, edgesAdded: 0, nodeIds: [] };
   }
+
+  assertLegacyMemoryWritable("knowledge_graph_ingestion");
 
   // P3: Pass existing edges so buildEdges won't create duplicate edges for node pairs already connected.
   const newEdges = buildEdges(newNodes, graph.nodes, graph.edges);
@@ -1522,6 +1541,7 @@ function expandWithGraphNeighbors(
 }
 
 function recordRetrievals(state: OrgGraphState, nodes: KnowledgeNode[]): void {
+  if (legacyMemoryWritesFrozen()) return;
   if (nodes.length === 0) return;
   const now = new Date().toISOString();
   const ids = new Set(nodes.map((n) => n.id));
@@ -2340,17 +2360,65 @@ export async function getPrecedents(
 
 // --- Curation ---
 
+/** Removes KG nodes whose content was derived from project evidence that has
+ * crossed a source-boundary deletion. This is intentionally synchronous so a
+ * resource unbind cannot commit while a derived node remains queryable. */
+export function retractProjectEvidenceKnowledgeNodes(
+  orgId: string,
+  projectId: string,
+  nodeIds: readonly string[],
+): string[] {
+  if (legacyMemoryWritesFrozen()) return [];
+  if (nodeIds.length === 0) return [];
+  const requested = new Set(nodeIds);
+  const state = getOrgState(orgId);
+  const removed: string[] = [];
+  for (let index = state.graph.nodes.length - 1; index >= 0; index--) {
+    const node = state.graph.nodes[index];
+    if (!requested.has(node.id)
+      || node.source_project_id !== projectId
+      || node.ingestion_provenance?.kind !== "project_evidence") continue;
+    _removeNodeFromIndexes(node, state);
+    state.graph.nodes.splice(index, 1);
+    removed.push(node.id);
+  }
+  if (removed.length === 0) return [];
+  const removedIds = new Set(removed);
+  state.graph.edges = state.graph.edges.filter((edge) =>
+    !removedIds.has(edge.source) && !removedIds.has(edge.target));
+  for (const node of state.graph.nodes) {
+    if (node.superseded_by && removedIds.has(node.superseded_by)) delete node.superseded_by;
+  }
+  state.graph.version++;
+  state.graph.updated_at = new Date().toISOString();
+  state.graph.communities = detectCommunities(state.graph);
+  state.hubIds = new Set(identifyHubs(state.graph));
+  persistGraph(orgId, state);
+  return removed;
+}
+
 export async function curateNode(
   orgId: string,
   nodeId: string,
   action: CurationAction,
   edits?: Partial<Pick<KnowledgeNode, "summary" | "details" | "domains">>,
 ): Promise<boolean> {
+  assertLegacyMemoryWritable("knowledge_graph_curation");
   const state = getOrgState(orgId);
   const { graph } = state;
 
   const nodeIndex = graph.nodes.findIndex((n) => n.id === nodeId);
   if (nodeIndex === -1) return false;
+
+  if (action === "approve" || action === "edit") {
+    const node = graph.nodes[nodeIndex];
+    assertLegacyActivationStructure({
+      type: node.type,
+      summary: edits?.summary ?? node.summary,
+      details: edits?.details ?? node.details,
+      domains: edits?.domains ?? node.domains,
+    });
+  }
 
   if (action === "reject") {
     _removeNodeFromIndexes(graph.nodes[nodeIndex], state);
@@ -2367,23 +2435,26 @@ export async function curateNode(
     graph.nodes[nodeIndex].curated = true;
   } else if (action === "edit" && edits) {
     const node = graph.nodes[nodeIndex];
-    _removeNodeFromIndexes(node, state);
-    if (edits.summary !== undefined) node.summary = edits.summary;
-    if (edits.details !== undefined) node.details = edits.details;
+    const editedNode = { ...node };
+    if (edits.summary !== undefined) editedNode.summary = edits.summary;
+    if (edits.details !== undefined) editedNode.details = edits.details;
     if (edits.domains !== undefined) {
       const priorDomains = normalizeTagList(node.domains);
       const priorScopes = normalizeTagList(node.scopes);
       const scopesWereDomainMirror = priorScopes.length === 0 || sameTags(priorScopes, priorDomains);
       const domains = normalizeTagList(edits.domains);
-      node.domains = domains;
-      if (scopesWereDomainMirror) node.scopes = domains;
+      editedNode.domains = domains;
+      if (scopesWereDomainMirror) editedNode.scopes = domains;
     }
-    const memory = buildKnowledgeNodeMemory({ node, orgId });
-    node.retrieval_text = memory.retrieval_text;
-    node.entity_refs = memory.entity_refs;
-    await refreshNodeEmbedding(node, true);
-    node.curated = true;
-    _indexNode(node, state);
+    const memory = buildKnowledgeNodeMemory({ node: editedNode, orgId });
+    editedNode.retrieval_text = memory.retrieval_text;
+    editedNode.entity_refs = memory.entity_refs;
+    await refreshNodeEmbedding(editedNode, true);
+    assertLegacyMemoryWritable("knowledge_graph_curation");
+    _removeNodeFromIndexes(node, state);
+    editedNode.curated = true;
+    graph.nodes[nodeIndex] = editedNode;
+    _indexNode(editedNode, state);
   }
 
   graph.version++;
@@ -2451,6 +2522,7 @@ export function getStats(orgId: string): KnowledgeStats {
 // --- Re-run Community Detection (called periodically) ---
 
 export function refreshAnalysis(orgId: string): void {
+  if (legacyMemoryWritesFrozen()) return;
   const state = orgStates.get(orgId);
   if (!state || state.graph.nodes.length === 0) {
     if (state) state.analysisStale = false;
@@ -2473,6 +2545,7 @@ export function refreshAnalysis(orgId: string): void {
  * re-runs against the newer graph. Correctness wins over throughput here.
  */
 export async function refreshAnalysisWithWorker(orgId: string): Promise<boolean> {
+  if (legacyMemoryWritesFrozen()) return false;
   const state = orgStates.get(orgId);
   if (!state || state.graph.nodes.length === 0) {
     if (state) state.analysisStale = false;
@@ -2503,6 +2576,7 @@ export async function refreshAnalysisWithWorker(orgId: string): Promise<boolean>
     // Discard stale result; next tick will re-run with the newer graph.
     return false;
   }
+  if (legacyMemoryWritesFrozen()) return false;
 
   liveState.graph.communities = response.communities;
   liveState.hubIds = new Set(response.hubIds);
@@ -2516,6 +2590,7 @@ export async function refreshAnalysisWithWorker(orgId: string): Promise<boolean>
 }
 
 function flushRetrievalTelemetryIfDirty(orgId: string, state: OrgGraphState): boolean {
+  if (legacyMemoryWritesFrozen()) return false;
   if (!state.retrievalTelemetryDirty) return false;
   persistGraph(orgId, state);
   return true;
@@ -2533,6 +2608,7 @@ function flushRetrievalTelemetryIfDirty(orgId: string, state: OrgGraphState): bo
  * which is the desired shape for periodic refresh.
  */
 export function refreshAnalysisIfStale(orgId?: string): boolean | Promise<boolean> {
+  if (legacyMemoryWritesFrozen()) return false;
   if (isGraphWorkerEnabled()) {
     return refreshAnalysisIfStaleAsync(orgId);
   }
@@ -2556,6 +2632,7 @@ export function refreshAnalysisIfStale(orgId?: string): boolean | Promise<boolea
 }
 
 async function refreshAnalysisIfStaleAsync(orgId?: string): Promise<boolean> {
+  if (legacyMemoryWritesFrozen()) return false;
   if (orgId) {
     const state = orgStates.get(orgId);
     if (!state) return false;
@@ -2627,6 +2704,8 @@ export function pruneStaleNodes(orgId?: string, now: Date = new Date()): { remov
     }
     return { removed: 0, moved_to_cold: moved, rescored };
   }
+
+  if (legacyMemoryWritesFrozen()) return { removed: 0, moved_to_cold: 0, rescored: 0 };
 
   const state = orgStates.get(orgId);
   if (!state || state.graph.nodes.length === 0) return { removed: 0, moved_to_cold: 0, rescored: 0 };

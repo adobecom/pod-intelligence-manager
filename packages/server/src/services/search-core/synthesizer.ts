@@ -59,11 +59,9 @@ export async function synthesizeSearch(opts: SynthesizeSearchOpts): Promise<stri
       maxTokens: opts.maxTokens ?? 1200,
     });
     return md.trim() || undefined;
-  } catch (err) {
-    console.error(
-      `[search/synthesizer] synthesis failed (${opts.label ?? "unknown"}):`,
-      (err as Error).message,
-    );
+  } catch {
+    // Model-provider errors can echo request content. Keep logs code-only.
+    console.error(`[search/synthesizer] synthesis failed (${opts.label ?? "unknown"})`);
     return undefined;
   }
 }

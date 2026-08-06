@@ -51,6 +51,7 @@ vi.mock("../project-memory.js", () => ({
     results: [{ source: "jira", ingested: 3 }, { source: "github", ingested: 1 }],
     health: [],
   })),
+  getProjectSourceHealth: vi.fn(() => []),
   loadProject: vi.fn(() => null),
 }));
 
@@ -101,8 +102,9 @@ function seedEvidence(projectId = PROJECT_ID, daysAgo = 1) {
   testDb
     .prepare(
       `INSERT OR IGNORE INTO project_evidence_items
-       (id, org_id, project_id, source, source_type, source_id, source_url, source_title, summary, body, author, occurred_at, ingested_at, metadata_json, confidence_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, org_id, project_id, source, source_type, source_id, source_url, source_title, summary, body,
+        author, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'project_visible')`,
     )
     .run(
       `ev-${projectId}-${daysAgo}`,
@@ -154,11 +156,11 @@ beforeEach(() => {
 // ── 1. listActiveProjectsForRefresh ─────────────────────────────────────────
 
 describe("listActiveProjectsForRefresh", () => {
-  it("returns only projects with resources_json and recent activity", () => {
+  it("includes configured projects before they have recent evidence", () => {
     const projects = listActiveProjectsForRefresh(30);
     const ids = projects.map((p) => p.project_id);
     expect(ids).toContain(PROJECT_ID);
-    expect(ids).not.toContain(INACTIVE_PROJECT_ID);
+    expect(ids).toContain(INACTIVE_PROJECT_ID);
   });
 
   it("includes a project with only context-update activity (no evidence)", () => {
@@ -301,7 +303,7 @@ describe("refreshProjectSearch", () => {
 
     const result = await refreshProjectSearch(ORG_ID, PROJECT_ID);
     expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/network failure/);
+    expect(result.error).toBe("project_refresh_failed");
   });
 });
 

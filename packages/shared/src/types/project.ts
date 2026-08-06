@@ -116,6 +116,23 @@ export type ProjectEvidenceSource =
   | "commit"
   | "confluence";
 
+/** Visibility admitted by the project evidence ingestion spine. Connectors may
+ * report `restricted`/`unknown`, but only `project_visible` evidence is stored. */
+export type ProjectEvidenceVisibility = "project_visible" | "restricted" | "unknown";
+
+/** Sources with user-configurable project bindings and operational sync state. */
+export type ProjectSourceHealthSource = "github" | "jira" | "slack" | "confluence" | "git";
+
+/** Connector behavior that is implemented today, rather than aspirational
+ * registry metadata. Used by connector tests and operational tooling. */
+export interface ProjectSourceCapabilities {
+  pagination: "cursor" | "server_next_url" | "none";
+  overlap_window: boolean;
+  deletion_reconciliation: boolean;
+  source_versions: boolean;
+  visibility: "project_visible_only";
+}
+
 export interface ProjectEvidenceItem {
   id: string;
   org_id: string;
@@ -134,7 +151,50 @@ export interface ProjectEvidenceItem {
   confidence_score: number;
   promotable: boolean;
   promoted_node_id?: string;
+  /** Stable upstream instance (for example a Slack workspace or Confluence site). */
+  source_instance?: string;
+  /** Native identifier within `source_instance`. */
+  native_id?: string;
+  /** Upstream version/etag, independent of the redacted content hash. */
+  source_version?: string;
+  visibility?: ProjectEvidenceVisibility;
+  visibility_version?: string;
+  redaction_version?: string;
+  normalized_content_hash?: string;
+  source_updated_at?: string;
 }
+
+export interface ProjectSourceChangeEvidence {
+  source_type: string;
+  source_url?: string;
+  source_title: string;
+  summary: string;
+  body: string;
+  author?: string;
+  metadata?: Record<string, unknown>;
+  confidence_score: number;
+  promotable?: boolean;
+}
+
+interface ProjectSourceChangeBase {
+  org_id: string;
+  project_id: string;
+  source: ProjectEvidenceSource;
+  source_instance: string;
+  native_id: string;
+  source_version?: string;
+  visibility: ProjectEvidenceVisibility;
+  visibility_version?: string;
+  occurred_at?: string;
+  updated_at?: string;
+  operational_metadata?: Record<string, unknown>;
+}
+
+/** Minimal cursor-driven connector contract. Delete changes carry identifiers
+ * only, so ineligible or removed content never needs to cross persistence. */
+export type ProjectSourceChange =
+  | (ProjectSourceChangeBase & { kind: "upsert"; evidence: ProjectSourceChangeEvidence })
+  | (ProjectSourceChangeBase & { kind: "delete"; evidence?: never });
 
 export type ProjectMemoryCandidateStatus = "pending" | "promoted" | "rejected";
 
@@ -213,7 +273,7 @@ export interface ProjectAnswerResponse {
 }
 
 export interface ProjectSourceHealth {
-  source: "github" | "jira" | "slack" | "confluence" | "git";
+  source: ProjectSourceHealthSource;
   configured: boolean;
   credential_state:
     | "ok"
@@ -226,5 +286,33 @@ export interface ProjectSourceHealth {
   configured_items: number;
   last_ingested_at?: string;
   cursor_count: number;
+  /** Per-binding routing watermarks; keys contain source-native IDs only. */
+  cursor_watermarks?: Record<string, string>;
+  source_instance?: string;
+  last_attempt_at?: string;
+  last_success_at?: string;
+  last_reconciliation_at?: string;
+  lag_seconds?: number;
+  indexed_count?: number;
+  retry_count?: number;
+  last_error_code?: string;
   message?: string;
+}
+
+/** Durable operational state. Cursors remain in `project_ingestion_cursors`;
+ * this record describes whether consuming those cursors is healthy. */
+export interface ProjectSourceSyncState {
+  org_id: string;
+  project_id: string;
+  source: ProjectSourceHealthSource;
+  source_instance: string;
+  last_attempt_at?: string;
+  last_success_at?: string;
+  last_reconciliation_at?: string;
+  lag_seconds?: number;
+  indexed_count: number;
+  retry_count: number;
+  last_error_code?: string;
+  last_error_message?: string;
+  updated_at: string;
 }

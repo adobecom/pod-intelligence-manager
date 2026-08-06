@@ -4,6 +4,8 @@ dist/
 .env
 .env.local
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 .data/
 
 # Local npm auth experiments — never commit credentials into tracked .npmrc
@@ -26,6 +28,7 @@ fiestaHarness.md
 fiestaHarness-review.md
 
 # Local scratch + analysis docs (kept on disk for review, not part of the PR)
+docs/research/
 docs/PIM_ON_SCOUT_STYLE_BENCHMARK_PLAN.md
 docs/SCOUT_BENCHMARKING_REPORT.md
 

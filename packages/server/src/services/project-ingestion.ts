@@ -1,7 +1,6 @@
 import { randomUUID } from "crypto";
 import db from "../db/connection.js";
-import { ContextUpdateInputSchema } from "./ingestion.js";
-import { scanForSecrets } from "./secret-scan.js";
+import { ContextUpdateInputSchema, type ContextUpdateInput } from "./ingestion.js";
 import { scoreProjectUpdate } from "./quality-scoring.js";
 import { broadcastToAll } from "../ws/index.js";
 import type { ProjectContextUpdate } from "@pim/shared";
@@ -12,6 +11,7 @@ import {
   buildProjectContextUpdateMemory,
   recordTemporalRelationshipsForUpdate,
 } from "./memory-enrichment.js";
+import { redactProjectText, redactProjectUrl } from "./project-evidence-normalization.js";
 
 export interface ProjectIngestionResult {
   success: boolean;
@@ -20,6 +20,43 @@ export interface ProjectIngestionResult {
   error?: string;
   secretFindings?: string[];
   deduplicated?: boolean;
+}
+
+function normalizeText(value: string, findings: Set<string>): string {
+  const normalized = redactProjectText(value);
+  for (const finding of normalized.findings) findings.add(finding);
+  return normalized.text;
+}
+
+/** Canonicalize every admitted string before it can reach memory enrichment,
+ * SQLite/WAL, evidence indexing, broadcasts, or follow-on jobs. */
+function normalizeProjectContextInput(data: ContextUpdateInput): {
+  data: ContextUpdateInput;
+  findings: string[];
+} {
+  const findings = new Set<string>();
+  const normalized: ContextUpdateInput = {
+    agent_id: normalizeText(data.agent_id, findings),
+    type: data.type,
+    scope: normalizeText(data.scope, findings),
+    summary: normalizeText(data.summary, findings),
+    details: normalizeText(data.details, findings),
+    artifacts: data.artifacts.map((artifact) => ({
+      type: normalizeText(artifact.type, findings),
+      ...(artifact.path !== undefined ? { path: normalizeText(artifact.path, findings) } : {}),
+      ...(artifact.url !== undefined ? { url: redactProjectUrl(artifact.url, findings) } : {}),
+      ...(artifact.sha !== undefined ? { sha: normalizeText(artifact.sha, findings) } : {}),
+    })),
+    status: data.status,
+    blocks: data.blocks.map((value) => normalizeText(value, findings)),
+    blocked_by: data.blocked_by.map((value) => normalizeText(value, findings)),
+    needs_input_from: data.needs_input_from.map((request) => ({
+      role: normalizeText(request.role, findings),
+      question: normalizeText(request.question, findings),
+    })),
+    source: data.source,
+  };
+  return { data: normalized, findings: [...findings].sort() };
 }
 
 export async function ingestProjectContextUpdate(
@@ -31,23 +68,21 @@ export async function ingestProjectContextUpdate(
     return { success: false, error: `Validation failed: ${parsed.error.message}` };
   }
 
-  const data = parsed.data;
+  const normalized = normalizeProjectContextInput(parsed.data);
+  if (normalized.findings.length > 0) {
+    return {
+      success: false,
+      error: "Context update rejected: potential secrets detected",
+      secretFindings: normalized.findings,
+    };
+  }
+  const data = normalized.data;
 
   const project = db.prepare("SELECT project_id, name, org_id FROM projects WHERE project_id = ?").get(projectId) as
     | { project_id: string; name: string; org_id: string | null }
     | undefined;
   if (!project) {
     return { success: false, error: `Project not found: ${projectId}` };
-  }
-
-  const textToScan = [data.summary, data.details, ...data.artifacts.map(a => a.path ?? a.url ?? "")].join(" ");
-  const scanResult = scanForSecrets(textToScan);
-  if (!scanResult.clean) {
-    return {
-      success: false,
-      error: "Context update rejected: potential secrets detected",
-      secretFindings: scanResult.findings,
-    };
   }
 
   const quality = scoreProjectUpdate(data, projectId);

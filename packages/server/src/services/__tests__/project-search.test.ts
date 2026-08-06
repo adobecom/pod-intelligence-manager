@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -51,6 +51,7 @@ import {
   reindexProjectSearch,
   type IndexDocumentInput,
 } from "../project-search-index.js";
+import { connectorBindingVersion } from "../project-resource-bindings.js";
 import { searchProject } from "../project-search.js";
 import { queryKnowledge } from "../knowledge-graph.js";
 
@@ -82,7 +83,12 @@ function seed() {
     "EMC Platform",
     null,
     new Date().toISOString(),
-    JSON.stringify({ jira: { project_keys: ["EMC"] }, github: { repos: ["adobe/emc"] } }),
+    JSON.stringify({
+      jira: { project_keys: ["EMC", "MWPW"] },
+      github: { repos: ["adobe/emc"] },
+      slack: { channels: ["T1:C1"] },
+      confluence: { space_keys: ["ENG"] },
+    }),
     ORG_ID,
     creator.user_id,
   );
@@ -142,10 +148,15 @@ function createLocalGitRepo(): { repo: string; sha: string } {
   runGit(repo, ["commit", "-m", "Fix EMC-123 implement event dashboard exports"]);
   const sha = runGit(repo, ["rev-parse", "HEAD"]);
   const canonicalRepo = runGit(repo, ["rev-parse", "--show-toplevel"]);
+  process.env.PROJECT_GIT_ALLOWED_ROOTS = canonicalRepo;
   return { repo: canonicalRepo, sha };
 }
 
 beforeEach(() => {
+  process.env.CONFLUENCE_PROJECT_VISIBLE_SPACE_KEYS = "ENG";
+  process.env.CONFLUENCE_BASE_URL = "https://wiki.example.test";
+  process.env.PROJECT_SLACK_SEARCH_ENABLED = "1";
+  process.env.PROJECT_CONFLUENCE_SEARCH_ENABLED = "1";
   vi.clearAllMocks();
   llmCalls.length = 0;
   mockKgNodes([]);
@@ -177,6 +188,13 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.CONFLUENCE_PROJECT_VISIBLE_SPACE_KEYS;
+  delete process.env.CONFLUENCE_BASE_URL;
+  delete process.env.PROJECT_SLACK_SEARCH_ENABLED;
+  delete process.env.PROJECT_CONFLUENCE_SEARCH_ENABLED;
+  delete process.env.PROJECT_GITHUB_VISIBLE_REPOS;
+  delete process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS;
+  delete process.env.PROJECT_GIT_ALLOWED_ROOTS;
   for (const repo of tempRepos) {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -184,6 +202,49 @@ afterEach(() => {
 });
 
 describe("indexed project search — retrieval", () => {
+  it("stamps derived metadata without rewriting authoritative evidence", async () => {
+    const currentVersion = connectorBindingVersion({
+      jira: { project_keys: ["EMC", "MWPW"] },
+    }, "jira");
+    const now = new Date().toISOString();
+    testDb.prepare(
+      `INSERT INTO project_evidence_items
+         (id, org_id, project_id, source, source_type, source_id, source_title,
+          summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+       VALUES ('evidence-binding-restamp', ?, ?, 'jira', 'issue', 'EMC-101',
+               'bindingrestampneedle remains searchable', 'Historical evidence',
+               'Historical evidence under the configured project binding.', ?, ?, ?, 0.7, 'project_visible')`,
+    ).run(
+      ORG_ID,
+      PROJECT_ID,
+      now,
+      now,
+      JSON.stringify({ key: "EMC-101", resource_binding_version: "resource-binding-v1:obsolete" }),
+    );
+
+    backfillProjectSearch(ORG_ID, PROJECT_ID);
+
+    const storedDocument = testDb.prepare(
+      "SELECT metadata_json FROM project_search_documents WHERE project_id = ? AND source_id = ?",
+    ).get(PROJECT_ID, "EMC-101") as { metadata_json: string };
+    const storedEvidence = testDb.prepare(
+      "SELECT metadata_json FROM project_evidence_items WHERE project_id = ? AND source_id = ?",
+    ).get(PROJECT_ID, "EMC-101") as { metadata_json: string };
+    expect(JSON.parse(storedDocument.metadata_json)).toMatchObject({
+      resource_binding_version: currentVersion,
+    });
+    expect(JSON.parse(storedEvidence.metadata_json)).toMatchObject({
+      resource_binding_version: "resource-binding-v1:obsolete",
+    });
+
+    process.env.PROJECT_JIRA_VISIBLE_PROJECT_KEYS = "UNRELATED,REORDERED";
+    expect(connectorBindingVersion({
+      jira: { project_keys: ["EMC", "MWPW"] },
+    }, "jira")).toBe(currentVersion);
+    const result = await searchProject(ORG_ID, PROJECT_ID, { query: "bindingrestampneedle" });
+    expect(result?.hits.map((hit) => hit.source_id)).toContain("EMC-101");
+  });
+
   it("returns an exact Jira-key lookup as the top hit", async () => {
     indexProjectDocument(doc({
       source: "jira", source_type: "resolved_issue", source_id: "EMC-123",
@@ -204,6 +265,82 @@ describe("indexed project search — retrieval", () => {
     expect(res!.detected_identifiers).toContain("emc-123");
   });
 
+  it("uses normalized exact-token equality for identifiers", async () => {
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-12",
+      title: "EMC-12 exact task", body: "The exact task requested by the user.",
+    }));
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-120",
+      title: "EMC-120 prefix collision", body: "A different task with a longer numeric suffix.",
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "EMC-12" });
+
+    expect(res!.hits[0].source_id).toBe("EMC-12");
+    expect(res!.hits[0].matched.identifier).toBe(true);
+    expect(res!.hits.find((hit) => hit.source_id === "EMC-120")?.matched.identifier).not.toBe(true);
+  });
+
+  it("applies source eligibility before the exact-identifier candidate cap", async () => {
+    for (let i = 0; i < 55; i++) {
+      indexProjectDocument(doc({
+        source: "slack",
+        source_type: "thread",
+        source_id: `exact-mirror-${i}`,
+        title: `EMC-77 mirror discussion ${i}`,
+      }));
+    }
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-77",
+      title: "Native identity task", body: "The canonical issue.",
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "EMC-77", sources: ["jira"] });
+
+    expect(res!.hits[0].source_id).toBe("EMC-77");
+    expect(res!.hits[0].matched.identifier).toBe(true);
+  });
+
+  it("expands project aliases and glossary terms with whole-phrase matching", async () => {
+    testDb.prepare("UPDATE projects SET resources_json = ? WHERE org_id = ? AND project_id = ?").run(
+      JSON.stringify({
+        aliases: ["Event Console"],
+        jira: { project_keys: ["EMC", "MWPW"] },
+        github: { repos: ["adobe/emc"] },
+        slack: { channels: ["T1:C1"] },
+        confluence: { space_keys: ["ENG"] },
+        glossary: [
+          { term: "role based access control", aliases: ["RBAC"] },
+          { term: "artificial intelligence", aliases: ["AI"] },
+        ],
+      }),
+      ORG_ID,
+      PROJECT_ID,
+    );
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-410",
+      title: "EMC Platform architecture", body: "Platform foundations and boundaries.",
+    }));
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-411",
+      title: "Authorization architecture", body: "Role based access control protects every operation.",
+    }));
+    indexProjectDocument(doc({
+      source: "jira", source_type: "issue", source_id: "EMC-412",
+      title: "ML architecture", body: "Artificial intelligence model evaluation.",
+    }));
+
+    const aliasRes = await searchProject(ORG_ID, PROJECT_ID, { query: "Event Console" });
+    expect(aliasRes!.hits.some((hit) => hit.source_id === "EMC-410")).toBe(true);
+
+    const glossaryRes = await searchProject(ORG_ID, PROJECT_ID, { query: "RBAC" });
+    expect(glossaryRes!.hits.some((hit) => hit.source_id === "EMC-411")).toBe(true);
+
+    const substringRes = await searchProject(ORG_ID, PROJECT_ID, { query: "chair" });
+    expect(substringRes!.hits.some((hit) => hit.source_id === "EMC-412")).toBe(false);
+  });
+
   it("answers a vague keyword query lexically (no embeddings) with a snippet", async () => {
     indexProjectDocument(doc({
       source: "jira", source_type: "resolved_issue", source_id: "EMC-200",
@@ -219,7 +356,7 @@ describe("indexed project search — retrieval", () => {
 
   it("never returns documents from a different project (wrong-project control)", async () => {
     indexProjectDocument({
-      org_id: ORG_ID, project_id: OTHER_PROJECT_ID, source: "jira", source_type: "issue",
+      org_id: ORG_ID, project_id: OTHER_PROJECT_ID, source: "project_update", source_type: "progress",
       source_id: "OTH-1", title: "zzqplutonium reactor calibration", body: "zzqplutonium specifics",
       occurred_at: new Date().toISOString(),
     });
@@ -253,6 +390,174 @@ describe("indexed project search — retrieval", () => {
     const res = await searchProject(ORG_ID, PROJECT_ID, { query: "timeout config", sources: ["jira"] });
     expect(res!.hits.length).toBeGreaterThanOrEqual(1);
     expect(res!.hits.every((h) => h.source === "jira")).toBe(true);
+  });
+
+  it("requires every configured Jira narrowing dimension before candidate generation", async () => {
+    testDb.prepare("UPDATE projects SET resources_json = ? WHERE org_id = ? AND project_id = ?").run(
+      JSON.stringify({
+        jira: {
+          project_keys: ["EMC"],
+          issue_keys: ["EMC-501", "EMC-502", "EMC-503", "EMC-505"],
+          epics: ["EMC-900"],
+          components: ["Project Search"],
+          fix_versions: ["R1"],
+        },
+      }),
+      ORG_ID,
+      PROJECT_ID,
+    );
+    const jiraDoc = (sourceId: string, metadata: Record<string, unknown>) => doc({
+      source: "jira",
+      source_type: "issue",
+      source_id: sourceId,
+      title: `${sourceId} conjunctiveboundarytoken`,
+      body: "conjunctiveboundarytoken",
+      metadata,
+    });
+    indexProjectDocument(jiraDoc("EMC-501", {
+      components: ["Project Search"], fix_versions: ["R1"], parent: "EMC-900",
+    }));
+    indexProjectDocument(jiraDoc("EMC-502", {
+      components: ["Other"], fix_versions: ["R1"], parent: "EMC-900",
+    }));
+    indexProjectDocument(jiraDoc("EMC-503", {
+      components: ["Project Search"], fix_versions: ["R2"], parent: "EMC-900",
+    }));
+    indexProjectDocument(jiraDoc("EMC-504", {
+      components: ["Project Search"], fix_versions: ["R1"], parent: "EMC-900",
+    }));
+    indexProjectDocument(jiraDoc("EMC-505", {
+      components: ["Project Search"], fix_versions: ["R1"], parent: "EMC-901",
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "conjunctiveboundarytoken", sources: ["jira"] });
+
+    expect(res!.hits.map((hit) => hit.source_id)).toEqual(["EMC-501"]);
+  });
+
+  it("applies source eligibility before the lexical candidate cap", async () => {
+    for (let i = 0; i < 210; i++) {
+      indexProjectDocument(doc({
+        source: "slack",
+        source_type: "thread",
+        source_id: `thread-${i}`,
+        title: `quasarneedle excluded thread ${i}`,
+        body: "quasarneedle quasarneedle quasarneedle quasarneedle",
+      }));
+    }
+    indexProjectDocument(doc({
+      source: "jira",
+      source_type: "issue",
+      source_id: "EMC-420",
+      title: "quasarneedle allowed Jira task",
+      body: "The scoped candidate.",
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, {
+      query: "quasarneedle",
+      sources: ["jira"],
+    });
+
+    expect(res!.hits.map((hit) => hit.source_id)).toContain("EMC-420");
+    expect(res!.hits.every((hit) => hit.source === "jira")).toBe(true);
+  });
+
+  it("expands neighboring Confluence chunks only after selection", async () => {
+    const paragraph = (marker: string, word: string) => `${marker} ${(`${word} `.repeat(90)).trim()}`;
+    indexProjectDocument(doc({
+      source: "confluence",
+      source_type: "page",
+      source_id: "wiki:page-42",
+      source_instance: "wiki.example.test",
+      native_id: "page-42",
+      title: "Architecture notes",
+      body: [
+        paragraph("precedingcontext", "alpha"),
+        paragraph("needlecontext", "beta"),
+        paragraph("followingcontext", "gamma"),
+      ].join("\n\n"),
+      metadata: { page_id: "page-42", space_key: "ENG" },
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "needlecontext" });
+
+    expect(res!.hits[0].source_id).toBe("wiki:page-42");
+    expect(res!.hits[0].snippet).toContain("precedingcontext");
+    expect(res!.hits[0].snippet).toContain("needlecontext");
+    expect(res!.hits[0].snippet).toContain("followingcontext");
+  });
+
+  it("deep-links a Slack hit to the matching message", async () => {
+    indexProjectDocument(doc({
+      source: "slack",
+      source_type: "thread",
+      source_id: "T1::C1:100.1",
+      source_url: "https://workspace.slack.com/archives/C1/p1001",
+      title: "#project: Release thread",
+      body: [
+        "[2026-07-01T00:00:00.000Z] <@U1>: Initial release question\nPermalink: https://workspace.slack.com/archives/C1/p1001",
+        "[2026-07-01T00:01:00.000Z] <@U2>: replydeepneedle contains the resolution\nPermalink: https://workspace.slack.com/archives/C1/p1011?thread_ts=100.1&cid=C1",
+      ].join("\n\n"),
+      source_instance: "T1",
+      native_id: "C1:100.1",
+      metadata: { workspace_id: "T1", channel_id: "C1", thread_ts: "100.1" },
+    }));
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "replydeepneedle" });
+
+    expect(res!.hits[0].url).toBe("https://workspace.slack.com/archives/C1/p1011?thread_ts=100.1&cid=C1");
+  });
+
+  it("expands neighboring Confluence section documents from the same page", async () => {
+    for (let sectionIndex = 0; sectionIndex < 5; sectionIndex++) {
+      indexProjectDocument(doc({
+        source: "confluence",
+        source_type: "page_section",
+        source_id: `site::page-42:section:${sectionIndex}`,
+        source_instance: "wiki.example.test",
+        native_id: `page-42:section:${sectionIndex}`,
+        title: `Architecture notes — Section ${sectionIndex}`,
+        body: sectionIndex === 2
+          ? "centralneedle matched section"
+          : `sectionmarker${sectionIndex} adjacent section`,
+        metadata: { page_id: "page-42", space_key: "ENG", section_index: sectionIndex },
+        visibility: "project_visible",
+      }));
+    }
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "centralneedle" });
+
+    expect(res!.hits[0].source_id).toContain("section:2");
+    expect(res!.hits[0].snippet).toContain("sectionmarker0");
+    expect(res!.hits[0].snippet).toContain("sectionmarker1");
+    expect(res!.hits[0].snippet).toContain("centralneedle");
+    expect(res!.hits[0].snippet).toContain("sectionmarker3");
+    expect(res!.hits[0].snippet).toContain("sectionmarker4");
+  });
+
+  it("includes project source health in every search response", async () => {
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "no indexed evidence" });
+
+    expect(res!.source_health.map((entry) => entry.source)).toEqual([
+      "github", "jira", "slack", "confluence", "git",
+    ]);
+    expect(res!.source_health.find((entry) => entry.source === "jira")?.configured).toBe(true);
+  });
+
+  it("fails closed over previously indexed Confluence evidence when the visibility policy is absent", async () => {
+    indexProjectDocument(doc({
+      source: "confluence",
+      source_type: "page_section",
+      source_id: "site::page-private:section:one",
+      title: "Policy-bound document",
+      body: "policyrevokedneedle must not remain searchable",
+      visibility: "project_visible",
+    }));
+    delete process.env.CONFLUENCE_PROJECT_VISIBLE_SPACE_KEYS;
+
+    const res = await searchProject(ORG_ID, PROJECT_ID, { query: "policyrevokedneedle" });
+
+    expect(res!.hits.some((hit) => hit.source === "confluence")).toBe(false);
   });
 
   it("honors the entity_types filter for document-backed entities", async () => {
@@ -289,6 +594,110 @@ describe("indexed project search — retrieval", () => {
 });
 
 describe("indexed project search — backfill + mind map", () => {
+  it.each(["first", "middle", "last"])(
+    "continues valid evidence and update rows when a malformed evidence row is %s",
+    (position) => {
+      const now = new Date().toISOString();
+      const insertEvidence = testDb.prepare(
+        `INSERT INTO project_evidence_items
+           (id, org_id, project_id, source, source_type, source_id, source_title,
+            summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+         VALUES (?, ?, ?, 'project_update', 'progress', ?, ?, ?, ?, ?, ?, ?, 0.7, 'project_visible')`,
+      );
+      const rows = [
+        { id: "evidence-good-a", sourceId: "good-a", metadata: "{}" },
+        { id: "evidence-bad", sourceId: "bad-row", metadata: "{" },
+        { id: "evidence-good-b", sourceId: "good-b", metadata: "{}" },
+      ];
+      if (position === "first") rows.unshift(rows.splice(1, 1)[0]!);
+      if (position === "last") rows.push(rows.splice(1, 1)[0]!);
+      for (const row of rows) {
+        insertEvidence.run(
+          row.id,
+          ORG_ID,
+          PROJECT_ID,
+          row.sourceId,
+          `Title ${row.sourceId}`,
+          `Summary ${row.sourceId}`,
+          `Body ${row.sourceId}`,
+          now,
+          now,
+          row.metadata,
+        );
+      }
+
+      testDb.prepare(
+        `INSERT INTO project_context_updates
+           (id, org_id, project_id, summary, details, type, scope, agent_id, status, timestamp)
+         VALUES ('project-update-after-bad', ?, ?, 'Project update after bad row', 'Still indexed',
+                 'progress', 'backend', 'agent-project', 'active', ?)`,
+      ).run(ORG_ID, PROJECT_ID, now);
+      testDb.prepare(
+        `INSERT INTO pods
+           (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure,
+            milestone_json, project_id, org_id, created_by_user_id)
+         VALUES ('pod-after-bad', 'Pod after bad row', '2026-08-01', '2026-08-07', 1, 7, 0, '{}', ?, ?, ?)`,
+      ).run(PROJECT_ID, ORG_ID, creatorId);
+      testDb.prepare(
+        `INSERT INTO context_updates
+           (id, agent_id, timestamp, pod_id, type, scope, summary, details, artifacts_json,
+            status, blocks_json, blocked_by_json, needs_input_from_json, org_id)
+         VALUES ('pod-update-after-bad', 'agent-pod', ?, 'pod-after-bad', 'progress', 'backend',
+                 'Pod update after bad row', 'Also indexed', '[]', 'active', '[]', '[]', '[]', ?)`,
+      ).run(now, ORG_ID);
+
+      const result = backfillProjectSearch(ORG_ID, PROJECT_ID);
+      const sourceIds = (testDb.prepare(
+        `SELECT source_id FROM project_search_documents
+         WHERE org_id = ? AND project_id = ? ORDER BY source_id`,
+      ).all(ORG_ID, PROJECT_ID) as Array<{ source_id: string }>).map((row) => row.source_id);
+
+      expect(result).toMatchObject({
+        failed_rows: 1,
+        complete: false,
+        skipped_ineligible: 0,
+      });
+      expect(result.failures).toEqual([
+        { row_id: "evidence-bad", source: "project_update", code: "metadata_json" },
+      ]);
+      expect(JSON.stringify(result.failures)).not.toContain("Body bad-row");
+      expect(sourceIds).toEqual(expect.arrayContaining([
+        "good-a",
+        "good-b",
+        "project-update-after-bad",
+        "pod-update-after-bad",
+      ]));
+      expect(sourceIds).not.toContain("bad-row");
+    },
+  );
+
+  it("prunes derived evidence whose connector binding was removed and classifies it as ineligible", () => {
+    const now = new Date().toISOString();
+    testDb.prepare(
+      `INSERT INTO project_evidence_items
+         (id, org_id, project_id, source, source_type, source_id, source_title,
+          summary, body, occurred_at, ingested_at, metadata_json, confidence_score, visibility)
+       VALUES ('stale-binding-row', ?, ?, 'jira', 'issue', 'EMC-REMOVED', 'Removed binding',
+               'Removed binding', 'Authoritative evidence remains', ?, ?, '{}', 0.7, 'project_visible')`,
+    ).run(ORG_ID, PROJECT_ID, now, now);
+    backfillProjectSearch(ORG_ID, PROJECT_ID);
+    expect(testDb.prepare(
+      "SELECT 1 FROM project_search_documents WHERE project_id = ? AND source_id = 'EMC-REMOVED'",
+    ).get(PROJECT_ID)).toBeDefined();
+
+    testDb.prepare("UPDATE projects SET resources_json = '{}' WHERE project_id = ?").run(PROJECT_ID);
+    testDb.prepare("UPDATE project_evidence_items SET metadata_json = '{' WHERE id = 'stale-binding-row'").run();
+    const result = backfillProjectSearch(ORG_ID, PROJECT_ID);
+
+    expect(result).toMatchObject({ skipped_ineligible: 1, failed_rows: 0, complete: true });
+    expect(testDb.prepare(
+      "SELECT 1 FROM project_search_documents WHERE project_id = ? AND source_id = 'EMC-REMOVED'",
+    ).get(PROJECT_ID)).toBeUndefined();
+    expect(testDb.prepare(
+      "SELECT body, metadata_json FROM project_evidence_items WHERE id = 'stale-binding-row'",
+    ).get()).toEqual({ body: "Authoritative evidence remains", metadata_json: "{" });
+  });
+
   it("backfills from linked pod context updates so they become searchable", async () => {
     testDb.prepare(
       "INSERT INTO pods (pod_id, name, sprint_start, sprint_end, day_number, total_days, conflict_pressure, milestone_json, project_id, org_id, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -411,12 +820,20 @@ describe("indexed project search — backfill + mind map", () => {
     expect(res!.hits).toHaveLength(1); // graph-only hits capped at floor(4 * 0.3) => 1
     expect(res!.hits[0].matched.graph).toBe(true);
     expect(res!.hits[0].graph_score).toBeGreaterThan(0);
+    expect(res!.hits[0].graph_score).toBeLessThanOrEqual(1 / 61); // graph lane is fused with RRF k=60
     expect(res!.mind_map!.entities).toEqual(expect.arrayContaining([
       expect.objectContaining({ entity_type: "feature", entity_key: "component:session builder" }),
     ]));
     expect(res!.mind_map!.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ edge_type: "implements", confidence_score: 0.9 }),
     ]));
+
+    const sourceFiltered = await searchProject(ORG_ID, PROJECT_ID, {
+      query: "Session Builder",
+      sources: ["github"],
+    });
+    expect(sourceFiltered!.hits).toHaveLength(0);
+    expect(sourceFiltered!.focus_feature).toBeUndefined();
   });
 
   it("can disable graph expansion per query", async () => {
@@ -466,8 +883,8 @@ describe("indexed project search — backfill + mind map", () => {
     testDb.prepare(
       `INSERT INTO project_evidence_items
          (id, org_id, project_id, source, source_type, source_id, source_title, summary, body,
-          occurred_at, ingested_at, metadata_json, confidence_score, promotable)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
+          occurred_at, ingested_at, metadata_json, confidence_score, promotable, visibility)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, 'project_visible')`,
     ).run(
       "pei-reindex-1",
       ORG_ID,
@@ -601,6 +1018,51 @@ describe("indexed project search — backfill + mind map", () => {
       .get(ORG_ID, PROJECT_ID) as { count: number };
     expect(candidates.count).toBe(0);
   });
+
+  it("does not dereference a tracked file symlink outside the admitted repository", async () => {
+    const { repo } = createLocalGitRepo();
+    const outside = mkdtempSync(path.join(tmpdir(), "pim-project-search-outside-"));
+    tempRepos.push(outside);
+    writeFileSync(path.join(outside, "secret.ts"), "export const OUTSIDE_SECRET = 'must-not-be-indexed';\n");
+    symlinkSync(path.join(outside, "secret.ts"), path.join(repo, "src", "leak.ts"));
+    runGit(repo, ["add", "src/leak.ts"]);
+    runGit(repo, ["commit", "-m", "Add tracked link fixture"]);
+    testDb.prepare("UPDATE projects SET resources_json = ? WHERE org_id = ? AND project_id = ?").run(
+      JSON.stringify({ git: { repo_paths: [repo], lookback_days: 90 } }),
+      ORG_ID,
+      PROJECT_ID,
+    );
+
+    await reindexProjectSearch(ORG_ID, PROJECT_ID, { embed: false });
+
+    const indexed = testDb.prepare(
+      `SELECT d.source_id, c.text AS content
+       FROM project_search_documents d
+       LEFT JOIN project_search_chunks c ON c.document_id = d.id
+       WHERE d.org_id = ? AND d.project_id = ? AND d.source = 'git'`,
+    ).all(ORG_ID, PROJECT_ID) as Array<{ source_id: string; content: string | null }>;
+    expect(indexed.some((row) => row.source_id.endsWith(":src/leak.ts"))).toBe(false);
+    expect(indexed.some((row) => row.content?.includes("must-not-be-indexed"))).toBe(false);
+  });
+
+  it("hides indexed Git rows immediately when the operator allowed-root policy narrows", async () => {
+    const { repo } = createLocalGitRepo();
+    testDb.prepare("UPDATE projects SET resources_json = ? WHERE org_id = ? AND project_id = ?").run(
+      JSON.stringify({ git: { repo_paths: [repo], lookback_days: 90 } }),
+      ORG_ID,
+      PROJECT_ID,
+    );
+    await reindexProjectSearch(ORG_ID, PROJECT_ID, { embed: false });
+    expect((await searchProject(ORG_ID, PROJECT_ID, { query: "EventDashboard" }))!.hits
+      .some((hit) => hit.source === "git")).toBe(true);
+
+    const replacementRoot = mkdtempSync(path.join(tmpdir(), "pim-project-search-new-root-"));
+    tempRepos.push(replacementRoot);
+    process.env.PROJECT_GIT_ALLOWED_ROOTS = replacementRoot;
+
+    expect((await searchProject(ORG_ID, PROJECT_ID, { query: "EventDashboard" }))!.hits
+      .some((hit) => hit.source === "git")).toBe(false);
+  });
 });
 
 describe("indexed project search — intent + readable answer", () => {
@@ -631,6 +1093,26 @@ describe("indexed project search — intent + readable answer", () => {
     expect(res!.summary_md).toContain("T3-26.29");
     // The release version is passed to the LLM as a readable citation ref (not the raw source_id).
     expect(llmCalls.at(-1)!.prompt).toContain("T3-26.29");
+  });
+
+  it("redacts query credentials before synthesis and response boundaries", async () => {
+    indexProjectDocument(doc({
+      source: "jira",
+      source_type: "release",
+      source_id: "release:MWPW:T3-26.29",
+      title: "Release T3-26.29 — Upcoming",
+      body: "Release T3-26.29 (MWPW) — Upcoming.",
+    }));
+
+    const secret = "query-secret-must-not-reach-model";
+    const res = await searchProject(ORG_ID, PROJECT_ID, {
+      query: `what is the next release token="${secret}"`,
+      synthesize: true,
+    });
+
+    expect(llmCalls.at(-1)?.prompt).not.toContain(secret);
+    expect(res?.query).not.toContain(secret);
+    expect(res?.query).toContain("[REDACTED:Generic Secret]");
   });
 
   it("feeds project-scoped KG evidence into synthesis before artifact hits", async () => {

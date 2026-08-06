@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const dbPath = process.env.DB_PATH
+export const dbPath = process.env.DB_PATH
   ? path.resolve(process.env.DB_PATH)
   : path.join(path.resolve(__dirname, "../../../../.data"), "pim.db");
 
