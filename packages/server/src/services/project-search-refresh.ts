@@ -4,8 +4,8 @@
  * Scheduled incremental refresh for the project search index.
  *
  * Mechanism:
- *   1. Enumerate every project with at least one configured connector. Newly
- *      configured projects must be eligible before they have any evidence.
+ *   1. Enumerate every indexing-enabled project with at least one configured
+ *      connector. Projects remain idle until an operator starts indexing.
  *   2. For each project, in order:
  *        a. pollProjectSources    — live API delta pull → project_evidence_items (cursor-based)
  *        b. backfillProjectSearch — fold DB rows → index (content-hash dedup, cheap for no-ops)
@@ -24,6 +24,7 @@
 
 import db from "../db/connection.js";
 import { pollProjectSources } from "./project-memory.js";
+import { isProjectSearchIndexingEnabled } from "./project-search-control.js";
 import {
   annotateProjectGraph,
   backfillProjectSearch,
@@ -58,7 +59,7 @@ export interface RefreshResult {
 // ── Enumerator ───────────────────────────────────────────────────────────────
 
 /**
- * Returns every project that has at least one concrete connector binding.
+ * Returns every indexing-enabled project with a concrete connector binding.
  * `windowDays` remains in the signature for API compatibility; freshness is a
  * connector concern, not an admission requirement for the scheduler.
  */
@@ -92,6 +93,7 @@ export function listActiveProjectsForRefresh(windowDays = 30): ProjectRef[] {
 
   return rows
     .filter((row) => configured(row.resources_json))
+    .filter((row) => isProjectSearchIndexingEnabled(row.org_id, row.project_id))
     .map(({ org_id, project_id }) => ({ org_id, project_id }));
 }
 
@@ -204,6 +206,8 @@ interface ScheduledRefresh {
 const scheduledRefreshes = new Map<string, ScheduledRefresh>();
 
 export function scheduleProjectSearchRefresh(orgId: string, projectId: string): void {
+  if (!isProjectSearchIndexingEnabled(orgId, projectId)) return;
+
   const key = `${orgId}\0${projectId}`;
   const existing = scheduledRefreshes.get(key);
   if (existing) {
@@ -248,7 +252,7 @@ export async function runProjectSearchRefreshTick(
 ): Promise<void> {
   const projects = listActiveProjectsForRefresh(windowDays);
   if (projects.length === 0) {
-    log.info({ msg: "Project search refresh: no active configured projects, skipping" });
+    log.info({ msg: "Project search refresh: no indexing-enabled configured projects, skipping" });
     return;
   }
 

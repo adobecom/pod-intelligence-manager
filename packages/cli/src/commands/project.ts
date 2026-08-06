@@ -266,7 +266,7 @@ export function registerProjectCommands(program: Command) {
 
   project
     .command("reindex")
-    .description("Rebuild a project's search index from its working memory (and optionally embed)")
+    .description("Start or rebuild a project's search index from its working memory (and optionally embed)")
     .argument("<projectId>", "Project ID")
     .option("--embed", "Generate chunk embeddings (requires Bedrock credentials; rate-limited)")
     .action(async (projectId: string, opts) => {
@@ -279,7 +279,7 @@ export function registerProjectCommands(program: Command) {
           body: JSON.stringify({ embed: !!opts.embed }),
         },
       );
-      console.log(chalk.green("\n  Reindex complete.\n"));
+      console.log(chalk.green("\n  Project indexing started; build complete.\n"));
       console.log(`  Documents: ${chalk.bold(stats.documents_indexed)}`);
       console.log(`  Chunks:    ${chalk.bold(stats.chunks_indexed)}`);
       console.log(`  Entities:  ${chalk.bold(stats.entities_indexed)}`);

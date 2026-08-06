@@ -6,3 +6,6 @@ import path from "node:path";
 // Production never loads this setup file and keeps its configured DB_PATH.
 const workerId = process.env.VITEST_WORKER_ID ?? process.env.VITEST_POOL_ID ?? "0";
 process.env.DB_PATH = path.join(os.tmpdir(), `pim-server-vitest-${process.pid}-${workerId}.db`);
+// Production project-search indexing is opt-in. Existing tests exercise the
+// indexed path directly, so enable the explicit all-projects test override.
+process.env.PROJECT_SEARCH_INDEXING_ENABLED = "1";

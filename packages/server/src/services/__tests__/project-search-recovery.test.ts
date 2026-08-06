@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   backfill: vi.fn(),
   indexKg: vi.fn(),
   annotate: vi.fn(),
+  indexingEnabled: vi.fn(),
 }));
 
 vi.mock("../../db/connection.js", () => ({
@@ -21,6 +22,10 @@ vi.mock("../project-search-index.js", () => ({
   backfillProjectSearch: mocks.backfill,
   indexProjectKgNodes: mocks.indexKg,
   annotateProjectGraph: mocks.annotate,
+}));
+
+vi.mock("../project-search-control.js", () => ({
+  isProjectSearchIndexingEnabled: mocks.indexingEnabled,
 }));
 
 import { rebuildProjectSearchAfterCoreRestore } from "../project-search-recovery.js";
@@ -49,6 +54,7 @@ describe("rebuildProjectSearchAfterCoreRestore", () => {
     });
     mocks.indexKg.mockReturnValue({ indexed: 1, deleted: 0, skipped: 0 });
     mocks.annotate.mockReturnValue({ annotated: 4, skipped: false });
+    mocks.indexingEnabled.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -63,7 +69,27 @@ describe("rebuildProjectSearchAfterCoreRestore", () => {
     expect(mocks.purge).not.toHaveBeenCalled();
   });
 
-  it("rebuilds every project locally and removes the marker only after success", async () => {
+  it("does not rebuild projects whose indexing has not been started", async () => {
+    fs.writeFileSync(markerPath, "");
+    mocks.prepare.mockReturnValue({
+      all: () => [{ org_id: "org-1", project_id: "project-a" }],
+    });
+    mocks.indexingEnabled.mockReturnValue(false);
+
+    const result = await rebuildProjectSearchAfterCoreRestore(log, markerPath);
+
+    expect(result).toMatchObject({
+      requested: true,
+      projects_total: 0,
+      projects_rebuilt: 0,
+      marker_removed: true,
+    });
+    expect(mocks.purge).not.toHaveBeenCalled();
+    expect(mocks.backfill).not.toHaveBeenCalled();
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it("rebuilds every started project locally and removes the marker only after success", async () => {
     fs.writeFileSync(markerPath, "");
     mocks.prepare.mockReturnValue({
       all: () => [

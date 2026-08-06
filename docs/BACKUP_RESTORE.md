@@ -52,12 +52,14 @@ On an empty replacement volume, `restore-db.sh`:
 5. For a `pim-core-*` backup, writes a search-rebuild marker.
 
 At server startup, after org knowledge graphs are loaded, the marker triggers a
-local rebuild for every project from `project_evidence_items`, project context,
-linked pod updates, local Git data when available, and scoped org-KG nodes. The
-marker is removed only after every project succeeds. Connector APIs and Bedrock
-are not called during this recovery pass, so lexical and graph search return
-without an external-service burst. The normal six-hour refresh incrementally
-restores embeddings for configured projects.
+local rebuild only for projects whose search indexing has previously been
+started. It rebuilds from `project_evidence_items`, project context, linked pod
+updates, local Git data when available, and scoped org-KG nodes. The marker is
+removed only after every started project succeeds; projects that have never
+started remain unindexed. Connector APIs and Bedrock are not called during this
+recovery pass, so lexical and graph search return without an external-service
+burst. The normal six-hour refresh incrementally restores embeddings for
+started, configured projects.
 
 If one project cannot be rebuilt, the server keeps the core PIM available, logs
 the failed project, and retains the marker so the next process start retries.

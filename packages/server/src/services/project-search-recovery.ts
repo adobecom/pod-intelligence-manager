@@ -6,6 +6,7 @@ import {
   indexProjectKgNodes,
   purgeProjectSearch,
 } from "./project-search-index.js";
+import { isProjectSearchIndexingEnabled } from "./project-search-control.js";
 
 interface RecoveryLogger {
   info: (obj: unknown, msg?: string) => void;
@@ -31,7 +32,8 @@ export function projectSearchRebuildMarkerPath(databasePath = dbPath): string {
 }
 
 /**
- * Reconstructs the derived project-search tables after a portable core restore.
+ * Reconstructs the derived project-search tables for projects whose indexing
+ * has been explicitly started after a portable core restore.
  *
  * This deliberately performs no connector calls and creates no embeddings, so
  * disaster recovery is bounded by local SQLite/KG work and cannot burst GitHub,
@@ -64,15 +66,17 @@ export async function rebuildProjectSearchAfterCoreRestore(
        ORDER BY org_id, project_id`,
     )
     .all() as unknown as ProjectRef[];
+  const enabledProjects = projects.filter(({ org_id, project_id }) =>
+    isProjectSearchIndexingEnabled(org_id, project_id));
 
   log.info(
-    { msg: "Project search recovery started", project_count: projects.length },
+    { msg: "Project search recovery started", project_count: enabledProjects.length },
     "Rebuilding derived project search after core restore",
   );
 
   let rebuilt = 0;
   const failedProjects: ProjectRef[] = [];
-  for (const project of projects) {
+  for (const project of enabledProjects) {
     try {
       // A prior process may have stopped midway through recovery. Purging each
       // project first makes retries deterministic while leaving source evidence
@@ -124,7 +128,7 @@ export async function rebuildProjectSearchAfterCoreRestore(
       markerRemoved = true;
       log.info({
         msg: "Project search recovery completed",
-        project_count: projects.length,
+        project_count: enabledProjects.length,
       });
     } catch (error) {
       log.error(
@@ -145,7 +149,7 @@ export async function rebuildProjectSearchAfterCoreRestore(
 
   return {
     requested: true,
-    projects_total: projects.length,
+    projects_total: enabledProjects.length,
     projects_rebuilt: rebuilt,
     failed_projects: failedProjects,
     marker_removed: markerRemoved,
