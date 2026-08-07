@@ -8,6 +8,7 @@ import {
   type EvidenceSummaryV1,
   type FreshnessV1,
   type MemoryContentV1,
+  type MemoryRecordHistoryV1,
   type MemoryRecordV1,
   type ValidationV1,
 } from "@pim/shared";
@@ -100,8 +101,163 @@ export class MemoryRecordConflictError extends Error {
   }
 }
 
+interface HistoryRecordRow {
+  record_id: string;
+  org_id: string;
+  project_id: string;
+  kind: ThinV1MemoryKind;
+  current_version: number;
+  current_status: RecordStatus;
+  repository_id: string;
+}
+
+interface HistoryTransitionRow {
+  transition_id: string;
+  from_status: string | null;
+  to_status: string;
+  actor_type: string;
+  actor_id: string;
+  reason_code: string;
+  explanation: string;
+  evidence_refs_json: string;
+  decision_refs_json: string;
+  policy_version: string;
+  occurred_at: string;
+  committed_at: string;
+}
+
+interface ReplacementRow {
+  record_id: string;
+  record_version: number;
+  kind: ThinV1MemoryKind;
+  current_status: RecordStatus;
+  content_json: string;
+  transition_id: string;
+  reason_code: string;
+  explanation: string;
+  created_at: string;
+}
+
 function parseJson<T>(raw: string): T {
   return JSON.parse(raw) as T;
+}
+
+function historyReplacement(row: ReplacementRow | undefined): MemoryRecordHistoryV1["replaces"] {
+  if (!row) return null;
+  const content = parseJson<MemoryContentV1>(row.content_json);
+  return {
+    record_id: row.record_id,
+    record_version: row.record_version,
+    kind: row.kind,
+    summary: content.summary,
+    lifecycle: { status: row.current_status },
+    transition_id: row.transition_id,
+    reason_code: row.reason_code,
+    explanation: row.explanation,
+    created_at: row.created_at,
+  };
+}
+
+export function getMemoryRecordHistory(
+  orgId: string,
+  projectId: string,
+  recordId: string,
+): MemoryRecordHistoryV1 | null {
+  const record = db.prepare(
+    `SELECT record.record_id, record.org_id, record.project_id, record.kind,
+            record.current_version, record.current_status, registry.repository_id
+     FROM memory_records AS record
+     INNER JOIN memory_repository_registry AS registry
+       ON registry.repository_row_id = record.repository_row_id
+     WHERE record.org_id = ? AND record.project_id = ? AND record.record_id = ?
+       AND record.plane = 'codebase'`,
+  ).get(orgId, projectId, recordId) as unknown as HistoryRecordRow | undefined;
+  if (!record) return null;
+  const versions = db.prepare(
+    `SELECT record_version, content_json, applicability_json, exceptions_json,
+            compatibility_json, validation_json, evidence_json,
+            evidence_summary_json, freshness_json, recorded_at
+     FROM memory_record_versions
+     WHERE record_id = ? ORDER BY record_version`,
+  ).all(recordId) as unknown as VersionRow[];
+  const transitions = db.prepare(
+    `SELECT transition_id, from_status, to_status, actor_type, actor_id,
+            reason_code, explanation, evidence_refs_json, decision_refs_json,
+            policy_version, occurred_at, committed_at
+     FROM memory_transitions
+     WHERE org_id = ? AND project_id = ? AND aggregate_type = 'record' AND aggregate_id = ?
+     ORDER BY committed_at, transition_id`,
+  ).all(orgId, projectId, recordId) as unknown as HistoryTransitionRow[];
+  const replaces = db.prepare(
+    `SELECT predecessor.record_id, link.predecessor_record_version AS record_version,
+            predecessor.kind, predecessor.current_status, version.content_json,
+            transition.transition_id, transition.reason_code, transition.explanation,
+            link.created_at
+     FROM memory_record_supersessions AS link
+     INNER JOIN memory_records AS predecessor
+       ON predecessor.record_id = link.predecessor_record_id
+     INNER JOIN memory_record_versions AS version
+       ON version.record_id = link.predecessor_record_id
+      AND version.record_version = link.predecessor_record_version
+     INNER JOIN memory_transitions AS transition
+       ON transition.transition_id = link.transition_id
+     WHERE link.org_id = ? AND link.project_id = ? AND link.successor_record_id = ?
+     ORDER BY link.created_at DESC LIMIT 1`,
+  ).get(orgId, projectId, recordId) as unknown as ReplacementRow | undefined;
+  const replacedBy = db.prepare(
+    `SELECT successor.record_id, link.successor_record_version AS record_version,
+            successor.kind, successor.current_status, version.content_json,
+            transition.transition_id, transition.reason_code, transition.explanation,
+            link.created_at
+     FROM memory_record_supersessions AS link
+     INNER JOIN memory_records AS successor
+       ON successor.record_id = link.successor_record_id
+     INNER JOIN memory_record_versions AS version
+       ON version.record_id = link.successor_record_id
+      AND version.record_version = link.successor_record_version
+     INNER JOIN memory_transitions AS transition
+       ON transition.transition_id = link.transition_id
+     WHERE link.org_id = ? AND link.project_id = ? AND link.predecessor_record_id = ?
+     ORDER BY link.created_at DESC LIMIT 1`,
+  ).get(orgId, projectId, recordId) as unknown as ReplacementRow | undefined;
+  return parseMemoryContract("MemoryRecordHistoryV1", {
+    schema_version: "pim.memory-record-history.v1",
+    record_id: record.record_id,
+    tenant: { project_id: record.project_id },
+    plane: "codebase",
+    kind: record.kind,
+    repository_id: record.repository_id,
+    current_version: record.current_version,
+    lifecycle: { status: record.current_status },
+    versions: versions.map((version) => ({
+      record_version: version.record_version,
+      content: parseJson(version.content_json),
+      applicability: parseJson(version.applicability_json),
+      exceptions: parseJson(version.exceptions_json),
+      compatibility: parseJson(version.compatibility_json),
+      validation: parseJson(version.validation_json),
+      evidence: parseJson(version.evidence_json),
+      evidence_summary: parseJson(version.evidence_summary_json),
+      freshness: parseJson(version.freshness_json),
+      recorded_at: version.recorded_at,
+    })),
+    transitions: transitions.map((transition) => ({
+      transition_id: transition.transition_id,
+      from_status: transition.from_status,
+      to_status: transition.to_status,
+      actor_type: transition.actor_type,
+      actor_id: transition.actor_id,
+      reason_code: transition.reason_code,
+      explanation: transition.explanation,
+      evidence_refs: parseJson(transition.evidence_refs_json),
+      decision_refs: parseJson(transition.decision_refs_json),
+      policy_version: transition.policy_version,
+      occurred_at: transition.occurred_at,
+      committed_at: transition.committed_at,
+    })),
+    replaces: historyReplacement(replaces),
+    replaced_by: historyReplacement(replacedBy),
+  });
 }
 
 function normalizedCodebaseApplicability(applicability: CodebaseApplicabilityV1): Record<string, unknown> {

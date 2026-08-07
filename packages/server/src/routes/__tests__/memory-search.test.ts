@@ -298,6 +298,22 @@ describe("Slice 1 memory HTTP authorization and retrieval", () => {
       record_version: 1,
     });
 
+    const history = await context.app.inject({
+      method: "GET",
+      url: `/api/v1/memory/records/${context.seededRecordId}/history`,
+      headers: auth(),
+    });
+    expect(history.statusCode, history.body).toBe(200);
+    expect(parseMemoryContract("MemoryRecordHistoryV1", history.json())).toMatchObject({
+      record_id: context.seededRecordId,
+      current_version: 1,
+      lifecycle: { status: "active" },
+      versions: [{ record_version: 1 }],
+      transitions: [{ from_status: null, to_status: "active" }],
+      replaces: null,
+      replaced_by: null,
+    });
+
     const crossTenant = await context.app.inject({
       method: "GET",
       url: `/api/v1/memory/records/${context.otherTenantRecordId}?version=1`,
@@ -305,6 +321,14 @@ describe("Slice 1 memory HTTP authorization and retrieval", () => {
     });
     expect(crossTenant.statusCode).toBe(404);
     expect(crossTenant.json()).toMatchObject({ code: "resource_not_found" });
+
+    const crossTenantHistory = await context.app.inject({
+      method: "GET",
+      url: `/api/v1/memory/records/${context.otherTenantRecordId}/history`,
+      headers: auth(),
+    });
+    expect(crossTenantHistory.statusCode).toBe(404);
+    expect(crossTenantHistory.json()).toMatchObject({ code: "resource_not_found" });
 
     const missingVersion = await context.app.inject({
       method: "GET",

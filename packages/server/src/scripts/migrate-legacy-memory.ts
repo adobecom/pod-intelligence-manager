@@ -121,8 +121,10 @@ function parseArguments(argv: string[]): CliOptions {
   if (!dbPath) throw new Error(`--db is required\n${usage()}`);
   if (command === "reconcile" || command === "compare") {
     if (!importRunId) throw new Error(`--import-run-id is required for ${command}\n${usage()}`);
-  } else if (command === "template" && (!inventoryPath || graphRoots.length === 0)) {
-    throw new Error(`--inventory and at least one --graph-root are required\n${usage()}`);
+  } else if (command === "template") {
+    if (!inventoryPath || graphRoots.length === 0) {
+      throw new Error(`--inventory and at least one --graph-root are required\n${usage()}`);
+    }
   } else if (command !== "prepare" && (!inventoryPath || !resolutionsPath || graphRoots.length === 0)) {
     throw new Error(`--inventory, --resolutions, and at least one --graph-root are required\n${usage()}`);
   }

@@ -38,6 +38,7 @@ export function getMemoryCapabilities(): MemoryCapabilitiesV1 {
         "pim.memory-search-result.v1",
         "pim.memory-harness-search-result.v1",
         "pim.memory-record.v1",
+        "pim.memory-record-history.v1",
         "pim.run-receipt-result.v1",
         "pim.memory-candidate-status.v1",
         "pim.memory-feedback-result.v1",

@@ -64,6 +64,7 @@ test("memory cutover fence stays down until memoryCutoverComplete context is set
   assert.doesNotMatch(userData, /knowledge-graph:ro/);
   assert.ok(kgWriteStatements(template).length > 0,
     "pre-cutover role must keep knowledge-graph bucket write access");
+  template.hasOutput("MemoryCutoverComplete", { Value: "false" });
 });
 
 test("memoryCutoverComplete=true raises the full memory cutover fence", () => {
@@ -82,4 +83,27 @@ test("memoryCutoverComplete=true raises the full memory cutover fence", () => {
   assert.match(userData, /-v \/data\/knowledge-graph:\/data\/knowledge-graph:ro/);
   assert.equal(kgWriteStatements(template).length, 0,
     "post-cutover role must not retain knowledge-graph bucket write access");
+  template.hasOutput("MemoryCutoverComplete", { Value: "true" });
+});
+
+test("server image context accepts only an immutable SHA-256 digest", () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  const app = new cdk.App({ context: { serverImageDigest: digest } });
+  const stack = new PimEc2Stack(app, "PimEc2Stack-digest", {
+    owner: "test",
+    env: { account: "111122223333", region: "us-west-2" },
+  });
+  const template = Template.fromStack(stack);
+  const launchTemplate = Object.values(
+    template.findResources("AWS::EC2::LaunchTemplate"),
+  )[0].Properties.LaunchTemplateData;
+  assert.match(stringLeaves(launchTemplate.UserData), new RegExp(`@${digest}`));
+
+  assert.throws(() => {
+    const invalidApp = new cdk.App({ context: { serverImageDigest: "sha256:not-a-digest" } });
+    new PimEc2Stack(invalidApp, "PimEc2Stack-invalid-digest", {
+      owner: "test",
+      env: { account: "111122223333", region: "us-west-2" },
+    });
+  }, /serverImageDigest must be an immutable lowercase SHA-256 digest/);
 });

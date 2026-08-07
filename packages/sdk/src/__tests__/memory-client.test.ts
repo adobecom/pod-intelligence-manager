@@ -182,6 +182,27 @@ describe("PimMemoryClient feedback and review", () => {
     });
   });
 
+  describe("getRecordHistory", () => {
+    it("gets and strictly validates the encoded record history URL", async () => {
+      const history = structuredClone(MEMORY_CONTRACT_FIXTURES.MemoryRecordHistoryV1);
+      mockResponse(history);
+
+      await expect(client().getRecordHistory("memory/1")).resolves.toEqual(history);
+      const [url, init] = request();
+      expect(url).toBe("http://localhost:4000/api/v1/memory/records/memory%2F1/history");
+      expect(init.method).toBeUndefined();
+
+      mockFetch.mockReset();
+      mockResponse({ ...history, replaced_by: { ...history.replaced_by, unexpected: true } });
+      await expect(client().getRecordHistory("memory/1")).rejects.toBeInstanceOf(
+        MemoryContractValidationError,
+      );
+      await expect(client().getRecordHistory("")).rejects.toThrow(
+        "recordId must contain 1 to 128 characters",
+      );
+    });
+  });
+
   describe("harnessSearch", () => {
     it("posts and strictly parses the dedicated permanent-shadow contract", async () => {
       const requestBody = structuredClone(

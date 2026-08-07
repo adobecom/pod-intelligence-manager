@@ -123,6 +123,25 @@ planning, and apply. Resolve every S3-only or divergent node exactly like a loca
 layout. Do not revoke writes while a remote-only layout remains outside the
 inventory.
 
+### 2.1 Prepare reviewed repository bindings
+
+If a bounded legacy collection has an explicit operator review, prepare its exact
+project repository bindings before generating the final inventory. The policy must
+name the organization, project, canonical GitHub repository ID, immutable provider
+repository ID, display slug, disposition, and assertions. This step is additive,
+is permitted only under unfrozen `legacy` authority, and runs in one transaction:
+
+```sh
+pnpm --filter @pim/server prepare-reviewed-memory-repositories -- \
+  --db /data/pim.db \
+  --policy /data/pim-cutover-YYYYMMDDTHHMMSSZ/reviewed-policy.json \
+  --output /data/pim-cutover-YYYYMMDDTHHMMSSZ/repository-preparation.json
+```
+
+Checkpoint and integrity-check the database again after this step. The inventory,
+resolution template, plan, and apply must all use this new stopped-state database
+digest. Do not edit repository bindings after inventory.
+
 ## 3. Inventory all legacy authorities
 
 Inventory the stopped, checkpointed database and all graph layouts:
@@ -148,12 +167,14 @@ pnpm --filter @pim/server migrate-legacy-memory -- template \
   --db /data/pim.db \
   --inventory /data/pim-cutover-YYYYMMDDTHHMMSSZ/inventory.json \
   --graph-root /data/knowledge-graph \
-  > /data/pim-cutover-YYYYMMDDTHHMMSSZ/resolutions.json
+  > /data/pim-cutover-YYYYMMDDTHHMMSSZ/resolutions-template.json
 ```
 
-Add the same complete graph-root list used for inventory. Review and edit the
-template for the exact source database digest in `inventory.json`. Every source
-key must retain one explicit disposition:
+Add the same complete graph-root list used for inventory. Keep this
+default-quarantine template unchanged; write the reviewed result to
+`resolutions.json`, either manually or with the reviewed collection builder below.
+The reviewed result is bound to the exact source database digest in
+`inventory.json`. Every source key must retain one explicit disposition:
 
 - `active`: only a resolvable graph node with complete codebase or harness
   applicability, provenance, evidence, and a payload accepted by the canonical
@@ -166,6 +187,37 @@ key must retain one explicit disposition:
 
 Organization memory remains manual-only. Never use `active` merely to make the
 coverage count pass.
+
+A reviewed collection may use the deterministic resolution builder instead of
+hand-editing hundreds of entries. This is appropriate only when an authorized
+operator has actually reviewed and certified the whole bounded collection. An
+active collection must explicitly assert all three facts:
+
+- `curated`: the operator certifies every selected node is curated;
+- `legacy_snapshot_provenance`: the reviewed immutable snapshot is the accepted
+  provenance for this one-time import; and
+- `codebase_scope`: every selected node belongs to the named project and routed
+  repository.
+
+The builder binds that review independently to every source key, source payload
+digest, snapshot digest, organization, project, and repository. It supplies an
+`authorized_review` evidence handle for the exact payload. A changed graph byte,
+wrong repository, missing assertion, or copied review envelope fails closed. This
+does not create a reusable bulk-promotion API and does not relax normal evidence
+rules for memories created after cutover.
+
+```sh
+pnpm --filter @pim/server build-reviewed-memory-resolutions -- \
+  --template /data/pim-cutover-YYYYMMDDTHHMMSSZ/resolutions-template.json \
+  --inventory /data/pim-cutover-YYYYMMDDTHHMMSSZ/inventory.json \
+  --policy /data/pim-cutover-YYYYMMDDTHHMMSSZ/reviewed-policy.json \
+  --output /data/pim-cutover-YYYYMMDDTHHMMSSZ/resolutions.json
+```
+
+Collections that are retained but not certified must use
+`pending_validation`; they remain durable and non-serving until revalidated by the
+normal canonical path. Collections outside the approved scope and legacy SQL
+candidate/evidence authorities must remain explicitly quarantined in the manifest.
 
 Imported `pending_validation` items are durable, visible parked candidates with a
 `legacy_reingestion_required` blocker. They are deliberately not queued for
@@ -257,6 +309,11 @@ Required results:
 - the dual-read report coverage equation holds and its `logical_memory_key` values
   are unique;
 - canonical search tests return each representative codebase and harness record;
+- imported historical active records retain valid current-dimension embeddings
+  when their stored embedding-text hash matches, but remain
+  `prompt_eligible = 0` initially;
+- `GET /api/v1/memory/records/:record_id/history` returns the immutable versions,
+  lifecycle reasons, and predecessor/successor link for a representative record;
 - organization records remain non-active/manual; and
 - prompt exposure remains disabled until the normal release gates pass.
 
@@ -292,6 +349,19 @@ before the cutover crash-loops the server fail-closed; deploying the stack witho
 the flag never raises the fence. Before starting PIM post-flag, verify IAM
 simulation denies both `s3:PutObject` and `s3:DeleteObject` on the exact legacy
 prefix.
+
+Always pass the reviewed immutable server image digest when raising the fence:
+
+```sh
+cdk deploy PimEc2Stack-rkhan \
+  -c memoryCutoverComplete=true \
+  -c serverImageDigest=sha256:REVIEWED_IMAGE_DIGEST \
+  --require-approval never
+```
+
+The deployment workflow reads `MemoryCutoverComplete` from this same stack and
+carries it forward. Once the output is `true`, ordinary releases cannot silently
+lower the terminal fence or switch the unit back to `:latest`.
 
 The container cannot restore an empty read-only graph mount. A replacement host
 must restore and checksum the retained graph archive (or sync the read-only S3

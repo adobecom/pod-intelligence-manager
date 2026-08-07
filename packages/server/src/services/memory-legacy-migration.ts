@@ -34,6 +34,7 @@ import {
   type MemoryPlane,
   type ThinV1MemoryKind,
 } from "./memory-structural-validator.js";
+import { embedText, embeddingTextHash, getEmbeddingDimensions } from "./embeddings.js";
 
 export type MemoryLegacySourceKind =
   | "graph_node"
@@ -170,6 +171,15 @@ interface PlannedItem extends LoadedSource {
   reuseExistingCanonical: boolean;
   duplicateOfItemId: string | null;
 }
+
+const LEGACY_OPERATOR_REVIEW_SCHEMA = "pim.memory-legacy-operator-review.v1";
+const LEGACY_OPERATOR_ASSERTIONS = new Set([
+  "curated",
+  "legacy_snapshot_provenance",
+  "codebase_scope",
+]);
+
+type LegacyOperatorAssertion = "curated" | "legacy_snapshot_provenance" | "codebase_scope";
 
 export interface MemoryLegacyMigrationPlan extends MemoryLegacyMigrationReport {
   authority: "migration_locked";
@@ -584,7 +594,81 @@ function sqlSources(graph: LoadedSource[], inventory: LegacyGraphInventoryReport
   return result;
 }
 
-function hasCompleteSourceProvenance(source: LoadedSource): boolean {
+function legacyOperatorReviewIssue(
+  source: LoadedSource,
+  mapping: MemoryLegacyCanonicalMapping,
+): string | null {
+  const review = mapping.provenance.legacy_operator_review;
+  if (review === undefined) return null;
+  if (!isObject(review) || source.sourceKind !== "graph_node") return "legacy_operator_review_invalid";
+  const allowed = [
+    "schema_version", "actor_id", "reviewed_at", "collection", "org_id", "project_id",
+    "repository_id", "source_kind", "source_key", "source_payload_digest", "snapshot_sha256",
+    "assertions",
+  ];
+  if (Object.keys(review).some((key) => !allowed.includes(key))
+      || review.schema_version !== LEGACY_OPERATOR_REVIEW_SCHEMA
+      || !stringValue(review.actor_id) || !stringValue(review.collection)
+      || !stringValue(review.reviewed_at) || !Number.isFinite(Date.parse(String(review.reviewed_at)))
+      || review.org_id !== source.orgId || review.project_id !== mapping.project_id
+      || review.source_kind !== source.sourceKind || review.source_key !== source.sourceKey
+      || review.source_payload_digest !== source.contentDigest
+      || review.snapshot_sha256 !== source.snapshotSha256
+      || !Array.isArray(review.assertions) || review.assertions.length === 0
+      || new Set(review.assertions).size !== review.assertions.length
+      || review.assertions.some((assertion) => typeof assertion !== "string"
+        || !LEGACY_OPERATOR_ASSERTIONS.has(assertion))) {
+    return "legacy_operator_review_invalid";
+  }
+  const repositoryId = mapping.plane === "codebase"
+    ? stringValue((mapping.applicability as CodebaseApplicabilityV1).repository_id)
+    : null;
+  if (review.repository_id !== repositoryId
+      || (review.assertions.includes("codebase_scope") && mapping.plane !== "codebase")
+      || !mapping.evidence.some((evidence) => evidence.source_authority === "authorized_review"
+        && evidence.digest === source.contentDigest)) {
+    return "legacy_operator_review_invalid";
+  }
+  return null;
+}
+
+function legacyOperatorAssertions(
+  source: LoadedSource,
+  mapping: MemoryLegacyCanonicalMapping,
+): Set<LegacyOperatorAssertion> {
+  if (legacyOperatorReviewIssue(source, mapping) !== null) return new Set();
+  const review = mapping.provenance.legacy_operator_review;
+  if (!isObject(review) || !Array.isArray(review.assertions)) return new Set();
+  return new Set(review.assertions as LegacyOperatorAssertion[]);
+}
+
+function linkedLegacyNode(source: LoadedSource): Record<string, unknown> | null {
+  return source.sourceKind === "graph_node"
+    ? source.payload
+    : isObject(source.provenance.resolved_node_payload)
+      ? source.provenance.resolved_node_payload
+      : null;
+}
+
+function verifiedLegacyEmbedding(source: LoadedSource): number[] | null {
+  const node = linkedLegacyNode(source);
+  if (!node || !Array.isArray(node.embedding) || node.embedding.length !== getEmbeddingDimensions()
+      || !node.embedding.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return null;
+  }
+  const summary = stringValue(node.summary);
+  const details = typeof node.details === "string" ? node.details : null;
+  const retrievalText = typeof node.retrieval_text === "string" ? node.retrieval_text : undefined;
+  if (!summary || details === null || typeof node.embedding_text_hash !== "string") return null;
+  const text = embedText({ summary, details, retrieval_text: retrievalText });
+  return node.embedding_text_hash === embeddingTextHash(text) ? [...node.embedding] as number[] : null;
+}
+
+function hasCompleteSourceProvenance(
+  source: LoadedSource,
+  mapping: MemoryLegacyCanonicalMapping,
+): boolean {
+  if (legacyOperatorAssertions(source, mapping).has("legacy_snapshot_provenance")) return true;
   const hasValidTimestamp = source.sourceTimestamp !== null
     && Number.isFinite(Date.parse(source.sourceTimestamp));
   if (source.sourceKind === "graph_node") {
@@ -612,8 +696,13 @@ function parsedLegacyEvidence(source: LoadedSource): Record<string, unknown> | n
   }
 }
 
-function sourcePlaneIssue(source: LoadedSource, plane: MemoryPlane): string | null {
+function sourcePlaneIssue(
+  source: LoadedSource,
+  plane: MemoryPlane,
+  mapping: MemoryLegacyCanonicalMapping,
+): string | null {
   if (source.sourceKind === "graph_node") {
+    const assertions = legacyOperatorAssertions(source, mapping);
     const audience = stringValue(source.payload.audience);
     const expected = audience === "project" || audience === "product"
       ? "codebase"
@@ -622,8 +711,14 @@ function sourcePlaneIssue(source: LoadedSource, plane: MemoryPlane): string | nu
         : audience === "org"
           ? "org"
           : null;
-    if (expected === null) return "legacy_plane_missing";
-    if (plane !== "org" && source.projectId === null) return "project_mapping_missing";
+    if (expected === null) {
+      return assertions.has("codebase_scope") && plane === "codebase"
+        ? null
+        : "legacy_plane_missing";
+    }
+    if (plane !== "org" && source.projectId === null && !assertions.has("codebase_scope")) {
+      return "project_mapping_missing";
+    }
     return plane === expected ? null : "legacy_plane_mismatch";
   }
   if (source.sourceKind === "project_candidate" || source.sourceKind === "project_evidence") {
@@ -637,15 +732,14 @@ function sourcePlaneIssue(source: LoadedSource, plane: MemoryPlane): string | nu
   return plane === expected ? null : "legacy_plane_mismatch";
 }
 
-function sourceCanActivate(source: LoadedSource): boolean {
-  const linkedNode = source.sourceKind === "graph_node"
-    ? source.payload
-    : isObject(source.provenance.resolved_node_payload)
-      ? source.provenance.resolved_node_payload
-      : null;
+function sourceCanActivate(source: LoadedSource, mapping: MemoryLegacyCanonicalMapping): boolean {
+  const linkedNode = linkedLegacyNode(source);
   if ((linkedNode && stringValue(linkedNode.superseded_by))
       || stringValue(source.provenance.superseded_by_legacy_id)) return false;
-  if (source.sourceKind === "graph_node") return source.payload.curated === true;
+  if (source.sourceKind === "graph_node") {
+    return source.payload.curated === true
+      || legacyOperatorAssertions(source, mapping).has("curated");
+  }
   if (source.sourceKind === "project_candidate") return source.payload.status === "promoted";
   if (source.sourceKind === "agent_candidate") {
     return source.payload.status === "promoted" || source.payload.status === "auto_promoted";
@@ -692,7 +786,9 @@ function validateMapping(source: LoadedSource, mapping: MemoryLegacyCanonicalMap
     ...memoryContractIssues("FreshnessV1", mapping.freshness),
   ];
   if (componentIssues.length > 0 || mapping.evidence.length > 64) return "mapped_contract_invalid";
-  const planeIssue = sourcePlaneIssue(source, mapping.plane);
+  const reviewIssue = legacyOperatorReviewIssue(source, mapping);
+  if (reviewIssue) return reviewIssue;
+  const planeIssue = sourcePlaneIssue(source, mapping.plane, mapping);
   if (planeIssue) return planeIssue;
   const issues = memoryStructuralIssues({
     plane: mapping.plane,
@@ -1017,7 +1113,7 @@ function buildPlan(input: MemoryLegacyMigrationInput, verifyDatabaseHash: boolea
         && !mapping.evidence.some((evidence) => evidence.source_authority === "authorized_review")) {
       disposition = "pending_validation";
       reasonCode = "authorized_review_required";
-    } else if (!sourceCanActivate(source)) {
+    } else if (!sourceCanActivate(source, mapping)) {
       disposition = "pending_validation";
       const linkedNode = source.sourceKind === "graph_node"
         ? source.payload
@@ -1030,7 +1126,7 @@ function buildPlan(input: MemoryLegacyMigrationInput, verifyDatabaseHash: boolea
         : source.sourceKind === "project_evidence"
         ? "legacy_evidence_requires_candidate_review"
         : "legacy_source_not_curated_or_promoted";
-    } else if (!source.legacyNodeId || !hasCompleteSourceProvenance(source)
+    } else if (!source.legacyNodeId || !hasCompleteSourceProvenance(source, mapping)
         || mapping.evidence.length === 0 || mapping.evidence_summary.ref_count !== mapping.evidence.length) {
       disposition = "pending_validation";
       reasonCode = "incomplete_legacy_provenance";
@@ -1069,7 +1165,9 @@ function buildPlan(input: MemoryLegacyMigrationInput, verifyDatabaseHash: boolea
     };
   });
 
-  const canonicalPayloadDigest = (item: PlannedItem) => canonicalJsonSha256({
+  const canonicalPayloadDigest = (item: PlannedItem) => {
+    const { legacy_operator_review: _review, ...claimProvenance } = item.mapping!.provenance;
+    return canonicalJsonSha256({
     org_id: item.mapping!.org_id,
     project_id: item.mapping!.project_id,
     plane: item.mapping!.plane,
@@ -1082,8 +1180,12 @@ function buildPlan(input: MemoryLegacyMigrationInput, verifyDatabaseHash: boolea
     evidence: item.mapping!.evidence,
     evidence_summary: item.mapping!.evidence_summary,
     freshness: item.mapping!.freshness,
-    provenance: item.mapping!.provenance,
+    // Each duplicate snapshot needs its own digest-bound review, but those
+    // source-specific review envelopes do not create distinct memory claims.
+    // Every envelope has already passed legacyOperatorReviewIssue above.
+    provenance: claimProvenance,
   });
+  };
   const claimGroups = new Map<string, PlannedItem[]>();
   for (const item of items) {
     if (!item.mapping || !["active", "pending_validation"].includes(item.disposition)
@@ -1279,6 +1381,7 @@ function assertCanonicalVersion(input: {
   provenance: Record<string, unknown>;
   requireCurrentActive?: boolean;
   requireSafeNewImport?: boolean;
+  expectedEmbedding?: number[] | null;
 }): void {
   const row = db.prepare(
     `SELECT record.org_id, record.project_id, record.plane, record.kind,
@@ -1287,7 +1390,7 @@ function assertCanonicalVersion(input: {
             version.content_json, version.applicability_json, version.exceptions_json,
             version.compatibility_json, version.validation_json, version.evidence_json,
             version.evidence_summary_json, version.freshness_json, version.provenance_json,
-            version.content_digest
+            version.embedding_json, version.content_digest
      FROM memory_records AS record
      INNER JOIN memory_record_versions AS version
        ON version.record_id = record.record_id AND version.record_version = ?
@@ -1355,6 +1458,12 @@ function assertCanonicalVersion(input: {
   for (const [field, expected] of fields) {
     assertSameJson(JSON.parse(String(row[field])), expected, `${input.recordId}.${field}`);
   }
+  if (input.expectedEmbedding !== undefined) {
+    const actualEmbedding = row.embedding_json === null
+      ? null
+      : JSON.parse(String(row.embedding_json)) as unknown;
+    assertSameJson(actualEmbedding, input.expectedEmbedding, `${input.recordId}.embedding_json`);
+  }
   if (row.content_digest !== expectedCanonicalContentDigest(input.mapping, input.provenance)) {
     throw new MemoryLegacyMigrationConflictError(`Canonical content digest mismatch: ${input.recordId}`);
   }
@@ -1389,6 +1498,7 @@ function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationP
       repository_row_id: string;
     } | undefined;
     if (!repository) throw new MemoryLegacyMigrationConflictError(`Repository binding disappeared: ${item.importItemId}`);
+    const embedding = verifiedLegacyEmbedding(item);
     const imported = importActiveMemoryRecord({
       orgId: mapping.org_id,
       projectId: mapping.project_id,
@@ -1404,6 +1514,7 @@ function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationP
       evidenceSummary: mapping.evidence_summary,
       freshness: mapping.freshness,
       provenance,
+      embedding,
       validFrom: item.sourceTimestamp ?? mapping.freshness.last_confirmed_at,
       expiresAt: mapping.freshness.expires_at ?? null,
       promptEligible: false,
@@ -1451,6 +1562,7 @@ function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationP
     provenance,
     requireCurrentActive: true,
     requireSafeNewImport: true,
+    expectedEmbedding: mapping.plane === "codebase" ? verifiedLegacyEmbedding(item) : undefined,
   });
 }
 
@@ -1841,6 +1953,23 @@ export function reconcileMemoryLegacyMigration(importRunId: string): MemoryLegac
         recordVersion: Number(item.canonical_record_version),
         mapping,
         provenance,
+        expectedEmbedding: importTransition ? verifiedLegacyEmbedding({
+          sourceKind: item.source_kind,
+          sourceKey: item.source_key,
+          legacyId: item.legacy_id,
+          legacyNodeId: item.legacy_node_id,
+          orgId: item.org_id,
+          projectId: item.project_id,
+          graphVersion: item.graph_version === null ? null : Number(item.graph_version),
+          snapshotSha256: item.snapshot_sha256,
+          contentDigest: item.content_digest,
+          semanticDigest: item.content_digest,
+          sourceTimestamp: item.source_timestamp,
+          payload,
+          provenance: JSON.parse(item.source_provenance_json) as Record<string, unknown>,
+          supersedesLegacyId: item.supersedes_legacy_id,
+          forcedReason: null,
+        }) : undefined,
       });
     } else if (item.disposition === "pending_validation") {
       const mapping = JSON.parse(String(item.mapped_payload_json)) as MemoryLegacyCanonicalMapping;

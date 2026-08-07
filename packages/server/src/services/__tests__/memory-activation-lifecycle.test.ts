@@ -17,6 +17,7 @@ import {
 import {
   canonicalMemoryConflictKey,
   getMemoryRecord,
+  getMemoryRecordHistory,
   transitionMemoryRecordStatus,
 } from "../memory-records.js";
 import { runMemoryOutboxPass } from "../memory-outbox.js";
@@ -413,6 +414,42 @@ describe("verified memory activation lifecycle", () => {
       `SELECT record_id FROM memory_records
        WHERE record_id IN (?, ?) AND current_status = 'active'`,
     ).all(predecessorRecordId, successorRecordId)).toEqual([{ record_id: successorRecordId }]);
+
+    expect(getMemoryRecordHistory(
+      context.orgA.id,
+      context.projectA,
+      predecessorRecordId,
+    )).toMatchObject({
+      record_id: predecessorRecordId,
+      lifecycle: { status: "superseded" },
+      versions: [{ record_version: 1 }],
+      transitions: [
+        { from_status: null, to_status: "active" },
+        { from_status: "active", to_status: "superseded", reason_code: "verified_successor_activated" },
+      ],
+      replaces: null,
+      replaced_by: {
+        record_id: successorRecordId,
+        record_version: 1,
+        lifecycle: { status: "active" },
+        reason_code: "verified_successor_activated",
+      },
+    });
+    expect(getMemoryRecordHistory(
+      context.orgA.id,
+      context.projectA,
+      successorRecordId,
+    )).toMatchObject({
+      record_id: successorRecordId,
+      lifecycle: { status: "active" },
+      replaces: {
+        record_id: predecessorRecordId,
+        record_version: 1,
+        lifecycle: { status: "superseded" },
+        reason_code: "verified_successor_activated",
+      },
+      replaced_by: null,
+    });
   });
 
   it("keeps different kinds on the same selectors independently active", () => {

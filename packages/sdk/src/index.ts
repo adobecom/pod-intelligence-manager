@@ -17,6 +17,7 @@ export type {
   HarnessApplicabilityV1,
   MemoryCandidateV1,
   MemoryRecordV1,
+  MemoryRecordHistoryV1,
   MemoryPromptPolicyUpdateV1,
   MemoryPromptPolicyV1,
   MemoryReleaseGateDecisionV1,

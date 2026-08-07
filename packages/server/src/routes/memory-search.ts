@@ -11,7 +11,7 @@ import {
   requireMemoryServiceScope,
 } from "../middleware/service-authz.js";
 import { sendMemoryError } from "../middleware/memory-errors.js";
-import { getMemoryRecord } from "../services/memory-records.js";
+import { getMemoryRecord, getMemoryRecordHistory } from "../services/memory-records.js";
 import { recordMemoryMetric } from "../services/memory-metrics.js";
 import {
   MemorySearchIdempotencyError,
@@ -199,6 +199,32 @@ export default async function memorySearchRoutes(app: FastifyInstance) {
       }
       throw error;
     }
+  });
+
+  app.get<{
+    Params: { record_id: string };
+  }>("/api/v1/memory/records/:record_id/history", async (req, reply) => {
+    const auth = requireMemoryServiceScope(req, reply, "memory:search");
+    if (!auth) return;
+    if (!auth.projectId || auth.podId) {
+      return sendMemoryError(
+        reply,
+        403,
+        "resource_binding_mismatch",
+        "Record history requires a project-bound service token",
+      );
+    }
+    const history = getMemoryRecordHistory(auth.orgId, auth.projectId, req.params.record_id);
+    if (!history) {
+      return sendMemoryError(reply, 404, "resource_not_found", "Memory record is unavailable");
+    }
+    if (!requireMemoryRepositoryBinding(
+      req,
+      reply,
+      auth.projectId,
+      history.repository_id,
+    )) return;
+    return history;
   });
 
   app.get<{

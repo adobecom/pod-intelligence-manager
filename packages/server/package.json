@@ -17,6 +17,8 @@
     "seed-project-search": "tsx src/scripts/seed-project-search.ts",
     "seed-memory": "tsx src/scripts/seed-memory.ts",
     "inventory-legacy-graphs": "node --import tsx src/scripts/inventory-legacy-graphs.ts",
+    "build-reviewed-memory-resolutions": "node --import tsx src/scripts/build-reviewed-memory-resolutions.ts",
+    "prepare-reviewed-memory-repositories": "node --import tsx src/scripts/prepare-reviewed-memory-repositories.ts",
     "migrate-legacy-memory": "node --import tsx src/scripts/migrate-legacy-memory.ts",
     "memory-retention": "node --import tsx src/scripts/memory-retention.ts",
     "scrub-project-search": "tsx src/scripts/scrub-project-search.ts",

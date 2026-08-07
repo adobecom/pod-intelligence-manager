@@ -82,6 +82,7 @@ const GRAPH_NODE_IDS = {
   harness: "legacy-harness-active",
   org: "legacy-org-pending",
   uncurated: "legacy-uncurated-pending",
+  operatorReviewed: "legacy-operator-reviewed-gap",
   layoutConflict: "legacy-layout-conflict",
 } as const;
 
@@ -90,8 +91,8 @@ interface LegacyNode {
   type: "pattern";
   summary: string;
   details: string;
-  audience: "project" | "harness" | "org";
-  source_project_id: string;
+  audience?: "project" | "harness" | "org";
+  source_project_id?: string;
   source_pod_id: string;
   source_pod_name: string;
   domains: string[];
@@ -99,7 +100,10 @@ interface LegacyNode {
   confidence_score: number;
   created_at: string;
   curated: boolean;
-  provenance: Array<{ source: string; source_id: string; occurred_at: string }>;
+  provenance?: Array<{ source: string; source_id: string; occurred_at: string }>;
+  retrieval_text?: string;
+  embedding?: number[];
+  embedding_text_hash?: string;
 }
 
 let graphRoots: string[] = [];
@@ -161,11 +165,22 @@ function writeGraph(root: string, version: number, nodes: LegacyNode[]): string 
 }
 
 function writeGraphs(): void {
+  const codebase = node(GRAPH_NODE_IDS.codebase, "project", true);
+  codebase.retrieval_text = `Expanded retrieval text for ${GRAPH_NODE_IDS.codebase}`;
+  codebase.embedding = Array.from({ length: 512 }, (_, index) => (index + 1) / 512);
+  codebase.embedding_text_hash = createHash("sha256")
+    .update(codebase.retrieval_text)
+    .digest("hex");
+  const operatorReviewed = node(GRAPH_NODE_IDS.operatorReviewed, "project", false);
+  delete operatorReviewed.audience;
+  delete operatorReviewed.source_project_id;
+  delete operatorReviewed.provenance;
   graphNodes = [
-    node(GRAPH_NODE_IDS.codebase, "project", true),
+    codebase,
     node(GRAPH_NODE_IDS.harness, "harness", true),
     node(GRAPH_NODE_IDS.org, "org", true),
     node(GRAPH_NODE_IDS.uncurated, "project", false),
+    operatorReviewed,
   ];
   const leftConflict = {
     ...node(GRAPH_NODE_IDS.layoutConflict, "project", true),
@@ -354,6 +369,7 @@ function configureManifest(): void {
   const harness = graphResolutions(GRAPH_NODE_IDS.harness);
   const org = graphResolutions(GRAPH_NODE_IDS.org);
   const uncurated = graphResolutions(GRAPH_NODE_IDS.uncurated);
+  const operatorReviewed = graphResolutions(GRAPH_NODE_IDS.operatorReviewed);
   const codebaseMapping = commonMapping(codebase[0]!, graphNodes[0]!, "codebase", {
     repository_id: REPOSITORY_ID,
     paths: ["src/legacy-memory.ts"],
@@ -382,6 +398,12 @@ function configureManifest(): void {
     resolveAs(resolution, commonMapping(resolution, graphNodes[3]!, "codebase", {
       repository_id: REPOSITORY_ID,
       paths: ["src/uncurated.ts"],
+    }));
+  }
+  for (const resolution of operatorReviewed) {
+    resolveAs(resolution, commonMapping(resolution, graphNodes[4]!, "codebase", {
+      repository_id: REPOSITORY_ID,
+      paths: ["src/operator-reviewed.ts"],
     }));
   }
   resolveAs(
@@ -452,7 +474,7 @@ describe("offline legacy memory migration", () => {
     expect(planned).toMatchObject({
       imported_count: 2,
       pending_count: 2,
-      quarantined_count: 5,
+      quarantined_count: 7,
       deduplicated_count: 5,
       authority: "migration_locked",
     });
@@ -486,6 +508,60 @@ describe("offline legacy memory migration", () => {
       disposition("graph_node", resolution.source_key)).sort()).toEqual(["deduplicated", "pending_validation"]);
     expect(graphResolutions(GRAPH_NODE_IDS.uncurated).map((resolution) =>
       disposition("graph_node", resolution.source_key)).sort()).toEqual(["deduplicated", "pending_validation"]);
+
+    const reviewedManifest = structuredClone(resolutionManifest);
+    for (const source of reviewedManifest.resolutions.filter((resolution) =>
+      resolution.source_kind === "graph_node"
+        && resolution.source_key.includes(`#${encodeURIComponent(GRAPH_NODE_IDS.operatorReviewed)}`))) {
+      const snapshotPath = source.source_key.slice(0, source.source_key.lastIndexOf("#"));
+      const snapshot = inventoryReport.snapshots.find((candidate) =>
+        path.resolve(candidate.path) === path.resolve(snapshotPath));
+      expect(snapshot).toBeDefined();
+      source.mapping!.provenance.legacy_operator_review = {
+        schema_version: "pim.memory-legacy-operator-review.v1",
+        actor_id: "milo-memory-owner",
+        reviewed_at: NOW,
+        collection: "milo",
+        org_id: ORG_ID,
+        project_id: PROJECT_ID,
+        repository_id: REPOSITORY_ID,
+        source_kind: source.source_kind,
+        source_key: source.source_key,
+        source_payload_digest: source.source_payload_digest,
+        snapshot_sha256: `sha256:${snapshot!.sha256}`,
+        assertions: ["curated", "legacy_snapshot_provenance", "codebase_scope"],
+      };
+    }
+    const reviewedPlan = planMemoryLegacyMigration({
+      ...migrationInput,
+      resolutionManifest: reviewedManifest,
+    });
+    expect(reviewedPlan.items.filter((item) => item.legacy_id === GRAPH_NODE_IDS.operatorReviewed)
+      .map((item) => ({ disposition: item.disposition, reason: item.reason_code })).sort((left, right) =>
+        left.disposition.localeCompare(right.disposition)))
+      .toEqual([
+        { disposition: "active", reason: "legacy_import_validated" },
+        { disposition: "deduplicated", reason: "same_content_alias" },
+      ]);
+    expect(reviewedPlan).toMatchObject({
+      imported_count: 3,
+      pending_count: 2,
+      quarantined_count: 5,
+      deduplicated_count: 6,
+    });
+    const tamperedManifest = structuredClone(reviewedManifest);
+    const tampered = tamperedManifest.resolutions.find((resolution) =>
+      resolution.source_kind === "graph_node"
+        && resolution.source_key.includes(`#${encodeURIComponent(GRAPH_NODE_IDS.operatorReviewed)}`))!;
+    (tampered.mapping!.provenance.legacy_operator_review as Record<string, unknown>)
+      .source_payload_digest = `sha256:${"0".repeat(64)}`;
+    expect(planMemoryLegacyMigration({
+      ...migrationInput,
+      resolutionManifest: tamperedManifest,
+    }).items.find((item) => item.source_key === tampered.source_key)).toMatchObject({
+      disposition: "quarantined",
+      reason_code: "legacy_operator_review_invalid",
+    });
     expect(graphResolutions(GRAPH_NODE_IDS.layoutConflict).map((resolution) =>
       disposition("graph_node", resolution.source_key))).toEqual(["quarantined", "quarantined"]);
     expect(disposition("agent_candidate", "agent-orphan")).toBe("quarantined");
@@ -587,6 +663,18 @@ describe("offline legacy memory migration", () => {
       graph_version: GRAPH_VERSION,
       snapshot_sha256: `sha256:${latestSnapshot.sha256}`,
     });
+    const activeCodebaseGraphItem = ledger.find((item) =>
+      item.legacy_node_id === GRAPH_NODE_IDS.codebase && item.disposition === "active")!;
+    const importedEmbedding = testDb.prepare(
+      `SELECT embedding_json FROM memory_record_versions
+       WHERE record_id = ? AND record_version = ?`,
+    ).get(
+      String(activeCodebaseGraphItem.canonical_record_id),
+      Number(activeCodebaseGraphItem.canonical_record_version),
+    ) as {
+      embedding_json: string;
+    };
+    expect(JSON.parse(importedEmbedding.embedding_json)).toEqual(graphNodes[0]!.embedding);
     expect(new Set(ledger.filter((item) => item.source_kind === "graph_node")
       .map((item) => JSON.parse(String(item.source_provenance_json)).graph_path)))
       .toEqual(new Set(graphPaths));

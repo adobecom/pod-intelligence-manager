@@ -11,6 +11,7 @@ import {
   type MemoryPromptPolicyUpdateV1,
   type MemoryPromptPolicyV1,
   type MemoryRecordV1,
+  type MemoryRecordHistoryV1,
   type MemoryReleaseGateDecisionV1,
   type MemoryReleaseGateEvaluationV1,
   type MemorySearchResultV1,
@@ -140,6 +141,16 @@ export class PimMemoryClient {
       await this.request(
         `/api/v1/memory/records/${encodeURIComponent(recordId)}?version=${recordVersion}`,
       ),
+    );
+  }
+
+  async getRecordHistory(recordId: string): Promise<MemoryRecordHistoryV1> {
+    if (!recordId || recordId.length > 128) {
+      throw new TypeError("recordId must contain 1 to 128 characters");
+    }
+    return parseMemoryContract(
+      "MemoryRecordHistoryV1",
+      await this.request(`/api/v1/memory/records/${encodeURIComponent(recordId)}/history`),
     );
   }
 

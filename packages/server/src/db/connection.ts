@@ -25,17 +25,23 @@ db.exec("PRAGMA busy_timeout = 5000");
 type NonPromise<T> = T extends PromiseLike<unknown> ? never : T;
 
 let savepointSeq = 0;
+let transactionDepth = 0;
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof value === "object" && value !== null && "then" in value && typeof (value as { then?: unknown }).then === "function";
 }
 
 function runSyncTransaction<T>(beginSql: string, fn: () => T): T {
-  const nested = db.isTransaction;
+  // DatabaseSync.isTransaction was added after the initial node:sqlite
+  // releases. Keep an explicit depth as the portable source of truth so the
+  // offline importer can safely nest record imports on supported older CLIs
+  // as well as in the Node 24 production image.
+  const nested = transactionDepth > 0 || db.isTransaction === true;
   const savepoint = nested ? `pim_tx_${++savepointSeq}` : "";
   let settled = false;
 
   db.exec(nested ? `SAVEPOINT ${savepoint}` : beginSql);
+  transactionDepth += 1;
   try {
     const result = fn();
     if (isPromiseLike(result)) {
@@ -61,6 +67,8 @@ function runSyncTransaction<T>(beginSql: string, fn: () => T): T {
       }
     }
     throw e;
+  } finally {
+    transactionDepth -= 1;
   }
 }
 

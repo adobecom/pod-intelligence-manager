@@ -386,6 +386,9 @@ export class PimEc2Stack extends cdk.Stack {
     const serverImageDigest = this.node.tryGetContext("serverImageDigest") as
       | string
       | undefined;
+    if (serverImageDigest !== undefined && !/^sha256:[0-9a-f]{64}$/.test(serverImageDigest)) {
+      throw new Error("serverImageDigest must be an immutable lowercase SHA-256 digest");
+    }
     const containerImage = serverImageDigest
       ? `${ecrRepo.repositoryUri}@${serverImageDigest}`
       : `${ecrRepo.repositoryUri}:latest`;
@@ -476,7 +479,7 @@ export class PimEc2Stack extends cdk.Stack {
       // ECR login
       'echo "[pim-bootstrap] stage=image-pull"',
       `aws ecr get-login-password --region ${this.region} | docker login --username AWS --password-stdin ${this.account}.dkr.ecr.${this.region}.amazonaws.com`,
-      `docker pull ${containerImage} || true`,
+      `docker pull ${containerImage}`,
 
       // systemd unit for the server
       'echo "[pim-bootstrap] stage=service-install"',
@@ -766,6 +769,10 @@ function handler(event) {
     new cdk.CfnOutput(this, "DataBackupPlanId", { value: dataBackupPlan.backupPlanId });
     new cdk.CfnOutput(this, "EcrRepoUri", { value: ecrRepo.repositoryUri });
     new cdk.CfnOutput(this, "AutoScalingGroupName", { value: asg.autoScalingGroupName });
+    new cdk.CfnOutput(this, "MemoryCutoverComplete", {
+      value: memoryCutoverComplete ? "true" : "false",
+      description: "Terminal canonical-memory fence state carried forward by deployments",
+    });
     new cdk.CfnOutput(this, "LogGroupName", { value: logGroup.logGroupName });
     new cdk.CfnOutput(this, "DistributionId", { value: distribution.distributionId });
     new cdk.CfnOutput(this, "VpcId", { value: vpc.vpcId });

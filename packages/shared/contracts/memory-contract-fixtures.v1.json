@@ -5,7 +5,7 @@
     "server_build": "test-build",
     "supported_schemas": {
       "requests": ["pim.memory-search.v1", "pim.memory-harness-search.v1", "pim.run-receipt.v1", "pim.memory-feedback.v1", "pim.memory-candidate-decision.v1", "pim.memory-prompt-policy-update.v1", "pim.memory-release-gate-evaluation.v1", "pim.memory-attestation.v1"],
-      "responses": ["pim.memory-capabilities.v1", "pim.memory-search-result.v1", "pim.memory-harness-search-result.v1", "pim.run-receipt-result.v1", "pim.memory-candidate-status.v1", "pim.memory-record.v1", "pim.memory-feedback-result.v1", "pim.memory-candidate-decision-result.v1", "pim.memory-prompt-policy.v1", "pim.memory-release-gate-decision.v1", "pim.memory-attestation-result.v1", "pim.error.v1"]
+      "responses": ["pim.memory-capabilities.v1", "pim.memory-search-result.v1", "pim.memory-harness-search-result.v1", "pim.run-receipt-result.v1", "pim.memory-candidate-status.v1", "pim.memory-record.v1", "pim.memory-record-history.v1", "pim.memory-feedback-result.v1", "pim.memory-candidate-decision-result.v1", "pim.memory-prompt-policy.v1", "pim.memory-release-gate-decision.v1", "pim.memory-attestation-result.v1", "pim.error.v1"]
     },
     "planes": ["codebase", "harness"],
     "kinds": ["decision", "constraint", "anti_pattern", "test_strategy"],
@@ -376,6 +376,87 @@
       "committed_at": "2026-08-01T17:00:00Z"
     },
     "recorded_at": "2026-08-01T17:00:00Z"
+  },
+  "MemoryRecordHistoryV1": {
+    "schema_version": "pim.memory-record-history.v1",
+    "record_id": "mem_contract_1",
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "kind": "constraint",
+    "repository_id": "github.com/acme/checkout",
+    "current_version": 1,
+    "lifecycle": { "status": "superseded" },
+    "versions": [
+      {
+        "record_version": 1,
+        "content": {
+          "summary": "Payment retries must reuse the original idempotency key.",
+          "details": "Every retry for one logical payment must retain the first provider idempotency key.",
+          "rationale": "Changing the key can create a second charge after an ambiguous provider response."
+        },
+        "applicability": { "repository_id": "github.com/acme/checkout", "paths": ["src/payments/retry.ts"], "symbols": ["retryCharge"], "task_classes": ["bug_fix"] },
+        "exceptions": [],
+        "compatibility": { "harness_version_range": "*", "workflow_version_range": "*" },
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": [{ "type": "symbol", "path": "src/payments/retry.ts", "value": "retryCharge", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }]
+        },
+        "evidence": [
+          {
+            "evidence_ref_id": "merge_contract_1",
+            "type": "git_diff",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "origin_id": "github.com/acme/checkout:pr-814:merge",
+            "source_authority": "verified"
+          }
+        ],
+        "evidence_summary": { "strength": "verified_merge_and_test", "ref_count": 1 },
+        "freshness": { "last_confirmed_at": "2026-08-01T17:00:00Z", "expires_at": null },
+        "recorded_at": "2026-08-01T17:00:00Z"
+      }
+    ],
+    "transitions": [
+      {
+        "transition_id": "transition_record_contract_1",
+        "from_status": null,
+        "to_status": "active",
+        "actor_type": "system",
+        "actor_id": "memory-activation",
+        "reason_code": "seed_fixture_imported",
+        "explanation": "The evidence-backed memory passed activation.",
+        "evidence_refs": ["merge_contract_1"],
+        "decision_refs": [],
+        "policy_version": "memory-activation-structural-v1",
+        "occurred_at": "2026-08-01T17:00:00Z",
+        "committed_at": "2026-08-01T17:00:00Z"
+      },
+      {
+        "transition_id": "transition_record_contract_2",
+        "from_status": "active",
+        "to_status": "superseded",
+        "actor_type": "system",
+        "actor_id": "memory-activation",
+        "reason_code": "verified_successor_activated",
+        "explanation": "A verified successor narrowed the retry rule.",
+        "evidence_refs": ["merge_contract_2"],
+        "decision_refs": ["decision_contract_2"],
+        "policy_version": "memory-activation-structural-v1",
+        "occurred_at": "2026-08-03T17:00:00Z",
+        "committed_at": "2026-08-03T17:00:00Z"
+      }
+    ],
+    "replaces": null,
+    "replaced_by": {
+      "record_id": "mem_contract_2",
+      "record_version": 1,
+      "kind": "constraint",
+      "summary": "Payment retries reuse one key except after a verified cancellation.",
+      "lifecycle": { "status": "active" },
+      "transition_id": "transition_record_contract_2",
+      "reason_code": "verified_successor_activated",
+      "explanation": "A verified successor narrowed the retry rule.",
+      "created_at": "2026-08-03T17:00:00Z"
+    }
   },
   "MemoryFeedbackV1": {
     "schema_version": "pim.memory-feedback.v1",

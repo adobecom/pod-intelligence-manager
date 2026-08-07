@@ -40,57 +40,132 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy CDK stack
-        working-directory: packages/infra
-        run: npx cdk deploy "$STACK_NAME" --require-approval never --outputs-file outputs.json
-
-      - name: Extract stack outputs
-        id: outputs
-        working-directory: packages/infra
+      - name: Read current scoped stack state
+        id: current
         run: |
-          UI_BUCKET=$(jq -r ".\"$STACK_NAME\".UiBucketName" outputs.json)
-          ECR_URI=$(jq -r ".\"$STACK_NAME\".EcrRepoUri" outputs.json)
-          ASG_NAME=$(jq -r ".\"$STACK_NAME\".AutoScalingGroupName" outputs.json)
-          DIST_ID=$(jq -r ".\"$STACK_NAME\".DistributionId" outputs.json)
-          CF_URL=$(jq -r ".\"$STACK_NAME\".CloudFrontUrl" outputs.json)
-          echo "ui_bucket=$UI_BUCKET" >> "$GITHUB_OUTPUT"
+          STACK=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --output json)
+          ECR_URI=$(jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "EcrRepoUri") | .OutputValue' <<<"$STACK")
+          CUTOVER=$(jq -r '[.Stacks[0].Outputs[] | select(.OutputKey == "MemoryCutoverComplete") | .OutputValue][0] // "false"' <<<"$STACK")
+          case "$ECR_URI" in *.dkr.ecr.*.amazonaws.com/pim-rkhan-server) ;; *) echo "Unexpected scoped ECR URI" >&2; exit 1 ;; esac
+          case "$CUTOVER" in true|false) ;; *) echo "Unexpected memory cutover state" >&2; exit 1 ;; esac
           echo "ecr_uri=$ECR_URI" >> "$GITHUB_OUTPUT"
-          echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
-          echo "dist_id=$DIST_ID" >> "$GITHUB_OUTPUT"
-          echo "cf_url=$CF_URL" >> "$GITHUB_OUTPUT"
+          echo "memory_cutover_complete=$CUTOVER" >> "$GITHUB_OUTPUT"
 
       - name: Log in to ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push server image
         env:
-          IMAGE: ${{ steps.outputs.outputs.ecr_uri }}
+          IMAGE: ${{ steps.current.outputs.ecr_uri }}
         run: |
           docker build -f packages/server/Dockerfile -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
 
+      - name: Resolve immutable server image
+        id: image
+        env:
+          ECR_URI: ${{ steps.current.outputs.ecr_uri }}
+        run: |
+          REPOSITORY_NAME=${ECR_URI##*/}
+          DIGEST=$(aws ecr describe-images \
+            --repository-name "$REPOSITORY_NAME" \
+            --image-ids imageTag="$GITHUB_SHA" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)
+          case "$DIGEST" in sha256:*) ;; *) echo "ECR did not return an immutable digest" >&2; exit 1 ;; esac
+          DIGEST_HEX=${DIGEST#sha256:}
+          [ "${#DIGEST_HEX}" -eq 64 ] || { echo "ECR digest length is invalid" >&2; exit 1; }
+          case "$DIGEST_HEX" in *[!0-9a-f]*) echo "ECR digest is not lowercase hex" >&2; exit 1 ;; esac
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image_ref=$ECR_URI@$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy only the scoped CDK stack
+        working-directory: packages/infra
+        env:
+          MEMORY_CUTOVER_COMPLETE: ${{ steps.current.outputs.memory_cutover_complete }}
+          SERVER_IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          npx cdk deploy "$STACK_NAME" \
+            -c memoryCutoverComplete="$MEMORY_CUTOVER_COMPLETE" \
+            -c serverImageDigest="$SERVER_IMAGE_DIGEST" \
+            --require-approval never \
+            --outputs-file outputs.json
+
+      - name: Extract and validate scoped stack outputs
+        id: outputs
+        working-directory: packages/infra
+        env:
+          EXPECTED_CUTOVER: ${{ steps.current.outputs.memory_cutover_complete }}
+        run: |
+          UI_BUCKET=$(jq -r ".\"$STACK_NAME\".UiBucketName" outputs.json)
+          ECR_URI=$(jq -r ".\"$STACK_NAME\".EcrRepoUri" outputs.json)
+          ASG_NAME=$(jq -r ".\"$STACK_NAME\".AutoScalingGroupName" outputs.json)
+          DIST_ID=$(jq -r ".\"$STACK_NAME\".DistributionId" outputs.json)
+          CF_URL=$(jq -r ".\"$STACK_NAME\".CloudFrontUrl" outputs.json)
+          KG_BUCKET=$(jq -r ".\"$STACK_NAME\".KnowledgeGraphBucketName" outputs.json)
+          BACKUPS_BUCKET=$(jq -r ".\"$STACK_NAME\".BackupsBucketName" outputs.json)
+          LOG_GROUP=$(jq -r ".\"$STACK_NAME\".LogGroupName" outputs.json)
+          CUTOVER=$(jq -r ".\"$STACK_NAME\".MemoryCutoverComplete" outputs.json)
+          [ "$CUTOVER" = "$EXPECTED_CUTOVER" ] || { echo "CDK changed the terminal memory fence" >&2; exit 1; }
+          echo "ui_bucket=$UI_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "ecr_uri=$ECR_URI" >> "$GITHUB_OUTPUT"
+          echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"
+          echo "dist_id=$DIST_ID" >> "$GITHUB_OUTPUT"
+          echo "cf_url=$CF_URL" >> "$GITHUB_OUTPUT"
+          echo "kg_bucket=$KG_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "backups_bucket=$BACKUPS_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "log_group=$LOG_GROUP" >> "$GITHUB_OUTPUT"
+          echo "memory_cutover_complete=$CUTOVER" >> "$GITHUB_OUTPUT"
+
       - name: Redeploy on running EC2 instances
         env:
           ASG_NAME: ${{ steps.outputs.outputs.asg_name }}
           ECR_URI: ${{ steps.outputs.outputs.ecr_uri }}
+          IMAGE_REF: ${{ steps.image.outputs.image_ref }}
+          KG_BUCKET: ${{ steps.outputs.outputs.kg_bucket }}
+          BACKUPS_BUCKET: ${{ steps.outputs.outputs.backups_bucket }}
+          LOG_GROUP: ${{ steps.outputs.outputs.log_group }}
+          MEMORY_CUTOVER_COMPLETE: ${{ steps.outputs.outputs.memory_cutover_complete }}
         run: |
           INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "$ASG_NAME" \
             --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
             --output text)
           if [ -z "$INSTANCES" ]; then
-            echo "No in-service instances yet; first boot will pull :latest via user-data"
+            echo "No in-service instances yet; first boot will pull the CDK-pinned digest"
             exit 0
           fi
-          CMD="aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${ECR_URI%%/*} && docker pull $ECR_URI:latest && systemctl restart pim-server"
+          REGISTRY=${ECR_URI%%/*}
+          COMMANDS=$(jq -nc \
+            --arg region "$AWS_REGION" \
+            --arg registry "$REGISTRY" \
+            --arg image "$IMAGE_REF" \
+            --arg kg "$KG_BUCKET" \
+            --arg backups "$BACKUPS_BUCKET" \
+            --arg logs "$LOG_GROUP" \
+            --arg cutover "$MEMORY_CUTOVER_COMPLETE" \
+            '[
+              "set -eu",
+              ("aws ecr get-login-password --region " + $region + " | docker login --username AWS --password-stdin " + $registry),
+              ("docker pull " + $image),
+              ("docker run --rm -v /etc/systemd/system:/host-systemd -e PIM_DEPLOY_IMAGE=" + $image + " -e PIM_DEPLOY_AWS_REGION=" + $region + " -e PIM_DEPLOY_KG_BUCKET=" + $kg + " -e PIM_DEPLOY_BACKUPS_BUCKET=" + $backups + " -e PIM_DEPLOY_LOG_GROUP=" + $logs + " -e PIM_DEPLOY_MEMORY_CUTOVER=" + $cutover + " " + $image + " /app/packages/server/scripts/install-systemd-unit.sh"),
+              "systemctl daemon-reload",
+              "systemctl restart pim-server",
+              "systemctl is-active --quiet pim-server",
+              "for ATTEMPT in $(seq 1 60); do curl -fsS http://127.0.0.1:4000/api/health && exit 0; sleep 2; done; exit 1"
+            ]')
+          PARAMETERS=$(jq -nc --argjson commands "$COMMANDS" '{commands:$commands}')
           for ID in $INSTANCES; do
-            aws ssm send-command \
+            COMMAND_ID=$(aws ssm send-command \
               --instance-ids "$ID" \
               --document-name AWS-RunShellScript \
-              --parameters "commands=[\"$CMD\"]" \
-              --comment "deploy $GITHUB_SHA" >/dev/null
-            echo "Dispatched restart to $ID"
+              --parameters "$PARAMETERS" \
+              --comment "pim deploy $GITHUB_SHA" \
+              --query 'Command.CommandId' \
+              --output text)
+            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$ID"
+            aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$ID" --output json
           done
 
       - name: Sync UI to S3

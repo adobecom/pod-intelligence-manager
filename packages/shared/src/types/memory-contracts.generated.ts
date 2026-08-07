@@ -2579,6 +2579,309 @@ export const MEMORY_CONTRACT_SCHEMA = {
         }
       }
     },
+    "MemoryRecordHistoryVersionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_version",
+        "content",
+        "applicability",
+        "exceptions",
+        "compatibility",
+        "validation",
+        "evidence",
+        "evidence_summary",
+        "freshness",
+        "recorded_at"
+      ],
+      "properties": {
+        "record_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content": {
+          "$ref": "#/$defs/MemoryContentV1"
+        },
+        "applicability": {
+          "$ref": "#/$defs/CodebaseApplicabilityV1"
+        },
+        "exceptions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "compatibility": {
+          "$ref": "#/$defs/CompatibilityV1"
+        },
+        "validation": {
+          "$ref": "#/$defs/ValidationV1"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/EvidenceHandleV1"
+          }
+        },
+        "evidence_summary": {
+          "$ref": "#/$defs/EvidenceSummaryV1"
+        },
+        "freshness": {
+          "$ref": "#/$defs/FreshnessV1"
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "MemoryRecordHistoryTransitionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition_id",
+        "from_status",
+        "to_status",
+        "actor_type",
+        "actor_id",
+        "reason_code",
+        "explanation",
+        "evidence_refs",
+        "decision_refs",
+        "policy_version",
+        "occurred_at",
+        "committed_at"
+      ],
+      "properties": {
+        "transition_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "from_status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "to_status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "actor_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "actor_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "evidence_refs": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "decision_refs": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "policy_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "occurred_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "committed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "MemoryRecordReplacementV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "record_version",
+        "kind",
+        "summary",
+        "lifecycle",
+        "transition_id",
+        "reason_code",
+        "explanation",
+        "created_at"
+      ],
+      "properties": {
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "record_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "decision",
+            "constraint",
+            "anti_pattern",
+            "test_strategy"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/LifecycleV1"
+        },
+        "transition_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "MemoryRecordHistoryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_id",
+        "tenant",
+        "plane",
+        "kind",
+        "repository_id",
+        "current_version",
+        "lifecycle",
+        "versions",
+        "transitions",
+        "replaces",
+        "replaced_by"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "pim.memory-record-history.v1"
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "tenant": {
+          "$ref": "#/$defs/TenantV1"
+        },
+        "plane": {
+          "const": "codebase"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "decision",
+            "constraint",
+            "anti_pattern",
+            "test_strategy"
+          ]
+        },
+        "repository_id": {
+          "type": "string",
+          "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$",
+          "maxLength": 256
+        },
+        "current_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/LifecycleV1"
+        },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1024,
+          "items": {
+            "$ref": "#/$defs/MemoryRecordHistoryVersionV1"
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4096,
+          "items": {
+            "$ref": "#/$defs/MemoryRecordHistoryTransitionV1"
+          }
+        },
+        "replaces": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MemoryRecordReplacementV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replaced_by": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MemoryRecordReplacementV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "MemoryFeedbackV1": {
       "type": "object",
       "additionalProperties": false,
@@ -3033,6 +3336,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
         "pim.run-receipt-result.v1",
         "pim.memory-candidate-status.v1",
         "pim.memory-record.v1",
+        "pim.memory-record-history.v1",
         "pim.memory-feedback-result.v1",
         "pim.memory-candidate-decision-result.v1",
         "pim.memory-prompt-policy.v1",
@@ -3570,6 +3874,126 @@ export const MEMORY_CONTRACT_FIXTURES = {
       "committed_at": "2026-08-01T17:00:00Z"
     },
     "recorded_at": "2026-08-01T17:00:00Z"
+  },
+  "MemoryRecordHistoryV1": {
+    "schema_version": "pim.memory-record-history.v1",
+    "record_id": "mem_contract_1",
+    "tenant": {
+      "project_id": "project-checkout"
+    },
+    "plane": "codebase",
+    "kind": "constraint",
+    "repository_id": "github.com/acme/checkout",
+    "current_version": 1,
+    "lifecycle": {
+      "status": "superseded"
+    },
+    "versions": [
+      {
+        "record_version": 1,
+        "content": {
+          "summary": "Payment retries must reuse the original idempotency key.",
+          "details": "Every retry for one logical payment must retain the first provider idempotency key.",
+          "rationale": "Changing the key can create a second charge after an ambiguous provider response."
+        },
+        "applicability": {
+          "repository_id": "github.com/acme/checkout",
+          "paths": [
+            "src/payments/retry.ts"
+          ],
+          "symbols": [
+            "retryCharge"
+          ],
+          "task_classes": [
+            "bug_fix"
+          ]
+        },
+        "exceptions": [],
+        "compatibility": {
+          "harness_version_range": "*",
+          "workflow_version_range": "*"
+        },
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": [
+            {
+              "type": "symbol",
+              "path": "src/payments/retry.ts",
+              "value": "retryCharge",
+              "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          ]
+        },
+        "evidence": [
+          {
+            "evidence_ref_id": "merge_contract_1",
+            "type": "git_diff",
+            "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "origin_id": "github.com/acme/checkout:pr-814:merge",
+            "source_authority": "verified"
+          }
+        ],
+        "evidence_summary": {
+          "strength": "verified_merge_and_test",
+          "ref_count": 1
+        },
+        "freshness": {
+          "last_confirmed_at": "2026-08-01T17:00:00Z",
+          "expires_at": null
+        },
+        "recorded_at": "2026-08-01T17:00:00Z"
+      }
+    ],
+    "transitions": [
+      {
+        "transition_id": "transition_record_contract_1",
+        "from_status": null,
+        "to_status": "active",
+        "actor_type": "system",
+        "actor_id": "memory-activation",
+        "reason_code": "seed_fixture_imported",
+        "explanation": "The evidence-backed memory passed activation.",
+        "evidence_refs": [
+          "merge_contract_1"
+        ],
+        "decision_refs": [],
+        "policy_version": "memory-activation-structural-v1",
+        "occurred_at": "2026-08-01T17:00:00Z",
+        "committed_at": "2026-08-01T17:00:00Z"
+      },
+      {
+        "transition_id": "transition_record_contract_2",
+        "from_status": "active",
+        "to_status": "superseded",
+        "actor_type": "system",
+        "actor_id": "memory-activation",
+        "reason_code": "verified_successor_activated",
+        "explanation": "A verified successor narrowed the retry rule.",
+        "evidence_refs": [
+          "merge_contract_2"
+        ],
+        "decision_refs": [
+          "decision_contract_2"
+        ],
+        "policy_version": "memory-activation-structural-v1",
+        "occurred_at": "2026-08-03T17:00:00Z",
+        "committed_at": "2026-08-03T17:00:00Z"
+      }
+    ],
+    "replaces": null,
+    "replaced_by": {
+      "record_id": "mem_contract_2",
+      "record_version": 1,
+      "kind": "constraint",
+      "summary": "Payment retries reuse one key except after a verified cancellation.",
+      "lifecycle": {
+        "status": "active"
+      },
+      "transition_id": "transition_record_contract_2",
+      "reason_code": "verified_successor_activated",
+      "explanation": "A verified successor narrowed the retry rule.",
+      "created_at": "2026-08-03T17:00:00Z"
+    }
   },
   "MemoryFeedbackV1": {
     "schema_version": "pim.memory-feedback.v1",
@@ -4128,6 +4552,61 @@ export type MemoryRecordV1 = {
   "recorded_at": string;
 };
 
+export type MemoryRecordHistoryVersionV1 = {
+  "record_version": number;
+  "content": MemoryContentV1;
+  "applicability": CodebaseApplicabilityV1;
+  "exceptions": Array<string>;
+  "compatibility": CompatibilityV1;
+  "validation": ValidationV1;
+  "evidence": Array<EvidenceHandleV1>;
+  "evidence_summary": EvidenceSummaryV1;
+  "freshness": FreshnessV1;
+  "recorded_at": string;
+};
+
+export type MemoryRecordHistoryTransitionV1 = {
+  "transition_id": string;
+  "from_status": string | null;
+  "to_status": string;
+  "actor_type": string;
+  "actor_id": string;
+  "reason_code": string;
+  "explanation": string;
+  "evidence_refs": Array<string>;
+  "decision_refs": Array<string>;
+  "policy_version": string;
+  "occurred_at": string;
+  "committed_at": string;
+};
+
+export type MemoryRecordReplacementV1 = {
+  "record_id": string;
+  "record_version": number;
+  "kind": "decision" | "constraint" | "anti_pattern" | "test_strategy";
+  "summary": string;
+  "lifecycle": LifecycleV1;
+  "transition_id": string;
+  "reason_code": string;
+  "explanation": string;
+  "created_at": string;
+};
+
+export type MemoryRecordHistoryV1 = {
+  "schema_version": "pim.memory-record-history.v1";
+  "record_id": string;
+  "tenant": TenantV1;
+  "plane": "codebase";
+  "kind": "decision" | "constraint" | "anti_pattern" | "test_strategy";
+  "repository_id": string;
+  "current_version": number;
+  "lifecycle": LifecycleV1;
+  "versions": Array<MemoryRecordHistoryVersionV1>;
+  "transitions": Array<MemoryRecordHistoryTransitionV1>;
+  "replaces": MemoryRecordReplacementV1 | null;
+  "replaced_by": MemoryRecordReplacementV1 | null;
+};
+
 export type MemoryFeedbackV1 = {
   "schema_version": "pim.memory-feedback.v1";
   "feedback_revision": number;
@@ -4248,6 +4727,10 @@ export interface MemoryContractTypeMap {
   "MemoryCandidateStatusV1": MemoryCandidateStatusV1;
   "EvidenceHandleV1": EvidenceHandleV1;
   "MemoryRecordV1": MemoryRecordV1;
+  "MemoryRecordHistoryVersionV1": MemoryRecordHistoryVersionV1;
+  "MemoryRecordHistoryTransitionV1": MemoryRecordHistoryTransitionV1;
+  "MemoryRecordReplacementV1": MemoryRecordReplacementV1;
+  "MemoryRecordHistoryV1": MemoryRecordHistoryV1;
   "MemoryFeedbackV1": MemoryFeedbackV1;
   "MemoryFeedbackResultV1": MemoryFeedbackResultV1;
   "MemoryCandidateDecisionV1": MemoryCandidateDecisionV1;
