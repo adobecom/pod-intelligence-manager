@@ -73,23 +73,38 @@ printf '%s\n' "$$" > "$LOCK_DIR/pid"
 org_count=$(sqlite3 -readonly "$DB_SRC" "SELECT count(*) FROM orgs" 2>/dev/null || echo 0)
 [ "${org_count:-0}" -gt 0 ] 2>/dev/null || die "database has no organizations"
 
-# SQLite's .dump accepts multiple object patterns. Database-owned identifiers
-# are constrained here before they are interpolated into the dot command.
-bad_table=$(sqlite3 -readonly "$DB_SRC" \
-  "SELECT name FROM sqlite_schema
-   WHERE type = 'table'
-     AND name NOT GLOB 'sqlite_*'
-     AND name NOT GLOB 'project_search_*'
-     AND name GLOB '*[^A-Za-z0-9_]*'
-   LIMIT 1")
-[ -z "$bad_table" ] || die "unsupported table name in backup set: $bad_table"
+# SQLite's .dump accepts multiple object patterns, but naming a table does not
+# automatically include separately-created indexes or triggers for that table.
+# Include those schema objects explicitly so composite foreign-key parents and
+# append-only guards survive a logical restore. Database-owned identifiers are
+# constrained here before they are interpolated into the dot command.
+authoritative_objects_sql="
+  WITH authoritative_tables AS (
+    SELECT name
+    FROM sqlite_schema
+    WHERE type = 'table'
+      AND name NOT GLOB 'sqlite_*'
+      AND name NOT GLOB 'project_search_*'
+  )
+  SELECT schema_object.name
+  FROM sqlite_schema AS schema_object
+  WHERE (
+      schema_object.type = 'table'
+      AND schema_object.name IN (SELECT name FROM authoritative_tables)
+    ) OR (
+      schema_object.type IN ('index', 'trigger')
+      AND schema_object.sql IS NOT NULL
+      AND schema_object.tbl_name IN (SELECT name FROM authoritative_tables)
+    )
+  ORDER BY schema_object.name"
 
-objects=$(sqlite3 -readonly "$DB_SRC" \
-  "SELECT name FROM sqlite_schema
-   WHERE type = 'table'
-     AND name NOT GLOB 'sqlite_*'
-     AND name NOT GLOB 'project_search_*'
-   ORDER BY name")
+bad_object=$(sqlite3 -readonly "$DB_SRC" \
+  "SELECT name FROM ($authoritative_objects_sql)
+   WHERE name GLOB '*[^A-Za-z0-9_]*'
+   LIMIT 1")
+[ -z "$bad_object" ] || die "unsupported schema object name in backup set: $bad_object"
+
+objects=$(sqlite3 -readonly "$DB_SRC" "$authoritative_objects_sql")
 [ -n "$objects" ] || die "no authoritative tables found"
 # Preserve AUTOINCREMENT high-water marks along with the selected tables.
 objects=$(printf '%s\nsqlite_sequence\n' "$objects" | tr '\n' ' ')

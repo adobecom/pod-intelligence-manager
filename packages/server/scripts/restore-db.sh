@@ -136,10 +136,14 @@ rm -f "$FIFO"
 
 ic=$(sqlite3 "$STAGED_DB" "PRAGMA integrity_check" 2>/dev/null || echo error)
 [ "$ic" = "ok" ] || die "integrity_check failed: $ic"
+if ! fk_violations=$(sqlite3 "$STAGED_DB" "PRAGMA foreign_key_check" 2>&1); then
+    die "foreign_key_check could not run: $fk_violations"
+fi
+[ -z "$fk_violations" ] || die "foreign_key_check found violations"
 
 orgs=$(count_orgs "$STAGED_DB")
 [ "${orgs:-0}" -gt 0 ] 2>/dev/null || die "restored DB has 0 orgs"
-log "restored orgs=$orgs, integrity ok"
+log "restored orgs=$orgs, integrity and foreign keys ok"
 
 # Optional manifest gate: restored counts must EXACTLY match the pre-shutdown
 # manifest (lines "table=count"). Fail-closed on any mismatch.

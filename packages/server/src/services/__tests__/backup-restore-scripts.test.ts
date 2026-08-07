@@ -44,10 +44,28 @@ describe("portable core backup and restore scripts", () => {
       CREATE TABLE project_evidence_items (id TEXT PRIMARY KEY, body TEXT NOT NULL);
       CREATE TABLE sequence_source (id INTEGER PRIMARY KEY AUTOINCREMENT, value TEXT NOT NULL);
       CREATE TABLE project_search_documents (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE repository_scope (org_id TEXT NOT NULL, repository_id TEXT NOT NULL);
+      CREATE UNIQUE INDEX idx_repository_scope_identity
+        ON repository_scope(org_id, repository_id);
+      CREATE TABLE scoped_finding (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        repository_id TEXT NOT NULL,
+        FOREIGN KEY (org_id, repository_id)
+          REFERENCES repository_scope(org_id, repository_id)
+      );
+      CREATE TABLE finding_audit (finding_id TEXT NOT NULL);
+      CREATE TRIGGER trg_scoped_finding_audit
+        AFTER INSERT ON scoped_finding
+        BEGIN
+          INSERT INTO finding_audit (finding_id) VALUES (NEW.id);
+        END;
       INSERT INTO orgs VALUES ('org-1');
       INSERT INTO project_evidence_items VALUES ('evidence-1', 'authoritative evidence');
       INSERT INTO sequence_source (value) VALUES ('keep sequence');
       INSERT INTO project_search_documents VALUES ('derived-1', 'large derived search row');
+      INSERT INTO repository_scope VALUES ('org-1', 'github.com/example/repo');
+      INSERT INTO scoped_finding VALUES ('finding-1', 'org-1', 'github.com/example/repo');
     `);
     sourceDb.close();
 
@@ -118,6 +136,21 @@ esac
         .get(),
     ).toEqual({ n: 0 });
     expect(restoredDb.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    expect(restoredDb.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(
+      restoredDb
+        .prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE name = 'idx_repository_scope_identity'")
+        .get(),
+    ).toEqual({ n: 1 });
+    expect(
+      restoredDb
+        .prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE name = 'trg_scoped_finding_audit'")
+        .get(),
+    ).toEqual({ n: 1 });
+    restoredDb
+      .prepare("INSERT INTO scoped_finding VALUES (?, ?, ?)")
+      .run("finding-2", "org-1", "github.com/example/repo");
+    expect(restoredDb.prepare("SELECT COUNT(*) AS n FROM finding_audit").get()).toEqual({ n: 2 });
     restoredDb.close();
 
     expect(fs.existsSync(`${restoredDbPath}.project-search-rebuild-required`)).toBe(true);
