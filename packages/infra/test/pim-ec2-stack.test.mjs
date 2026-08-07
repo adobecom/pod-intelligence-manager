@@ -48,6 +48,18 @@ function kgWriteStatements(template) {
   );
 }
 
+function ecrPushStatements(template) {
+  const policies = template.findResources("AWS::IAM::Policy");
+  return Object.values(policies).flatMap((policy) =>
+    policy.Properties.PolicyDocument.Statement.filter((statement) => {
+      const actions = [statement.Action ?? []].flat();
+      const resources = stringLeaves(statement.Resource ?? "");
+      return actions.includes("ecr:InitiateLayerUpload")
+        && resources.includes("ServerRepo");
+    }),
+  );
+}
+
 test("memory cutover fence stays down until memoryCutoverComplete context is set", () => {
   const app = new cdk.App();
   const stack = new PimEc2Stack(app, "PimEc2Stack-precutover", {
@@ -106,4 +118,24 @@ test("server image context accepts only an immutable SHA-256 digest", () => {
       env: { account: "111122223333", region: "us-west-2" },
     });
   }, /serverImageDigest must be an immutable lowercase SHA-256 digest/);
+});
+
+test("scoped host ECR push is denied by default and explicitly temporary", () => {
+  const defaultApp = new cdk.App();
+  const defaultStack = new PimEc2Stack(defaultApp, "PimEc2Stack-no-push", {
+    owner: "test",
+    env: { account: "111122223333", region: "us-west-2" },
+  });
+  const defaultTemplate = Template.fromStack(defaultStack);
+  assert.equal(ecrPushStatements(defaultTemplate).length, 0);
+  defaultTemplate.hasOutput("ServerImagePushAllowed", { Value: "false" });
+
+  const buildApp = new cdk.App({ context: { allowServerImagePush: "true" } });
+  const buildStack = new PimEc2Stack(buildApp, "PimEc2Stack-build-push", {
+    owner: "test",
+    env: { account: "111122223333", region: "us-west-2" },
+  });
+  const buildTemplate = Template.fromStack(buildStack);
+  assert.ok(ecrPushStatements(buildTemplate).length > 0);
+  buildTemplate.hasOutput("ServerImagePushAllowed", { Value: "true" });
 });

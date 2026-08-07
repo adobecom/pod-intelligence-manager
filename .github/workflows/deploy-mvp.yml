@@ -107,7 +107,9 @@ jobs:
           BACKUPS_BUCKET=$(jq -r ".\"$STACK_NAME\".BackupsBucketName" outputs.json)
           LOG_GROUP=$(jq -r ".\"$STACK_NAME\".LogGroupName" outputs.json)
           CUTOVER=$(jq -r ".\"$STACK_NAME\".MemoryCutoverComplete" outputs.json)
+          IMAGE_PUSH=$(jq -r ".\"$STACK_NAME\".ServerImagePushAllowed" outputs.json)
           [ "$CUTOVER" = "$EXPECTED_CUTOVER" ] || { echo "CDK changed the terminal memory fence" >&2; exit 1; }
+          [ "$IMAGE_PUSH" = "false" ] || { echo "Temporary server-image push permission remains enabled" >&2; exit 1; }
           echo "ui_bucket=$UI_BUCKET" >> "$GITHUB_OUTPUT"
           echo "ecr_uri=$ECR_URI" >> "$GITHUB_OUTPUT"
           echo "asg_name=$ASG_NAME" >> "$GITHUB_OUTPUT"

@@ -165,6 +165,13 @@ export class PimEc2Stack extends cdk.Stack {
     const cutoverContext: unknown = this.node.tryGetContext("memoryCutoverComplete");
     const memoryCutoverComplete = cutoverContext === true
       || (typeof cutoverContext === "string" && cutoverContext.trim() === "true");
+    // Manual releases may build on the scoped PIM host when CI credentials are
+    // unavailable. ECR push is then raised only through this stack and must be
+    // lowered again in the digest-pinning deploy immediately after the push.
+    // Normal synthesis and the GitHub workflow leave it disabled.
+    const imagePushContext: unknown = this.node.tryGetContext("allowServerImagePush");
+    const allowServerImagePush = imagePushContext === true
+      || (typeof imagePushContext === "string" && imagePushContext.trim() === "true");
 
     const operationsAlerts = new sns.Topic(this, "OperationsAlerts", {
       topicName: `pim-${owner}-operations-alerts`,
@@ -343,7 +350,11 @@ export class PimEc2Stack extends cdk.Stack {
     }));
     uiBucket.grantRead(ec2Role);
     logGroup.grantWrite(ec2Role);
-    ecrRepo.grantPull(ec2Role);
+    if (allowServerImagePush) {
+      ecrRepo.grantPullPush(ec2Role);
+    } else {
+      ecrRepo.grantPull(ec2Role);
+    }
 
     ec2Role.addToPolicy(
       new iam.PolicyStatement({
@@ -772,6 +783,10 @@ function handler(event) {
     new cdk.CfnOutput(this, "MemoryCutoverComplete", {
       value: memoryCutoverComplete ? "true" : "false",
       description: "Terminal canonical-memory fence state carried forward by deployments",
+    });
+    new cdk.CfnOutput(this, "ServerImagePushAllowed", {
+      value: allowServerImagePush ? "true" : "false",
+      description: "Temporary scoped-host ECR push gate; must be false after a manual image build",
     });
     new cdk.CfnOutput(this, "LogGroupName", { value: logGroup.logGroupName });
     new cdk.CfnOutput(this, "DistributionId", { value: distribution.distributionId });
