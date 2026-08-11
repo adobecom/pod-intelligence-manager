@@ -4,6 +4,7 @@ import websocket from "@fastify/websocket";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import { createTables } from "./db/schema.js";
+import { runSchemaMigrations } from "./db/migrations.js";
 import { seedDatabase } from "./db/seed.js";
 import { seedKnowledgeGraph } from "./db/seed-knowledge.js";
 import podRoutes from "./routes/pods.js";
@@ -22,6 +23,16 @@ import skillCatalogRoutes from "./routes/skill-catalog.js";
 import skillCatalogWebhookRoutes from "./routes/skill-catalog-webhooks.js";
 import hostedMcpRoutes from "./routes/hosted-mcp.js";
 import memoryCapabilitiesRoutes from "./routes/memory-capabilities.js";
+import memoryMcpRoutes from "./routes/memory-mcp.js";
+import memoryV2BindingRoutes from "./routes/memory-v2-binding.js";
+import memoryV2CapabilitiesRoutes from "./routes/memory-v2-capabilities.js";
+import memoryV2ReadinessRoutes from "./routes/memory-v2-readiness.js";
+import memoryV2SearchRoutes, {
+  MEMORY_V2_RECORD_ID_MAX_LENGTH,
+} from "./routes/memory-v2-search.js";
+import memoryV2WriteRoutes, {
+  MEMORY_V2_PATH_PARAM_MAX_LENGTH,
+} from "./routes/memory-v2-write.js";
 import memorySearchRoutes from "./routes/memory-search.js";
 import memoryHarnessSearchRoutes from "./routes/memory-harness-search.js";
 import memoryReceiptRoutes from "./routes/memory-receipts.js";
@@ -29,8 +40,6 @@ import memoryCandidateRoutes from "./routes/memory-candidates.js";
 import memoryAttestationRoutes from "./routes/memory-attestations.js";
 import memoryFeedbackRoutes from "./routes/memory-feedback.js";
 import memoryDecisionRoutes from "./routes/memory-decisions.js";
-import memoryPromptPolicyRoutes from "./routes/memory-prompt-policy.js";
-import memoryReleaseGateRoutes from "./routes/memory-release-gates.js";
 import wsRoutes from "./routes/ws.js";
 import wsTunnelRoutes from "./routes/ws-tunnel.js";
 import tunnelProxyRoutes from "./routes/tunnel-proxy.js";
@@ -54,22 +63,57 @@ import {
 } from "./services/memory-authority.js";
 import { backfillLegacyMemoryTokenBindings } from "./services/service-tokens.js";
 import {
+  assertMemoryV2StartupReconciled,
+  reconcileMemoryV2CanonicalFacets,
+  reconcileMemoryV2CanonicalWrites,
+} from "./services/memory-v2-startup-reconciliation.js";
+import { reconcileMemoryV2Resources } from "./services/memory-v2-resources.js";
+import { reconcileMemoryV2RuntimeOrigins } from "./services/memory-v2-runtime-attestations.js";
+import { reconcileMemoryV2ReverificationAdmissions } from "./services/memory-v2-reverification-admission.js";
+import {
+  getMemoryV2Availability,
+  initializeMemoryV2Availability,
+} from "./services/memory-v2-availability.js";
+import {
+  memoryV2ReverificationEnabled,
+  runMemoryV2ReverificationPass,
+} from "./services/memory-v2-reverification.js";
+import { memoryV2ProductionReverificationProvider } from "./services/memory-v2-reverification-provider.js";
+import {
   createCloudWatchSkillCatalogMetricSink,
   setSkillCatalogMetricSink,
 } from "./services/skill-catalog-metrics.js";
 import {
   createCloudWatchMemoryMetricSink,
   emitMemoryOperationalMetrics,
+  emitMemoryV2ReverificationDeadLetterAgeMetrics,
   setMemoryMetricSink,
 } from "./services/memory-metrics.js";
 import { createAuthHook } from "./middleware/auth.js";
 import { resolveRequestOrg } from "./middleware/org-context.js";
 import { registerJsonBodyParser } from "./middleware/validation.js";
-import { isMemoryApiPath, sendMemoryError, type PimMemoryErrorCode } from "./middleware/memory-errors.js";
+import { registerMemoryV2AvailabilityGuard } from "./middleware/memory-v2-availability.js";
+import {
+  isMemoryApiPath,
+  isMemoryV2ApiPath,
+  sendMemoryError,
+  sendMemoryV2Error,
+  type PimMemoryErrorCode,
+  type PimMemoryV2ErrorCode,
+} from "./middleware/memory-errors.js";
 import db from "./db/connection.js";
 
 const PORT = parseInt(process.env.PORT ?? "4000", 10);
-const app = Fastify({ logger: true });
+const HOST = process.env.PIM_SERVER_HOST ?? "0.0.0.0";
+const app = Fastify({
+  logger: true,
+  routerOptions: {
+    maxParamLength: Math.max(
+      MEMORY_V2_RECORD_ID_MAX_LENGTH,
+      MEMORY_V2_PATH_PARAM_MAX_LENGTH,
+    ),
+  },
+});
 registerJsonBodyParser(app);
 setSkillCatalogMetricSink(createCloudWatchSkillCatalogMetricSink(app.log));
 setMemoryMetricSink(createCloudWatchMemoryMetricSink(app.log));
@@ -81,7 +125,7 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
   const statusCode = error.statusCode ?? 500;
   if (isMemoryApiPath(request.url)) {
     const candidateCode = (error as Error & { code?: string }).code;
-    const knownCodes = new Set<PimMemoryErrorCode>([
+    const v1KnownCodes = new Set<PimMemoryErrorCode>([
       "authentication_required",
       "contract_version_unsupported",
       "schema_invalid",
@@ -95,7 +139,29 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
       "rate_limited",
       "temporarily_unavailable",
     ]);
-    const code: PimMemoryErrorCode = candidateCode && knownCodes.has(candidateCode as PimMemoryErrorCode)
+    const v2KnownCodes = new Set<PimMemoryV2ErrorCode>([
+      ...v1KnownCodes,
+      "scope_required",
+      "provider_unavailable",
+      "reverification_required",
+    ]);
+    if (isMemoryV2ApiPath(request.url)) {
+      const code: PimMemoryV2ErrorCode = candidateCode
+        && v2KnownCodes.has(candidateCode as PimMemoryV2ErrorCode)
+        ? candidateCode as PimMemoryV2ErrorCode
+        : statusCode >= 500
+          ? "temporarily_unavailable"
+          : "schema_invalid";
+      sendMemoryV2Error(
+        reply,
+        statusCode,
+        code,
+        statusCode >= 500 ? "Memory service is temporarily unavailable" : error.message,
+      );
+      return;
+    }
+    const code: PimMemoryErrorCode = candidateCode
+      && v1KnownCodes.has(candidateCode as PimMemoryErrorCode)
       ? candidateCode as PimMemoryErrorCode
       : statusCode >= 500
         ? "temporarily_unavailable"
@@ -112,15 +178,86 @@ app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => 
     error: statusCode >= 500 ? "Internal server error" : error.message,
   });
 });
+registerMemoryV2AvailabilityGuard(app);
 
 // Initialize database
-createTables();
+createTables({ memoryMigrationThroughVersion: 11 });
 installLegacySqlWriteBarriers();
 assertCanonicalMemoryAuthorityRequired();
-const grandfatheredBindings = backfillLegacyMemoryTokenBindings();
-if (grandfatheredBindings > 0) {
-  app.log.info(
-    `Backfilled ${grandfatheredBindings} repository bindings for pre-binding memory service tokens`,
+const memoryV2Startup = initializeMemoryV2Availability({
+  migrate: () => runSchemaMigrations(),
+  reconcile: () => {
+    const grandfatheredBindings = backfillLegacyMemoryTokenBindings();
+    if (grandfatheredBindings > 0) {
+      app.log.info(
+        `Backfilled ${grandfatheredBindings} repository bindings for pre-binding memory service tokens`,
+      );
+    }
+    const resources = reconcileMemoryV2Resources();
+    const facets = reconcileMemoryV2CanonicalFacets();
+    const writes = reconcileMemoryV2CanonicalWrites();
+    const runtimeOrigins = reconcileMemoryV2RuntimeOrigins();
+    if (!resources.ok || !facets.ok || !writes.ok || !runtimeOrigins.ok) {
+      throw new Error("Memory v2 admission companions failed reconciliation");
+    }
+  },
+  admit: () => {
+    const admission = reconcileMemoryV2ReverificationAdmissions();
+    app.log.info(
+      {
+        eligible_records: admission.eligibleRecordCount,
+        missing_records: admission.missingRecordCount,
+        already_covered_records: admission.alreadyCoveredRecordCount,
+        admitted_records: admission.admittedRecordCount,
+        codebase_admitted: admission.codebaseAdmittedCount,
+        harness_admitted: admission.harnessAdmittedCount,
+        admission_cap: admission.maxAdmissionRecords,
+      },
+      "Memory v2 reverification admission reconciled",
+    );
+  },
+  validate: () => {
+    const reconciliation = assertMemoryV2StartupReconciled();
+    app.log.info(
+      {
+        resource_rows: reconciliation.resources.repositoryProjectionCount
+          + reconciliation.resources.harnessProjectionCount,
+        record_sources: reconciliation.facets.records.sourceCount,
+        candidate_sources: reconciliation.facets.candidates.sourceCount,
+        receipt_sources: reconciliation.facets.receipts.sourceCount,
+        feedback_sources: reconciliation.facets.feedback.sourceCount,
+        active_pointers: reconciliation.facets.activePointerCount,
+        harness_record_versions: reconciliation.facets.harnessRead.sourceRecordVersionCount,
+        harness_backfill_empty: reconciliation.facets.harnessRead.emptyBackfill,
+        runtime_corroboration_domains: reconciliation.runtimeOrigins.domainCount,
+        runtime_origins: reconciliation.runtimeOrigins.originCount,
+        runtime_derivations: reconciliation.runtimeOrigins.derivationCount,
+        runtime_root_links: reconciliation.runtimeOrigins.rootLinkCount,
+        runtime_candidate_links: reconciliation.runtimeOrigins.candidateLinkCount,
+        runtime_review_signals: reconciliation.runtimeOrigins.reviewSignalCount,
+        runtime_origin_mismatches: reconciliation.runtimeOrigins.mismatchCount,
+        reverification_policies: reconciliation.reverification.policyCount,
+        reverification_states: reconciliation.reverification.stateCount,
+        reverification_jobs: reconciliation.reverification.jobCount,
+        reverification_attempts: reconciliation.reverification.attemptCount,
+        reverification_uncovered_influence:
+          reconciliation.reverification.uncoveredInfluenceRecordCount,
+        reverification_historical_states: reconciliation.reverification.historicalStateCount,
+        reverification_historical_influence:
+          reconciliation.reverification.historicalInfluenceEligibleCount,
+        reverification_graph_mismatches: reconciliation.reverification.graphMismatchCount,
+      },
+      "Memory v2 startup reconciliation passed",
+    );
+  },
+});
+if (memoryV2Startup.error) {
+  app.log.error(
+    {
+      err: memoryV2Startup.error,
+      memory_v2_availability: memoryV2Startup.availability,
+    },
+    "Memory v2 startup failed; v2 remains unavailable while shared PIM routes continue",
   );
 }
 seedDatabase();
@@ -204,9 +341,14 @@ const authenticate = createAuthHook(authMode);
 // The `/tunnel/` proxy authenticates via a per-tunnel share_token path segment
 // (checked in tunnel-proxy.ts) so external collaborators without IMS sessions
 // can load previews — matching Expo/ngrok semantics.
-// `/mcp` performs stricter service-token-only authentication in its own route
-// before constructing the per-request MCP server.
-const PUBLIC_PATHS = new Set<string>(["/api/health", "/api/cli-config", "/mcp"]);
+// `/mcp` and `/mcp/memory` perform stricter service-token-only authentication
+// in their own routes before constructing a per-request MCP server.
+const PUBLIC_PATHS = new Set<string>([
+  "/api/health",
+  "/api/cli-config",
+  "/mcp",
+  "/mcp/memory",
+]);
 const PUBLIC_PREFIXES = [
   "/ws",
   "/tunnel",
@@ -249,6 +391,11 @@ app.register(agentMemoryRoutes);
 app.register(skillCatalogRoutes);
 app.register(skillCatalogWebhookRoutes);
 app.register(memoryCapabilitiesRoutes);
+app.register(memoryV2BindingRoutes);
+app.register(memoryV2CapabilitiesRoutes);
+app.register(memoryV2ReadinessRoutes);
+app.register(memoryV2SearchRoutes);
+app.register(memoryV2WriteRoutes);
 app.register(memorySearchRoutes);
 app.register(memoryHarnessSearchRoutes);
 app.register(memoryReceiptRoutes);
@@ -256,11 +403,10 @@ app.register(memoryCandidateRoutes);
 app.register(memoryAttestationRoutes);
 app.register(memoryFeedbackRoutes);
 app.register(memoryDecisionRoutes);
-app.register(memoryPromptPolicyRoutes);
-app.register(memoryReleaseGateRoutes);
 app.register(hostedMcpRoutes, {
   apiBaseUrl: `http://127.0.0.1:${PORT}`,
 });
+app.register(memoryMcpRoutes);
 app.register(wsRoutes);
 app.register(wsTunnelRoutes);
 app.register(tunnelProxyRoutes);
@@ -352,9 +498,15 @@ const MEMORY_METRICS_INTERVAL_MS = positiveIntervalMs(
   process.env.MEMORY_METRICS_INTERVAL_MS,
   60_000,
 );
+const MEMORY_V2_REVERIFICATION_INTERVAL_MS = positiveIntervalMs(
+  process.env.MEMORY_V2_REVERIFICATION_INTERVAL_MS,
+  30_000,
+);
 const MEMORY_WORKERS_ENABLED = process.env.MEMORY_WORKERS_ENABLED !== "0";
+let memoryV2ReverificationTimer: ReturnType<typeof setInterval> | null = null;
+let memoryV2ReverificationInFlight: Promise<void> | null = null;
 
-app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
+app.listen({ port: PORT, host: HOST }, (err) => {
   if (err) {
     app.log.error(err);
     process.exit(1);
@@ -531,9 +683,53 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
     setInterval(reconcileMemoryInbox, MEMORY_RECONCILE_INTERVAL_MS);
   }
 
+  if (memoryV2ReverificationEnabled()
+      && getMemoryV2Availability().status === "ready") {
+    const reverifyMemory = () => {
+      if (memoryV2ReverificationInFlight) {
+        app.log.debug(
+          { interval_ms: MEMORY_V2_REVERIFICATION_INTERVAL_MS },
+          "Memory v2 reverification pass skipped because the prior pass is still running",
+        );
+        return;
+      }
+      const pass = runMemoryV2ReverificationPass({
+        provider: memoryV2ProductionReverificationProvider,
+      })
+        .then((result) => {
+          app.log.info(
+            {
+              scheduled: result.scheduled,
+              claimed: result.claimed,
+              verified: result.verified,
+              retired: result.retired,
+              pending: result.pending,
+              dead_lettered: result.deadLettered,
+            },
+            "Memory v2 reverification pass completed",
+          );
+        })
+        .catch((error) => {
+          app.log.error(error, "Memory v2 reverification pass failed");
+        })
+        .finally(() => {
+          if (memoryV2ReverificationInFlight === pass) {
+            memoryV2ReverificationInFlight = null;
+          }
+        });
+      memoryV2ReverificationInFlight = pass;
+    };
+    reverifyMemory();
+    memoryV2ReverificationTimer = setInterval(
+      reverifyMemory,
+      MEMORY_V2_REVERIFICATION_INTERVAL_MS,
+    );
+  }
+
   const publishMemoryOperationalMetrics = () => {
     try {
       emitMemoryOperationalMetrics();
+      emitMemoryV2ReverificationDeadLetterAgeMetrics();
     } catch (error) {
       app.log.error(error, "Memory operational metric collection failed");
     }
@@ -566,6 +762,14 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
       ? `Memory workers: outbox ${MEMORY_OUTBOX_INTERVAL_MS}ms, reconciliation ${MEMORY_RECONCILE_INTERVAL_MS}ms`
       : "Memory workers: disabled (MEMORY_WORKERS_ENABLED=0)",
   );
+  app.log.info(
+    {
+      enabled: memoryV2ReverificationEnabled(),
+      memory_v2_availability: getMemoryV2Availability(),
+      interval_ms: MEMORY_V2_REVERIFICATION_INTERVAL_MS,
+    },
+    "Memory v2 reverification worker configured",
+  );
   app.log.info(`Memory operational metrics interval: ${MEMORY_METRICS_INTERVAL_MS}ms`);
 });
 
@@ -573,6 +777,11 @@ app.listen({ port: PORT, host: "0.0.0.0" }, (err) => {
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info(`Received ${signal}, shutting down gracefully`);
   try {
+    if (memoryV2ReverificationTimer) {
+      clearInterval(memoryV2ReverificationTimer);
+      memoryV2ReverificationTimer = null;
+    }
+    await memoryV2ReverificationInFlight;
     await app.close();
     db.close();
     process.exit(0);

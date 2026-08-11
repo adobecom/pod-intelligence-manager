@@ -12,6 +12,16 @@ import {
   assertMemoryStructure,
   MemoryStructuralValidationError,
 } from "./memory-structural-validator.js";
+import {
+  assertMemoryV2StoredCandidateFacet,
+  insertMemoryV2CandidateFacet,
+  insertMemoryV2FacetQuarantine,
+  type MemoryV2HarnessSubtype,
+} from "./memory-v2-canonical-writes.js";
+import {
+  memoryV2RepositoryResourceRowId,
+  resolveMemoryV2HarnessResourceRowId,
+} from "./memory-v2-resources.js";
 
 type CandidateStatus = MemoryCandidateStatusV1["status"];
 type ActivationRequirement = MemoryCandidateStatusV1["activation_requirement"];
@@ -47,6 +57,24 @@ interface TransitionRow {
   committed_at: string;
 }
 
+interface NativeHarnessScopeRow {
+  receipt_id: string;
+  resource_row_id: string;
+  producer_run_id: string;
+  scope_snapshot_digest: string;
+}
+
+interface NativeHarnessRuntimeEvidenceRow {
+  evidence_ref_id: string;
+  outcome_json: string;
+  source_authority: "observed" | "verified";
+}
+
+type NativeHarnessValidationStrategy =
+  | "stable_failure_fingerprint"
+  | "runtime_attestation"
+  | "authorized_review";
+
 export interface InsertMemoryCandidateInput {
   orgId: string;
   projectId: string;
@@ -57,6 +85,8 @@ export interface InsertMemoryCandidateInput {
   evidenceManifestRowId: string | null;
   evidenceRowsByProducerRef: Map<string, string>;
   candidate: MemoryCandidateV1;
+  /** Native-v2 harness subtype; legacy v1 callers intentionally omit it. */
+  candidateSubtype?: MemoryV2HarnessSubtype;
   now: string;
 }
 
@@ -146,7 +176,35 @@ function insertTransition(input: {
   return transitionId;
 }
 
-export function insertMemoryCandidate(input: InsertMemoryCandidateInput): InsertedMemoryCandidate {
+function insertMemoryCandidateInTransaction(
+  input: InsertMemoryCandidateInput,
+): InsertedMemoryCandidate {
+  let resourceRowId: string | null;
+  if (input.candidate.plane === "codebase" && input.repositoryRowId) {
+    resourceRowId = memoryV2RepositoryResourceRowId(input.repositoryRowId);
+  } else if (input.candidate.plane === "harness") {
+    const applicability = input.candidate.applicability as HarnessApplicabilityV1;
+    if (applicability.harness_id !== input.producerHarnessId) {
+      throw new MemoryCandidateIdempotencyError(
+        "Harness candidate does not match its authenticated producer resource",
+      );
+    }
+    const harnessResourceRowId = resolveMemoryV2HarnessResourceRowId({
+      orgId: input.orgId,
+      projectId: input.projectId,
+      harnessId: applicability.harness_id,
+    });
+    if (!harnessResourceRowId) {
+      throw new MemoryCandidateIdempotencyError("Harness candidate resource is unavailable");
+    }
+    resourceRowId = harnessResourceRowId;
+  } else if (input.candidate.plane === "org" && input.repositoryRowId === null) {
+    resourceRowId = null;
+  } else {
+    throw new MemoryCandidateIdempotencyError(
+      "Candidate plane has no exact implemented canonical resource",
+    );
+  }
   const digest = canonicalJsonSha256(input.candidate);
   const existing = db.prepare(
     `SELECT * FROM memory_candidates_v1
@@ -163,6 +221,7 @@ export function insertMemoryCandidate(input: InsertMemoryCandidateInput): Insert
         "Producer candidate identity was reused with different immutable content",
       );
     }
+    assertMemoryV2StoredCandidateFacet(existing.candidate_id);
     db.prepare(
       `INSERT OR IGNORE INTO memory_receipt_candidates
          (receipt_id, candidate_id, client_candidate_id, candidate_digest)
@@ -205,6 +264,31 @@ export function insertMemoryCandidate(input: InsertMemoryCandidateInput): Insert
     input.now,
     input.now,
   );
+  if (input.candidate.plane === "org") {
+    insertMemoryV2FacetQuarantine({
+      quarantineRowId: `v2facetq:${randomUUID()}`,
+      aggregateType: "candidate",
+      aggregateId: candidateId,
+      aggregateVersion: 0,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      sourcePlane: "org",
+      reasonCode: "unsupported_plane",
+      sourceDigest: digest,
+      now: input.now,
+    });
+  } else {
+    insertMemoryV2CandidateFacet({
+      candidateId,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      plane: input.candidate.plane,
+      resourceRowId: resourceRowId!,
+      broadKind: input.candidate.kind,
+      subtype: input.candidateSubtype,
+      now: input.now,
+    });
+  }
   const row = getCandidateRow(candidateId)!;
   insertTransition({
     row,
@@ -254,6 +338,15 @@ export function insertMemoryCandidate(input: InsertMemoryCandidateInput): Insert
     input.now,
   );
   return { candidateId, status: "received", blockers, created: true };
+}
+
+/**
+ * Transaction-owning candidate writer. Receipt intake may call this inside its
+ * aggregate transaction; the database wrapper uses a savepoint for that nested
+ * call so direct callers receive the same all-or-nothing guarantee.
+ */
+export function insertMemoryCandidate(input: InsertMemoryCandidateInput): InsertedMemoryCandidate {
+  return withImmediateTransaction(() => insertMemoryCandidateInTransaction(input));
 }
 
 const ALLOWED_TRANSITIONS: Record<CandidateStatus, CandidateStatus[]> = {
@@ -335,6 +428,140 @@ function rejectCandidate(row: CandidateRow, blocker: string, explanation: string
   });
 }
 
+function nativeHarnessScope(receiptId: string): NativeHarnessScopeRow | null {
+  return (db.prepare(
+    `SELECT receipt_id, resource_row_id, producer_run_id, scope_snapshot_digest
+     FROM memory_v2_scope_snapshots
+     WHERE receipt_id = ? AND plane = 'harness'`,
+  ).get(receiptId) as NativeHarnessScopeRow | undefined) ?? null;
+}
+
+function validateNativeHarnessCandidate(input: {
+  row: CandidateRow;
+  candidate: MemoryCandidateV1;
+  receipt: {
+    producer_run_id: string;
+    producer_harness_id: string;
+    receipt_json: string;
+  };
+  scope: NativeHarnessScopeRow;
+}): CandidateRow {
+  const applicability = input.candidate.applicability as HarnessApplicabilityV1;
+  const receiptPayload = parseMemoryContract(
+    "RunReceiptV1",
+    parseJson<RunReceiptV1>(input.receipt.receipt_json),
+  );
+  const extensions = input.candidate.extensions ?? {};
+  const strategy = extensions.v2_validation_strategy;
+  if (applicability.harness_id !== input.receipt.producer_harness_id
+      || applicability.harness_id !== receiptPayload.producer.harness_id
+      || input.scope.producer_run_id !== input.receipt.producer_run_id
+      || extensions.v2_scope_snapshot_digest !== input.scope.scope_snapshot_digest) {
+    return rejectCandidate(
+      input.row,
+      "candidate_harness_mismatch",
+      "Native v2 harness applicability must exactly match its authenticated receipt scope.",
+    );
+  }
+  if (strategy !== "stable_failure_fingerprint"
+      && strategy !== "runtime_attestation"
+      && strategy !== "authorized_review") {
+    return rejectCandidate(
+      input.row,
+      "candidate_validation_strategy_invalid",
+      "Native v2 harness validation strategy is unavailable or unsupported.",
+    );
+  }
+  const validationStrategy = strategy as NativeHarnessValidationStrategy;
+  const failureFingerprint = input.candidate.validation.failure_fingerprint;
+  const failureDerived = validationStrategy === "stable_failure_fingerprint";
+  if (failureDerived
+      ? input.candidate.validation.strategy !== "stable_failure_fingerprint"
+        || !failureFingerprint
+        || failureFingerprint !== receiptPayload.outcome.failure_fingerprint
+      : input.candidate.validation.strategy !== "policy_owner_review"
+        || failureFingerprint !== undefined
+        || receiptPayload.outcome.status !== "completed"
+        || receiptPayload.outcome.verification_status !== "passed"
+        || receiptPayload.outcome.failure_fingerprint !== null) {
+    return rejectCandidate(
+      input.row,
+      failureDerived
+        ? "stable_failure_fingerprint_mismatch"
+        : "successful_runtime_evidence_mismatch",
+      failureDerived
+        ? "Native v2 failure-derived evidence must preserve the receipt's stable failure fingerprint."
+        : "Native v2 successful-run evidence must preserve a completed, verified, fingerprint-free outcome.",
+    );
+  }
+  const evidence = db.prepare(
+    `SELECT origin.evidence_ref_id, origin.outcome_json, origin.source_authority
+     FROM memory_v2_candidate_origins AS link
+     INNER JOIN memory_v2_origins AS origin ON origin.origin_id = link.origin_id
+     WHERE link.candidate_id = ? AND link.receipt_id = ?
+       AND link.producer_run_id = ? AND link.resource_row_id = ?
+       AND origin.receipt_id = link.receipt_id
+       AND origin.evidence_ref_id = link.evidence_ref_id
+     ORDER BY origin.evidence_ref_id`,
+  ).all(
+    input.row.candidate_id,
+    input.scope.receipt_id,
+    input.scope.producer_run_id,
+    input.scope.resource_row_id,
+  ) as unknown as NativeHarnessRuntimeEvidenceRow[];
+  const evidenceRefs = evidence.map((item) => item.evidence_ref_id).sort();
+  const evidenceRequired = validationStrategy !== "authorized_review";
+  if ((evidenceRequired && evidence.length === 0)
+      || extensions.v2_evidence_refs_digest !== canonicalJsonSha256(evidenceRefs)) {
+    return rejectCandidate(
+      input.row,
+      "candidate_evidence_unresolvable",
+      "Native v2 harness runtime evidence is incomplete or unavailable.",
+    );
+  }
+  const outcomesMatch = evidence.every((item) => {
+    try {
+      const outcome = parseJson<{
+        status?: unknown;
+        verification_status?: unknown;
+        failure_fingerprint?: unknown;
+      }>(item.outcome_json);
+      return failureDerived
+        ? outcome.failure_fingerprint === failureFingerprint
+        : outcome.status === "completed"
+          && outcome.verification_status === "passed"
+          && outcome.failure_fingerprint === null
+          && (validationStrategy !== "runtime_attestation"
+            || item.source_authority === "verified");
+    } catch {
+      return false;
+    }
+  });
+  if (!outcomesMatch) {
+    return rejectCandidate(
+      input.row,
+      failureDerived
+        ? "stable_failure_fingerprint_mismatch"
+        : "successful_runtime_evidence_mismatch",
+      failureDerived
+        ? "Native v2 runtime evidence does not match the candidate failure fingerprint."
+        : "Native v2 runtime evidence does not verify the declared successful-run strategy.",
+    );
+  }
+  const blockers = ["authorized_review_required"];
+  if (extensions.v2_activation_requirement_requested === "independently_verified_runtime") {
+    blockers.push("origin_quorum_unavailable");
+  }
+  return transitionCandidate({
+    candidateId: input.row.candidate_id,
+    expectedVersion: input.row.aggregate_version,
+    toStatus: "pending_review",
+    blockers,
+    reasonCode: "authorized_review_required",
+    explanation: "Structurally valid native v2 harness memory awaits authorized review before activation.",
+  });
+}
+
 export function validateMemoryCandidate(candidateId: string, expectedVersion: number): CandidateRow {
   let row = getCandidateRow(candidateId);
   if (!row) throw new Error("Candidate validation target is unavailable");
@@ -354,13 +581,6 @@ export function validateMemoryCandidate(candidateId: string, expectedVersion: nu
   }
   if (row.current_status !== "validating") return row;
   const candidate = parseMemoryContract("MemoryCandidateV1", parseJson(row.candidate_json));
-  if (candidate.plane === "org") {
-    return rejectCandidate(
-      row,
-      "organization_plane_not_supported",
-      "Organization memory remains manual-only and is not enabled in this slice.",
-    );
-  }
   try {
     assertMemoryStructure({
       plane: candidate.plane,
@@ -388,6 +608,17 @@ export function validateMemoryCandidate(candidateId: string, expectedVersion: nu
   if (!receipt || !candidate.source_run_ids.includes(receipt.producer_run_id)) {
     return rejectCandidate(row, "producer_run_provenance_missing", "Candidate source runs do not include the receipt producer run.");
   }
+  const nativeScope = candidate.plane === "harness"
+    ? nativeHarnessScope(row.receipt_id)
+    : null;
+  if (candidate.plane === "harness" && nativeScope) {
+    return validateNativeHarnessCandidate({
+      row,
+      candidate,
+      receipt,
+      scope: nativeScope,
+    });
+  }
   const linkedEvidence = db.prepare(
     `SELECT ref.type, ref.producer_ref_id
      FROM memory_candidate_evidence link
@@ -397,6 +628,16 @@ export function validateMemoryCandidate(candidateId: string, expectedVersion: nu
   if (!row.evidence_manifest_row_id || linkedEvidence.length !== candidate.evidence_refs.length
       || candidate.evidence_refs.length === 0) {
     return rejectCandidate(row, "candidate_evidence_unresolvable", "Candidate evidence is incomplete or unavailable.");
+  }
+  if (candidate.plane === "org") {
+    return transitionCandidate({
+      candidateId,
+      expectedVersion: row.aggregate_version,
+      toStatus: "pending_review",
+      blockers: ["manual_policy_owner_required"],
+      reasonCode: "manual_policy_owner_required",
+      explanation: "Structurally valid organization memory awaits explicit policy-owner validation and review.",
+    });
   }
   if (candidate.plane === "harness") {
     const applicability = candidate.applicability as HarnessApplicabilityV1;
@@ -424,17 +665,13 @@ export function validateMemoryCandidate(candidateId: string, expectedVersion: nu
         "Harness candidates require resolvable failure evidence for the stable fingerprint.",
       );
     }
-    const blockers = ["authorized_review_required"];
-    if (linkedEvidence.some((item) => item.type === "git_diff")) {
-      blockers.push("verified_fiesta_merge_required");
-    }
     return transitionCandidate({
       candidateId,
       expectedVersion: row.aggregate_version,
       toStatus: "pending_review",
-      blockers,
+      blockers: ["authorized_review_required"],
       reasonCode: "authorized_review_required",
-      explanation: "Structurally valid harness memory awaits authorized review in permanent shadow mode.",
+      explanation: "Structurally valid harness memory awaits authorized review.",
     });
   }
 

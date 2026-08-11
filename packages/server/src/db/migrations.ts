@@ -12,12 +12,43 @@ import { MEMORY_HARNESS_SHADOW_MIGRATION_SQL } from "./migrations/008-memory-har
 import { MEMORY_OFFLINE_LEGACY_CUTOVER_MIGRATION_SQL } from "./migrations/009-memory-offline-legacy-cutover.js";
 import { MEMORY_RETENTION_ERASURE_MIGRATION_SQL } from "./migrations/010-memory-retention-erasure.js";
 import { MEMORY_ATTESTATION_DIFF_PROOF_MIGRATION_SQL } from "./migrations/011-memory-attestation-diff-proof.js";
+import { MEMORY_V2_RESOURCES_MIGRATION_SQL } from "./migrations/012-memory-v2-resources.js";
+import { MEMORY_V2_FACETS_MIGRATION_SQL } from "./migrations/013-memory-v2-facets.js";
+import { MEMORY_V2_RETRIEVAL_PACKS_MIGRATION_SQL } from "./migrations/014-memory-v2-retrieval-packs.js";
+import { MEMORY_V2_SCOPE_FEEDBACK_MIGRATION_SQL } from "./migrations/015-memory-v2-scope-feedback.js";
+import { MEMORY_V2_RUNTIME_ORIGINS_MIGRATION_SQL } from "./migrations/016-memory-v2-runtime-origins.js";
+import { MEMORY_V2_REVERIFICATION_MIGRATION_SQL } from "./migrations/017-memory-v2-reverification.js";
+import {
+  assertMemoryExperimentCleanupPreconditions,
+  MEMORY_EXPERIMENT_CLEANUP_MIGRATION_SQL,
+} from "./migrations/018-memory-experiment-cleanup.js";
 
 interface Migration {
   version: number;
   name: string;
   sql: string;
   requiresForeignKeysOff?: boolean;
+  preflight?: (database: DatabaseSync) => void;
+}
+
+export const MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION_ENV =
+  "PIM_MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION";
+export const MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION =
+  "apply-memory-v2-012-013";
+
+function assertOfflineMemoryV2CutoverConfirmed(migration: Migration): void {
+  if (process.env.NODE_ENV !== "production" || migration.version < 12 || migration.version > 13) {
+    return;
+  }
+  if (process.env[MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION_ENV]
+      === MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION) {
+    return;
+  }
+  throw new Error(
+    `Schema migration ${migration.version} requires the stopped-writer memory v2 offline cutover; `
+      + `set ${MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION_ENV}=`
+      + `${MEMORY_V2_OFFLINE_CUTOVER_CONFIRMATION} only for the confirmed one-shot cutover`,
+  );
 }
 
 const MIGRATIONS: readonly Migration[] = [
@@ -77,6 +108,42 @@ const MIGRATIONS: readonly Migration[] = [
     name: "memory_attestation_diff_proof",
     sql: MEMORY_ATTESTATION_DIFF_PROOF_MIGRATION_SQL,
   },
+  {
+    version: 12,
+    name: "memory_v2_resources",
+    sql: MEMORY_V2_RESOURCES_MIGRATION_SQL,
+  },
+  {
+    version: 13,
+    name: "memory_v2_facets",
+    sql: MEMORY_V2_FACETS_MIGRATION_SQL,
+  },
+  {
+    version: 14,
+    name: "memory_v2_retrieval_packs",
+    sql: MEMORY_V2_RETRIEVAL_PACKS_MIGRATION_SQL,
+  },
+  {
+    version: 15,
+    name: "memory_v2_scope_feedback",
+    sql: MEMORY_V2_SCOPE_FEEDBACK_MIGRATION_SQL,
+  },
+  {
+    version: 16,
+    name: "memory_v2_runtime_origins",
+    sql: MEMORY_V2_RUNTIME_ORIGINS_MIGRATION_SQL,
+  },
+  {
+    version: 17,
+    name: "memory_v2_reverification",
+    sql: MEMORY_V2_REVERIFICATION_MIGRATION_SQL,
+  },
+  {
+    version: 18,
+    name: "memory_experiment_cleanup",
+    sql: MEMORY_EXPERIMENT_CLEANUP_MIGRATION_SQL,
+    preflight: assertMemoryExperimentCleanupPreconditions,
+  },
 ];
 
 function checksum(migration: Migration): string {
@@ -118,6 +185,11 @@ export function runSchemaMigrations(
       continue;
     }
 
+    // 012/013 backfill canonical memory authority. They may be replayed and
+    // validated during normal production starts, but their first application
+    // is an operator-confirmed, stopped-writer cutover only.
+    assertOfflineMemoryV2CutoverConfirmed(migration);
+
     const foreignKeysRow = migration.requiresForeignKeysOff
       ? database.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }
       : null;
@@ -126,6 +198,7 @@ export function runSchemaMigrations(
       if (migration.requiresForeignKeysOff) database.exec("PRAGMA foreign_keys = OFF");
       database.exec("BEGIN IMMEDIATE");
       transactionStarted = true;
+      migration.preflight?.(database);
       database.exec(migration.sql);
       if (migration.requiresForeignKeysOff) {
         const violations = database.prepare("PRAGMA foreign_key_check").all();

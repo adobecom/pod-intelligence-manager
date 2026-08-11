@@ -1,17 +1,8 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import type { Pod, OrgPodSummary, ArchivedPod } from "@pim/shared";
+import type { Pod, OrgPodSummary, ArchivedPod, PodArchiveJob } from "@pim/shared";
 import { getPressureLevel, getPressureLabel } from "@pim/shared";
 import { getBaseUrl, fetchJSON } from "../util.js";
-
-interface PodArchiveJob {
-  job_id: string;
-  pod_id: string;
-  status: "running" | "completed" | "failed";
-  status_url: string;
-  archived?: ArchivedPod;
-  error?: string;
-}
 
 export function registerPodCommands(program: Command) {
   const pod = program.command("pod").description("Manage pods");
@@ -114,8 +105,12 @@ export function registerPodCommands(program: Command) {
         : started;
       console.log(chalk.green(`\n  Archived: ${result.name}`));
       console.log(`  Duration: ${result.duration_days} days | Final pressure: ${result.final_pressure.toFixed(2)}`);
-      if (typeof result.learnings_extracted === "number") {
-        console.log(`  Learnings extracted: ${result.learnings_extracted}`);
+      if (result.canonical_memory_intake) {
+        console.log(
+          `  Candidates submitted for validation/review: ${result.canonical_memory_intake.candidates_submitted} (not active yet)`,
+        );
+      } else if (typeof result.learnings_extracted === "number") {
+        console.log(`  Legacy graph learnings added: ${result.learnings_extracted}`);
       }
       console.log();
     });

@@ -29,7 +29,7 @@ describe("shared memory structural validator", () => {
       plane: "codebase",
       kind: "constraint",
       content,
-      applicability: { harness_id: "fiesta", harness_version_range: "*" },
+      applicability: { harness_id: "example-harness-a", harness_version_range: "*" },
       validation: { strategy: "repository_anchors" },
       exceptions: [],
     });
@@ -56,4 +56,3 @@ describe("shared memory structural validator", () => {
     expect(normalizeRepositoryId("checkout")).toBeNull();
   });
 });
-

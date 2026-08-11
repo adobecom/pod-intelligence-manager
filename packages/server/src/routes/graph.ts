@@ -11,12 +11,13 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type {
-  AdHocLearningInput,
-  ConfidenceLevel,
-  CurationRequest,
-  EnhancedPodLearning,
-  KnowledgeQueryOptions,
+import {
+  canonicalJsonSha256,
+  type AdHocLearningInput,
+  type ConfidenceLevel,
+  type CurationRequest,
+  type EnhancedPodLearning,
+  type KnowledgeQueryOptions,
 } from "@pim/shared";
 import {
   curateNode,
@@ -27,9 +28,11 @@ import {
   queryKnowledgeSemantic,
   stripEmbeddingsFromGraph,
 } from "../services/knowledge-graph.js";
-import { ingestLearnings } from "../services/ingestion-gateway.js";
+import { ingestLearnings, prepareLearnings } from "../services/ingestion-gateway.js";
 import { validateBody } from "../middleware/validation.js";
 import { assertLegacyActivationStructure } from "../services/memory-structural-validator.js";
+import { legacyMemoryWritesFrozen } from "../services/memory-authority.js";
+import { submitCanonicalLegacyLearnings } from "../services/canonical-legacy-intake.js";
 import {
   rejectServiceToken,
   requireProjectBinding,
@@ -195,8 +198,8 @@ export default async function graphRoutes(app: FastifyInstance) {
 
   // Ad-hoc learning submission. For confirmed learnings outside any active pod
   // (bug fixes, chatbot/agent conversations, anything an operator deems worth keeping).
-  // Submitted nodes pass through the ingestion gateway (sanitize → normalize domains
-  // → clamp confidence) before embedding + dedup + relational edge-building.
+  // Before cutover, submitted nodes use the legacy ingestion gateway. After the
+  // legacy-authority freeze they become canonical candidates pending review.
   app.post<{ Body: AdHocLearningInput }>(
     "/api/knowledge/nodes",
     { preHandler: validateBody(AdHocLearningSchema) },
@@ -213,6 +216,66 @@ export default async function graphRoutes(app: FastifyInstance) {
         confidence: "extracted" satisfies ConfidenceLevel,
         confidence_score: body.confidence_score ?? AD_HOC_DEFAULT_CONFIDENCE,
       };
+      if (legacyMemoryWritesFrozen()) {
+        const prepared = prepareLearnings(
+          req.org!.org_id,
+          [learning],
+          "ad_hoc",
+          new Set(),
+        );
+        const selected = prepared.prepared[0];
+        if (!selected) {
+          reply.code(422);
+          return {
+            error: "Submission rejected by canonical intake quality policy.",
+            intake: { total: 1, selected: 0, dropped_quality: prepared.droppedCount },
+          };
+        }
+        const submittedAt = new Date().toISOString();
+        const sourceDigest = canonicalJsonSha256({
+          schema_version: "pim.ad-hoc-canonical-source.v1",
+          source_label: (body.source_label ?? AD_HOC_DEFAULT_LABEL).trim(),
+          learning: selected,
+        }).slice("sha256:".length);
+        const intake = submitCanonicalLegacyLearnings({
+          orgId: req.org!.org_id,
+          source: {
+            kind: "ad_hoc",
+            sourceId: `ad-hoc:${sourceDigest}`,
+            sourceLabel: body.source_label ?? AD_HOC_DEFAULT_LABEL,
+            projectId: null,
+            occurredAt: submittedAt,
+            taskSummary: "Submit an ad-hoc organizational learning for canonical validation and review",
+            evidence: {
+              source: "pim_ad_hoc_knowledge_api",
+              route: "/api/knowledge/nodes",
+            },
+          },
+          learnings: [selected],
+          now: submittedAt,
+        });
+        const submission = intake.submissions[0];
+        if (!submission) {
+          reply.code(422);
+          return {
+            error: "Submission rejected by canonical intake selection policy.",
+            intake: intake.counters,
+          };
+        }
+        reply.code(202);
+        return {
+          status: "candidate_submitted",
+          projectId: intake.projectId,
+          usedSystemProject: intake.usedSystemProject,
+          candidateId: submission.candidateId,
+          receiptId: submission.receiptId,
+          candidateStatus: submission.status,
+          blockers: submission.blockers,
+          candidatesSubmitted: intake.candidatesSubmitted,
+          candidatesCreated: intake.candidatesCreated,
+          intake: intake.counters,
+        };
+      }
       const result = await ingestLearnings(
         req.org!.org_id,
         [learning],

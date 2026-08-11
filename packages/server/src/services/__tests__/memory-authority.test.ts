@@ -81,10 +81,12 @@ import {
 import {
   getMemoryCandidate,
   promoteMemoryCandidate,
+  rejectMemoryCandidate,
 } from "../agent-memory.js";
 import {
   listProjectMemoryCandidates,
   promoteProjectMemoryCandidate,
+  rejectProjectMemoryCandidate,
   recordProjectEvidence,
 } from "../project-memory.js";
 
@@ -268,13 +270,37 @@ describe("durable legacy memory authority freeze", () => {
 
     await expect(promoteMemoryCandidate(ORG_ID, "agent-after-freeze"))
       .rejects.toBeInstanceOf(LegacyMemoryAuthorityFrozenError);
+    expect(() => rejectMemoryCandidate(ORG_ID, "agent-after-freeze"))
+      .toThrowError(LegacyMemoryAuthorityFrozenError);
     expect(getMemoryCandidate(ORG_ID, "agent-after-freeze")?.status).toBe("pending");
 
     await expect(promoteProjectMemoryCandidate(ORG_ID, PROJECT_ID, projectAfter))
       .rejects.toBeInstanceOf(LegacyMemoryAuthorityFrozenError);
+    expect(() => rejectProjectMemoryCandidate(ORG_ID, PROJECT_ID, projectAfter))
+      .toThrowError(LegacyMemoryAuthorityFrozenError);
     expect(listProjectMemoryCandidates(ORG_ID, PROJECT_ID, "pending")?.map((item) => item.id))
       .toContain(projectAfter);
     expect(ingestLearnings.mock.calls).toHaveLength(ingestCallsBeforeFreeze);
+
+    const candidateCountBeforeFrozenEvidence = (testDb.prepare(
+      "SELECT COUNT(*) AS count FROM project_memory_candidates",
+    ).get() as { count: number }).count;
+    const evidenceOnly = await recordProjectEvidence({
+      org_id: ORG_ID,
+      project_id: PROJECT_ID,
+      source: "project_update",
+      source_type: "decision",
+      source_id: "project-after-freeze-evidence-only",
+      source_title: "Frozen project evidence remains searchable",
+      summary: "Frozen project evidence does not create legacy candidates",
+      body: "Project evidence intake remains available for search but candidate creation and promotion are retired under frozen authority.",
+      occurred_at: NOW,
+      confidence_score: 0.9,
+      promotable: true,
+    });
+    expect(evidenceOnly.source_id).toBe("project-after-freeze-evidence-only");
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM project_memory_candidates").get())
+      .toMatchObject({ count: candidateCountBeforeFrozenEvidence });
 
     expect(() => testDb.prepare(
       "UPDATE memory_candidates SET summary = 'blocked' WHERE id = 'agent-after-freeze'",

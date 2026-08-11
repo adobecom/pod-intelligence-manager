@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import db, { withImmediateTransaction, withTransaction } from "../db/connection.js";
 import { assertLegacyActivationStructure } from "./memory-structural-validator.js";
-import { assertLegacyMemoryWritable } from "./memory-authority.js";
+import { assertLegacyMemoryWritable, legacyMemoryWritesFrozen } from "./memory-authority.js";
+import {
+  submitCanonicalLegacyLearnings,
+  type CanonicalLegacyCandidateSubmission,
+} from "./canonical-legacy-intake.js";
 import type {
   AgentCheckpoint,
   AgentMemoryRollupPolicy,
@@ -1021,6 +1025,60 @@ function toCandidate(row: CandidateRow): MemoryCandidate {
     promoted_node_id: row.promoted_node_id,
     created_at: row.created_at,
     reviewed_at: row.reviewed_at,
+  };
+}
+
+function canonicalSubmissionAsMemoryCandidate(input: {
+  orgId: string;
+  projectId: string;
+  podId: string | null;
+  sessionId: string;
+  runId: string | null;
+  sourceType: "agent_run" | "agent_session";
+  sourceId: string;
+  occurredAt: string;
+  submission: CanonicalLegacyCandidateSubmission;
+}): MemoryCandidate {
+  const extensions = input.submission.candidate.extensions ?? {};
+  const parseExtension = <T>(key: string, fallback: T): T => {
+    const value = extensions[key];
+    if (typeof value !== "string") return fallback;
+    return parseJson<T>(value, fallback);
+  };
+  const sourceType = extensions.source_learning_type;
+  const type = isValidKnowledgeNodeType(sourceType) ? sourceType : "scope_insight";
+  return {
+    id: input.submission.candidateId,
+    org_id: input.orgId,
+    project_id: input.projectId,
+    pod_id: input.podId,
+    session_id: input.sessionId,
+    run_id: input.runId,
+    source_type: input.sourceType,
+    source_id: input.sourceId,
+    type,
+    summary: input.submission.candidate.content.summary,
+    details: input.submission.candidate.content.details,
+    retrieval_text: typeof extensions.source_retrieval_text === "string"
+      ? extensions.source_retrieval_text
+      : null,
+    entity_refs: parseExtension<MemoryEntityRef[]>("source_entity_refs_json", []),
+    domains: parseExtension<string[]>("source_domains_json", []),
+    confidence_score: input.submission.candidate.extraction.confidence,
+    evidence: {
+      canonical_memory: {
+        receipt_id: input.submission.receiptId,
+        candidate_id: input.submission.candidateId,
+        status: input.submission.status,
+        blockers: input.submission.blockers,
+        receipt_created: input.submission.receiptCreated,
+        candidate_created: input.submission.candidateCreated,
+      },
+    },
+    status: "pending",
+    promoted_node_id: null,
+    created_at: input.occurredAt,
+    reviewed_at: null,
   };
 }
 
@@ -2326,6 +2384,7 @@ export async function promoteMemoryCandidate(orgId: string, candidateId: string)
 }
 
 export function rejectMemoryCandidate(orgId: string, candidateId: string): MemoryCandidate | null {
+  assertLegacyMemoryWritable("agent_memory_candidate_rejection");
   const candidate = getMemoryCandidate(orgId, candidateId);
   if (!candidate) return null;
   if (candidate.status === "promoted" || candidate.status === "auto_promoted") return candidate;
@@ -2359,6 +2418,7 @@ async function validatePendingAgentSessionCandidate(input: {
 export async function validatePendingAgentSessionCandidatesForProjectEvidence(
   evidence: ProjectEvidenceItem,
 ): Promise<MemoryCandidate[]> {
+  if (legacyMemoryWritesFrozen()) return [];
   if (evidence.source !== "github" || evidence.source_type !== "merged_pr") return [];
   const rows = db
     .prepare(
@@ -2397,6 +2457,7 @@ export async function validatePendingAgentSessionCandidatesForProjectEvidence(
 }
 
 async function validatePendingHarnessCandidatesForRuntime(orgId: string, sessionId: string): Promise<MemoryCandidate[]> {
+  if (legacyMemoryWritesFrozen()) return [];
   const rows = db
     .prepare(
       `SELECT * FROM memory_candidates
@@ -2420,10 +2481,13 @@ async function validatePendingHarnessCandidatesForRuntime(orgId: string, session
 export async function rollupAgentRun(orgId: string, runId: string): Promise<MemoryCandidate | null> {
   const run = getRunRow(orgId, runId);
   if (!run) return null;
-  const existing = db
-    .prepare("SELECT * FROM memory_candidates WHERE org_id = ? AND source_type = 'agent_run' AND source_id = ?")
-    .get(orgId, runId) as unknown as CandidateRow | undefined;
-  if (existing) return toCandidate(existing);
+  const frozen = legacyMemoryWritesFrozen();
+  if (!frozen) {
+    const existing = db
+      .prepare("SELECT * FROM memory_candidates WHERE org_id = ? AND source_type = 'agent_run' AND source_id = ?")
+      .get(orgId, runId) as unknown as CandidateRow | undefined;
+    if (existing) return toCandidate(existing);
+  }
 
   const session = getSessionRow(orgId, run.session_id);
   if (!session) return null;
@@ -2448,7 +2512,6 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
     artifacts: artifactRefs,
     source: "agent_run",
   });
-  persistMemoryEntities(orgId, entityRefs, { source_run_id: run.run_id });
   const candidateTypeValue = candidateType(text.summary, text.details);
   const retrievalText = buildRetrievalText({
     kind: "memory_candidate",
@@ -2530,6 +2593,73 @@ export async function rollupAgentRun(orgId: string, runId: string): Promise<Memo
       evaluated_at: now,
     },
   };
+  if (frozen) {
+    const sourceOccurredAt = run.ended_at ?? run.started_at;
+    const intake = submitCanonicalLegacyLearnings({
+      orgId,
+      source: {
+        kind: "agent_run_rollup",
+        sourceId: run.run_id,
+        sourceLabel: `Agent run ${run.agent_id}`,
+        projectId: run.project_id,
+        occurredAt: sourceOccurredAt,
+        taskSummary: `Roll up agent run ${run.run_id} for canonical validation and review`,
+        evidence: {
+          ...evidence,
+          validation_gate: {
+            ...evidence.validation_gate,
+            evaluated_at: sourceOccurredAt,
+          },
+          event_refs: events.map((event) => ({
+            id: event.id,
+            seq: event.seq,
+            type: event.event_type,
+            created_at: event.created_at,
+          })),
+        },
+      },
+      learnings: [{
+        type: candidateTypeValue,
+        summary: text.summary,
+        details: text.details,
+        retrieval_text: retrievalText,
+        entity_refs: entityRefs,
+        scopes: domains,
+        domains,
+        confidence: confidence >= AUTO_PROMOTE_CONFIDENCE_MIN ? "extracted" : "inferred",
+        confidence_score: confidence,
+        audience: project ? "project" : "org",
+        provenance: [{
+          source: "agent_run",
+          source_id: run.run_id,
+          title: text.summary,
+        }],
+        ingestion_provenance: {
+          kind: "agent_run",
+          run_id: run.run_id,
+          model: run.model ?? "deterministic-agent-run-rollup-v1",
+          evidence_node_ids: [],
+          evidence_item_ids: events.map((event) => event.id),
+        },
+      }],
+      now: sourceOccurredAt,
+    });
+    const submission = intake.submissions[0];
+    return submission
+      ? canonicalSubmissionAsMemoryCandidate({
+          orgId,
+          projectId: intake.projectId,
+          podId: run.pod_id,
+          sessionId: run.session_id,
+          runId: run.run_id,
+          sourceType: "agent_run",
+          sourceId: run.run_id,
+          occurredAt: sourceOccurredAt,
+          submission,
+        })
+      : null;
+  }
+  persistMemoryEntities(orgId, entityRefs, { source_run_id: run.run_id });
   const candidate = withImmediateTransaction(() => {
     const existing = db
       .prepare("SELECT * FROM memory_candidates WHERE org_id = ? AND source_type = 'agent_run' AND source_id = ?")
@@ -2827,7 +2957,8 @@ function uniqueArtifacts(artifacts: Artifact[]): Artifact[] {
 }
 
 export async function rollupAgentSession(orgId: string, sessionId: string): Promise<MemoryCandidate[]> {
-  const existing = listAgentSessionRollupCandidates(orgId, sessionId);
+  const frozen = legacyMemoryWritesFrozen();
+  const existing = frozen ? [] : listAgentSessionRollupCandidates(orgId, sessionId);
   const activeExisting = existing.filter((candidate) => candidate.status !== "rejected");
   const activeByContent = new Map<string, MemoryCandidate>();
   const rejectedContent = new Set<string>();
@@ -2892,6 +3023,138 @@ export async function rollupAgentSession(orgId: string, sessionId: string): Prom
     });
   } catch (err) {
     console.error(`[agent-memory] agent-session LLM extraction failed for ${sessionId}:`, err);
+  }
+
+  if (frozen) {
+    const seen = new Set<string>();
+    const seeds = [...deterministic, ...llmSeeds].filter((seed) => {
+      const key = normalizedCandidateContent(seed.type, seed.summary, seed.details);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const project = loadProject(orgId, session.project_id);
+    const pod = loadPod(orgId, session.pod_id);
+    const learnings: EnhancedPodLearning[] = seeds.map((seed) => {
+      const artifactRefs = uniqueArtifacts(seed.artifactRefs);
+      const entityRefs = extractEntityRefs({
+        orgId,
+        project,
+        pod,
+        scope: session.scope ?? seed.domains[0],
+        agentId: session.agent_id,
+        type: seed.type,
+        summary: seed.summary,
+        details: seed.details,
+        artifacts: artifactRefs,
+        source: "agent_session",
+      });
+      const domains = uniqueStrings([
+        ...seed.domains,
+        session.scope,
+        session.project_id,
+        "agent-session",
+      ]);
+      return {
+        type: seed.type,
+        summary: seed.summary,
+        details: seed.details,
+        retrieval_text: buildRetrievalText({
+          kind: "memory_candidate",
+          summary: seed.summary,
+          details: seed.details,
+          type: seed.type,
+          projectName: project?.name,
+          podName: pod?.name,
+          scope: session.scope,
+          agentId: session.agent_id,
+          source: "agent_session",
+          artifacts: artifactRefs,
+          entityRefs,
+          currentStatus: "current",
+          provenance: [
+            `session_id:${session.session_id}`,
+            ...seed.sourceRunIds.map((sourceRunId) => `run_id:${sourceRunId}`),
+            ...seed.evidenceRefs,
+          ],
+        }),
+        entity_refs: entityRefs,
+        scopes: domains,
+        domains,
+        confidence: seed.confidenceScore >= AUTO_PROMOTE_CONFIDENCE_MIN ? "extracted" : "inferred",
+        confidence_score: seed.confidenceScore,
+        audience: project ? "project" : "org",
+        provenance: [
+          {
+            source: "agent_session",
+            source_id: session.session_id,
+            title: seed.summary,
+          },
+          ...seed.sourceRunIds.map((sourceRunId) => ({
+            source: "agent_run",
+            source_id: sourceRunId,
+            title: seed.summary,
+          })),
+        ],
+        ingestion_provenance: {
+          kind: "agent_run",
+          run_id: `agent-session:${session.session_id}`,
+          model: seed.extractionModel,
+          evidence_node_ids: [],
+          evidence_item_ids: seed.evidenceRefs,
+        },
+      };
+    });
+    const sourceOccurredAt = session.ended_at ?? session.created_at;
+    const intake = submitCanonicalLegacyLearnings({
+      orgId,
+      source: {
+        kind: "agent_session_rollup",
+        sourceId: session.session_id,
+        sourceLabel: session.goal?.trim() || `Agent session ${session.agent_id}`,
+        projectId: session.project_id,
+        occurredAt: sourceOccurredAt,
+        taskSummary: `Roll up agent session ${session.session_id} for canonical validation and review`,
+        evidence: {
+          session_id: session.session_id,
+          agent_id: session.agent_id,
+          run_refs: runs.map((run) => ({
+            run_id: run.run_id,
+            status: run.status,
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            context_update_id: run.context_update_id,
+          })),
+          event_refs: events.map((event) => ({
+            id: event.id,
+            run_id: event.run_id,
+            seq: event.seq,
+            type: event.event_type,
+            created_at: event.created_at,
+          })),
+          checkpoint_refs: checkpoints.map((checkpoint) => ({
+            checkpoint_id: checkpoint.checkpoint_id,
+            run_id: checkpoint.run_id,
+            seq: checkpoint.seq,
+            created_at: checkpoint.created_at,
+          })),
+          context_update_ids: contextUpdateIds,
+        },
+      },
+      learnings,
+      now: sourceOccurredAt,
+    });
+    return intake.submissions.map((submission) => canonicalSubmissionAsMemoryCandidate({
+      orgId,
+      projectId: intake.projectId,
+      podId: session.pod_id,
+      sessionId: session.session_id,
+      runId: null,
+      sourceType: "agent_session",
+      sourceId: submission.candidate.client_candidate_id,
+      occurredAt: sourceOccurredAt,
+      submission,
+    }));
   }
 
   const runsById = new Map(runs.map((run) => [run.run_id, run]));

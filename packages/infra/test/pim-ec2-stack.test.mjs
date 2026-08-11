@@ -139,3 +139,22 @@ test("scoped host ECR push is denied by default and explicitly temporary", () =>
   assert.ok(ecrPushStatements(buildTemplate).length > 0);
   buildTemplate.hasOutput("ServerImagePushAllowed", { Value: "true" });
 });
+
+test("private memory MCP subpaths use the same API behavior as /mcp", () => {
+  const app = new cdk.App();
+  const stack = new PimEc2Stack(app, "PimEc2Stack-mcp-paths", {
+    owner: "test",
+    env: { account: "111122223333", region: "us-west-2" },
+  });
+  const template = Template.fromStack(stack);
+  const distributions = template.findResources("AWS::CloudFront::Distribution");
+  const behaviors = Object.values(distributions)[0].Properties.DistributionConfig.CacheBehaviors;
+  const exact = behaviors.find((behavior) => behavior.PathPattern === "/mcp");
+  const subpaths = behaviors.find((behavior) => behavior.PathPattern === "/mcp/*");
+
+  assert.ok(exact);
+  assert.ok(subpaths);
+  const { PathPattern: _exactPath, ...exactBehavior } = exact;
+  const { PathPattern: _subpathPattern, ...subpathBehavior } = subpaths;
+  assert.deepEqual(subpathBehavior, exactBehavior);
+});

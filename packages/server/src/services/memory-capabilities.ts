@@ -29,8 +29,6 @@ export function getMemoryCapabilities(): MemoryCapabilitiesV1 {
         "pim.run-receipt.v1",
         "pim.memory-feedback.v1",
         "pim.memory-candidate-decision.v1",
-        "pim.memory-prompt-policy-update.v1",
-        "pim.memory-release-gate-evaluation.v1",
         "pim.memory-attestation.v1",
       ],
       responses: [
@@ -43,8 +41,6 @@ export function getMemoryCapabilities(): MemoryCapabilitiesV1 {
         "pim.memory-candidate-status.v1",
         "pim.memory-feedback-result.v1",
         "pim.memory-candidate-decision-result.v1",
-        "pim.memory-prompt-policy.v1",
-        "pim.memory-release-gate-decision.v1",
         "pim.memory-attestation-result.v1",
         "pim.error.v1",
       ],

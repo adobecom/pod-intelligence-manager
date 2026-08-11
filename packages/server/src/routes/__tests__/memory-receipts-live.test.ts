@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   canonicalJsonSha256,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateV1,
   type RunReceiptV1,
 } from "@pim/shared";
@@ -33,8 +33,8 @@ describe("live SDK Slice 2 receipt contract", () => {
     const producerRunId = `fiesta:test:live-receipt:${suffix}`;
     const clientCandidateId = `fiesta-candidate-${suffix}`;
     const evidenceRefId = `diff-${suffix}`;
-    const manifestContents: Omit<FiestaCodeEvidenceV2, "digest"> = {
-      schema_version: "fiesta.code-evidence.v2",
+    const manifestContents: Omit<CodeEvidenceManifestV2, "digest"> = {
+      schema_version: "pim.memory-code-evidence.v2",
       manifest_id: `manifest-${suffix}`,
       refs: [{
         id: evidenceRefId,
@@ -46,7 +46,7 @@ describe("live SDK Slice 2 receipt contract", () => {
         source_authority: "observed",
       }],
     };
-    const evidenceManifest: FiestaCodeEvidenceV2 = {
+    const evidenceManifest: CodeEvidenceManifestV2 = {
       ...manifestContents,
       digest: canonicalJsonSha256(manifestContents),
     };

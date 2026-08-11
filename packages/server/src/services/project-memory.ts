@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import db from "../db/connection.js";
 import { assertLegacyActivationStructure } from "./memory-structural-validator.js";
-import { assertLegacyMemoryWritable } from "./memory-authority.js";
+import { assertLegacyMemoryWritable, legacyMemoryWritesFrozen } from "./memory-authority.js";
 import type {
   EnhancedPodLearning,
   KnowledgeNodeType,
@@ -469,6 +469,7 @@ export function rejectProjectMemoryCandidate(
   projectId: string,
   candidateId: string,
 ): ProjectMemoryCandidate | null {
+  assertLegacyMemoryWritable("project_memory_candidate_rejection");
   const row = getCandidateRow(orgId, projectId, candidateId);
   if (!row) return null;
   const now = new Date().toISOString();
@@ -602,6 +603,7 @@ export async function recordProjectEvidence(input: ProjectEvidenceInput): Promis
   const row = db.prepare("SELECT * FROM project_evidence_items WHERE id = ?").get(id) as unknown as EvidenceRow;
   const evidence = rowToEvidence(row);
   indexEvidenceItem(evidence);
+  if (legacyMemoryWritesFrozen()) return evidence;
   const candidate = createOrLoadCandidate(evidence);
   if (shouldAutoPromote(evidence) && !hasCurrentContradiction(evidence) && candidate.status !== "promoted") {
     await promoteProjectMemoryCandidate(input.org_id, input.project_id, candidate.id);

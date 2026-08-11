@@ -4,7 +4,7 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryAttestationV1,
   type MemoryCandidateV1,
   type MemoryFeedbackV1,
@@ -122,8 +122,8 @@ describe("live SDK closed-loop memory integration", () => {
     const evidenceRefId = `closed-loop-diff-${suffix}`;
     const diffDigest = canonicalJsonSha256({ diff: suffix });
     const occurredAt = new Date().toISOString();
-    const manifestBody: Omit<FiestaCodeEvidenceV2, "digest"> = {
-      schema_version: "fiesta.code-evidence.v2",
+    const manifestBody: Omit<CodeEvidenceManifestV2, "digest"> = {
+      schema_version: "pim.memory-code-evidence.v2",
       manifest_id: `closed-loop-manifest-${suffix}`,
       refs: [{
         id: evidenceRefId,
@@ -135,7 +135,7 @@ describe("live SDK closed-loop memory integration", () => {
         source_authority: "observed",
       }],
     };
-    const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+    const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
       ...manifestBody,
       digest: canonicalJsonSha256(manifestBody),
     });
@@ -210,7 +210,6 @@ describe("live SDK closed-loop memory integration", () => {
             reason_code: "closed_loop_seed_checkout_validated",
           },
           terminal_outcome: {
-            exposure: { status: "exposed", consumer_phase: "planner" },
             use_disposition: "applied",
             use_attribution_confidence: 1,
             utility: "helpful",

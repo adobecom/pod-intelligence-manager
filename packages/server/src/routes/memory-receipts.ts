@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   MemoryContractValidationError,
   parseMemoryContract,
@@ -8,6 +8,7 @@ import {
   requireMemoryHarnessBinding,
   requireMemoryProjectBinding,
   requireMemoryRepositoryBinding,
+  requireMemoryServicePrincipal,
   requireMemoryServiceScope,
 } from "../middleware/service-authz.js";
 import { sendMemoryError } from "../middleware/memory-errors.js";
@@ -17,8 +18,10 @@ import { runMemoryOutboxPass } from "../services/memory-outbox.js";
 import { reconcileUnmatchedGithubAttestations } from "../services/memory-attestations.js";
 import {
   acceptMemoryRunReceipt,
+  lookupStoredMemoryRunReceiptReplay,
   MemoryReceiptError,
   refreshMemoryReceiptResult,
+  type StoredMemoryRunReceiptReplay,
 } from "../services/memory-receipts.js";
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -32,6 +35,11 @@ function rawProjectId(body: unknown): string | null {
   return typeof tenant?.project_id === "string" ? tenant.project_id : null;
 }
 
+function rawSchemaVersion(body: unknown): string | null {
+  const schemaVersion = objectValue(body)?.schema_version;
+  return typeof schemaVersion === "string" ? schemaVersion : null;
+}
+
 function rawRepositoryId(body: unknown): string | null {
   const repository = objectValue(objectValue(body)?.repository);
   return typeof repository?.repository_id === "string" ? repository.repository_id : null;
@@ -40,6 +48,15 @@ function rawRepositoryId(body: unknown): string | null {
 function rawCandidates(body: unknown): unknown[] {
   const candidates = objectValue(body)?.candidates;
   return Array.isArray(candidates) ? candidates : [];
+}
+
+function rawProducerHarnessId(body: unknown): string | null {
+  const producer = objectValue(objectValue(body)?.producer);
+  return typeof producer?.harness_id === "string" ? producer.harness_id : null;
+}
+
+function hasRawHarnessCandidates(body: unknown): boolean {
+  return rawCandidates(body).some((candidate) => objectValue(candidate)?.plane === "harness");
 }
 
 function isRawHarnessOnlyReceipt(body: unknown): boolean {
@@ -62,6 +79,94 @@ function rawFeedbackCount(body: unknown): number {
 function rawEvidenceRefCount(body: unknown): number {
   const manifest = objectValue(objectValue(body)?.evidence_manifest);
   return Array.isArray(manifest?.refs) ? manifest.refs.length : 0;
+}
+
+function authorizeReceiptSelectors(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  projectId: string,
+  body: unknown,
+  stored?: Pick<
+    StoredMemoryRunReceiptReplay,
+    "producerHarnessId" | "repositoryRowId" | "repositoryId"
+  >,
+): boolean {
+  const harnessCandidates = hasRawHarnessCandidates(body);
+  const harnessOnly = isRawHarnessOnlyReceipt(body);
+  const repositoryIds = new Set<string>();
+  const bodyRepositoryId = rawRepositoryId(body);
+  if (stored && ((stored.repositoryRowId === null) !== (stored.repositoryId === null))) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Stored receipt repository selectors are incomplete",
+    );
+    return false;
+  }
+  if (stored && bodyRepositoryId !== stored.repositoryId) {
+    sendMemoryError(
+      reply,
+      403,
+      "resource_binding_mismatch",
+      "Stored receipt repository selectors do not match",
+    );
+    return false;
+  }
+  if (bodyRepositoryId) repositoryIds.add(bodyRepositoryId);
+  if (stored?.repositoryId) repositoryIds.add(stored.repositoryId);
+
+  if (!harnessOnly || repositoryIds.size > 0) {
+    if (!requireMemoryServiceScope(req, reply, "memory:receipt:write")) return false;
+  }
+  if (harnessCandidates) {
+    if (!requireMemoryServiceScope(req, reply, "memory:harness:receipt:write")) return false;
+  }
+
+  for (const repositoryId of repositoryIds) {
+    const repository = requireMemoryRepositoryBinding(req, reply, projectId, repositoryId);
+    if (!repository) return false;
+    if (stored?.repositoryRowId !== null
+        && stored?.repositoryRowId !== undefined
+        && stored.repositoryRowId !== repository.repository_row_id) {
+      sendMemoryError(
+        reply,
+        403,
+        "resource_binding_mismatch",
+        "Stored receipt repository does not match the authenticated repository binding",
+      );
+      return false;
+    }
+  }
+
+  if (harnessCandidates) {
+    const harnessIds = new Set<string>();
+    const bodyHarnessId = rawProducerHarnessId(body);
+    if (stored && bodyHarnessId !== stored.producerHarnessId) {
+      sendMemoryError(
+        reply,
+        403,
+        "resource_binding_mismatch",
+        "Stored receipt harness selectors do not match",
+      );
+      return false;
+    }
+    if (bodyHarnessId) harnessIds.add(bodyHarnessId);
+    if (stored?.producerHarnessId) harnessIds.add(stored.producerHarnessId);
+    if (harnessIds.size === 0) {
+      sendMemoryError(
+        reply,
+        403,
+        "resource_binding_mismatch",
+        "Receipt harness selector is unavailable",
+      );
+      return false;
+    }
+    for (const harnessId of harnessIds) {
+      if (!requireMemoryHarnessBinding(req, reply, projectId, harnessId)) return false;
+    }
+  }
+  return true;
 }
 
 function parseReceipt(body: unknown, reply: FastifyReply): RunReceiptV1 | null {
@@ -99,13 +204,8 @@ export default async function memoryReceiptRoutes(app: FastifyInstance) {
     "/api/v1/memory/run-receipts/:producer_run_id",
     { bodyLimit: MEMORY_LIMITS.max_receipt_bytes },
     async (req, reply) => {
-      const harnessOnly = isRawHarnessOnlyReceipt(req.body);
-      const auth = requireMemoryServiceScope(
-        req,
-        reply,
-        harnessOnly ? "memory:harness:receipt:write" : "memory:receipt:write",
-      );
-      if (!auth) return;
+      const principal = requireMemoryServicePrincipal(req, reply);
+      if (!principal) return;
       const producerRunId = req.params.producer_run_id;
       if (!producerRunId || producerRunId.length > 256) {
         return sendMemoryError(
@@ -119,6 +219,54 @@ export default async function memoryReceiptRoutes(app: FastifyInstance) {
 
       const requestedProjectId = rawProjectId(req.body);
       if (requestedProjectId && !requireMemoryProjectBinding(req, reply, requestedProjectId)) return;
+      const schemaVersion = rawSchemaVersion(req.body);
+      const storedReplay = requestedProjectId && schemaVersion
+        ? lookupStoredMemoryRunReceiptReplay({
+            orgId: principal.orgId,
+            projectId: requestedProjectId,
+            schemaVersion,
+            producerRunId,
+            rawRequest: req.body,
+          })
+        : null;
+      if (storedReplay && requestedProjectId) {
+        let storedRequest: unknown;
+        try {
+          storedRequest = JSON.parse(storedReplay.receiptJson) as unknown;
+        } catch {
+          return sendMemoryError(
+            reply,
+            409,
+            "idempotency_conflict",
+            "Stored receipt authorization selectors are unavailable",
+          );
+        }
+        if (!authorizeReceiptSelectors(req, reply, requestedProjectId, req.body)) return;
+        if (!authorizeReceiptSelectors(
+          req,
+          reply,
+          requestedProjectId,
+          storedRequest,
+          storedReplay,
+        )) return;
+        if (!storedReplay.requestMatches) {
+          return sendMemoryError(
+            reply,
+            409,
+            "idempotency_conflict",
+            "Producer run is already finalized with different receipt content",
+          );
+        }
+        return reply.type("application/json").send(storedReplay.responseJson);
+      }
+
+      const harnessOnly = isRawHarnessOnlyReceipt(req.body);
+      const auth = requireMemoryServiceScope(
+        req,
+        reply,
+        harnessOnly ? "memory:harness:receipt:write" : "memory:receipt:write",
+      );
+      if (!auth) return;
       const requestedRepositoryId = rawRepositoryId(req.body);
       let repository = null;
       if (requestedProjectId && requestedRepositoryId) {

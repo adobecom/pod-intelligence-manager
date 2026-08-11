@@ -12,6 +12,7 @@ export interface WSEvent {
     | "tunnel_status_changed"
     | "lint_completed"
     | "knowledge_updated"
+    | "memory_candidates_submitted"
     | "living_doc_viewed"
     | "project_context_update_added"
     | "context_update_enriched"

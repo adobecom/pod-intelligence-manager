@@ -12,6 +12,15 @@ import {
   resolveMemoryHarnessPrincipalBinding,
   type MemoryHarnessPrincipalBinding,
 } from "../services/memory-harness-bindings.js";
+import {
+  type ImplementedMemoryV2Plane,
+  type MemoryV2Operation,
+} from "../services/memory-v2-constants.js";
+import {
+  authorizeMemoryV2Request,
+  type MemoryV2AuthorizationDecision,
+  type MemoryV2RequestAuthorizationSnapshot,
+} from "../services/memory-v2-request-authorization.js";
 
 function serviceAuth(req: FastifyRequest) {
   return req.auth?.kind === "service_token" ? req.auth : null;
@@ -232,4 +241,23 @@ export function requireMemoryHarnessBinding(
     return null;
   }
   return binding;
+}
+
+/**
+ * Compatibility name for the single pure v2 authorization primitive. The
+ * request snapshot was already proven and frozen at transport entry; this
+ * helper performs no storage lookup and only narrows it to one operation and
+ * exact resource.
+ */
+export function authorizeMemoryV2Resource(input: {
+  principal: MemoryV2RequestAuthorizationSnapshot | null | undefined;
+  operation: MemoryV2Operation;
+  plane: ImplementedMemoryV2Plane;
+  projectId: string;
+  resourceRowId: string;
+}): MemoryV2AuthorizationDecision {
+  return authorizeMemoryV2Request({
+    ...input,
+    orgId: input.principal?.orgId ?? "",
+  });
 }

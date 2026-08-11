@@ -8,12 +8,8 @@ import {
   type MemoryFeedbackV1,
   type MemoryHarnessSearchResultV1,
   type MemoryHarnessSearchV1,
-  type MemoryPromptPolicyUpdateV1,
-  type MemoryPromptPolicyV1,
   type MemoryRecordV1,
   type MemoryRecordHistoryV1,
-  type MemoryReleaseGateDecisionV1,
-  type MemoryReleaseGateEvaluationV1,
   type MemorySearchResultV1,
   type MemorySearchV1,
   type PimErrorV1,
@@ -38,15 +34,16 @@ export class PimMemoryApiError extends Error {
   }
 }
 
+function nonJsonErrorResponse(): PimErrorV1 {
+  return {
+    schema_version: "pim.error.v1",
+    code: "temporarily_unavailable",
+    message: "Memory API returned a non-JSON error response",
+  };
+}
+
 export class PimMemoryClient {
   constructor(private readonly config: PimMemoryClientConfig) {}
-
-  private projectPath(projectId: string, suffix: string): string {
-    if (!projectId || projectId.length > 128) {
-      throw new TypeError("projectId must contain 1 to 128 characters");
-    }
-    return `/api/v1/memory/projects/${encodeURIComponent(projectId)}${suffix}`;
-  }
 
   private url(path: string): string {
     return `${this.config.baseUrl.replace(/\/+$/, "")}${path}`;
@@ -57,7 +54,13 @@ export class PimMemoryClient {
     headers.set("Authorization", `Bearer ${this.config.authToken}`);
     if (this.config.orgSlug) headers.set("X-Pim-Org", this.config.orgSlug);
     const response = await fetch(this.url(path), { ...init, headers });
-    const body = await response.json() as unknown;
+    let body: unknown;
+    try {
+      body = await response.json() as unknown;
+    } catch (error) {
+      if (response.ok) throw error;
+      throw new PimMemoryApiError(response.status, nonJsonErrorResponse());
+    }
     if (!response.ok) {
       throw new PimMemoryApiError(response.status, parseMemoryContract("PimErrorV1", body));
     }
@@ -88,43 +91,6 @@ export class PimMemoryClient {
     return parseMemoryContract(
       "MemoryHarnessSearchResultV1",
       await this.request("/api/v1/memory/harness/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-    );
-  }
-
-  async getPromptPolicy(projectId: string): Promise<MemoryPromptPolicyV1> {
-    return parseMemoryContract(
-      "MemoryPromptPolicyV1",
-      await this.request(this.projectPath(projectId, "/prompt-policy")),
-    );
-  }
-
-  async updatePromptPolicy(
-    projectId: string,
-    update: MemoryPromptPolicyUpdateV1,
-  ): Promise<MemoryPromptPolicyV1> {
-    const body = parseMemoryContract("MemoryPromptPolicyUpdateV1", update);
-    return parseMemoryContract(
-      "MemoryPromptPolicyV1",
-      await this.request(this.projectPath(projectId, "/prompt-policy"), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-    );
-  }
-
-  async evaluateReleaseGates(
-    projectId: string,
-    evaluation: MemoryReleaseGateEvaluationV1,
-  ): Promise<MemoryReleaseGateDecisionV1> {
-    const body = parseMemoryContract("MemoryReleaseGateEvaluationV1", evaluation);
-    return parseMemoryContract(
-      "MemoryReleaseGateDecisionV1",
-      await this.request(this.projectPath(projectId, "/release-gates/evaluate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

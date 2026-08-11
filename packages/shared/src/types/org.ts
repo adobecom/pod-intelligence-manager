@@ -25,13 +25,27 @@ export interface ArchivedPod {
   completed_date: string;
   duration_days: number;
   final_pressure: number;
-  /** Present on archive API response when knowledge extraction ran. */
+  /** Number of graph nodes added under legacy authority or candidates submitted after freeze. */
   learnings_extracted?: number;
+  /** Present when `learnings_extracted` counts pending canonical candidates. */
+  canonical_memory_intake?: CanonicalMemoryIntakeSummary;
   /** False while archival knowledge extraction still needs to complete or be retried. */
   extraction_completed?: boolean;
 }
 
 export type PodArchiveJobStatus = "running" | "completed" | "failed";
+
+export interface CanonicalMemoryIntakeSummary {
+  project_id: string;
+  used_system_project: boolean;
+  candidates_submitted: number;
+  candidates_created: number;
+  total: number;
+  selected: number;
+  dropped_low_confidence: number;
+  dropped_unmappable: number;
+  dropped_over_cap: number;
+}
 
 export interface PodArchiveJob {
   job_id: string;
@@ -41,7 +55,10 @@ export interface PodArchiveJob {
   completed_at?: string;
   status_url: string;
   archived?: ArchivedPod;
+  /** Present when frozen legacy output was submitted to canonical review intake. */
+  canonical_memory_intake?: CanonicalMemoryIntakeSummary;
   error?: string;
+  error_code?: string;
 }
 
 /** Initiative removed from the active list; context updates are deleted at archive time. */

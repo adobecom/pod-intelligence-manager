@@ -4,7 +4,7 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryAttestationV1,
   type MemoryCandidateStatusV1,
   type MemoryCandidateV1,
@@ -25,7 +25,6 @@ import {
 } from "../../services/memory-attestations.js";
 import type { AuthoritativeGithubState } from "../../services/memory-activation.js";
 import { getMemoryOperationalSnapshot } from "../../services/memory-metrics.js";
-import { updateMemoryPromptPolicy } from "../../services/memory-prompt-policy.js";
 import type { MemoryRepositoryBinding } from "../../services/memory-repository-registry.js";
 import type { ServiceTokenAuthMetadata } from "../../services/service-tokens.js";
 import { createMemoryTestContext, type MemoryTestContext } from "./memory-test-app.js";
@@ -41,7 +40,7 @@ interface CandidateRun {
   producerRunId: string;
   candidate: MemoryCandidateV1;
   receipt: RunReceiptV1;
-  manifest: FiestaCodeEvidenceV2;
+  manifest: CodeEvidenceManifestV2;
   diffDigest: string;
 }
 
@@ -63,8 +62,8 @@ function buildCandidateRun(input: { projectId?: string } = {}): CandidateRun {
   const producerRunId = `fiesta:test:merge:${suffix}`;
   const evidenceRefId = `diff-${suffix}`;
   const diffDigest = canonicalJsonSha256({ diff: suffix });
-  const manifestContents: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const manifestContents: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
@@ -76,7 +75,7 @@ function buildCandidateRun(input: { projectId?: string } = {}): CandidateRun {
       source_authority: "observed",
     }],
   };
-  const manifest: FiestaCodeEvidenceV2 = {
+  const manifest: CodeEvidenceManifestV2 = {
     ...manifestContents,
     digest: canonicalJsonSha256(manifestContents),
   };
@@ -994,7 +993,6 @@ describe("Slice 3 GitHub attestation trust path", () => {
     expect(detail.json()).toMatchObject({
       record_id: recordId,
       record_version: 1,
-      prompt_eligible: false,
       lifecycle: { status: "active" },
       content: run.candidate.content,
     });
@@ -1004,74 +1002,7 @@ describe("Slice 3 GitHub attestation trust path", () => {
     expect(db.prepare(
       "SELECT record_key FROM memory_record_versions_fts WHERE record_key = ?",
     ).get(`${recordId}:1`)).toMatchObject({ record_key: `${recordId}:1` });
-    expect(db.prepare(
-      "SELECT shadow_recall_eligible, prompt_eligible FROM memory_records WHERE record_id = ?",
-    ).get(recordId)).toMatchObject({ shadow_recall_eligible: 1, prompt_eligible: 0 });
     expect((await searchFor(run)).items.map((item) => item.record_id)).toContain(recordId);
-  });
-
-  it("marks only new verified activations eligible after an explicit passing expansion gate", async () => {
-    const now = new Date().toISOString();
-    db.prepare(
-      `INSERT INTO memory_release_gate_decisions
-         (decision_id, org_id, project_id, stage, decision, status,
-          metric_snapshot_json, dataset_digest, reasons_json, created_at)
-       VALUES (?, ?, ?, 'expansion', 'continue', 'pass', '{}', ?, '[]', ?)`,
-    ).run(
-      `gate-${randomUUID()}`,
-      context.orgA.id,
-      context.projectA,
-      canonicalJsonSha256({ fixture: "automatic-activation-gate" }),
-      now,
-    );
-    updateMemoryPromptPolicy({
-      orgId: context.orgA.id,
-      projectId: context.projectA,
-      principalId: "attestation-test-policy-owner",
-      update: {
-        schema_version: "pim.memory-prompt-policy-update.v1",
-        expected_revision: 0,
-        enabled: false,
-        kill_switch: true,
-        automatic_activation_enabled: true,
-        canary_percentage: 0,
-        allowed_repository_ids: [],
-        allowed_kinds: [],
-        max_prompt_items: 3,
-        max_prompt_tokens: 800,
-      },
-      now,
-    });
-
-    try {
-      const run = buildCandidateRun();
-      const candidateId = await putCandidateRun(run);
-      const attestation = attestationFor(run);
-      authoritativeStates.set(attestation.provider_event_id, authoritativeState(run, attestation));
-      expect((await postAttestation({ attestation })).statusCode).toBe(200);
-      const recordId = (await candidateStatus(candidateId)).active_record!.record_id;
-      expect(db.prepare(
-        "SELECT prompt_eligible FROM memory_records WHERE record_id = ?",
-      ).get(recordId)).toEqual({ prompt_eligible: 1 });
-    } finally {
-      updateMemoryPromptPolicy({
-        orgId: context.orgA.id,
-        projectId: context.projectA,
-        principalId: "attestation-test-policy-owner",
-        update: {
-          schema_version: "pim.memory-prompt-policy-update.v1",
-          expected_revision: 1,
-          enabled: false,
-          kill_switch: true,
-          automatic_activation_enabled: false,
-          canary_percentage: 0,
-          allowed_repository_ids: [],
-          allowed_kinds: [],
-          max_prompt_items: 3,
-          max_prompt_tokens: 800,
-        },
-      });
-    }
   });
 
   it("rechecks the activation allowlist before processing a delayed inbox event", async () => {

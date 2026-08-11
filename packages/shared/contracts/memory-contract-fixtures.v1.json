@@ -4,8 +4,8 @@
     "contract_revision": "memory-contract-2026-08-03",
     "server_build": "test-build",
     "supported_schemas": {
-      "requests": ["pim.memory-search.v1", "pim.memory-harness-search.v1", "pim.run-receipt.v1", "pim.memory-feedback.v1", "pim.memory-candidate-decision.v1", "pim.memory-prompt-policy-update.v1", "pim.memory-release-gate-evaluation.v1", "pim.memory-attestation.v1"],
-      "responses": ["pim.memory-capabilities.v1", "pim.memory-search-result.v1", "pim.memory-harness-search-result.v1", "pim.run-receipt-result.v1", "pim.memory-candidate-status.v1", "pim.memory-record.v1", "pim.memory-record-history.v1", "pim.memory-feedback-result.v1", "pim.memory-candidate-decision-result.v1", "pim.memory-prompt-policy.v1", "pim.memory-release-gate-decision.v1", "pim.memory-attestation-result.v1", "pim.error.v1"]
+      "requests": ["pim.memory-search.v1", "pim.memory-harness-search.v1", "pim.run-receipt.v1", "pim.memory-feedback.v1", "pim.memory-candidate-decision.v1", "pim.memory-attestation.v1"],
+      "responses": ["pim.memory-capabilities.v1", "pim.memory-search-result.v1", "pim.memory-harness-search-result.v1", "pim.run-receipt-result.v1", "pim.memory-candidate-status.v1", "pim.memory-record.v1", "pim.memory-record-history.v1", "pim.memory-feedback-result.v1", "pim.memory-candidate-decision-result.v1", "pim.memory-attestation-result.v1", "pim.error.v1"]
     },
     "planes": ["codebase", "harness"],
     "kinds": ["decision", "constraint", "anti_pattern", "test_strategy"],
@@ -23,110 +23,15 @@
     "temporal_modes": ["current"],
     "deprecations": []
   },
-  "MemoryPromptPolicyUpdateV1": {
-    "schema_version": "pim.memory-prompt-policy-update.v1",
-    "expected_revision": 0,
-    "enabled": false,
-    "kill_switch": true,
-    "automatic_activation_enabled": false,
-    "canary_percentage": 0,
-    "allowed_repository_ids": [],
-    "allowed_kinds": [],
-    "max_prompt_items": 3,
-    "max_prompt_tokens": 800
-  },
-  "MemoryPromptPolicyV1": {
-    "schema_version": "pim.memory-prompt-policy.v1",
-    "project_id": "project-checkout",
-    "policy_revision": 0,
-    "enabled": false,
-    "kill_switch": true,
-    "automatic_activation_enabled": false,
-    "canary_percentage": 0,
-    "allowed_repository_ids": [],
-    "allowed_kinds": [],
-    "max_prompt_items": 3,
-    "max_prompt_tokens": 800,
-    "global_enabled": false,
-    "effective_enabled": false,
-    "updated_at": null
-  },
-  "MemoryReleaseGateSnapshotV1": {
-    "representative_sample_count": 100,
-    "reviewed_candidate_count": 100,
-    "known_boundary_leakage_count": 0,
-    "provenance_completeness_rate": 1,
-    "typed_round_trip_conformance_rate": 1,
-    "unresolved_active_pointer_count": 0,
-    "extraction_precision_rate": 0.95,
-    "resolvable_evidence_rate": 0.95,
-    "harmful_or_stale_prompt_exposure_rate": 0.009,
-    "critical_policy_violation_count": 0,
-    "evidence_bypass_incident_count": 0,
-    "critical_harm_incident_count": 0,
-    "pim_outage_blocked_execution_count": 0,
-    "pim_outage_lost_queued_receipt_count": 0,
-    "memory_on_off_pair_count": 50,
-    "task_pass_lift_percentage_points": 5,
-    "paired_95ci_lower_percentage_points": 0,
-    "pass_rate_delta_percentage_points": null,
-    "noninferiority_margin_percentage_points": null,
-    "efficiency_reduction_rate": null,
-    "same_record_helpful_independent_runs": 2,
-    "latency_or_cost_increase_rate": 0.1,
-    "disciplined_no_lift_cycles": 1
-  },
-  "MemoryReleaseGateEvaluationV1": {
-    "schema_version": "pim.memory-release-gate-evaluation.v1",
-    "stage": "expansion",
-    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "metric_snapshot": {
-      "representative_sample_count": 100,
-      "reviewed_candidate_count": 100,
-      "known_boundary_leakage_count": 0,
-      "provenance_completeness_rate": 1,
-      "typed_round_trip_conformance_rate": 1,
-      "unresolved_active_pointer_count": 0,
-      "extraction_precision_rate": 0.95,
-      "resolvable_evidence_rate": 0.95,
-      "harmful_or_stale_prompt_exposure_rate": 0.009,
-      "critical_policy_violation_count": 0,
-      "evidence_bypass_incident_count": 0,
-      "critical_harm_incident_count": 0,
-      "pim_outage_blocked_execution_count": 0,
-      "pim_outage_lost_queued_receipt_count": 0,
-      "memory_on_off_pair_count": 50,
-      "task_pass_lift_percentage_points": 5,
-      "paired_95ci_lower_percentage_points": 0,
-      "pass_rate_delta_percentage_points": null,
-      "noninferiority_margin_percentage_points": null,
-      "efficiency_reduction_rate": null,
-      "same_record_helpful_independent_runs": 2,
-      "latency_or_cost_increase_rate": 0.1,
-      "disciplined_no_lift_cycles": 1
-    }
-  },
-  "MemoryReleaseGateDecisionV1": {
-    "schema_version": "pim.memory-release-gate-decision.v1",
-    "project_id": "project-checkout",
-    "decision_id": "gate_contract_1",
-    "stage": "expansion",
-    "decision": "continue",
-    "status": "pass",
-    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "metric_snapshot_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "reasons": [],
-    "created_at": "2026-08-03T20:00:00Z"
-  },
   "MemorySearchV1": {
     "schema_version": "pim.memory-search.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "consumer": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version": "7b6e858",
       "workflow_version": "code-change.v3",
-      "adapter_version": "fiesta-pim-adapter.v1",
-      "consumer_run_id": "fiesta:test:thread-1:run-1"
+      "adapter_version": "example-harness-a-pim-adapter.v1",
+      "consumer_run_id": "example-harness-a:test:thread-1:run-1"
     },
     "tenant": { "project_id": "project-checkout" },
     "plane": "codebase",
@@ -144,15 +49,13 @@
   },
   "MemorySearchResultV1": {
     "schema_version": "pim.memory-search-result.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "retrieval_pack_id": "pack_contract_1",
     "policy_version": "retrieval-codebase-v1",
     "tenant": { "project_id": "project-checkout" },
     "plane": "codebase",
     "repository_id": "github.com/acme/checkout",
     "token_count": 96,
-    "prompt_eligible": false,
-    "evaluation_arm": "shadow",
     "items": [
       {
         "record_id": "mem_contract_1",
@@ -170,7 +73,6 @@
         },
         "evidence_summary": { "strength": "verified_merge_and_test", "ref_count": 2 },
         "freshness": { "last_confirmed_at": "2026-08-01T17:00:00Z", "expires_at": null },
-        "prompt_eligible": false,
         "detail_href": "/api/v1/memory/records/mem_contract_1?version=1",
         "match_reasons": ["exact_path", "exact_symbol"]
       }
@@ -180,21 +82,21 @@
   },
   "MemoryHarnessSearchV1": {
     "schema_version": "pim.memory-harness-search.v1",
-    "request_id": "fiesta-harness-search-contract-1",
+    "request_id": "example-harness-a-harness-search-contract-1",
     "consumer": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version": "7b6e858",
       "workflow_version": "code-change.v3",
-      "adapter_version": "fiesta-pim-adapter.v1",
-      "consumer_run_id": "fiesta:test:harness-shadow:run-1"
+      "adapter_version": "example-harness-a-pim-adapter.v1",
+      "consumer_run_id": "example-harness-a:test:harness:run-1"
     },
     "tenant": { "project_id": "project-checkout" },
     "plane": "harness",
     "applicability": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version_range": "7b6e858",
       "workflow_version_range": "code-change.v3",
-      "adapter_version_range": "fiesta-pim-adapter.v1",
+      "adapter_version_range": "example-harness-a-pim-adapter.v1",
       "configuration_ids": ["routing-default-v2"]
     },
     "task": { "query": "Recover safely after a tool timeout", "task_class": "recovery" },
@@ -203,16 +105,12 @@
   },
   "MemoryHarnessSearchResultV1": {
     "schema_version": "pim.memory-harness-search-result.v1",
-    "request_id": "fiesta-harness-search-contract-1",
+    "request_id": "example-harness-a-harness-search-contract-1",
     "retrieval_pack_id": "pack_harness_contract_1",
-    "policy_version": "retrieval-harness-shadow-v1",
+    "policy_version": "retrieval-harness-v1",
     "tenant": { "project_id": "project-checkout" },
     "plane": "harness",
-    "harness_id": "fiesta",
-    "shadow_only": true,
-    "routing_influence": false,
-    "prompt_eligible": false,
-    "evaluation_arm": "shadow",
+    "harness_id": "example-harness-a",
     "token_count": 82,
     "items": [
       {
@@ -223,17 +121,17 @@
         "summary": "Retry a timed-out tool only after checking its terminal state.",
         "lifecycle": { "status": "active" },
         "applicability": {
-          "harness_id": "fiesta",
+          "harness_id": "example-harness-a",
           "harness_version_range": "7b6e858",
           "workflow_version_range": "code-change.v3",
-          "adapter_version_range": "fiesta-pim-adapter.v1",
+          "adapter_version_range": "example-harness-a-pim-adapter.v1",
           "configuration_ids": ["routing-default-v2"]
         },
         "exceptions": ["Do not retry tools whose side effects cannot be checked."],
         "compatibility": {
           "harness_version_range": "7b6e858",
           "workflow_version_range": "code-change.v3",
-          "adapter_version_range": "fiesta-pim-adapter.v1"
+          "adapter_version_range": "example-harness-a-pim-adapter.v1"
         },
         "validation": {
           "strategy": "stable_failure_fingerprint",
@@ -241,7 +139,6 @@
         },
         "evidence_summary": { "strength": "reviewed", "ref_count": 2 },
         "freshness": { "last_confirmed_at": "2026-08-02T18:00:00Z", "expires_at": null },
-        "prompt_eligible": false,
         "match_reasons": ["exact_configuration", "task_lexical_match"]
       }
     ],
@@ -250,7 +147,7 @@
   },
   "MemoryCandidateV1": {
     "schema_version": "pim.memory-candidate.v1",
-    "client_candidate_id": "fiesta-candidate-contract-1",
+    "client_candidate_id": "example-harness-a-candidate-contract-1",
     "plane": "codebase",
     "kind": "constraint",
     "content": {
@@ -261,13 +158,13 @@
     "applicability": { "repository_id": "github.com/acme/checkout", "paths": ["src/payments/provider.ts"], "symbols": ["lookupTransaction"] },
     "validation": { "strategy": "repository_anchors" },
     "exceptions": [],
-    "source_run_ids": ["fiesta:test:thread-1:run-1"],
+    "source_run_ids": ["example-harness-a:test:thread-1:run-1"],
     "evidence_refs": ["diff_contract_1", "test_contract_1"],
-    "extraction": { "method": "model_then_deterministic_validation", "extractor_version": "fiesta-candidate-extractor.v1", "confidence": 0.86 },
+    "extraction": { "method": "model_then_deterministic_validation", "extractor_version": "example-harness-a-candidate-extractor.v1", "confidence": 0.86 },
     "activation_requirement_requested": "verified_merge"
   },
-  "FiestaCodeEvidenceV2": {
-    "schema_version": "fiesta.code-evidence.v2",
+  "CodeEvidenceManifestV2": {
+    "schema_version": "pim.memory-code-evidence.v2",
     "manifest_id": "manifest_contract_1",
     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "refs": [
@@ -284,8 +181,8 @@
   },
   "RunReceiptV1": {
     "schema_version": "pim.run-receipt.v1",
-    "external_session_id": "fiesta-thread-contract-1",
-    "producer": { "harness_id": "fiesta", "harness_version": "7b6e858", "workflow_version": "code-change.v3", "adapter_version": "fiesta-pim-adapter.v1" },
+    "external_session_id": "example-harness-a-thread-contract-1",
+    "producer": { "harness_id": "example-harness-a", "harness_version": "7b6e858", "workflow_version": "code-change.v3", "adapter_version": "example-harness-a-pim-adapter.v1" },
     "tenant": { "project_id": "project-checkout" },
     "repository": {
       "repository_id": "github.com/acme/checkout",
@@ -312,7 +209,7 @@
   "RunReceiptResultV1": {
     "schema_version": "pim.run-receipt-result.v1",
     "receipt_id": "receipt_contract_1",
-    "producer_run_id": "fiesta:test:thread-1:run-1",
+    "producer_run_id": "example-harness-a:test:thread-1:run-1",
     "request_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
     "status": "accepted",
     "candidate_results": []
@@ -320,7 +217,7 @@
   "MemoryCandidateStatusV1": {
     "schema_version": "pim.memory-candidate-status.v1",
     "candidate_id": "candidate_contract_1",
-    "client_candidate_id": "fiesta-candidate-contract-1",
+    "client_candidate_id": "example-harness-a-candidate-contract-1",
     "plane": "codebase",
     "kind": "constraint",
     "status": "pending_merge",
@@ -367,7 +264,6 @@
     "evidence_summary": { "strength": "verified_merge_and_test", "ref_count": 1 },
     "freshness": { "last_confirmed_at": "2026-08-01T17:00:00Z", "expires_at": null },
     "lifecycle": { "status": "active" },
-    "prompt_eligible": false,
     "transition_summary": {
       "transition_id": "transition_record_contract_1",
       "from_status": null,
@@ -464,7 +360,7 @@
     "retrieval_pack_id": "pack_contract_1",
     "record_id": "mem_contract_1",
     "record_version": 1,
-    "producer_run_id": "fiesta:test:thread-2:run-1",
+    "producer_run_id": "example-harness-a:test:thread-2:run-1",
     "repository_id": "github.com/acme/checkout",
     "base_sha": "0123456789abcdef0123456789abcdef01234567",
     "disposition": "helpful",
@@ -527,7 +423,7 @@
     "schema_version": "pim.error.v1",
     "code": "schema_invalid",
     "message": "Request does not match pim.memory-search.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "details": [{ "path": "/unexpected", "reason": "unknown field" }]
   }
 }

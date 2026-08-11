@@ -8,10 +8,6 @@ import {
   type MemoryFeedbackV1,
   type MemoryHarnessSearchResultV1,
   type MemoryHarnessSearchV1,
-  type MemoryPromptPolicyUpdateV1,
-  type MemoryPromptPolicyV1,
-  type MemoryReleaseGateDecisionV1,
-  type MemoryReleaseGateEvaluationV1,
   type PimErrorV1,
 } from "@pim/shared";
 import { PimMemoryApiError, PimMemoryClient } from "../memory-client.js";
@@ -131,6 +127,32 @@ describe("PimMemoryClient feedback and review", () => {
         response: error,
       } satisfies Partial<PimMemoryApiError>);
     });
+
+    it("wraps non-JSON and empty non-success responses without reflecting their bodies", async () => {
+      for (const [body, status] of [
+        ["<html>upstream-secret</html>", 502],
+        [null, 503],
+      ] as const) {
+        mockFetch.mockReset();
+        mockFetch.mockResolvedValue(new Response(body, {
+          status,
+          headers: { "Content-Type": "text/html" },
+        }));
+
+        const thrown = await client().capabilities().catch((error: unknown) => error);
+        expect(thrown).toMatchObject({
+          name: "PimMemoryApiError",
+          message: "Memory API returned a non-JSON error response",
+          statusCode: status,
+          response: {
+            schema_version: "pim.error.v1",
+            code: "temporarily_unavailable",
+            message: "Memory API returned a non-JSON error response",
+          },
+        } satisfies Partial<PimMemoryApiError>);
+        expect((thrown as PimMemoryApiError).message).not.toContain("upstream-secret");
+      }
+    });
   });
 
   describe("decideCandidate", () => {
@@ -204,7 +226,7 @@ describe("PimMemoryClient feedback and review", () => {
   });
 
   describe("harnessSearch", () => {
-    it("posts and strictly parses the dedicated permanent-shadow contract", async () => {
+    it("posts and strictly parses the dedicated harness contract", async () => {
       const requestBody = structuredClone(
         MEMORY_CONTRACT_FIXTURES.MemoryHarnessSearchV1,
       ) as unknown as MemoryHarnessSearchV1;
@@ -221,7 +243,7 @@ describe("PimMemoryClient feedback and review", () => {
       expect(JSON.parse(String(init.body))).toEqual(requestBody);
     });
 
-    it("rejects a response that widens permanent-shadow fields", async () => {
+    it("rejects a response that restores removed routing fields", async () => {
       const requestBody = structuredClone(
         MEMORY_CONTRACT_FIXTURES.MemoryHarnessSearchV1,
       ) as unknown as MemoryHarnessSearchV1;
@@ -236,67 +258,4 @@ describe("PimMemoryClient feedback and review", () => {
     });
   });
 
-  describe("prompt policy and release gates", () => {
-    it("gets and updates a strictly validated project prompt policy", async () => {
-      const policy = structuredClone(
-        MEMORY_CONTRACT_FIXTURES.MemoryPromptPolicyV1,
-      ) as unknown as MemoryPromptPolicyV1;
-      const update = structuredClone(
-        MEMORY_CONTRACT_FIXTURES.MemoryPromptPolicyUpdateV1,
-      ) as unknown as MemoryPromptPolicyUpdateV1;
-      mockResponse(policy);
-
-      await expect(client().getPromptPolicy("project/checkout")).resolves.toEqual(policy);
-      expect(request()[0]).toBe(
-        "http://localhost:4000/api/v1/memory/projects/project%2Fcheckout/prompt-policy",
-      );
-      expect(request()[1].method).toBeUndefined();
-
-      mockFetch.mockReset();
-      mockResponse(policy);
-      await expect(
-        client().updatePromptPolicy("project/checkout", update),
-      ).resolves.toEqual(policy);
-      const [url, init] = request();
-      expect(url).toBe(
-        "http://localhost:4000/api/v1/memory/projects/project%2Fcheckout/prompt-policy",
-      );
-      expect(init.method).toBe("PUT");
-      expect(JSON.parse(String(init.body))).toEqual(update);
-    });
-
-    it("evaluates release gates through the strict admin contract", async () => {
-      const evaluation = structuredClone(
-        MEMORY_CONTRACT_FIXTURES.MemoryReleaseGateEvaluationV1,
-      ) as unknown as MemoryReleaseGateEvaluationV1;
-      const decision = structuredClone(
-        MEMORY_CONTRACT_FIXTURES.MemoryReleaseGateDecisionV1,
-      ) as unknown as MemoryReleaseGateDecisionV1;
-      mockResponse(decision);
-
-      await expect(
-        client().evaluateReleaseGates("project-checkout", evaluation),
-      ).resolves.toEqual(decision);
-      const [url, init] = request();
-      expect(url).toBe(
-        "http://localhost:4000/api/v1/memory/projects/project-checkout/release-gates/evaluate",
-      );
-      expect(init.method).toBe("POST");
-      expect(JSON.parse(String(init.body))).toEqual(evaluation);
-    });
-
-    it("rejects malformed control-plane responses and invalid project ids", async () => {
-      const policy = structuredClone(
-        MEMORY_CONTRACT_FIXTURES.MemoryPromptPolicyV1,
-      ) as unknown as MemoryPromptPolicyV1;
-      mockResponse({ ...policy, effective_enabled: "yes" });
-
-      await expect(client().getPromptPolicy("project-checkout")).rejects.toBeInstanceOf(
-        MemoryContractValidationError,
-      );
-      await expect(client().getPromptPolicy("")).rejects.toThrow(
-        "projectId must contain 1 to 128 characters",
-      );
-    });
-  });
 });

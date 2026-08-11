@@ -65,21 +65,28 @@ export { canonicalizeJson, canonicalJsonSha256, sha256Hex } from "./canonical-js
 
 export {
   MEMORY_CONTRACT_FIXTURES,
+  MEMORY_CONTRACT_FIXTURES_V2,
   MEMORY_CONTRACT_MAX_DEPTH,
   MEMORY_CONTRACT_MAX_NODES,
   MEMORY_CONTRACT_SCHEMA,
+  MEMORY_CONTRACT_SCHEMA_V2,
   MemoryContractValidationError,
   memoryContractIssues,
+  memoryContractV2Issues,
   parseMemoryContract,
+  parseMemoryContractV2,
 } from "./contracts/memory-contracts.js";
 
 export type {
   MemoryContractIssue,
   MemoryContractName,
+  MemoryContractNameV2,
   MemoryContractTypeMap,
+  MemoryContractTypeMapV2,
 } from "./contracts/memory-contracts.js";
 
 export type * from "./types/memory-contracts.generated.js";
+export type * from "./types/memory-contracts-v2.generated.js";
 
 export type {
   OrgConfig,
@@ -182,6 +189,7 @@ export type {
   OrgPodSummary,
   CrossPodOverlap,
   ArchivedPod,
+  CanonicalMemoryIntakeSummary,
   PodArchiveJob,
   PodArchiveJobStatus,
   ArchivedProject,

@@ -1,0 +1,1171 @@
+{
+  "MemoryCapabilitiesV2": {
+    "schema_version": "pim.memory-capabilities.v2",
+    "contract_revision": "memory-contract-v2-2026-08-07",
+    "server_build": "test-build",
+    "known_planes": ["codebase", "harness"],
+    "planes": [
+      {
+        "plane": "codebase",
+        "status": "available",
+        "operations": ["search", "detail", "history", "pack", "receipt_write", "candidate_read", "candidate_write", "feedback_write", "readiness", "review", "activation"],
+        "operation_surfaces": [
+          { "operation": "search", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "detail", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "history", "canonical_http": "available", "restricted_mcp": "not_exposed" },
+          { "operation": "pack", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "receipt_write", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "candidate_read", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "candidate_write", "canonical_http": "available", "restricted_mcp": "receipt_embedded" },
+          { "operation": "feedback_write", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "readiness", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "review", "canonical_http": "available", "restricted_mcp": "excluded_control_plane" },
+          { "operation": "activation", "canonical_http": "available", "restricted_mcp": "excluded_control_plane" }
+        ],
+        "applicability_schema": "pim.memory-codebase-applicability.v2"
+      },
+      {
+        "plane": "harness",
+        "status": "available",
+        "operations": ["search", "detail", "history", "pack", "receipt_write", "candidate_read", "candidate_write", "readiness", "review", "activation", "runtime_attestation_write"],
+        "operation_surfaces": [
+          { "operation": "search", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "detail", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "history", "canonical_http": "available", "restricted_mcp": "not_exposed" },
+          { "operation": "pack", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "receipt_write", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "candidate_read", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "candidate_write", "canonical_http": "available", "restricted_mcp": "receipt_embedded" },
+          { "operation": "readiness", "canonical_http": "available", "restricted_mcp": "exposed" },
+          { "operation": "review", "canonical_http": "available", "restricted_mcp": "excluded_control_plane" },
+          { "operation": "activation", "canonical_http": "available", "restricted_mcp": "excluded_control_plane" },
+          { "operation": "runtime_attestation_write", "canonical_http": "available", "restricted_mcp": "excluded_control_plane" }
+        ],
+        "applicability_schema": "pim.memory-harness-applicability.v2"
+      }
+    ],
+    "supported_schemas": {
+      "requests": [
+        "pim.memory-search.v2",
+        "pim.run-receipt.v2",
+        "pim.memory-feedback.v2",
+        "pim.memory-candidate-decision.v2"
+      ],
+      "responses": [
+        "pim.memory-capabilities.v2",
+        "pim.memory-binding.v2",
+        "pim.memory-search-result.v2",
+        "pim.memory-record.v2",
+        "pim.memory-record-history.v2",
+        "pim.memory-retrieval-pack.v2",
+        "pim.memory-readiness.v2",
+        "pim.run-receipt-result.v2",
+        "pim.memory-candidate-status.v2",
+        "pim.memory-feedback-result.v2",
+        "pim.memory-candidate-decision-result.v2",
+        "pim.error.v2"
+      ]
+    },
+    "exact_harness_scopes": [
+      "memory:harness:search",
+      "memory:harness:receipt:write",
+      "memory:harness:candidate:read",
+      "memory:harness:review"
+    ],
+    "harness_subkind_mapping": {
+      "workflow_strategy": "decision",
+      "failure_pattern": "anti_pattern",
+      "verification_sequence": "test_strategy",
+      "tool_constraint": "constraint",
+      "escalation_requirement": "constraint"
+    },
+    "mcp_surface": {
+      "protocol_version": "2026-07-28",
+      "authentication_profile": "private_pim_service_token",
+      "production_enabled": true,
+      "committed_tools": [
+        "pim_memory_capabilities",
+        "pim_memory_binding",
+        "pim_code_memory_search",
+        "pim_run_receipt_submit",
+        "pim_feedback_submit",
+        "pim_candidate_status",
+        "pim_harness_memory_search",
+        "pim_memory_readiness"
+      ],
+      "exposed_tools": [
+        "pim_memory_capabilities",
+        "pim_memory_binding",
+        "pim_code_memory_search",
+        "pim_run_receipt_submit",
+        "pim_feedback_submit",
+        "pim_candidate_status",
+        "pim_harness_memory_search",
+        "pim_memory_readiness"
+      ],
+      "resource_templates": [
+        "pim-memory://records/{record_id}/versions/{version}",
+        "pim-memory://packs/{pack_id}"
+      ],
+      "excluded_control_plane_operations": [
+        "review",
+        "activation",
+        "runtime_attestation_write"
+      ]
+    },
+    "limits": {
+      "max_receipt_bytes": 262144,
+      "max_candidate_bytes": 32768,
+      "max_evidence_refs": 128,
+      "max_feedback_items": 256,
+      "max_search_tokens": 8000,
+      "max_search_items": 32
+    },
+    "temporal_modes": ["current"]
+  },
+  "MemoryBindingV2": {
+    "schema_version": "pim.memory-binding.v2",
+    "service_principal_id": "principal-example-harness-a-contract",
+    "tenant": {
+      "organization_id": "org-acme",
+      "project_id": "project-checkout"
+    },
+    "scopes": ["memory:search", "memory:receipt:write"],
+    "resources": [
+      {
+        "resource_row_id": "resource-repository-contract",
+        "organization_id": "org-acme",
+        "project_id": "project-checkout",
+        "plane": "codebase",
+        "resource_type": "repository",
+        "canonical_resource_id": "github.com/acme/checkout",
+        "provider": "github",
+        "provider_resource_id": "provider-repo-814",
+        "display_label": "Acme/Checkout",
+        "permitted_operations": ["search", "detail", "history", "receipt_write", "readiness"]
+      }
+    ]
+  },
+  "CodebaseApplicabilityV2": {
+    "plane": "codebase",
+    "repository_id": "github.com/acme/checkout",
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "components": ["payments"],
+    "paths": ["src/payments/retry.ts"],
+    "symbols": ["retryCharge"],
+    "task_classes": ["bug_fix"]
+  },
+  "HarnessApplicabilityV2": {
+    "plane": "harness",
+    "harness_id": "example-harness-a",
+    "harness_version_range": "7b6e858",
+    "workflow_version_range": "code-change.v3",
+    "adapter_version_range": "example-harness-a-pim-adapter.v2",
+    "configuration_ids": ["routing-default-v2"],
+    "configuration_digests": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "model_ids": ["claude-sonnet"],
+    "tool_ids": ["github"]
+  },
+  "CodebaseScopeSnapshotV2": {
+    "schema_version": "pim.memory-scope-snapshot.codebase.v2",
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["search", "detail", "history", "receipt_write", "candidate_read", "candidate_write", "feedback_write", "review"]
+    },
+    "repository_id": "github.com/acme/checkout",
+    "base_sha": "0123456789abcdef0123456789abcdef01234567",
+    "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "HarnessScopeSnapshotV2": {
+    "schema_version": "pim.memory-scope-snapshot.harness.v2",
+    "plane": "harness",
+    "resource_binding": {
+      "resource_row_id": "resource-harness-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "harness",
+      "resource_type": "harness",
+      "canonical_resource_id": "example-harness-a",
+      "provider": null,
+      "provider_resource_id": null,
+      "display_label": "Example Harness A",
+      "permitted_operations": ["search", "detail", "history", "receipt_write", "candidate_read", "candidate_write", "feedback_write", "review", "runtime_attestation_write"]
+    },
+    "harness_id": "example-harness-a",
+    "harness_version": "7b6e858",
+    "workflow_version": "code-change.v3",
+    "adapter_version": "example-harness-a-pim-adapter.v2",
+    "configuration_id": "routing-default-v2",
+    "configuration_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "scope_snapshot_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "MemorySearchV2": {
+    "schema_version": "pim.memory-search.v2",
+    "request_id": "example-harness-a-search-v2-contract-1",
+    "consumer": {
+      "harness_id": "example-harness-a",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-a-pim-adapter.v2",
+      "consumer_run_id": "example-harness-a:test:thread-1:run-1"
+    },
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_selector": { "resource_row_id": "resource-repository-contract" },
+    "applicability": {
+      "plane": "codebase",
+      "repository_id": "github.com/acme/checkout",
+      "base_sha": "0123456789abcdef0123456789abcdef01234567",
+      "components": ["payments"],
+      "paths": ["src/payments/retry.ts"],
+      "symbols": ["retryCharge"],
+      "task_classes": ["bug_fix"]
+    },
+    "task": {
+      "query": "Prevent duplicate charges during payment retries",
+      "task_class": "bug_fix"
+    },
+    "temporal": {
+      "mode": "current",
+      "valid_at": "2026-08-07T18:00:00Z",
+      "recorded_at": "2026-08-07T18:00:00Z"
+    },
+    "budget": { "max_tokens": 1800, "max_items": 8 },
+    "options": { "include_explanations": true }
+  },
+  "MemorySearchResultV2": {
+    "schema_version": "pim.memory-search-result.v2",
+    "request_id": "example-harness-a-search-v2-contract-1",
+    "retrieval_pack_id": "pack-v2-contract-1",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["search", "detail", "history", "receipt_write", "candidate_read", "candidate_write", "feedback_write", "review"]
+    },
+    "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "policy_version": "retrieval-codebase-v2",
+    "ranker_version": "hybrid-authorized-v1",
+    "token_count": 96,
+    "items": [
+      {
+        "record_id": "memory-v2-contract-1",
+        "record_version": 1,
+        "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+        "plane": "codebase",
+        "resource_binding": {
+          "resource_row_id": "resource-repository-contract",
+          "organization_id": "org-acme",
+          "project_id": "project-checkout",
+          "plane": "codebase",
+          "resource_type": "repository",
+          "canonical_resource_id": "github.com/acme/checkout",
+          "provider": "github",
+          "provider_resource_id": "provider-repo-814",
+          "display_label": "Acme/Checkout",
+          "permitted_operations": ["search", "detail"]
+        },
+        "kind": "constraint",
+        "subkind": null,
+        "summary": "Payment retries must reuse the original idempotency key.",
+        "lifecycle": { "status": "active" },
+        "applicability": {
+          "plane": "codebase",
+          "repository_id": "github.com/acme/checkout",
+          "base_sha": null,
+          "components": ["payments"],
+          "paths": ["src/payments/retry.ts"],
+          "symbols": ["retryCharge"],
+          "task_classes": ["bug_fix"]
+        },
+        "exceptions": [],
+        "compatibility": {
+          "harness_version_range": "*",
+          "workflow_version_range": "*",
+          "adapter_version_range": "*"
+        },
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": ["src/payments/retry.ts#retryCharge"],
+          "failure_fingerprint": null
+        },
+        "evidence_summary": {
+          "strength": "verified_merge_and_test",
+          "ref_count": 2,
+          "distinct_corroboration_domain_count": 1
+        },
+        "freshness": {
+          "status": "fresh",
+          "last_confirmed_at": "2026-08-07T17:00:00Z",
+          "last_verified_at": "2026-08-07T17:00:00Z",
+          "next_reverify_at": "2026-09-07T17:00:00Z",
+          "expires_at": null
+        },
+        "detail_href": "/api/v2/memory/records/memory-v2-contract-1?version=1",
+        "match_reasons": ["exact_path", "exact_symbol"]
+      }
+    ],
+    "omitted_count": 0,
+    "expires_at": "2026-08-07T18:15:00Z"
+  },
+  "MemoryRecordV2": {
+    "schema_version": "pim.memory-record.v2",
+    "record_id": "memory-v2-contract-1",
+    "record_version": 1,
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["search", "detail", "history"]
+    },
+    "kind": "constraint",
+    "subkind": null,
+    "content": {
+      "summary": "Payment retries must reuse the original idempotency key.",
+      "details": "Every retry for one logical payment must retain the first provider idempotency key.",
+      "rationale": "Changing the key can create a second charge after an ambiguous provider response."
+    },
+    "applicability": {
+      "plane": "codebase",
+      "repository_id": "github.com/acme/checkout",
+      "base_sha": null,
+      "components": ["payments"],
+      "paths": ["src/payments/retry.ts"],
+      "symbols": ["retryCharge"],
+      "task_classes": ["bug_fix"]
+    },
+    "compatibility": {
+      "harness_version_range": "*",
+      "workflow_version_range": "*",
+      "adapter_version_range": "*"
+    },
+    "exceptions": [],
+    "validation": {
+      "strategy": "repository_anchors",
+      "anchor_refs": ["src/payments/retry.ts#retryCharge"],
+      "failure_fingerprint": null
+    },
+    "evidence": [
+      {
+        "evidence_ref_id": "merge-v2-contract-1",
+        "type": "git_diff",
+        "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "origin_id": "github.com/acme/checkout:pr-814:merge",
+        "source_authority": "verified"
+      }
+    ],
+    "evidence_summary": {
+      "strength": "verified_merge_and_test",
+      "ref_count": 1,
+      "distinct_corroboration_domain_count": 1
+    },
+    "freshness": {
+      "status": "fresh",
+      "last_confirmed_at": "2026-08-07T17:00:00Z",
+      "last_verified_at": "2026-08-07T17:00:00Z",
+      "next_reverify_at": "2026-09-07T17:00:00Z",
+      "expires_at": null
+    },
+    "lifecycle": { "status": "active" },
+    "transition_summary": {
+      "transition_id": "transition-v2-contract-1",
+      "from_status": null,
+      "to_status": "active",
+      "reason_code": "verified_evidence_activated",
+      "committed_at": "2026-08-07T17:00:00Z"
+    },
+    "recorded_at": "2026-08-07T17:00:00Z",
+    "classification": "internal"
+  },
+  "MemoryRecordHistoryV2": {
+    "schema_version": "pim.memory-record-history.v2",
+    "record_id": "memory-v2-contract-1",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["detail", "history"]
+    },
+    "current_version": 1,
+    "lifecycle": { "status": "active" },
+    "versions": [
+      {
+        "schema_version": "pim.memory-record.v2",
+        "record_id": "memory-v2-contract-1",
+        "record_version": 1,
+        "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+        "plane": "codebase",
+        "resource_binding": {
+          "resource_row_id": "resource-repository-contract",
+          "organization_id": "org-acme",
+          "project_id": "project-checkout",
+          "plane": "codebase",
+          "resource_type": "repository",
+          "canonical_resource_id": "github.com/acme/checkout",
+          "provider": "github",
+          "provider_resource_id": "provider-repo-814",
+          "display_label": "Acme/Checkout",
+          "permitted_operations": ["search", "detail", "history"]
+        },
+        "kind": "constraint",
+        "subkind": null,
+        "content": {
+          "summary": "Payment retries must reuse the original idempotency key.",
+          "details": "Every retry for one logical payment must retain the first provider idempotency key.",
+          "rationale": "Changing the key can create a second charge after an ambiguous provider response."
+        },
+        "applicability": {
+          "plane": "codebase",
+          "repository_id": "github.com/acme/checkout",
+          "base_sha": null,
+          "components": ["payments"],
+          "paths": ["src/payments/retry.ts"],
+          "symbols": ["retryCharge"],
+          "task_classes": ["bug_fix"]
+        },
+        "compatibility": {
+          "harness_version_range": "*",
+          "workflow_version_range": "*",
+          "adapter_version_range": "*"
+        },
+        "exceptions": [],
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": ["src/payments/retry.ts#retryCharge"],
+          "failure_fingerprint": null
+        },
+        "evidence": [
+          {
+            "evidence_ref_id": "merge-v2-contract-1",
+            "type": "git_diff",
+            "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+            "origin_id": "github.com/acme/checkout:pr-814:merge",
+            "source_authority": "verified"
+          }
+        ],
+        "evidence_summary": {
+          "strength": "verified_merge_and_test",
+          "ref_count": 1,
+          "distinct_corroboration_domain_count": 1
+        },
+        "freshness": {
+          "status": "fresh",
+          "last_confirmed_at": "2026-08-07T17:00:00Z",
+          "last_verified_at": "2026-08-07T17:00:00Z",
+          "next_reverify_at": "2026-09-07T17:00:00Z",
+          "expires_at": null
+        },
+        "lifecycle": { "status": "active" },
+        "transition_summary": {
+          "transition_id": "transition-v2-contract-1",
+          "from_status": null,
+          "to_status": "active",
+          "reason_code": "verified_evidence_activated",
+          "committed_at": "2026-08-07T17:00:00Z"
+        },
+        "recorded_at": "2026-08-07T17:00:00Z",
+        "classification": "internal"
+      }
+    ],
+    "transitions": []
+  },
+  "EvidenceRefV2": {
+    "id": "diff-v2-contract-1",
+    "type": "git_diff",
+    "uri": "https://github.com/acme/checkout/pull/814.diff",
+    "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "origin_id": "github.com/acme/checkout:pr-814:head-diff",
+    "occurred_at": "2026-08-07T17:58:00Z",
+    "source_authority": "observed"
+  },
+  "CodeEvidenceManifestV2": {
+    "schema_version": "pim.memory-code-evidence.v2",
+    "manifest_id": "manifest-v2-contract-1",
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "refs": [
+      {
+        "id": "diff-v2-contract-1",
+        "type": "git_diff",
+        "uri": "https://github.com/acme/checkout/pull/814.diff",
+        "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+        "origin_id": "github.com/acme/checkout:pr-814:head-diff",
+        "occurred_at": "2026-08-07T17:58:00Z",
+        "source_authority": "observed"
+      },
+      {
+        "id": "test-v2-contract-1",
+        "type": "test_run",
+        "uri": "https://github.com/acme/checkout/actions/runs/814",
+        "digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "origin_id": "github.com/acme/checkout:actions-run-814",
+        "occurred_at": "2026-08-07T17:59:00Z",
+        "source_authority": "verified"
+      }
+    ]
+  },
+  "HarnessRootOriginEvidenceHandleV2": {
+    "evidence_ref_id": "runtime-root-v2-contract-1",
+    "handle_type": "root_origin",
+    "provider": "runtime_attestation",
+    "provider_identity": null,
+    "provider_domain_key": null,
+    "provider_event_id": "runtime-provider-root-v2-contract-1",
+    "immutable_digest": "sha256:bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc",
+    "producer_principal_id": null,
+    "effective_root_origin_id": null,
+    "corroboration_domain_id": null,
+    "observation_type": "root",
+    "outcome": {
+      "status": "completed",
+      "reason_code": "recovery_verified",
+      "verification_status": "passed",
+      "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+    },
+    "occurred_at": "2026-08-07T20:00:00Z",
+    "verified_at": null,
+    "source_authority": null,
+    "derivation_parent_refs": []
+  },
+  "HarnessDerivationEvidenceHandleV2": {
+    "evidence_ref_id": "runtime-summary-v2-contract-1",
+    "handle_type": "derivation",
+    "provider": "runtime_attestation",
+    "provider_identity": null,
+    "provider_domain_key": null,
+    "provider_event_id": "runtime-provider-summary-v2-contract-1",
+    "immutable_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "producer_principal_id": null,
+    "effective_root_origin_id": null,
+    "corroboration_domain_id": null,
+    "observation_type": "summary",
+    "outcome": {
+      "status": "completed",
+      "reason_code": "recovery_verified",
+      "verification_status": "passed",
+      "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+    },
+    "occurred_at": "2026-08-07T20:00:30Z",
+    "verified_at": null,
+    "source_authority": null,
+    "derivation_parent_refs": ["runtime-root-v2-contract-1"]
+  },
+  "MemoryCandidateStatusV2": {
+    "schema_version": "pim.memory-candidate-status.v2",
+    "candidate_id": "candidate-row-v2-contract-1",
+    "client_candidate_id": "candidate-v2-contract-1",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["candidate_read", "review"]
+    },
+    "kind": "constraint",
+    "subkind": null,
+    "status": "pending_evidence",
+    "activation_requirement": "verified_merge",
+    "blockers": ["verified_merge_required"],
+    "latest_transition": {
+      "transition_id": "candidate-transition-v2-contract-1",
+      "from_status": "validating",
+      "to_status": "pending_evidence",
+      "reason_code": "verified_merge_required",
+      "committed_at": "2026-08-07T18:01:00Z"
+    },
+    "active_record": null,
+    "created_at": "2026-08-07T18:00:00Z",
+    "updated_at": "2026-08-07T18:01:00Z"
+  },
+  "RunReceiptV2": {
+    "schema_version": "pim.run-receipt.v2",
+    "external_session_id": "example-harness-a-thread-v2-contract-1",
+    "producer": {
+      "harness_id": "example-harness-a",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-a-pim-adapter.v2",
+      "consumer_run_id": "example-harness-a:test:thread-1:run-1"
+    },
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_selector": { "resource_row_id": "resource-repository-contract" },
+    "scope_snapshot": {
+      "schema_version": "pim.memory-scope-snapshot.codebase.v2",
+      "plane": "codebase",
+      "resource_binding": {
+        "resource_row_id": "resource-repository-contract",
+        "organization_id": "org-acme",
+        "project_id": "project-checkout",
+        "plane": "codebase",
+        "resource_type": "repository",
+        "canonical_resource_id": "github.com/acme/checkout",
+        "provider": "github",
+        "provider_resource_id": "provider-repo-814",
+        "display_label": "Acme/Checkout",
+        "permitted_operations": ["receipt_write"]
+      },
+      "repository_id": "github.com/acme/checkout",
+      "base_sha": "0123456789abcdef0123456789abcdef01234567",
+      "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "task": {
+      "task_class": "bug_fix",
+      "summary": "Prevent duplicate charges during payment retries"
+    },
+    "outcome": {
+      "status": "completed",
+      "terminal_stage": "close",
+      "reason_code": "completed",
+      "verification_status": "passed",
+      "failure_fingerprint": null
+    },
+    "retrieval_feedback": [],
+    "evidence_manifest": {
+      "schema_version": "pim.memory-code-evidence.v2",
+      "manifest_id": "manifest-v2-contract-1",
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refs": [
+        {
+          "id": "diff-v2-contract-1",
+          "type": "git_diff",
+          "uri": "https://github.com/acme/checkout/pull/814.diff",
+          "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+          "origin_id": "github.com/acme/checkout:pr-814:head-diff",
+          "occurred_at": "2026-08-07T17:58:00Z",
+          "source_authority": "observed"
+        },
+        {
+          "id": "test-v2-contract-1",
+          "type": "test_run",
+          "uri": "https://github.com/acme/checkout/actions/runs/814",
+          "digest": "sha256:abababababababababababababababababababababababababababababababab",
+          "origin_id": "github.com/acme/checkout:actions-run-814",
+          "occurred_at": "2026-08-07T17:59:00Z",
+          "source_authority": "verified"
+        }
+      ]
+    },
+    "candidates": [
+      {
+        "schema_version": "pim.memory-candidate.v2",
+        "client_candidate_id": "candidate-v2-contract-1",
+        "plane": "codebase",
+        "resource_row_id": "resource-repository-contract",
+        "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "kind": "constraint",
+        "subkind": null,
+        "content": {
+          "summary": "Provider status checks use the original merchant account.",
+          "details": "A status request against another account can incorrectly report the transaction absent.",
+          "rationale": "This caused a false retry after an ambiguous provider timeout."
+        },
+        "applicability": {
+          "plane": "codebase",
+          "repository_id": "github.com/acme/checkout",
+          "base_sha": "0123456789abcdef0123456789abcdef01234567",
+          "components": ["payments"],
+          "paths": ["src/payments/provider.ts"],
+          "symbols": ["lookupTransaction"],
+          "task_classes": ["bug_fix"]
+        },
+        "validation": {
+          "strategy": "repository_anchors",
+          "anchor_refs": ["src/payments/provider.ts#lookupTransaction"],
+          "failure_fingerprint": null
+        },
+        "exceptions": [],
+        "source_run_ids": ["example-harness-a:test:thread-1:run-1"],
+        "evidence_refs": ["diff-v2-contract-1", "test-v2-contract-1"],
+        "extraction": {
+          "method": "model_then_deterministic_validation",
+          "extractor_version": "example-harness-a-candidate-extractor.v2",
+          "confidence": 0.86
+        },
+        "activation_requirement_requested": "verified_merge"
+      }
+    ]
+  },
+  "HarnessRunReceiptV2": {
+    "schema_version": "pim.run-receipt.v2",
+    "external_session_id": "example-harness-a-harness-thread-v2-contract-1",
+    "producer": {
+      "harness_id": "example-harness-a",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-a-pim-adapter.v2",
+      "consumer_run_id": "example-harness-a:test:harness-thread-1:run-1"
+    },
+    "tenant": { "project_id": "project-checkout" },
+    "plane": "harness",
+    "resource_selector": { "resource_row_id": "resource-harness-contract" },
+    "scope_snapshot": {
+      "schema_version": "pim.memory-scope-snapshot.harness.v2",
+      "plane": "harness",
+      "resource_binding": {
+        "resource_row_id": "resource-harness-contract",
+        "organization_id": "org-acme",
+        "project_id": "project-checkout",
+        "plane": "harness",
+        "resource_type": "harness",
+        "canonical_resource_id": "example-harness-a",
+        "provider": null,
+        "provider_resource_id": null,
+        "display_label": "Example Harness A",
+        "permitted_operations": ["receipt_write", "candidate_write", "runtime_attestation_write"]
+      },
+      "harness_id": "example-harness-a",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-a-pim-adapter.v2",
+      "configuration_id": "routing-default-v2",
+      "configuration_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "scope_snapshot_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "task": {
+      "task_class": "recovery",
+      "summary": "Recover safely after a tool timeout"
+    },
+    "outcome": {
+      "status": "completed",
+      "terminal_stage": "verify",
+      "reason_code": "recovery_verified",
+      "verification_status": "passed",
+      "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+    },
+    "retrieval_feedback": [],
+    "evidence_handles": [
+      {
+        "evidence_ref_id": "runtime-root-v2-contract-1",
+        "handle_type": "root_origin",
+        "provider": "runtime_attestation",
+        "provider_identity": null,
+        "provider_domain_key": null,
+        "provider_event_id": "runtime-provider-root-v2-contract-1",
+        "immutable_digest": "sha256:bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc",
+        "producer_principal_id": null,
+        "effective_root_origin_id": null,
+        "corroboration_domain_id": null,
+        "observation_type": "root",
+        "outcome": {
+          "status": "completed",
+          "reason_code": "recovery_verified",
+          "verification_status": "passed",
+          "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+        },
+        "occurred_at": "2026-08-07T20:00:00Z",
+        "verified_at": null,
+        "source_authority": null,
+        "derivation_parent_refs": []
+      },
+      {
+        "evidence_ref_id": "runtime-summary-v2-contract-1",
+        "handle_type": "derivation",
+        "provider": "runtime_attestation",
+        "provider_identity": null,
+        "provider_domain_key": null,
+        "provider_event_id": "runtime-provider-summary-v2-contract-1",
+        "immutable_digest": "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+        "producer_principal_id": null,
+        "effective_root_origin_id": null,
+        "corroboration_domain_id": null,
+        "observation_type": "summary",
+        "outcome": {
+          "status": "completed",
+          "reason_code": "recovery_verified",
+          "verification_status": "passed",
+          "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+        },
+        "occurred_at": "2026-08-07T20:00:30Z",
+        "verified_at": null,
+        "source_authority": null,
+        "derivation_parent_refs": ["runtime-root-v2-contract-1"]
+      }
+    ],
+    "candidates": [
+      {
+        "schema_version": "pim.memory-candidate.v2",
+        "client_candidate_id": "harness-candidate-v2-contract-1",
+        "plane": "harness",
+        "resource_row_id": "resource-harness-contract",
+        "scope_snapshot_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "kind": "anti_pattern",
+        "subkind": "failure_pattern",
+        "content": {
+          "summary": "A tool timeout can hide a completed side effect.",
+          "details": "Resolve the provider event before retrying so a successful first attempt is not repeated.",
+          "rationale": "A blind retry can duplicate the side effect after an ambiguous timeout."
+        },
+        "applicability": {
+          "plane": "harness",
+          "harness_id": "example-harness-a",
+          "harness_version_range": "7b6e858",
+          "workflow_version_range": "code-change.v3",
+          "adapter_version_range": "example-harness-a-pim-adapter.v2",
+          "configuration_ids": ["routing-default-v2"],
+          "configuration_digests": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+          "model_ids": ["claude-sonnet"],
+          "tool_ids": ["github"]
+        },
+        "validation": {
+          "strategy": "stable_failure_fingerprint",
+          "anchor_refs": [],
+          "failure_fingerprint": "fixture:harness:tool-timeout:v2"
+        },
+        "exceptions": [],
+        "source_run_ids": ["example-harness-a:test:harness-thread-1:run-1"],
+        "evidence_refs": ["runtime-root-v2-contract-1", "runtime-summary-v2-contract-1"],
+        "extraction": {
+          "method": "model_then_deterministic_validation",
+          "extractor_version": "example-harness-a-candidate-extractor.v2",
+          "confidence": 0.82
+        },
+        "activation_requirement_requested": "independently_verified_runtime"
+      }
+    ]
+  },
+  "RunReceiptResultV2": {
+    "schema_version": "pim.run-receipt-result.v2",
+    "receipt_id": "receipt-v2-contract-1",
+    "producer_run_id": "example-harness-a:test:thread-1:run-1",
+    "request_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["receipt_write"]
+    },
+    "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "status": "accepted",
+    "duplicate": false,
+    "candidate_results": []
+  },
+  "MemoryFeedbackV2": {
+    "schema_version": "pim.memory-feedback.v2",
+    "feedback_revision": 1,
+    "retrieval_pack_id": "pack-v2-contract-1",
+    "record_id": "memory-v2-contract-1",
+    "record_version": 1,
+    "producer_run_id": "example-harness-a:test:thread-2:run-1",
+    "plane": "codebase",
+    "resource_row_id": "resource-repository-contract",
+    "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "disposition": "helpful",
+    "reason_code": "prevented_duplicate_retry",
+    "outcome_evidence_refs": [],
+    "event_time": "2026-08-07T19:00:00Z"
+  },
+  "MemoryFeedbackResultV2": {
+    "schema_version": "pim.memory-feedback-result.v2",
+    "feedback_id": "feedback-v2-contract-1",
+    "feedback_revision": 1,
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["feedback_write"]
+    },
+    "duplicate": false,
+    "review_signal_ids": []
+  },
+  "MemoryCandidateDecisionV2": {
+    "schema_version": "pim.memory-candidate-decision.v2",
+    "decision_revision": 1,
+    "plane": "codebase",
+    "resource_row_id": "resource-repository-contract",
+    "decision": "approve",
+    "reason_code": "failure_evidence_reviewed",
+    "explanation": "The failure evidence and bounded exceptions are supported.",
+    "evidence_refs": ["failure-v2-contract-1"],
+    "event_time": "2026-08-07T19:05:00Z"
+  },
+  "MemoryCandidateDecisionResultV2": {
+    "schema_version": "pim.memory-candidate-decision-result.v2",
+    "decision_id": "decision-v2-contract-1",
+    "candidate_id": "candidate-row-v2-contract-1",
+    "decision_revision": 1,
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["review"]
+    },
+    "decision": "approve",
+    "candidate_status": "active",
+    "active_record": { "record_id": "memory-v2-contract-1", "record_version": 1 },
+    "duplicate": false
+  },
+  "MemoryRetrievalPackV2": {
+    "schema_version": "pim.memory-retrieval-pack.v2",
+    "retrieval_pack_id": "pack-v2-contract-1",
+    "request_id": "example-harness-a-search-v2-contract-1",
+    "request_digest": "sha256:edededededededededededededededededededededededededededededededed",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "codebase",
+    "resource_binding": {
+      "resource_row_id": "resource-repository-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "codebase",
+      "resource_type": "repository",
+      "canonical_resource_id": "github.com/acme/checkout",
+      "provider": "github",
+      "provider_resource_id": "provider-repo-814",
+      "display_label": "Acme/Checkout",
+      "permitted_operations": ["search", "detail", "pack"]
+    },
+    "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "policy_version": "retrieval-codebase-v2",
+    "ranker_version": "hybrid-authorized-v1",
+    "budget": { "max_tokens": 1800, "max_items": 8 },
+    "authorized_scopes": ["memory:search"],
+    "token_count": 96,
+    "omitted_count": 0,
+    "items": [
+      {
+        "item_order": 0,
+        "record_id": "memory-v2-contract-1",
+        "record_version": 1,
+        "token_count": 96,
+        "rank_score": 1000,
+        "match_reasons": ["exact_path", "exact_symbol"]
+      }
+    ],
+    "created_at": "2026-08-07T18:00:00Z",
+    "expires_at": "2026-08-07T18:15:00Z"
+  },
+  "MemoryReadinessV2": {
+    "schema_version": "pim.memory-readiness.v2",
+    "tenant": { "organization_id": "org-acme", "project_id": "project-checkout" },
+    "plane": "harness",
+    "resource_binding": {
+      "resource_row_id": "resource-harness-contract",
+      "organization_id": "org-acme",
+      "project_id": "project-checkout",
+      "plane": "harness",
+      "resource_type": "harness",
+      "canonical_resource_id": "example-harness-a",
+      "provider": null,
+      "provider_resource_id": null,
+      "display_label": "Example Harness A",
+      "permitted_operations": ["readiness"]
+    },
+    "status": "healthy",
+    "reverification_supported": true,
+    "worker_status": "disabled",
+    "fresh_count": 13,
+    "due_count": 0,
+    "pending_count": 0,
+    "dead_letter_count": 0,
+    "oldest_due_at": null,
+    "oldest_dead_letter_at": null,
+    "last_success_at": "2026-08-07T20:00:00Z",
+    "checked_at": "2026-08-07T20:01:00Z"
+  },
+  "MemoryMcpCodeSearchInputV2": {
+    "schema_version": "pim.memory-search.v2",
+    "request_id": "mcp-code-search-v2-contract-1",
+    "consumer": {
+      "harness_id": "example-harness-a",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-a-pim-adapter.v2",
+      "consumer_run_id": "example-harness-a:test:mcp-code:run-1"
+    },
+    "plane": "codebase",
+    "resource_selector": { "resource_row_id": "resource-repository-contract" },
+    "applicability": {
+      "plane": "codebase",
+      "repository_id": "github.com/acme/checkout",
+      "base_sha": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "components": ["payments"],
+      "paths": ["src/payments/retry.ts"],
+      "symbols": ["retryCharge"],
+      "task_classes": ["bug_fix"]
+    },
+    "task": { "query": "Prevent duplicate charges during payment retries", "task_class": "bug_fix" },
+    "temporal": { "mode": "current", "valid_at": "2026-08-07T18:00:00Z", "recorded_at": "2026-08-07T18:00:00Z" },
+    "budget": { "max_tokens": 1800, "max_items": 8 },
+    "options": { "include_explanations": true }
+  },
+  "MemoryMcpHarnessSearchInputV2": {
+    "schema_version": "pim.memory-search.v2",
+    "request_id": "mcp-harness-search-v2-contract-1",
+    "consumer": {
+      "harness_id": "example-harness-b",
+      "harness_version": "7b6e858",
+      "workflow_version": "code-change.v3",
+      "adapter_version": "example-harness-b-pim-adapter.v2",
+      "consumer_run_id": "example-harness-b:test:mcp-harness:run-1"
+    },
+    "plane": "harness",
+    "resource_selector": { "resource_row_id": "resource-harness-contract" },
+    "applicability": {
+      "plane": "harness",
+      "harness_id": "example-harness-b",
+      "harness_version_range": "7b6e858",
+      "workflow_version_range": "code-change.v3",
+      "adapter_version_range": "example-harness-b-pim-adapter.v2",
+      "configuration_ids": ["routing-default-v2"],
+      "configuration_digests": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+      "model_ids": ["claude-sonnet"],
+      "tool_ids": ["github"]
+    },
+    "task": { "query": "Recover safely after a tool timeout", "task_class": "recovery" },
+    "temporal": { "mode": "current", "valid_at": "2026-08-07T20:00:00Z", "recorded_at": "2026-08-07T20:00:00Z" },
+    "budget": { "max_tokens": 1200, "max_items": 6 },
+    "options": { "include_explanations": true }
+  },
+  "MemoryMcpRunReceiptSubmitInputV2": {
+    "idempotency_key": "mcp-receipt-v2-contract-1",
+    "producer_run_id": "example-harness-a:test:mcp-code:run-1",
+    "receipt": {
+      "schema_version": "pim.run-receipt.v2",
+      "external_session_id": "example-harness-a-mcp-thread-v2-contract-1",
+      "producer": {
+        "harness_id": "example-harness-a",
+        "harness_version": "7b6e858",
+        "workflow_version": "code-change.v3",
+        "adapter_version": "example-harness-a-pim-adapter.v2",
+        "consumer_run_id": "example-harness-a:test:mcp-code:run-1"
+      },
+      "plane": "codebase",
+      "resource_selector": { "resource_row_id": "resource-repository-contract" },
+      "scope_snapshot": {
+        "schema_version": "pim.memory-scope-snapshot.codebase.v2",
+        "plane": "codebase",
+        "repository_id": "github.com/acme/checkout",
+        "base_sha": "0123456789abcdef0123456789abcdef01234567",
+        "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "task": { "task_class": "bug_fix", "summary": "Prevent duplicate charges during payment retries" },
+      "outcome": {
+        "status": "completed",
+        "terminal_stage": "close",
+        "reason_code": "completed",
+        "verification_status": "passed",
+        "failure_fingerprint": null
+      },
+      "retrieval_feedback": [],
+      "evidence_manifest": {
+        "schema_version": "pim.memory-code-evidence.v2",
+        "manifest_id": "mcp-manifest-v2-contract-1",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "refs": []
+      },
+      "candidates": []
+    }
+  },
+  "MemoryMcpFeedbackSubmitInputV2": {
+    "idempotency_key": "mcp-feedback-v2-contract-1",
+    "feedback": {
+      "schema_version": "pim.memory-feedback.v2",
+      "feedback_revision": 1,
+      "retrieval_pack_id": "pack-v2-contract-1",
+      "record_id": "memory-v2-contract-1",
+      "record_version": 1,
+      "producer_run_id": "example-harness-a:test:mcp-code:run-2",
+      "plane": "codebase",
+      "resource_row_id": "resource-repository-contract",
+      "scope_snapshot_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "disposition": "helpful",
+      "reason_code": "prevented_duplicate_retry",
+      "outcome_evidence_refs": [],
+      "event_time": "2026-08-07T19:00:00Z"
+    }
+  },
+  "MemoryMcpCandidateStatusInputV2": {
+    "plane": "harness",
+    "resource_selector": { "resource_row_id": "resource-harness-contract" },
+    "receipt_id": "receipt-harness-v2-contract-1",
+    "producer_run_id": "example-harness-a:test:harness-thread-1:run-1",
+    "candidate_id": "harness-candidate-row-v2-contract-1"
+  },
+  "MemoryMcpReadinessInputV2": {
+    "plane": "harness",
+    "resource_selector": { "resource_row_id": "resource-harness-contract" }
+  },
+  "MemoryMcpRecordResourceSelectorV2": {
+    "plane": "codebase",
+    "resource_selector": { "resource_row_id": "resource-repository-contract" },
+    "record_id": "memory-v2-contract-1",
+    "record_version": 1
+  },
+  "MemoryMcpPackResourceSelectorV2": {
+    "plane": "codebase",
+    "resource_selector": { "resource_row_id": "resource-repository-contract" },
+    "pack_id": "pack-v2-contract-1"
+  },
+  "PimErrorV2": {
+    "schema_version": "pim.error.v2",
+    "code": "scope_required",
+    "message": "The authenticated harness principal lacks the required operation scope",
+    "request_id": "example-harness-a-scope-denial-v2-contract-1",
+    "plane": "harness",
+    "retryable": false,
+    "details": []
+  }
+}

@@ -23,7 +23,13 @@ import {
   importActiveMemoryRecord,
   transitionMemoryRecordStatus,
 } from "./memory-records.js";
-import { automaticVerifiedMergePromptEligibilityEnabled } from "./memory-prompt-policy.js";
+import {
+  assertMemoryV2StoredCandidateFacet,
+  assertMemoryV2StoredRecordFacet,
+} from "./memory-v2-canonical-writes.js";
+import { ensureMemoryV2ReverificationAdmission } from "./memory-v2-reverification-admission.js";
+import { memoryV2ReverificationEnabled } from "./memory-v2-reverification.js";
+import { ensureMemoryV2EvidenceVerifiedTrust } from "./memory-v2-trust.js";
 
 export interface AuthoritativeGithubState {
   repositoryId: string;
@@ -394,7 +400,6 @@ function commitCandidateActivation(input: {
   manifestDigest: string;
   evidence: EvidenceHandleV1[];
   evidenceStrength: EvidenceSummaryV1["strength"];
-  promptEligible: boolean;
   lastConfirmedAt: string;
   actorId: string;
   actorType: string;
@@ -504,7 +509,6 @@ function commitCandidateActivation(input: {
       evidence: input.evidence,
       evidenceSummary: { strength: input.evidenceStrength, ref_count: input.evidence.length },
       freshness: { last_confirmed_at: input.lastConfirmedAt, expires_at: null },
-      promptEligible: input.promptEligible,
       provenance: {
         candidate_id: stored.row.candidate_id,
         producer_run_id: input.producerRunId,
@@ -523,9 +527,22 @@ function commitCandidateActivation(input: {
       now: input.now,
     });
     const reusedCanonicalClaim = record.record_id !== recordId;
-    db.prepare(
-      "UPDATE memory_records SET shadow_recall_eligible = 1 WHERE record_id = ?",
-    ).run(record.record_id);
+    const trust = ensureMemoryV2EvidenceVerifiedTrust({
+      recordId: record.record_id,
+      recordVersion: record.record_version,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      evidenceVerifiedAt: input.lastConfirmedAt,
+      now: input.now,
+    });
+    if (trust.trustBasis === "evidence_verified" && memoryV2ReverificationEnabled()) {
+      ensureMemoryV2ReverificationAdmission({
+        recordId: record.record_id,
+        recordVersion: record.record_version,
+        createdBy: "memory-v2-code-activation",
+        now: input.now,
+      });
+    }
 
     let supersessionTransitionId: string | null = null;
     let predecessorVersion: number | null = null;
@@ -655,6 +672,7 @@ function activateCandidate(input: {
       input.correlation.candidate_id,
     );
     if (!stored) throw new MemoryActivationError("Candidate is unavailable", 409, "transition_invalid");
+    assertMemoryV2StoredCandidateFacet(stored.row.candidate_id);
     if (stored.row.current_status === "active" && stored.row.active_record_id && stored.row.active_record_version) {
       const record = getMemoryRecord(
         input.orgId,
@@ -663,6 +681,10 @@ function activateCandidate(input: {
         stored.row.active_record_version,
       );
       if (!record) throw new MemoryActivationError("Active candidate projection is inconsistent", 409, "transition_invalid");
+      assertMemoryV2StoredRecordFacet({
+        recordId: stored.row.active_record_id,
+        recordVersion: stored.row.active_record_version,
+      });
       return record;
     }
     if (stored.row.current_status !== "pending_merge") {
@@ -685,10 +707,6 @@ function activateCandidate(input: {
       manifestDigest: input.correlation.manifest_digest,
       evidence,
       evidenceStrength: "verified_merge",
-      promptEligible: automaticVerifiedMergePromptEligibilityEnabled(
-        input.orgId,
-        input.projectId,
-      ),
       lastConfirmedAt: input.state.occurredAt,
       actorId: input.attestationRow.attestation_row_id,
       actorType: "system",
@@ -715,6 +733,7 @@ export function activateReviewedMemoryCandidate(input: {
   return withImmediateTransaction(() => {
     const stored = getStoredMemoryCandidate(input.orgId, input.projectId, input.candidateId);
     if (!stored) throw new MemoryActivationError("Candidate is unavailable", 404, "transition_invalid");
+    assertMemoryV2StoredCandidateFacet(stored.row.candidate_id);
     if (stored.row.current_status !== "pending_review"
         || stored.row.activation_requirement !== "authorized_review"
         || stored.candidate.plane !== "codebase"
@@ -790,7 +809,6 @@ export function activateReviewedMemoryCandidate(input: {
       manifestDigest: receipt.manifest_digest,
       evidence,
       evidenceStrength: "reviewed",
-      promptEligible: true,
       lastConfirmedAt: input.decision.event_time,
       actorId: input.reviewerId,
       actorType: "reviewer",
@@ -929,6 +947,11 @@ export function reconcileVerifiedGithubState(input: {
     const match = matches[0];
     const stored = getStoredMemoryCandidate(input.orgId, input.projectId, match.candidate_id);
     if (stored?.row.current_status === "active" && stored.row.active_record_id) {
+      assertMemoryV2StoredCandidateFacet(stored.row.candidate_id);
+      assertMemoryV2StoredRecordFacet({
+        recordId: stored.row.active_record_id,
+        recordVersion: stored.row.active_record_version ?? undefined,
+      });
       return {
         status: "activated",
         candidateIds: [match.candidate_id],

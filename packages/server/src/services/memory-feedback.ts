@@ -8,6 +8,12 @@ import {
 } from "@pim/shared";
 import db, { withImmediateTransaction } from "../db/connection.js";
 import type { MemoryRepositoryBinding } from "./memory-repository-registry.js";
+import {
+  assertMemoryV2StoredFeedbackFacet,
+  insertMemoryV2FeedbackFacet,
+  MemoryV2CanonicalWriteError,
+} from "./memory-v2-canonical-writes.js";
+import { memoryV2RepositoryResourceRowId } from "./memory-v2-resources.js";
 
 type FeedbackErrorCode = PimErrorV1["code"];
 
@@ -72,6 +78,16 @@ function resultFor(row: FeedbackRow, _duplicate: boolean): MemoryFeedbackResultV
     duplicate: false,
     review_signal_ids: reviewSignalIds(row.feedback_id),
   });
+}
+
+function replayFeedback(row: FeedbackRow): MemoryFeedbackResultV1 {
+  try {
+    assertMemoryV2StoredFeedbackFacet(row.feedback_id);
+  } catch (error) {
+    if (!(error instanceof MemoryV2CanonicalWriteError)) throw error;
+    throw new MemoryFeedbackError(error.message, 409, "idempotency_conflict");
+  }
+  return resultFor(row, true);
 }
 
 function assertFeedbackTarget(input: {
@@ -231,7 +247,7 @@ export function appendMemoryFeedback(input: {
         "idempotency_conflict",
       );
     }
-    return resultFor(replay, true);
+    return replayFeedback(replay);
   }
   const now = input.now ?? new Date().toISOString();
   return withImmediateTransaction(() => {
@@ -244,7 +260,7 @@ export function appendMemoryFeedback(input: {
           "idempotency_conflict",
         );
       }
-      return resultFor(concurrent, true);
+      return replayFeedback(concurrent);
     }
     const receiptId = assertFeedbackTarget(input);
     const row: FeedbackRow = {
@@ -272,6 +288,15 @@ export function appendMemoryFeedback(input: {
       digest,
       now,
     );
+    insertMemoryV2FeedbackFacet({
+      feedbackId: row.feedback_id,
+      retrievalPackId: input.feedback.retrieval_pack_id,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      plane: "codebase",
+      resourceRowId: memoryV2RepositoryResourceRowId(input.repository.repository_row_id),
+      now,
+    });
     insertReviewSignals({ ...input, feedbackId: row.feedback_id, now });
     return resultFor(row, false);
   });

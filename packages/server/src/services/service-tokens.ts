@@ -14,9 +14,24 @@ import {
   createMemoryHarnessPrincipalBinding,
   type MemoryHarnessPrincipalBinding,
 } from "./memory-harness-bindings.js";
+import { MEMORY_V2_HARNESS_SCOPES } from "./memory-v2-constants.js";
+import {
+  projectMemoryV2BindingsForToken,
+  projectMemoryV2ResourceBindings,
+} from "./memory-v2-resources.js";
+import {
+  verifyAndSnapshotMemoryV2Request,
+  type MemoryV2RequestAuthorizationSnapshot,
+} from "./memory-v2-request-authorization.js";
+export type { MemoryV2RequestAuthorizationSnapshot } from "./memory-v2-request-authorization.js";
 
 export const SERVICE_TOKEN_PREFIX = "pim_svc_";
 const LAST_USED_THROTTLE_MS = 60_000;
+
+export const PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE = "private_pim_service_token" as const;
+export const PRIVATE_MEMORY_MCP_AUDIENCE = "urn:pim:audience:mcp-memory" as const;
+export const PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR = "urn:pim:resource:mcp-memory" as const;
+export const PRIVATE_MEMORY_MCP_ENDPOINT_PATH = "/mcp/memory" as const;
 
 export const SERVICE_TOKEN_SCOPES = [
   "project:read",
@@ -38,12 +53,24 @@ export const SERVICE_TOKEN_SCOPES = [
   "memory:feedback:write",
   "memory:review",
   "memory:admin",
-  "memory:harness:receipt:write",
-  "memory:harness:review",
-  "memory:harness:search",
+  ...MEMORY_V2_HARNESS_SCOPES,
 ] as const;
 
 export type ServiceTokenScope = typeof SERVICE_TOKEN_SCOPES[number];
+
+export const PRIVATE_MEMORY_MCP_SAFE_SCOPES = [
+  "memory:search",
+  "memory:receipt:write",
+  "memory:candidate:read",
+  "memory:feedback:write",
+  "memory:harness:search",
+  "memory:harness:receipt:write",
+  "memory:harness:candidate:read",
+] as const satisfies readonly ServiceTokenScope[];
+
+const privateMemoryMcpSafeScopeSet = new Set<ServiceTokenScope>(
+  PRIVATE_MEMORY_MCP_SAFE_SCOPES,
+);
 
 const MEMORY_REPOSITORY_SCOPES = new Set<ServiceTokenScope>([
   "memory:search",
@@ -55,11 +82,7 @@ const MEMORY_REPOSITORY_SCOPES = new Set<ServiceTokenScope>([
   "memory:admin",
 ]);
 
-const MEMORY_HARNESS_SCOPES = new Set<ServiceTokenScope>([
-  "memory:harness:receipt:write",
-  "memory:harness:review",
-  "memory:harness:search",
-]);
+const MEMORY_HARNESS_SCOPES = new Set<ServiceTokenScope>(MEMORY_V2_HARNESS_SCOPES);
 
 export interface ServiceTokenRepositoryBinding {
   repositoryRowId: string;
@@ -76,11 +99,17 @@ export interface ServiceTokenAuthMetadata {
   podId?: string;
   repositoryBindings: ServiceTokenRepositoryBinding[];
   harnessBindings?: MemoryHarnessPrincipalBinding[];
+  /** Canonical token expiry exposed by the verifier for resource-server checks. */
+  expiresAt?: string;
 }
 
 export interface VerifiedServiceToken {
   user: UserRecord;
   auth: ServiceTokenAuthMetadata;
+}
+
+export interface VerifiedMemoryV2ServiceToken extends VerifiedServiceToken {
+  authorization: MemoryV2RequestAuthorizationSnapshot;
 }
 
 export interface ServiceTokenListItem {
@@ -102,6 +131,50 @@ export interface ServiceTokenListItem {
 export interface CreatedServiceToken extends ServiceTokenListItem {
   token: string;
 }
+
+export interface CreateServiceTokenInput {
+  orgId: string;
+  name: string;
+  scopes: string[];
+  createdByUserId: string;
+  projectId?: string | null;
+  podId?: string | null;
+  repositoryIds?: string[];
+  harnessIds?: string[];
+  expiresAt: string;
+}
+
+export interface PrivateMemoryMcpTokenProfile {
+  tokenId: string;
+  authenticationProfile: typeof PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE;
+  audience: typeof PRIVATE_MEMORY_MCP_AUDIENCE;
+  resourceIndicator: typeof PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR;
+  endpointPath: typeof PRIVATE_MEMORY_MCP_ENDPOINT_PATH;
+  createdAt: string;
+}
+
+export interface CreatedPrivateMemoryMcpServiceToken extends CreatedServiceToken {
+  mcp_profile: Omit<PrivateMemoryMcpTokenProfile, "tokenId">;
+}
+
+export interface VerifiedPrivateMemoryMcpServiceToken extends Omit<VerifiedServiceToken, "auth"> {
+  auth: ServiceTokenAuthMetadata & { expiresAt: string };
+  profile: PrivateMemoryMcpTokenProfile;
+  authorization: MemoryV2RequestAuthorizationSnapshot;
+}
+
+export type PrivateMemoryMcpTokenVerification =
+  | { ok: true; verified: VerifiedPrivateMemoryMcpServiceToken }
+  | {
+      ok: false;
+      reason:
+        | "invalid_token"
+        | "profile_required"
+        | "profile_mismatch"
+        | "unsafe_scope"
+        | "project_binding_required"
+        | "resource_binding_required";
+    };
 
 export class ServiceTokenError extends Error {
   constructor(message: string, public statusCode = 400) {
@@ -234,17 +307,10 @@ function toListItem(row: JoinedTokenRow): ServiceTokenListItem {
   };
 }
 
-export function createServiceToken(input: {
-  orgId: string;
-  name: string;
-  scopes: string[];
-  createdByUserId: string;
-  projectId?: string | null;
-  podId?: string | null;
-  repositoryIds?: string[];
-  harnessIds?: string[];
-  expiresAt: string;
-}): CreatedServiceToken {
+function createServiceTokenInternal(
+  input: CreateServiceTokenInput,
+  privateMemoryMcpProfile: boolean,
+): CreatedServiceToken {
   const name = input.name.trim();
   if (!name) throw new ServiceTokenError("Service-token name is required");
   if (input.projectId && input.podId) {
@@ -393,6 +459,36 @@ export function createServiceToken(input: {
       })
     ));
 
+    // The v2 exact-resource authority is an atomic companion only for tokens
+    // that carry memory authority. Unrelated service-token issuance must not
+    // depend on the optional v2 companion store.
+    if (hasMemoryRepositoryScope || hasMemoryHarnessScope) {
+      projectMemoryV2BindingsForToken(tokenId);
+    }
+
+    if (privateMemoryMcpProfile) {
+      try {
+        db.prepare(
+          `INSERT INTO memory_v2_service_token_mcp_profiles
+             (token_id, authentication_profile, audience, resource_indicator,
+              endpoint_path, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        ).run(
+          tokenId,
+          PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE,
+          PRIVATE_MEMORY_MCP_AUDIENCE,
+          PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR,
+          PRIVATE_MEMORY_MCP_ENDPOINT_PATH,
+          now,
+        );
+      } catch {
+        throw new ServiceTokenError(
+          "Private memory MCP token profile store is unavailable",
+          503,
+        );
+      }
+    }
+
     return {
       token: rawToken,
       token_id: tokenId,
@@ -412,6 +508,50 @@ export function createServiceToken(input: {
   });
 }
 
+/** Public token issuance deliberately never creates an MCP audience/profile. */
+export function createServiceToken(input: CreateServiceTokenInput): CreatedServiceToken {
+  return createServiceTokenInternal(input, false);
+}
+
+/**
+ * Explicit least-privilege issuance for the private memory MCP endpoint.
+ * The caller must be an authorized control-plane route; ordinary token
+ * issuance deliberately does not add this profile.
+ */
+export function createPrivateMemoryMcpServiceToken(
+  input: CreateServiceTokenInput,
+): CreatedPrivateMemoryMcpServiceToken {
+  if (!input.projectId?.trim() || input.podId) {
+    throw new ServiceTokenError(
+      "Private memory MCP service tokens require one exact project binding",
+    );
+  }
+  if (input.scopes.length === 0 || input.scopes.some((scope) => (
+    !privateMemoryMcpSafeScopeSet.has(scope as ServiceTokenScope)
+  ))) {
+    throw new ServiceTokenError(
+      "Private memory MCP service tokens may contain only safe memory data-plane scopes",
+    );
+  }
+  if ((input.repositoryIds?.length ?? 0) === 0 && (input.harnessIds?.length ?? 0) === 0) {
+    throw new ServiceTokenError(
+      "Private memory MCP service tokens require at least one exact repository or harness binding",
+    );
+  }
+
+  const created = createServiceTokenInternal(input, true);
+  return {
+    ...created,
+    mcp_profile: {
+      authenticationProfile: PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE,
+      audience: PRIVATE_MEMORY_MCP_AUDIENCE,
+      resourceIndicator: PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR,
+      endpointPath: PRIVATE_MEMORY_MCP_ENDPOINT_PATH,
+      createdAt: created.created_at,
+    },
+  };
+}
+
 /** Grandfather memory-scoped service tokens minted before per-repository
  * bindings existed (migration 006). A memory-scoped, project-bound token with
  * zero binding rows can only predate the fence — createServiceToken has
@@ -421,10 +561,11 @@ export function createServiceToken(input: {
  * granted; that requires minting a new token. Idempotent: tokens with any
  * existing binding row are never touched. */
 export function backfillLegacyMemoryTokenBindings(now = new Date().toISOString()): number {
-  const memoryScopes = [...MEMORY_REPOSITORY_SCOPES];
-  const scopePlaceholders = memoryScopes.map(() => "?").join(", ");
-  const result = db.prepare(
-    `INSERT INTO memory_service_token_repository_bindings
+  return withTransaction(() => {
+    const memoryScopes = [...MEMORY_REPOSITORY_SCOPES];
+    const scopePlaceholders = memoryScopes.map(() => "?").join(", ");
+    const result = db.prepare(
+      `INSERT INTO memory_service_token_repository_bindings
        (binding_id, token_id, service_principal_id, org_id, project_id,
         repository_row_id, repository_id, created_at)
      SELECT
@@ -454,8 +595,13 @@ export function backfillLegacyMemoryTokenBindings(now = new Date().toISOString()
          SELECT 1 FROM memory_service_token_repository_bindings existing
          WHERE existing.token_id = token.token_id
        )`,
-  ).run(now, ...memoryScopes);
-  return Number(result.changes);
+    ).run(now, ...memoryScopes);
+    // Migration 012 runs before this compatibility backfill at startup. Keep
+    // the newly grandfathered legacy binding and its v2 exact-resource
+    // companion in the same transaction, or acknowledge neither.
+    projectMemoryV2ResourceBindings();
+    return Number(result.changes);
+  });
 }
 
 function repositoryBindingsForToken(
@@ -609,6 +755,135 @@ export function verifyServiceToken(rawToken: string): VerifiedServiceToken | nul
         principal.org_id,
         token.project_id,
       ),
+      expiresAt: token.expires_at,
+    },
+  };
+}
+
+/** V2-only verifier; generic/v1 service-token authentication never reads 012+. */
+export function verifyMemoryV2ServiceToken(
+  rawToken: string,
+): VerifiedMemoryV2ServiceToken | null {
+  let verified: VerifiedServiceToken | null = null;
+  const authorization = verifyAndSnapshotMemoryV2Request(() => {
+    verified = verifyServiceToken(rawToken);
+    return verified;
+  });
+  if (!verified || !authorization) return null;
+  return { ...(verified as VerifiedServiceToken), authorization };
+}
+
+interface PrivateMemoryMcpTokenProfileRow {
+  token_id: string;
+  authentication_profile: string;
+  audience: string;
+  resource_indicator: string;
+  endpoint_path: string;
+  created_at: string;
+}
+
+function privateMemoryMcpProfileForToken(tokenId: string): PrivateMemoryMcpTokenProfile | null {
+  let row: PrivateMemoryMcpTokenProfileRow | undefined;
+  try {
+    row = db.prepare(
+      `SELECT token_id, authentication_profile, audience, resource_indicator,
+              endpoint_path, created_at
+       FROM memory_v2_service_token_mcp_profiles
+       WHERE token_id = ?`,
+    ).get(tokenId) as PrivateMemoryMcpTokenProfileRow | undefined;
+  } catch {
+    throw new ServiceTokenError(
+      "Private memory MCP token profile store is unavailable",
+      503,
+    );
+  }
+  if (!row) return null;
+  if (
+    row.authentication_profile !== PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE
+    || row.audience !== PRIVATE_MEMORY_MCP_AUDIENCE
+    || row.resource_indicator !== PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR
+    || row.endpoint_path !== PRIVATE_MEMORY_MCP_ENDPOINT_PATH
+  ) return null;
+  return {
+    tokenId: row.token_id,
+    authenticationProfile: PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE,
+    audience: PRIVATE_MEMORY_MCP_AUDIENCE,
+    resourceIndicator: PRIVATE_MEMORY_MCP_RESOURCE_INDICATOR,
+    endpointPath: PRIVATE_MEMORY_MCP_ENDPOINT_PATH,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Verifies the opaque PIM token and then independently proves the immutable
+ * private MCP profile and its current, exact principal/resource authority.
+ * A legacy token without a companion row is intentionally ineligible.
+ */
+export function verifyPrivateMemoryMcpServiceToken(
+  rawToken: string,
+  target: {
+    audience: string;
+    resourceIndicator: string;
+    endpointPath: string;
+  },
+): PrivateMemoryMcpTokenVerification {
+  let base: VerifiedServiceToken | null = null;
+  let profile: PrivateMemoryMcpTokenProfile | null = null;
+  let failure: Exclude<PrivateMemoryMcpTokenVerification, { ok: true }>["reason"] | null = null;
+  const authorization = verifyAndSnapshotMemoryV2Request(() => {
+    base = verifyServiceToken(rawToken);
+    if (!base) {
+      failure = "invalid_token";
+      return null;
+    }
+    const candidate = base as VerifiedServiceToken;
+    if (!candidate.auth.expiresAt) {
+      failure = "invalid_token";
+      return null;
+    }
+    profile = privateMemoryMcpProfileForToken(candidate.auth.tokenId);
+    if (!profile) {
+      failure = "profile_required";
+      return null;
+    }
+    if (
+      target.audience !== profile.audience
+      || target.resourceIndicator !== profile.resourceIndicator
+      || target.endpointPath !== profile.endpointPath
+    ) {
+      failure = "profile_mismatch";
+      return null;
+    }
+    if (
+      candidate.auth.scopes.length === 0
+      || candidate.auth.scopes.some((scope) => !privateMemoryMcpSafeScopeSet.has(scope))
+    ) {
+      failure = "unsafe_scope";
+      return null;
+    }
+    if (!candidate.auth.projectId || candidate.auth.podId) {
+      failure = "project_binding_required";
+      return null;
+    }
+    return candidate;
+  });
+  if (!authorization || !base || !profile) {
+    return { ok: false, reason: failure ?? "invalid_token" };
+  }
+  if (authorization.resources.length === 0) {
+    return { ok: false, reason: "resource_binding_required" };
+  }
+  const verifiedBase = base as VerifiedServiceToken;
+  const verifiedProfile = profile as PrivateMemoryMcpTokenProfile;
+  const expiresAt = verifiedBase.auth.expiresAt!;
+
+  return {
+    ok: true,
+    verified: {
+      ...verifiedBase,
+      auth: { ...verifiedBase.auth, expiresAt },
+      profile: verifiedProfile,
+      authorization,
     },
   };
 }

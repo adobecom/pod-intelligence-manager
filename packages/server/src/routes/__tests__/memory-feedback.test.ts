@@ -4,7 +4,7 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateV1,
   type MemoryFeedbackResultV1,
   type MemoryFeedbackV1,
@@ -59,10 +59,10 @@ function searchRequest(producerRunId: string): MemorySearchV1 {
 
 function candidateForRun(producerRunId: string): {
   candidate: MemoryCandidateV1;
-  manifest: FiestaCodeEvidenceV2;
+  manifest: CodeEvidenceManifestV2;
 } {
   const evidenceRefId = uniqueId("feedback-diff");
-  const evidenceRefs: FiestaCodeEvidenceV2["refs"] = [{
+  const evidenceRefs: CodeEvidenceManifestV2["refs"] = [{
     id: evidenceRefId,
     type: "git_diff",
     uri: `https://github.com/acme/checkout/commit/${TREE_SHA}.diff`,
@@ -72,11 +72,11 @@ function candidateForRun(producerRunId: string): {
     source_authority: "observed",
   }];
   const manifestBase = {
-    schema_version: "fiesta.code-evidence.v2" as const,
+    schema_version: "pim.memory-code-evidence.v2" as const,
     manifest_id: uniqueId("feedback-manifest"),
     refs: evidenceRefs,
   };
-  const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+  const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
     ...manifestBase,
     digest: canonicalJsonSha256(manifestBase),
   });

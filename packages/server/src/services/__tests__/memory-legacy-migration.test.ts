@@ -69,6 +69,13 @@ import {
   planMemoryRetention,
 } from "../memory-data-governance.js";
 import { markMemoryCandidateValidationFailed } from "../memory-candidates.js";
+import {
+  assertMemoryV2StoredCandidateFacet,
+  assertMemoryV2StoredReceiptAggregateFacets,
+} from "../memory-v2-canonical-writes.js";
+import {
+  reconcileMemoryV2CanonicalFacets,
+} from "../memory-v2-startup-reconciliation.js";
 
 const NOW = "2026-08-03T12:00:00.000Z";
 const ORG_ID = "org-memory-legacy-migration";
@@ -221,12 +228,30 @@ function insertFixtureResources(): void {
              'user-memory-legacy-migration')`,
   ).run(PROJECT_ID, NOW, JSON.stringify({ github: { repos: ["acme/legacy-memory"] } }), ORG_ID);
   testDb.prepare(
+    `INSERT INTO service_principals
+       (service_principal_id, user_id, org_id, name, created_by_user_id, created_at)
+     VALUES ('principal-memory-legacy-harness', 'user-memory-legacy-migration', ?,
+             'Memory Legacy Harness', 'user-memory-legacy-migration', ?)`,
+  ).run(ORG_ID, NOW);
+  testDb.prepare(
     `INSERT INTO memory_repository_registry
        (repository_row_id, org_id, project_id, provider, provider_repository_id,
         repository_id, display_slug, valid_from, valid_until, created_at, updated_at)
      VALUES (?, ?, ?, 'github', 'provider-memory-legacy-migration', ?,
              'Acme/Legacy-Memory', ?, NULL, ?, ?)`,
   ).run(REPOSITORY_ROW_ID, ORG_ID, PROJECT_ID, REPOSITORY_ID, NOW, NOW, NOW);
+  testDb.prepare(
+    `INSERT INTO memory_harness_principal_bindings
+       (binding_id, service_principal_id, org_id, project_id, harness_id, created_at)
+     VALUES ('binding-memory-legacy-harness', 'principal-memory-legacy-harness',
+             ?, ?, 'fiesta', ?)`,
+  ).run(ORG_ID, PROJECT_ID, NOW);
+  testDb.prepare(
+    `INSERT INTO memory_harness_principal_bindings
+       (binding_id, service_principal_id, org_id, project_id, harness_id, created_at)
+     VALUES ('binding-memory-legacy-producer', 'principal-memory-legacy-harness',
+             ?, ?, 'pim-legacy-migration', ?)`,
+  ).run(ORG_ID, PROJECT_ID, NOW);
 }
 
 function insertLegacyRows(): void {
@@ -576,6 +601,114 @@ describe("offline legacy memory migration", () => {
   });
 
   it("rolls back a late failure, then applies, reconciles, and replays atomically without changing sources", () => {
+    const pendingHarnessManifest = structuredClone(resolutionManifest);
+    const pendingHarnessResolutions = pendingHarnessManifest.resolutions.filter((candidate) =>
+      candidate.source_kind === "graph_node"
+        && candidate.source_key.includes(`#${encodeURIComponent(GRAPH_NODE_IDS.harness)}`));
+    for (const resolution of pendingHarnessResolutions) {
+      resolution.disposition = "pending_validation";
+      resolution.reason_code = "legacy_harness_reingestion_required";
+    }
+    pendingHarnessResolutions[1]!.mapping!.applicability = {
+      ...(pendingHarnessResolutions[1]!.mapping!.applicability as HarnessApplicabilityV1),
+      harness_id: "pim-legacy-migration",
+    };
+    const pendingHarnessInput = {
+      ...migrationInput,
+      resolutionManifest: pendingHarnessManifest,
+    };
+    testDb.exec("SAVEPOINT verify_pending_harness_quarantine");
+    const pendingHarnessReport = applyMemoryLegacyMigration(pendingHarnessInput);
+    const pendingHarnessRows = testDb.prepare(
+      `SELECT legacy.import_item_id, candidate.candidate_id, candidate.receipt_id,
+              candidate.producer_harness_id, candidate.candidate_json
+       FROM memory_legacy_import_items AS legacy
+       INNER JOIN memory_candidates_v1 AS candidate
+         ON candidate.client_candidate_id = legacy.import_item_id
+       WHERE legacy.import_run_id = ? AND legacy.plane = 'harness'
+         AND legacy.disposition = 'pending_validation'
+       ORDER BY candidate.candidate_id`,
+    ).all(pendingHarnessReport.import_run_id) as unknown as Array<{
+      import_item_id: string;
+      candidate_id: string;
+      receipt_id: string;
+      producer_harness_id: string;
+      candidate_json: string;
+    }>;
+    expect(pendingHarnessRows).toHaveLength(2);
+    expect(pendingHarnessRows.every((row) =>
+      row.producer_harness_id === "pim-legacy-migration")).toBe(true);
+    const targetHarnessId = (row: (typeof pendingHarnessRows)[number]): string => (
+      JSON.parse(row.candidate_json).applicability.harness_id as string
+    );
+    const pendingHarness = pendingHarnessRows.find((row) => targetHarnessId(row) === "fiesta")!;
+    const exactProducerHarness = pendingHarnessRows.find((row) =>
+      targetHarnessId(row) === "pim-legacy-migration")!;
+    expect(testDb.prepare(
+      "SELECT 1 FROM memory_v2_candidate_facets WHERE candidate_id = ?",
+    ).get(pendingHarness.candidate_id)).toBeUndefined();
+    expect(testDb.prepare(
+      "SELECT 1 FROM memory_v2_receipt_facets WHERE receipt_id = ?",
+    ).get(pendingHarness.receipt_id)).toBeUndefined();
+    expect(testDb.prepare(
+      `SELECT aggregate_type, aggregate_id, source_plane, reason_code
+       FROM memory_v2_facet_quarantine
+       WHERE aggregate_id IN (?, ?) ORDER BY aggregate_type`,
+    ).all(pendingHarness.candidate_id, pendingHarness.receipt_id)).toEqual([
+      {
+        aggregate_type: "candidate",
+        aggregate_id: pendingHarness.candidate_id,
+        source_plane: "harness",
+        reason_code: "subtype_ambiguous",
+      },
+      {
+        aggregate_type: "receipt",
+        aggregate_id: pendingHarness.receipt_id,
+        source_plane: "harness",
+        reason_code: "authority_mismatch",
+      },
+    ]);
+    assertMemoryV2StoredCandidateFacet(exactProducerHarness.candidate_id);
+    assertMemoryV2StoredReceiptAggregateFacets(exactProducerHarness.receipt_id);
+    expect(testDb.prepare(
+      `SELECT resource.canonical_resource_id
+       FROM memory_v2_receipt_facets AS facet
+       INNER JOIN memory_v2_resources AS resource
+         ON resource.resource_row_id = facet.resource_row_id
+       WHERE facet.receipt_id = ?`,
+    ).get(exactProducerHarness.receipt_id)).toEqual({
+      canonical_resource_id: "pim-legacy-migration",
+    });
+    expect(testDb.prepare(
+      `SELECT source_plane, reason_code
+       FROM memory_v2_facet_quarantine
+       WHERE aggregate_type = 'candidate' AND aggregate_id = ?`,
+    ).get(exactProducerHarness.candidate_id)).toEqual({
+      source_plane: "harness",
+      reason_code: "subtype_ambiguous",
+    });
+    const pendingHarnessFacets = reconcileMemoryV2CanonicalFacets();
+    expect(pendingHarnessFacets).toMatchObject({
+      candidates: { mismatchCount: 0 },
+      receipts: { mismatchCount: 0 },
+      ok: true,
+    });
+    // This intermediate quarantine rehearsal validates only facet closure. The
+    // full startup reconciliation is asserted after the migration is applied.
+    expect(pendingHarnessFacets.ok).toBe(true);
+    expect(reconcileMemoryLegacyMigration(pendingHarnessReport.import_run_id))
+      .toEqual(pendingHarnessReport);
+    expect(applyMemoryLegacyMigration(pendingHarnessInput)).toEqual(pendingHarnessReport);
+    testDb.exec("ROLLBACK TO verify_pending_harness_quarantine");
+    testDb.exec("RELEASE verify_pending_harness_quarantine");
+    // SQLite may rewrite otherwise unchanged database pages after rolling back
+    // the rehearsal. Refresh the required offline artifact checksum before the
+    // real cutover; the logical legacy rows and reviewed resolutions are unchanged.
+    inventoryReport = inventoryLegacyGraphs({ dbPath: testDbPath, graphRoots });
+    resolutionManifest.source_database_sha256 = inventoryReport.database.sha256;
+    migrationInput = { ...migrationInput, inventoryReport, resolutionManifest };
+    planned = planMemoryLegacyMigration(migrationInput);
+
     testDb.exec(`
       CREATE TEMP TRIGGER fail_legacy_migration_duplicate_item
       BEFORE INSERT ON memory_legacy_import_items
@@ -595,6 +728,16 @@ describe("offline legacy memory migration", () => {
       .toEqual({ count: 0 });
     expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_candidates_v1").get())
       .toEqual({ count: 0 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_resources").get())
+      .toEqual({ count: 0 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_record_facets").get())
+      .toEqual({ count: 0 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_candidate_facets").get())
+      .toEqual({ count: 0 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_receipt_facets").get())
+      .toEqual({ count: 0 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_facet_quarantine").get())
+      .toEqual({ count: 0 });
     expect(testDb.prepare(
       `SELECT COUNT(*) AS count FROM sqlite_schema
        WHERE type = 'trigger' AND name LIKE '%legacy_authority%'`,
@@ -603,6 +746,33 @@ describe("offline legacy memory migration", () => {
     expect(legacyRows()).toBe(legacyRowsBefore);
 
     testDb.exec("DROP TRIGGER temp.fail_legacy_migration_duplicate_item");
+    testDb.exec(`
+      CREATE TEMP TRIGGER fail_legacy_migration_candidate_companion
+      BEFORE INSERT ON memory_v2_candidate_facets
+      BEGIN SELECT RAISE(ABORT, 'injected legacy companion failure'); END;
+    `);
+    expect(() => applyMemoryLegacyMigration(migrationInput))
+      .toThrow("injected legacy companion failure");
+    for (const table of [
+      "memory_legacy_import_runs",
+      "memory_legacy_import_items",
+      "memory_authority_transitions",
+      "memory_records",
+      "memory_candidates_v1",
+      "memory_run_receipts",
+      "memory_v2_resources",
+      "memory_v2_record_facets",
+      "memory_v2_candidate_facets",
+      "memory_v2_receipt_facets",
+      "memory_v2_facet_quarantine",
+    ]) {
+      expect(testDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(), table)
+        .toEqual({ count: 0 });
+    }
+    expect(graphPaths.map(fileFingerprint)).toEqual(graphBefore);
+    expect(legacyRows()).toBe(legacyRowsBefore);
+    testDb.exec("DROP TRIGGER temp.fail_legacy_migration_candidate_companion");
+
     const report = applyMemoryLegacyMigration(migrationInput);
     const reconciled = reconcileMemoryLegacyMigration(report.import_run_id);
 
@@ -616,6 +786,46 @@ describe("offline legacy memory migration", () => {
       deduplicated_count: planned.deduplicated_count,
       authority: "canonical",
     });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_resources").get())
+      .toEqual({ count: 3 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_record_facets").get())
+      .toEqual({ count: 1 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_candidate_facets").get())
+      .toEqual({ count: 1 });
+    expect(testDb.prepare("SELECT COUNT(*) AS count FROM memory_v2_receipt_facets").get())
+      .toEqual({ count: 1 });
+    expect(testDb.prepare(
+      `SELECT aggregate_type, source_plane, reason_code
+       FROM memory_v2_facet_quarantine ORDER BY aggregate_type`,
+    ).all()).toEqual([
+      { aggregate_type: "candidate", source_plane: "org", reason_code: "unsupported_plane" },
+      { aggregate_type: "receipt", source_plane: "org", reason_code: "unsupported_plane" },
+      { aggregate_type: "record", source_plane: "harness", reason_code: "subtype_ambiguous" },
+    ]);
+    expect(reconcileMemoryV2CanonicalFacets()).toMatchObject({
+      records: { mismatchCount: 0 },
+      candidates: { mismatchCount: 0 },
+      receipts: { mismatchCount: 0 },
+      feedback: { mismatchCount: 0 },
+      activePointerMismatchCount: 0,
+      ok: true,
+    });
+
+    const replayFacet = testDb.prepare(
+      `SELECT record_id, record_version FROM memory_v2_record_facets
+       ORDER BY record_id, record_version LIMIT 1`,
+    ).get() as { record_id: string; record_version: number };
+    testDb.exec("SAVEPOINT verify_legacy_replay_does_not_repair");
+    testDb.prepare(
+      "DELETE FROM memory_v2_record_facets WHERE record_id = ? AND record_version = ?",
+    ).run(replayFacet.record_id, replayFacet.record_version);
+    expect(() => applyMemoryLegacyMigration(migrationInput)).toThrow(/companion facet/i);
+    expect(testDb.prepare(
+      "SELECT 1 FROM memory_v2_record_facets WHERE record_id = ? AND record_version = ?",
+    ).get(replayFacet.record_id, replayFacet.record_version)).toBeUndefined();
+    testDb.exec("ROLLBACK TO verify_legacy_replay_does_not_repair");
+    testDb.exec("RELEASE verify_legacy_replay_does_not_repair");
+
     const ledger = testDb.prepare(
       `SELECT source_kind, source_key, legacy_id, legacy_node_id, graph_version,
               snapshot_sha256, content_digest, source_timestamp, source_payload_json,
@@ -873,10 +1083,16 @@ describe("offline legacy memory migration", () => {
       ).all(rootImportItemId) as Array<{ import_item_id: string }>
     ).map((item) => item.import_item_id);
 
-    markMemoryCandidateValidationFailed(
-      codebaseLineage.candidate_id,
-      "legacy_candidate_retention_test",
-    );
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime("2026-08-06T11:00:00.000Z");
+      markMemoryCandidateValidationFailed(
+        codebaseLineage.candidate_id,
+        "legacy_candidate_retention_test",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
     expect(testDb.prepare(
       `SELECT current_status, aggregate_version
        FROM memory_candidates_v1 WHERE candidate_id = ?`,

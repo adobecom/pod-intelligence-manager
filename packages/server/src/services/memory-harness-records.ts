@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
 import {
   canonicalJsonSha256,
   type CompatibilityV1,
@@ -14,6 +15,15 @@ import {
   assertMemoryStructure,
   type ThinV1MemoryKind,
 } from "./memory-structural-validator.js";
+import {
+  assertMemoryV2StoredRecordFacet,
+  insertMemoryV2RecordFacet,
+  type MemoryV2HarnessSubtype,
+} from "./memory-v2-canonical-writes.js";
+import {
+  projectMemoryV2HarnessResource,
+  resolveMemoryV2HarnessResourceRowId,
+} from "./memory-v2-resources.js";
 
 type HarnessRecordStatus = "active" | "stale" | "superseded" | "revoked" | "expired";
 
@@ -26,8 +36,6 @@ interface HarnessRecordRow {
   kind: ThinV1MemoryKind;
   current_version: number;
   current_status: HarnessRecordStatus;
-  shadow_recall_eligible: number;
-  prompt_eligible: number;
   claim_key: string;
   valid_from: string;
   valid_until: string | null;
@@ -51,6 +59,14 @@ interface HarnessVersionRow {
   recorded_at: string;
 }
 
+interface HarnessTransitionRow {
+  transition_id: string;
+  from_status: string | null;
+  to_status: string;
+  reason_code: string;
+  committed_at: string;
+}
+
 export interface HarnessMemoryRecord {
   recordId: string;
   recordVersion: number;
@@ -69,8 +85,14 @@ export interface HarnessMemoryRecord {
   freshness: FreshnessV1;
   provenance: Record<string, unknown>;
   recordedAt: string;
-  promptEligible: false;
-  shadowRecallEligible: boolean;
+  contentDigest: string;
+  transitionSummary: {
+    transition_id: string;
+    from_status: string | null;
+    to_status: string;
+    reason_code: string;
+    committed_at: string;
+  } | null;
 }
 
 export interface ImportActiveHarnessMemoryRecordInput {
@@ -78,6 +100,10 @@ export interface ImportActiveHarnessMemoryRecordInput {
   projectId: string;
   recordId: string;
   kind: ThinV1MemoryKind;
+  /** Exact native-v2 subtype; migrated v1 callers intentionally omit it. */
+  subtype?: MemoryV2HarnessSubtype;
+  /** Exact native-v2 configuration selectors; migrated v1 callers omit them. */
+  configurationDigests?: string[];
   content: MemoryContentV1;
   applicability: HarnessApplicabilityV1;
   exceptions: string[];
@@ -108,6 +134,26 @@ function parseJson<T>(raw: string): T {
   return JSON.parse(raw) as T;
 }
 
+function assertRequestedNativeSubtype(input: {
+  recordId: string;
+  recordVersion: number;
+  subtype: MemoryV2HarnessSubtype | undefined;
+}): void {
+  if (!input.subtype) return;
+  const facet = db.prepare(
+    `SELECT subtype, projection_status FROM memory_v2_record_facets
+     WHERE record_id = ? AND record_version = ? AND plane = 'harness'`,
+  ).get(input.recordId, input.recordVersion) as {
+    subtype: string | null;
+    projection_status: string;
+  } | undefined;
+  if (!facet || facet.projection_status !== "mapped" || facet.subtype !== input.subtype) {
+    throw new MemoryHarnessRecordConflictError(
+      "An existing harness claim does not preserve the requested native v2 subtype",
+    );
+  }
+}
+
 function normalizedList(values: string[] | undefined): string[] {
   return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].sort();
 }
@@ -130,15 +176,17 @@ function normalizeText(value: string, lowerCase = false): string {
 
 export function canonicalHarnessMemoryClaimKey(
   input: Pick<ImportActiveHarnessMemoryRecordInput,
-    "kind" | "content" | "applicability" | "provenance">,
+    "kind" | "subtype" | "content" | "applicability" | "configurationDigests" | "provenance">,
 ): string {
   const configurationIds = normalizedList(input.applicability.configuration_ids);
+  const configurationDigests = normalizedList(input.configurationDigests);
   const modelIds = normalizedList(input.applicability.model_ids);
   const toolIds = normalizedList(input.applicability.tool_ids);
   return canonicalJsonSha256({
     schema_version: "pim.memory-harness-record.v1",
     plane: "harness",
     kind: input.kind,
+    ...(input.subtype ? { subtype: input.subtype } : {}),
     content: {
       summary: normalizeText(input.content.summary, true),
       details: normalizeText(input.content.details),
@@ -156,6 +204,7 @@ export function canonicalHarnessMemoryClaimKey(
         ? { adapter_version_range: input.applicability.adapter_version_range }
         : {}),
       ...(configurationIds.length ? { configuration_ids: configurationIds } : {}),
+      ...(configurationDigests.length ? { configuration_digests: configurationDigests } : {}),
       ...(modelIds.length ? { model_ids: modelIds } : {}),
       ...(toolIds.length ? { tool_ids: toolIds } : {}),
     },
@@ -165,10 +214,27 @@ export function canonicalHarnessMemoryClaimKey(
   });
 }
 
-function toHarnessRecord(record: HarnessRecordRow, version: HarnessVersionRow): HarnessMemoryRecord {
-  if (record.prompt_eligible !== 0) {
-    throw new MemoryHarnessRecordConflictError("Harness records must remain prompt-ineligible");
-  }
+function harnessTransition(
+  orgId: string,
+  projectId: string,
+  recordId: string,
+  database: DatabaseSync,
+): HarnessTransitionRow | null {
+  return (database.prepare(
+    `SELECT transition_id, from_status, to_status, reason_code, committed_at
+     FROM memory_transitions
+     WHERE org_id = ? AND project_id = ?
+       AND aggregate_type = 'record' AND aggregate_id = ?
+     ORDER BY committed_at DESC, rowid DESC LIMIT 1`,
+  ).get(orgId, projectId, recordId) as HarnessTransitionRow | undefined) ?? null;
+}
+
+function toHarnessRecord(
+  record: HarnessRecordRow,
+  version: HarnessVersionRow,
+  database: DatabaseSync,
+): HarnessMemoryRecord {
+  const transition = harnessTransition(record.org_id, record.project_id, record.record_id, database);
   return {
     recordId: record.record_id,
     recordVersion: version.record_version,
@@ -187,8 +253,14 @@ function toHarnessRecord(record: HarnessRecordRow, version: HarnessVersionRow): 
     freshness: parseJson(version.freshness_json),
     provenance: parseJson(version.provenance_json),
     recordedAt: version.recorded_at,
-    promptEligible: false,
-    shadowRecallEligible: record.shadow_recall_eligible === 1,
+    contentDigest: version.content_digest,
+    transitionSummary: transition ? {
+      transition_id: transition.transition_id,
+      from_status: transition.from_status,
+      to_status: transition.to_status,
+      reason_code: transition.reason_code,
+      committed_at: transition.committed_at,
+    } : null,
   };
 }
 
@@ -198,31 +270,35 @@ export function getHarnessMemoryRecord(input: {
   harnessId: string;
   recordId: string;
   recordVersion?: number;
-}): HarnessMemoryRecord | null {
-  const record = db.prepare(
+}, database: DatabaseSync = db): HarnessMemoryRecord | null {
+  const record = database.prepare(
     `SELECT * FROM memory_records
      WHERE org_id = ? AND project_id = ? AND harness_id = ?
        AND plane = 'harness' AND record_id = ?`,
   ).get(input.orgId, input.projectId, input.harnessId, input.recordId) as unknown as HarnessRecordRow | undefined;
   if (!record) return null;
-  const version = db.prepare(
+  const version = database.prepare(
     "SELECT * FROM memory_record_versions WHERE record_id = ? AND record_version = ?",
   ).get(input.recordId, input.recordVersion ?? record.current_version) as unknown as HarnessVersionRow | undefined;
-  return version ? toHarnessRecord(record, version) : null;
+  return version ? toHarnessRecord(record, version, database) : null;
 }
 
 export function findActiveHarnessMemoryRecordByClaim(input: {
   orgId: string;
   projectId: string;
   kind: ThinV1MemoryKind;
+  subtype?: MemoryV2HarnessSubtype;
   content: MemoryContentV1;
   applicability: HarnessApplicabilityV1;
+  configurationDigests?: string[];
   extractorVersion: string;
 }): HarnessMemoryRecord | null {
   const key = canonicalHarnessMemoryClaimKey({
     kind: input.kind,
+    subtype: input.subtype,
     content: input.content,
     applicability: input.applicability,
+    configurationDigests: input.configurationDigests,
     provenance: { extractor_version: input.extractorVersion },
   });
   const row = db.prepare(
@@ -293,6 +369,15 @@ export function importActiveHarnessMemoryRecord(
           || existing.content_digest !== contentDigest) {
         throw new MemoryHarnessRecordConflictError("Record ID is assigned to different immutable content");
       }
+      assertMemoryV2StoredRecordFacet({
+        recordId: input.recordId,
+        recordVersion: existing.current_version,
+      });
+      assertRequestedNativeSubtype({
+        recordId: input.recordId,
+        recordVersion: existing.current_version,
+        subtype: input.subtype,
+      });
       return getHarnessMemoryRecord({
         orgId: input.orgId,
         projectId: input.projectId,
@@ -315,6 +400,15 @@ export function importActiveHarnessMemoryRecord(
           "A non-active canonical harness claim cannot be reused",
         );
       }
+      assertMemoryV2StoredRecordFacet({ recordId: duplicate.record_id });
+      const duplicateVersion = db.prepare(
+        "SELECT current_version FROM memory_records WHERE record_id = ?",
+      ).get(duplicate.record_id) as { current_version: number };
+      assertRequestedNativeSubtype({
+        recordId: duplicate.record_id,
+        recordVersion: duplicateVersion.current_version,
+        subtype: input.subtype,
+      });
       return getHarnessMemoryRecord({
         orgId: input.orgId,
         projectId: input.projectId,
@@ -323,12 +417,17 @@ export function importActiveHarnessMemoryRecord(
       })!;
     }
 
+    const resource = projectMemoryV2HarnessResource({
+      orgId: input.orgId,
+      projectId: input.projectId,
+      harnessId: input.applicability.harness_id,
+    });
     db.prepare(
       `INSERT INTO memory_records
          (record_id, org_id, project_id, repository_row_id, harness_id, plane, kind,
-          current_version, current_status, aggregate_version, shadow_recall_eligible,
-          prompt_eligible, claim_key, valid_from, valid_until, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, ?, 'harness', ?, 1, 'active', 1, 1, 0, ?, ?, NULL, ?, ?, ?)`,
+          current_version, current_status, aggregate_version,
+          claim_key, valid_from, valid_until, expires_at, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, 'harness', ?, 1, 'active', 1, ?, ?, NULL, ?, ?, ?)`,
     ).run(
       input.recordId,
       input.orgId,
@@ -361,13 +460,28 @@ export function importActiveHarnessMemoryRecord(
       contentDigest,
       now,
     );
+    insertMemoryV2RecordFacet({
+      recordId: input.recordId,
+      recordVersion: 1,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      plane: "harness",
+      resourceRowId: resolveMemoryV2HarnessResourceRowId({
+        orgId: input.orgId,
+        projectId: input.projectId,
+        harnessId: input.applicability.harness_id,
+      }) ?? resource.resourceRowId,
+      broadKind: input.kind,
+      subtype: input.subtype,
+      now,
+    });
     db.prepare(
       `INSERT INTO memory_transitions
          (transition_id, org_id, project_id, aggregate_type, aggregate_id, from_status,
           to_status, actor_type, actor_id, reason_code, explanation, evidence_refs_json,
           decision_refs_json, policy_version, occurred_at, committed_at)
        VALUES (?, ?, ?, 'record', ?, NULL, 'active', 'reviewer', ?, ?, ?, ?, ?,
-               'memory-harness-shadow-v1', ?, ?)`,
+               'memory-harness-v1', ?, ?)`,
     ).run(
       `transition_${randomUUID()}`,
       input.orgId,
@@ -415,7 +529,7 @@ export function listCurrentHarnessMemoryRecords(input: {
   const rows = db.prepare(
     `SELECT record_id FROM memory_records
      WHERE org_id = ? AND project_id = ? AND plane = 'harness' AND harness_id = ?
-       AND current_status = 'active' AND shadow_recall_eligible = 1 AND prompt_eligible = 0
+       AND current_status = 'active'
        AND valid_from <= ?
        AND (valid_until IS NULL OR valid_until > ?)
        AND (expires_at IS NULL OR expires_at > ?)

@@ -12,14 +12,23 @@ import {
 } from "../middleware/service-authz.js";
 import { getOrgConfig, setOrgConfig, getOrgTuning, deleteOrgTuning } from "../services/org-settings.js";
 import {
+  createPrivateMemoryMcpServiceToken,
   createServiceToken,
   listServiceTokens,
+  PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE,
   revokeServiceToken,
   ServiceTokenError,
   SERVICE_TOKEN_SCOPES,
 } from "../services/service-tokens.js";
+import { sendMemoryV2Error, setMemoryV2PrivateResponseHeaders } from "../middleware/memory-errors.js";
+import { MemoryV2ResourceError } from "../services/memory-v2-resources.js";
 import { extractKnowledgeEnhanced } from "../pim/agents/knowledge-extraction.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
+import { legacyMemoryWritesFrozen } from "../services/memory-authority.js";
+import {
+  submitCanonicalLegacyLearnings,
+  type CanonicalLegacyIntakeResult,
+} from "../services/canonical-legacy-intake.js";
 import { broadcastToAll } from "../ws/index.js";
 import { computeCurrentDay } from "../services/pod-day.js";
 import { runTuningAgent, getOrgTuningHistory } from "../pim/agents/tuning-agent.js";
@@ -190,6 +199,7 @@ const CreateServiceTokenSchema = z
   .object({
     name: z.string().min(1).max(120).transform((s) => s.trim()),
     scopes: z.array(z.enum(SERVICE_TOKEN_SCOPES)).min(1),
+    authentication_profile: z.literal(PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE).optional(),
     project_id: z.string().min(1).optional(),
     pod_id: z.string().min(1).optional(),
     repository_ids: z.array(
@@ -240,22 +250,41 @@ export default async function orgRoutes(app: FastifyInstance) {
       if (!requireAdmin(req, reply)) return;
       const expiresAt = new Date(Date.now() + req.body.expires_in_days * 24 * 60 * 60 * 1000).toISOString();
       try {
+        const created = req.body.authentication_profile === PRIVATE_MEMORY_MCP_AUTHENTICATION_PROFILE
+          ? createPrivateMemoryMcpServiceToken({
+              orgId: req.org!.org_id,
+              name: req.body.name,
+              scopes: req.body.scopes,
+              projectId: req.body.project_id,
+              podId: req.body.pod_id,
+              repositoryIds: req.body.repository_ids,
+              harnessIds: req.body.harness_ids,
+              expiresAt,
+              createdByUserId: req.userRecord.user_id,
+            })
+          : createServiceToken({
+              orgId: req.org!.org_id,
+              name: req.body.name,
+              scopes: req.body.scopes,
+              projectId: req.body.project_id,
+              podId: req.body.pod_id,
+              repositoryIds: req.body.repository_ids,
+              harnessIds: req.body.harness_ids,
+              expiresAt,
+              createdByUserId: req.userRecord.user_id,
+            });
+        setMemoryV2PrivateResponseHeaders(reply);
         reply.code(201);
-        return createServiceToken({
-          orgId: req.org!.org_id,
-          name: req.body.name,
-          scopes: req.body.scopes,
-          projectId: req.body.project_id,
-          podId: req.body.pod_id,
-          repositoryIds: req.body.repository_ids,
-          harnessIds: req.body.harness_ids,
-          expiresAt,
-          createdByUserId: req.userRecord.user_id,
-        });
+        return created;
       } catch (err) {
         if (err instanceof ServiceTokenError) {
           reply.code(err.statusCode);
           return { error: err.message };
+        }
+        if (err instanceof MemoryV2ResourceError) {
+          return sendMemoryV2Error(reply, err.statusCode, err.code, err.message, {
+            retryable: err.statusCode >= 500,
+          });
         }
         throw err;
       }
@@ -440,19 +469,46 @@ export default async function orgRoutes(app: FastifyInstance) {
 async function runArchiveExtractionJob(app: FastifyInstance, job: ArchiveJobState, pod: PodRow): Promise<void> {
   let learningsExtracted = 0;
   try {
-    learningsExtracted = await withArchiveExtractionTimeout(
+    const extraction = await withArchiveExtractionTimeout(
       extractArchiveLearnings(job, pod),
       archiveExtractionTimeoutMs(),
     );
-    if (learningsExtracted > 0) {
+    learningsExtracted = extraction.learningsExtracted;
+    if (extraction.mode === "canonical") {
+      const intake = extraction.intake;
+      job.canonical_memory_intake = {
+        project_id: intake.projectId,
+        used_system_project: intake.usedSystemProject,
+        candidates_submitted: intake.candidatesSubmitted,
+        candidates_created: intake.candidatesCreated,
+        ...intake.counters,
+      };
+      broadcastToAll({
+        type: "memory_candidates_submitted",
+        podId: pod.pod_id,
+        payload: {
+          status: "pending_validation_review",
+          ...job.canonical_memory_intake,
+        },
+      });
+    } else if (learningsExtracted > 0) {
       broadcastToAll({ type: "knowledge_updated", podId: pod.pod_id, payload: { learnings_extracted: learningsExtracted } });
     }
 
     const archived = markArchiveExtractionCompleted(job.org_id, pod.pod_id);
     job.status = "completed";
     job.completed_at = new Date().toISOString();
-    if (archived) job.archived = { ...archived, learnings_extracted: learningsExtracted };
+    if (archived) {
+      job.archived = {
+        ...archived,
+        learnings_extracted: learningsExtracted,
+        ...(job.canonical_memory_intake
+          ? { canonical_memory_intake: job.canonical_memory_intake }
+          : {}),
+      };
+    }
     delete job.error;
+    delete job.error_code;
     scheduleArchiveJobEviction(archiveJobKey(job.org_id, pod.pod_id), job);
 
     void runTuningAgent(job.org_id).catch((err) => {
@@ -465,13 +521,54 @@ async function runArchiveExtractionJob(app: FastifyInstance, job: ArchiveJobStat
     job.completed_at = new Date().toISOString();
     if (archived) job.archived = { ...archived, learnings_extracted: learningsExtracted };
     job.error = err instanceof Error ? err.message : "Archive extraction failed";
+    job.error_code = typeof err === "object" && err !== null && "code" in err
+      && typeof err.code === "string"
+      ? err.code
+      : "archive_extraction_failed";
     scheduleArchiveJobEviction(archiveJobKey(job.org_id, pod.pod_id), job);
   }
 }
 
-async function extractArchiveLearnings(job: ArchiveJobState, pod: PodRow): Promise<number> {
+type ArchiveLearningExtraction = {
+  mode: "legacy";
+  learningsExtracted: number;
+} | {
+  mode: "canonical";
+  learningsExtracted: number;
+  intake: CanonicalLegacyIntakeResult;
+};
+
+async function extractArchiveLearnings(
+  job: ArchiveJobState,
+  pod: PodRow,
+): Promise<ArchiveLearningExtraction> {
   const learnings = await extractKnowledgeEnhanced(pod.pod_id, job.org_id);
-  if (learnings.length === 0) return 0;
+  if (legacyMemoryWritesFrozen()) {
+    const intake = submitCanonicalLegacyLearnings({
+      orgId: job.org_id,
+      source: {
+        kind: "pod_archival",
+        sourceId: pod.pod_id,
+        sourceLabel: pod.name,
+        projectId: pod.project_id,
+        occurredAt: archivedCompletedAt(job.archived!),
+        taskSummary: `Archive Pod ${pod.name} learnings for canonical validation and review`,
+        evidence: {
+          pod_id: pod.pod_id,
+          pod_name: pod.name,
+          project_id: pod.project_id ?? null,
+        },
+      },
+      learnings,
+      now: job.started_at,
+    });
+    return {
+      mode: "canonical",
+      learningsExtracted: intake.candidatesSubmitted,
+      intake,
+    };
+  }
+  if (learnings.length === 0) return { mode: "legacy", learningsExtracted: 0 };
 
   let projectMeta: { project_id: string; project_name: string } | undefined;
   if (pod.project_id) {
@@ -483,5 +580,5 @@ async function extractArchiveLearnings(job: ArchiveJobState, pod: PodRow): Promi
   // Route through the ingestion gateway (sanitize -> normalize domains ->
   // clamp confidence) before embedding + dedup + relational edge-building.
   const result = await ingestLearnings(job.org_id, learnings, pod.pod_id, pod.name, "pod_archival", projectMeta, { skipAnalysis: true });
-  return result.nodesAdded;
+  return { mode: "legacy", learningsExtracted: result.nodesAdded };
 }
