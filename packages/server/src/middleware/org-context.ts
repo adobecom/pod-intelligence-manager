@@ -7,7 +7,13 @@ import {
   type OrgRecord,
   type MembershipRecord,
 } from "../services/orgs.js";
-import { isMemoryApiPath, sendMemoryError } from "./memory-errors.js";
+import { recordMemoryMetric } from "../services/memory-metrics.js";
+import {
+  isMemoryApiPath,
+  isMemoryV2ApiPath,
+  sendMemoryPathError,
+  type PimMemoryV2ErrorCode,
+} from "./memory-errors.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -17,6 +23,45 @@ declare module "fastify" {
 }
 
 const ORG_HEADER = "x-pim-org";
+
+function recordReadinessOrgContextDenial(
+  req: FastifyRequest,
+  statusCode: number,
+  reason: PimMemoryV2ErrorCode,
+): void {
+  if (!isMemoryV2ApiPath(req.url)
+      || req.url.split("?", 1)[0] !== "/api/v2/memory/readiness") return;
+  const selectedPlane = new URL(req.url, "http://memory.local").searchParams.get("plane");
+  const plane = selectedPlane === "codebase" || selectedPlane === "harness"
+    ? selectedPlane
+    : "unresolved";
+  recordMemoryMetric({
+    name: "MemoryOperationOutcome",
+    value: 1,
+    unit: "Count",
+    dimensions: {
+      transport: "direct_http",
+      operation: "readiness",
+      plane,
+      resource_type: plane === "codebase"
+        ? "repository"
+        : plane === "harness"
+          ? "harness"
+          : "unresolved",
+      contract_version: "pim.memory.v2",
+      outcome: "deny",
+      reason,
+      status: statusCode >= 500 ? "5xx" : "4xx",
+    },
+    fields: req.auth?.kind === "service_token"
+      ? {
+          service_principal_id: req.auth.servicePrincipalId,
+          organization_id: req.auth.orgId,
+          ...(req.auth.projectId ? { project_id: req.auth.projectId } : {}),
+        }
+      : undefined,
+  });
+}
 
 function requiresExplicitOrg(url: string): boolean {
   const path = url.split("?")[0] ?? url;
@@ -44,13 +89,42 @@ export async function resolveRequestOrg(req: FastifyRequest, reply: FastifyReply
   const slug = Array.isArray(headerVal) ? headerVal[0] : headerVal;
 
   if (req.auth?.kind === "service_token") {
+    if (isMemoryV2ApiPath(req.url)) {
+      const authorization = req.memoryV2Authorization;
+      if (!authorization) {
+        recordReadinessOrgContextDenial(req, 403, "resource_binding_mismatch");
+        return sendMemoryPathError(
+          req.url,
+          reply,
+          403,
+          "resource_binding_mismatch",
+          "Memory v2 request authorization is unavailable",
+        );
+      }
+      if (slug && slug !== authorization.org.slug) {
+        recordReadinessOrgContextDenial(req, 403, "resource_binding_mismatch");
+        return sendMemoryPathError(
+          req.url,
+          reply,
+          403,
+          "resource_binding_mismatch",
+          "Authenticated organization binding does not match the request",
+        );
+      }
+      req.org = authorization.org;
+      req.membership = authorization.membership;
+      return;
+    }
     if (isMemoryApiPath(req.url)) {
       const org = findOrgById(req.auth.orgId);
       if (!org) {
-        return sendMemoryError(reply, 404, "resource_not_found", "Organization is unavailable");
+        recordReadinessOrgContextDenial(req, 404, "resource_not_found");
+        return sendMemoryPathError(req.url, reply, 404, "resource_not_found", "Organization is unavailable");
       }
       if (slug && slug !== org.slug) {
-        return sendMemoryError(
+        recordReadinessOrgContextDenial(req, 403, "resource_binding_mismatch");
+        return sendMemoryPathError(
+          req.url,
           reply,
           403,
           "resource_binding_mismatch",
@@ -59,7 +133,9 @@ export async function resolveRequestOrg(req: FastifyRequest, reply: FastifyReply
       }
       const membership = getMembership(org.org_id, req.userRecord.user_id);
       if (!membership) {
-        return sendMemoryError(
+        recordReadinessOrgContextDenial(req, 403, "resource_binding_mismatch");
+        return sendMemoryPathError(
+          req.url,
           reply,
           403,
           "resource_binding_mismatch",

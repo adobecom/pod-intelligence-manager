@@ -19,6 +19,7 @@ import { identifyHubs } from "./graph-analysis.js";
 import { getGraph } from "./knowledge-graph.js";
 import { ingestLearnings } from "./ingestion-gateway.js";
 import { isEmbeddingAvailable } from "./embeddings.js";
+import { legacyMemoryWritesFrozen } from "./memory-authority.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -265,6 +266,10 @@ interface LLMSynthesisResponse {
  */
 export async function runScheduledGraphSynthesis(orgId: string): Promise<GraphSynthesisRunResult> {
   const run_id = crypto.randomUUID();
+
+  if (legacyMemoryWritesFrozen()) {
+    return { ok: true, skipped: "legacy_authority_frozen", run_id };
+  }
 
   if (!isLLMAvailable()) {
     return { ok: true, skipped: "llm_unavailable", run_id };

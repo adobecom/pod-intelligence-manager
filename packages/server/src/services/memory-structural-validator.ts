@@ -118,8 +118,18 @@ export function memoryStructuralIssues(input: StructuralMemoryInput): MemoryStru
         || Boolean(input.applicability.tool_ids?.length);
       if (!hasVersionSelector) issues.push({ path: "/applicability", reason: "harness activation requires a version, configuration, model, or tool selector" });
     }
-    if (input.validation.strategy !== "stable_failure_fingerprint" || !input.validation.failure_fingerprint) {
-      issues.push({ path: "/validation", reason: "harness memory requires a stable failure fingerprint" });
+    if (input.validation.strategy === "stable_failure_fingerprint") {
+      if (!input.validation.failure_fingerprint) {
+        issues.push({
+          path: "/validation/failure_fingerprint",
+          reason: "failure-derived harness memory requires a stable failure fingerprint",
+        });
+      }
+    } else if (input.validation.strategy !== "policy_owner_review") {
+      issues.push({
+        path: "/validation/strategy",
+        reason: "harness memory requires failure-fingerprint or authorized-review validation",
+      });
     }
   } else if (input.plane === "org") {
     if (!isOrgApplicability(input.applicability)) {

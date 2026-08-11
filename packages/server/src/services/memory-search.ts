@@ -13,11 +13,6 @@ import {
   listAuthorizedCurrentMemoryRecords,
   type SearchableMemoryRecord,
 } from "./memory-records.js";
-import {
-  assignMemoryPromptArm,
-  getMemoryPromptPolicy,
-  promptPolicyAllowsRecord,
-} from "./memory-prompt-policy.js";
 import type { MemoryRepositoryBinding } from "./memory-repository-registry.js";
 
 const SEARCH_POLICY_VERSION = "retrieval-codebase-v1";
@@ -44,6 +39,41 @@ interface RankedRecord {
 export interface MemorySearchDependencies {
   now?: () => Date;
   generateQueryEmbedding?: (text: string) => Promise<number[] | null>;
+}
+
+export interface MemorySearchProjectionItem {
+  record: SearchableMemoryRecord;
+  tokenCount: number;
+  rankScore: number;
+  matchReasons: string[];
+}
+
+export interface MemorySearchProjectionContext {
+  requestDigest: string;
+  retrievalPackId: string;
+  policyVersion: string;
+  rankerVersion: string;
+  createdAt: string;
+  expiresAt: string;
+  response: MemorySearchResultV1;
+  items: MemorySearchProjectionItem[];
+}
+
+/**
+ * Persistence seam for transport/version-specific immutable packs. Ranking,
+ * hard filters, and token budgeting remain owned by this service and execute
+ * exactly once before this callback runs in the same immediate transaction.
+ */
+export interface MemorySearchProjection<T> {
+  requestDigest: string;
+  replay(): T | null;
+  filterAuthorizedRecords?(
+    records: readonly SearchableMemoryRecord[],
+  ): SearchableMemoryRecord[];
+  assertAuthorizedRecords?(records: readonly SearchableMemoryRecord[]): void;
+  assertCommitAuthorized?(): void;
+  assertCommitRecords?(records: readonly SearchableMemoryRecord[]): void;
+  commit(context: MemorySearchProjectionContext): T;
 }
 
 function words(text: string): Set<string> {
@@ -187,7 +217,6 @@ function toSearchItem(ranked: RankedRecord, includeExplanations: boolean): Memor
     validation: detail.validation,
     evidence_summary: detail.evidence_summary,
     freshness: detail.freshness,
-    prompt_eligible: false,
     detail_href: `/api/v1/memory/records/${encodeURIComponent(detail.record_id)}?version=${detail.record_version}`,
     match_reasons: includeExplanations ? ranked.matchReasons : [],
   };
@@ -213,36 +242,33 @@ function existingReplay(
   return parseMemoryContract("MemorySearchResultV1", JSON.parse(row.response_json));
 }
 
-export async function executeMemorySearch(input: {
+export async function executeMemorySearchWithProjection<T>(input: {
   orgId: string;
   principalId: string;
   repository: MemoryRepositoryBinding;
   request: MemorySearchV1;
-}, dependencies: MemorySearchDependencies = {}): Promise<MemorySearchResultV1> {
-  const requestDigest = canonicalJsonSha256(input.request);
-  const replay = existingReplay(
-    input.orgId,
-    input.request.tenant.project_id,
-    input.request.request_id,
-    requestDigest,
-  );
+}, dependencies: MemorySearchDependencies, projection: MemorySearchProjection<T>): Promise<T> {
+  const requestDigest = projection.requestDigest;
+  const replay = projection.replay();
   if (replay) return replay;
 
   const nowDate = dependencies.now?.() ?? new Date();
   const now = nowDate.toISOString();
-  const authorized = listAuthorizedCurrentMemoryRecords({
+  const authorizedSource = listAuthorizedCurrentMemoryRecords({
     orgId: input.orgId,
     projectId: input.request.tenant.project_id,
     repositoryRowId: input.repository.repository_row_id,
     now,
   });
+  const authorized = projection.filterAuthorizedRecords?.(authorizedSource) ?? authorizedSource;
+  projection.assertAuthorizedRecords?.(authorized);
   const embed = dependencies.generateQueryEmbedding ?? generateEmbedding;
   const needsEmbedding = authorized.some((item) => item.version.embedding_json);
   const queryEmbedding = needsEmbedding ? await embed(input.request.task.query) : null;
   // Embedding generation is the only await between the initial hard filter and
   // pack commit. Re-read the authorized population afterwards so a concurrent
   // revocation can never be packed from a stale pre-await snapshot.
-  const currentAuthorized = needsEmbedding
+  const currentAuthorizedSource = needsEmbedding
     ? listAuthorizedCurrentMemoryRecords({
         orgId: input.orgId,
         projectId: input.request.tenant.project_id,
@@ -250,6 +276,10 @@ export async function executeMemorySearch(input: {
         now: (dependencies.now?.() ?? new Date()).toISOString(),
       })
     : authorized;
+  const currentAuthorized = needsEmbedding
+    ? projection.filterAuthorizedRecords?.(currentAuthorizedSource) ?? currentAuthorizedSource
+    : currentAuthorizedSource;
+  projection.assertAuthorizedRecords?.(currentAuthorized);
   const scored = currentAuthorized
     .map((record) => scoreRecord(record, input.request, queryEmbedding))
     .filter((record): record is RankedRecord => record !== null)
@@ -270,47 +300,12 @@ export async function executeMemorySearch(input: {
   const retrievalPackId = `pack_${randomUUID()}`;
   const expiresAt = new Date(nowDate.getTime() + PACK_TTL_MS).toISOString();
 
-  return withImmediateTransaction(() => {
-    const concurrentReplay = existingReplay(
-      input.orgId,
-      input.request.tenant.project_id,
-      input.request.request_id,
-      requestDigest,
-    );
+  return withImmediateTransaction((): unknown => {
+    projection.assertCommitAuthorized?.();
+    const concurrentReplay = projection.replay();
     if (concurrentReplay) return concurrentReplay;
+    projection.assertCommitRecords?.(selected.map((entry) => entry.ranked.source));
 
-    // Policy evaluation and the prompt-visible pack commit share one immediate
-    // transaction. A kill/pause writer therefore wins before this read or waits
-    // until after this immutable pack is committed; stale exposure cannot slip
-    // across the switch boundary.
-    const promptPolicy = getMemoryPromptPolicy(
-      input.orgId,
-      input.request.tenant.project_id,
-    );
-    const evaluationArm = assignMemoryPromptArm({
-      policy: promptPolicy,
-      repositoryId: input.repository.repository_id,
-      consumerRunId: input.request.consumer.consumer_run_id,
-    });
-    let promptItemCount = 0;
-    let promptTokenCount = 0;
-    for (const entry of selected) {
-      if (promptItemCount >= promptPolicy.max_prompt_items) break;
-      if (entry.ranked.source.record.prompt_eligible !== 1
-          || !promptPolicyAllowsRecord({
-            policy: promptPolicy,
-            arm: evaluationArm,
-            repositoryId: input.repository.repository_id,
-            kind: entry.item.kind,
-          })) {
-        continue;
-      }
-      if (promptTokenCount + entry.tokens > promptPolicy.max_prompt_tokens) continue;
-      entry.item.prompt_eligible = true;
-      promptItemCount += 1;
-      promptTokenCount += entry.tokens;
-    }
-    const promptEligible = promptItemCount > 0;
     const response = parseMemoryContract("MemorySearchResultV1", {
       schema_version: "pim.memory-search-result.v1",
       request_id: input.request.request_id,
@@ -320,86 +315,109 @@ export async function executeMemorySearch(input: {
       plane: "codebase",
       repository_id: input.repository.repository_id,
       token_count: tokenCount,
-      prompt_eligible: promptEligible,
-      evaluation_arm: evaluationArm,
       items: selected.map((entry) => entry.item),
       omitted_count: Math.max(0, scored.length - selected.length),
       expires_at: expiresAt,
     });
-    const responseJson = JSON.stringify(response);
-
-    db.prepare(
-      `INSERT INTO memory_retrieval_packs
-         (retrieval_pack_id, org_id, project_id, request_id, request_digest,
-          repository_row_id, repository_id, plane, query, policy_version, ranker_version,
-          authorized_scope_json, token_count, omitted_count, response_json, created_at,
-          expires_at, consumer_run_id, request_base_sha, prompt_eligible, evaluation_arm,
-          prompt_policy_revision, prompt_policy_snapshot_json, prompt_item_count,
-          prompt_token_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'codebase', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      retrievalPackId,
-      input.orgId,
-      input.request.tenant.project_id,
-      input.request.request_id,
+    return projection.commit({
       requestDigest,
-      input.repository.repository_row_id,
-      input.repository.repository_id,
-      input.request.task.query,
-      SEARCH_POLICY_VERSION,
-      SEARCH_RANKER_VERSION,
-      JSON.stringify({
-        org_id: input.orgId,
-        project_id: input.request.tenant.project_id,
-        repository_id: input.repository.repository_id,
-        service_principal_id: input.principalId,
-      }),
-      tokenCount,
-      response.omitted_count,
-      responseJson,
-      now,
+      retrievalPackId,
+      policyVersion: SEARCH_POLICY_VERSION,
+      rankerVersion: SEARCH_RANKER_VERSION,
+      createdAt: now,
       expiresAt,
-      input.request.consumer.consumer_run_id,
-      (input.request.applicability as CodebaseApplicabilityV1).base_sha ?? null,
-      promptEligible ? 1 : 0,
-      evaluationArm,
-      promptPolicy.policy_revision,
-      JSON.stringify({ policy: promptPolicy, evaluation_arm: evaluationArm }),
-      promptItemCount,
-      promptTokenCount,
-    );
-    const insertItem = db.prepare(
-      `INSERT INTO memory_retrieval_pack_items
-         (retrieval_pack_id, item_order, record_id, record_version, token_count,
-          rank_score, match_reasons_json, prompt_eligible)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    selected.forEach((entry, index) => insertItem.run(
-      retrievalPackId,
-      index,
-      entry.item.record_id,
-      entry.item.record_version,
-      entry.tokens,
-      entry.ranked.score,
-      JSON.stringify(entry.ranked.matchReasons),
-      entry.item.prompt_eligible ? 1 : 0,
-    ));
-    db.prepare(
-      `INSERT INTO memory_idempotency_keys
-         (org_id, project_id, operation, idempotency_key, request_digest,
-          response_resource_type, response_resource_id, response_json, created_at, expires_at)
-       VALUES (?, ?, 'memory_search', ?, ?, 'retrieval_pack', ?, ?, ?, ?)`,
-    ).run(
+      response,
+      items: selected.map((entry) => ({
+        record: entry.ranked.source,
+        tokenCount: entry.tokens,
+        rankScore: entry.ranked.score,
+        matchReasons: [...entry.ranked.matchReasons],
+      })),
+    });
+  }) as T;
+}
+
+export async function executeMemorySearch(input: {
+  orgId: string;
+  principalId: string;
+  repository: MemoryRepositoryBinding;
+  request: MemorySearchV1;
+}, dependencies: MemorySearchDependencies = {}): Promise<MemorySearchResultV1> {
+  const requestDigest = canonicalJsonSha256(input.request);
+  return executeMemorySearchWithProjection(input, dependencies, {
+    requestDigest,
+    replay: () => existingReplay(
       input.orgId,
       input.request.tenant.project_id,
       input.request.request_id,
       requestDigest,
-      retrievalPackId,
-      responseJson,
-      now,
-      new Date(nowDate.getTime() + IDEMPOTENCY_RETENTION_MS).toISOString(),
-    );
-    return response;
+    ),
+    commit: (context) => {
+      const responseJson = JSON.stringify(context.response);
+      db.prepare(
+        `INSERT INTO memory_retrieval_packs
+           (retrieval_pack_id, org_id, project_id, request_id, request_digest,
+            repository_row_id, repository_id, plane, query, policy_version, ranker_version,
+            authorized_scope_json, token_count, omitted_count, response_json, created_at,
+            expires_at, consumer_run_id, request_base_sha)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'codebase', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        context.retrievalPackId,
+        input.orgId,
+        input.request.tenant.project_id,
+        input.request.request_id,
+        context.requestDigest,
+        input.repository.repository_row_id,
+        input.repository.repository_id,
+        input.request.task.query,
+        context.policyVersion,
+        context.rankerVersion,
+        JSON.stringify({
+          org_id: input.orgId,
+          project_id: input.request.tenant.project_id,
+          repository_id: input.repository.repository_id,
+          service_principal_id: input.principalId,
+        }),
+        context.response.token_count,
+        context.response.omitted_count,
+        responseJson,
+        context.createdAt,
+        context.expiresAt,
+        input.request.consumer.consumer_run_id,
+        (input.request.applicability as CodebaseApplicabilityV1).base_sha ?? null,
+      );
+      const insertItem = db.prepare(
+        `INSERT INTO memory_retrieval_pack_items
+           (retrieval_pack_id, item_order, record_id, record_version, token_count,
+            rank_score, match_reasons_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      context.items.forEach((entry, index) => insertItem.run(
+        context.retrievalPackId,
+        index,
+        entry.record.detail.record_id,
+        entry.record.detail.record_version,
+        entry.tokenCount,
+        entry.rankScore,
+        JSON.stringify(entry.matchReasons),
+      ));
+      db.prepare(
+        `INSERT INTO memory_idempotency_keys
+           (org_id, project_id, operation, idempotency_key, request_digest,
+            response_resource_type, response_resource_id, response_json, created_at, expires_at)
+         VALUES (?, ?, 'memory_search', ?, ?, 'retrieval_pack', ?, ?, ?, ?)`,
+      ).run(
+        input.orgId,
+        input.request.tenant.project_id,
+        input.request.request_id,
+        context.requestDigest,
+        context.retrievalPackId,
+        responseJson,
+        context.createdAt,
+        new Date(Date.parse(context.createdAt) + IDEMPOTENCY_RETENTION_MS).toISOString(),
+      );
+      return context.response;
+    },
   });
 }
 

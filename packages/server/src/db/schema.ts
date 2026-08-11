@@ -5,7 +5,7 @@ import { runSchemaMigrations } from "./migrations.js";
 export const ORG_CONFIG_ROW_KEY = "org_config";
 export const ORG_TUNING_ROW_KEY = "org_tuning";
 
-export function createTables() {
+export function createTables(options: { memoryMigrationThroughVersion?: number } = {}) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       user_id TEXT PRIMARY KEY,
@@ -1303,5 +1303,5 @@ export function createTables() {
   // Canonical memory uses numbered, immutable, fail-fast migrations. Keep this
   // outside the legacy best-effort ALTER guards above so a partial memory
   // schema can never be mistaken for a successful deployment.
-  runSchemaMigrations();
+  runSchemaMigrations(db, { throughVersion: options.memoryMigrationThroughVersion });
 }

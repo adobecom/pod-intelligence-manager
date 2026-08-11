@@ -444,14 +444,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         }
       }
     },
-    "MemoryEvaluationArmV1": {
-      "type": "string",
-      "enum": [
-        "shadow",
-        "memory_off",
-        "memory_on"
-      ]
-    },
     "MemorySearchItemV1": {
       "type": "object",
       "additionalProperties": false,
@@ -468,7 +460,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         "validation",
         "evidence_summary",
         "freshness",
-        "prompt_eligible",
         "detail_href",
         "match_reasons"
       ],
@@ -525,9 +516,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         },
         "freshness": {
           "$ref": "#/$defs/FreshnessV1"
-        },
-        "prompt_eligible": {
-          "type": "boolean"
         },
         "detail_href": {
           "type": "string",
@@ -746,7 +734,7 @@ export const MEMORY_CONTRACT_SCHEMA = {
         }
       }
     },
-    "FiestaCodeEvidenceV2": {
+    "CodeEvidenceManifestV2": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -757,7 +745,7 @@ export const MEMORY_CONTRACT_SCHEMA = {
       ],
       "properties": {
         "schema_version": {
-          "const": "fiesta.code-evidence.v2"
+          "const": "pim.memory-code-evidence.v2"
         },
         "manifest_id": {
           "type": "string",
@@ -968,460 +956,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         }
       }
     },
-    "MemoryPromptPolicyUpdateV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "expected_revision",
-        "enabled",
-        "kill_switch",
-        "automatic_activation_enabled",
-        "canary_percentage",
-        "allowed_repository_ids",
-        "allowed_kinds",
-        "max_prompt_items",
-        "max_prompt_tokens"
-      ],
-      "properties": {
-        "schema_version": {
-          "const": "pim.memory-prompt-policy-update.v1"
-        },
-        "expected_revision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "kill_switch": {
-          "type": "boolean"
-        },
-        "automatic_activation_enabled": {
-          "type": "boolean"
-        },
-        "canary_percentage": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "allowed_repository_ids": {
-          "type": "array",
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$",
-            "maxLength": 256
-          }
-        },
-        "allowed_kinds": {
-          "type": "array",
-          "maxItems": 4,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "decision",
-              "constraint",
-              "anti_pattern",
-              "test_strategy"
-            ]
-          }
-        },
-        "max_prompt_items": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 3
-        },
-        "max_prompt_tokens": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1200
-        }
-      }
-    },
-    "MemoryPromptPolicyV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "project_id",
-        "policy_revision",
-        "enabled",
-        "kill_switch",
-        "automatic_activation_enabled",
-        "canary_percentage",
-        "allowed_repository_ids",
-        "allowed_kinds",
-        "max_prompt_items",
-        "max_prompt_tokens",
-        "global_enabled",
-        "effective_enabled",
-        "updated_at"
-      ],
-      "properties": {
-        "schema_version": {
-          "const": "pim.memory-prompt-policy.v1"
-        },
-        "project_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "policy_revision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "kill_switch": {
-          "type": "boolean"
-        },
-        "automatic_activation_enabled": {
-          "type": "boolean"
-        },
-        "canary_percentage": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 100
-        },
-        "allowed_repository_ids": {
-          "type": "array",
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$",
-            "maxLength": 256
-          }
-        },
-        "allowed_kinds": {
-          "type": "array",
-          "maxItems": 4,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "decision",
-              "constraint",
-              "anti_pattern",
-              "test_strategy"
-            ]
-          }
-        },
-        "max_prompt_items": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 3
-        },
-        "max_prompt_tokens": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1200
-        },
-        "global_enabled": {
-          "type": "boolean"
-        },
-        "effective_enabled": {
-          "type": "boolean"
-        },
-        "updated_at": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "date-time"
-        }
-      }
-    },
-    "MemoryReleaseGateSnapshotV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "representative_sample_count",
-        "reviewed_candidate_count",
-        "known_boundary_leakage_count",
-        "provenance_completeness_rate",
-        "typed_round_trip_conformance_rate",
-        "unresolved_active_pointer_count",
-        "extraction_precision_rate",
-        "resolvable_evidence_rate",
-        "harmful_or_stale_prompt_exposure_rate",
-        "critical_policy_violation_count",
-        "evidence_bypass_incident_count",
-        "critical_harm_incident_count",
-        "pim_outage_blocked_execution_count",
-        "pim_outage_lost_queued_receipt_count",
-        "memory_on_off_pair_count",
-        "task_pass_lift_percentage_points",
-        "paired_95ci_lower_percentage_points",
-        "pass_rate_delta_percentage_points",
-        "noninferiority_margin_percentage_points",
-        "efficiency_reduction_rate",
-        "same_record_helpful_independent_runs",
-        "latency_or_cost_increase_rate",
-        "disciplined_no_lift_cycles"
-      ],
-      "properties": {
-        "representative_sample_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "reviewed_candidate_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "known_boundary_leakage_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "provenance_completeness_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "typed_round_trip_conformance_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "unresolved_active_pointer_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "extraction_precision_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "resolvable_evidence_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "harmful_or_stale_prompt_exposure_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "critical_policy_violation_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "evidence_bypass_incident_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "critical_harm_incident_count": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "pim_outage_blocked_execution_count": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "pim_outage_lost_queued_receipt_count": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "memory_on_off_pair_count": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "task_pass_lift_percentage_points": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -100,
-          "maximum": 100
-        },
-        "paired_95ci_lower_percentage_points": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -100,
-          "maximum": 100
-        },
-        "pass_rate_delta_percentage_points": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -100,
-          "maximum": 100
-        },
-        "noninferiority_margin_percentage_points": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 100
-        },
-        "efficiency_reduction_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -1,
-          "maximum": 1
-        },
-        "same_record_helpful_independent_runs": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "latency_or_cost_increase_rate": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -1,
-          "maximum": 10
-        },
-        "disciplined_no_lift_cycles": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        }
-      }
-    },
-    "MemoryReleaseGateEvaluationV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "stage",
-        "dataset_digest",
-        "metric_snapshot"
-      ],
-      "properties": {
-        "schema_version": {
-          "const": "pim.memory-release-gate-evaluation.v1"
-        },
-        "stage": {
-          "type": "string",
-          "enum": [
-            "pre_canary",
-            "expansion"
-          ]
-        },
-        "dataset_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        },
-        "metric_snapshot": {
-          "$ref": "#/$defs/MemoryReleaseGateSnapshotV1"
-        }
-      }
-    },
-    "MemoryReleaseGateDecisionV1": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "project_id",
-        "decision_id",
-        "stage",
-        "decision",
-        "status",
-        "dataset_digest",
-        "metric_snapshot_digest",
-        "reasons",
-        "created_at"
-      ],
-      "properties": {
-        "schema_version": {
-          "const": "pim.memory-release-gate-decision.v1"
-        },
-        "project_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "decision_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "stage": {
-          "type": "string",
-          "enum": [
-            "pre_canary",
-            "expansion"
-          ]
-        },
-        "decision": {
-          "type": "string",
-          "enum": [
-            "continue",
-            "pause"
-          ]
-        },
-        "status": {
-          "type": "string",
-          "enum": [
-            "pass",
-            "fail",
-            "insufficient_data"
-          ]
-        },
-        "dataset_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        },
-        "metric_snapshot_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        },
-        "reasons": {
-          "type": "array",
-          "maxItems": 32,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        },
-        "created_at": {
-          "type": "string",
-          "format": "date-time"
-        }
-      }
-    },
     "MemorySearchV1": {
       "type": "object",
       "additionalProperties": false,
@@ -1563,8 +1097,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         "plane",
         "repository_id",
         "token_count",
-        "prompt_eligible",
-        "evaluation_arm",
         "items",
         "omitted_count",
         "expires_at"
@@ -1603,12 +1135,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
           "type": "integer",
           "minimum": 0
         },
-        "prompt_eligible": {
-          "type": "boolean"
-        },
-        "evaluation_arm": {
-          "$ref": "#/$defs/MemoryEvaluationArmV1"
-        },
         "items": {
           "type": "array",
           "maxItems": 32,
@@ -1642,7 +1168,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         "validation",
         "evidence_summary",
         "freshness",
-        "prompt_eligible",
         "match_reasons"
       ],
       "properties": {
@@ -1698,9 +1223,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         },
         "freshness": {
           "$ref": "#/$defs/FreshnessV1"
-        },
-        "prompt_eligible": {
-          "const": false
         },
         "match_reasons": {
           "type": "array",
@@ -1814,10 +1336,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         "tenant",
         "plane",
         "harness_id",
-        "shadow_only",
-        "routing_influence",
-        "prompt_eligible",
-        "evaluation_arm",
         "token_count",
         "items",
         "omitted_count",
@@ -1852,18 +1370,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
           "type": "string",
           "minLength": 1,
           "maxLength": 64
-        },
-        "shadow_only": {
-          "const": true
-        },
-        "routing_influence": {
-          "const": false
-        },
-        "prompt_eligible": {
-          "const": false
-        },
-        "evaluation_arm": {
-          "const": "shadow"
         },
         "token_count": {
           "type": "integer",
@@ -1934,7 +1440,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "exposure",
             "use_disposition",
             "use_attribution_confidence",
             "utility",
@@ -1942,28 +1447,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
             "reason_code"
           ],
           "properties": {
-            "exposure": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "status",
-                "consumer_phase"
-              ],
-              "properties": {
-                "status": {
-                  "type": "string",
-                  "enum": [
-                    "not_exposed",
-                    "exposed"
-                  ]
-                },
-                "consumer_phase": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 64
-                }
-              }
-            },
             "use_disposition": {
               "type": "string",
               "enum": [
@@ -2193,7 +1676,7 @@ export const MEMORY_CONTRACT_SCHEMA = {
           }
         },
         "evidence_manifest": {
-          "$ref": "#/$defs/FiestaCodeEvidenceV2"
+          "$ref": "#/$defs/CodeEvidenceManifestV2"
         },
         "candidates": {
           "type": "array",
@@ -2498,7 +1981,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         "evidence_summary",
         "freshness",
         "lifecycle",
-        "prompt_eligible",
         "transition_summary",
         "recorded_at"
       ],
@@ -2566,9 +2048,6 @@ export const MEMORY_CONTRACT_SCHEMA = {
         },
         "lifecycle": {
           "$ref": "#/$defs/LifecycleV1"
-        },
-        "prompt_eligible": {
-          "type": "boolean"
         },
         "transition_summary": {
           "$ref": "#/$defs/TransitionSummaryV1"
@@ -3325,8 +2804,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
         "pim.run-receipt.v1",
         "pim.memory-feedback.v1",
         "pim.memory-candidate-decision.v1",
-        "pim.memory-prompt-policy-update.v1",
-        "pim.memory-release-gate-evaluation.v1",
         "pim.memory-attestation.v1"
       ],
       "responses": [
@@ -3339,8 +2816,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
         "pim.memory-record-history.v1",
         "pim.memory-feedback-result.v1",
         "pim.memory-candidate-decision-result.v1",
-        "pim.memory-prompt-policy.v1",
-        "pim.memory-release-gate-decision.v1",
         "pim.memory-attestation-result.v1",
         "pim.error.v1"
       ]
@@ -3379,110 +2854,15 @@ export const MEMORY_CONTRACT_FIXTURES = {
     ],
     "deprecations": []
   },
-  "MemoryPromptPolicyUpdateV1": {
-    "schema_version": "pim.memory-prompt-policy-update.v1",
-    "expected_revision": 0,
-    "enabled": false,
-    "kill_switch": true,
-    "automatic_activation_enabled": false,
-    "canary_percentage": 0,
-    "allowed_repository_ids": [],
-    "allowed_kinds": [],
-    "max_prompt_items": 3,
-    "max_prompt_tokens": 800
-  },
-  "MemoryPromptPolicyV1": {
-    "schema_version": "pim.memory-prompt-policy.v1",
-    "project_id": "project-checkout",
-    "policy_revision": 0,
-    "enabled": false,
-    "kill_switch": true,
-    "automatic_activation_enabled": false,
-    "canary_percentage": 0,
-    "allowed_repository_ids": [],
-    "allowed_kinds": [],
-    "max_prompt_items": 3,
-    "max_prompt_tokens": 800,
-    "global_enabled": false,
-    "effective_enabled": false,
-    "updated_at": null
-  },
-  "MemoryReleaseGateSnapshotV1": {
-    "representative_sample_count": 100,
-    "reviewed_candidate_count": 100,
-    "known_boundary_leakage_count": 0,
-    "provenance_completeness_rate": 1,
-    "typed_round_trip_conformance_rate": 1,
-    "unresolved_active_pointer_count": 0,
-    "extraction_precision_rate": 0.95,
-    "resolvable_evidence_rate": 0.95,
-    "harmful_or_stale_prompt_exposure_rate": 0.009,
-    "critical_policy_violation_count": 0,
-    "evidence_bypass_incident_count": 0,
-    "critical_harm_incident_count": 0,
-    "pim_outage_blocked_execution_count": 0,
-    "pim_outage_lost_queued_receipt_count": 0,
-    "memory_on_off_pair_count": 50,
-    "task_pass_lift_percentage_points": 5,
-    "paired_95ci_lower_percentage_points": 0,
-    "pass_rate_delta_percentage_points": null,
-    "noninferiority_margin_percentage_points": null,
-    "efficiency_reduction_rate": null,
-    "same_record_helpful_independent_runs": 2,
-    "latency_or_cost_increase_rate": 0.1,
-    "disciplined_no_lift_cycles": 1
-  },
-  "MemoryReleaseGateEvaluationV1": {
-    "schema_version": "pim.memory-release-gate-evaluation.v1",
-    "stage": "expansion",
-    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "metric_snapshot": {
-      "representative_sample_count": 100,
-      "reviewed_candidate_count": 100,
-      "known_boundary_leakage_count": 0,
-      "provenance_completeness_rate": 1,
-      "typed_round_trip_conformance_rate": 1,
-      "unresolved_active_pointer_count": 0,
-      "extraction_precision_rate": 0.95,
-      "resolvable_evidence_rate": 0.95,
-      "harmful_or_stale_prompt_exposure_rate": 0.009,
-      "critical_policy_violation_count": 0,
-      "evidence_bypass_incident_count": 0,
-      "critical_harm_incident_count": 0,
-      "pim_outage_blocked_execution_count": 0,
-      "pim_outage_lost_queued_receipt_count": 0,
-      "memory_on_off_pair_count": 50,
-      "task_pass_lift_percentage_points": 5,
-      "paired_95ci_lower_percentage_points": 0,
-      "pass_rate_delta_percentage_points": null,
-      "noninferiority_margin_percentage_points": null,
-      "efficiency_reduction_rate": null,
-      "same_record_helpful_independent_runs": 2,
-      "latency_or_cost_increase_rate": 0.1,
-      "disciplined_no_lift_cycles": 1
-    }
-  },
-  "MemoryReleaseGateDecisionV1": {
-    "schema_version": "pim.memory-release-gate-decision.v1",
-    "project_id": "project-checkout",
-    "decision_id": "gate_contract_1",
-    "stage": "expansion",
-    "decision": "continue",
-    "status": "pass",
-    "dataset_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "metric_snapshot_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "reasons": [],
-    "created_at": "2026-08-03T20:00:00Z"
-  },
   "MemorySearchV1": {
     "schema_version": "pim.memory-search.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "consumer": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version": "7b6e858",
       "workflow_version": "code-change.v3",
-      "adapter_version": "fiesta-pim-adapter.v1",
-      "consumer_run_id": "fiesta:test:thread-1:run-1"
+      "adapter_version": "example-harness-a-pim-adapter.v1",
+      "consumer_run_id": "example-harness-a:test:thread-1:run-1"
     },
     "tenant": {
       "project_id": "project-checkout"
@@ -3520,7 +2900,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
   },
   "MemorySearchResultV1": {
     "schema_version": "pim.memory-search-result.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "retrieval_pack_id": "pack_contract_1",
     "policy_version": "retrieval-codebase-v1",
     "tenant": {
@@ -3529,8 +2909,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
     "plane": "codebase",
     "repository_id": "github.com/acme/checkout",
     "token_count": 96,
-    "prompt_eligible": false,
-    "evaluation_arm": "shadow",
     "items": [
       {
         "record_id": "mem_contract_1",
@@ -3574,7 +2952,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
           "last_confirmed_at": "2026-08-01T17:00:00Z",
           "expires_at": null
         },
-        "prompt_eligible": false,
         "detail_href": "/api/v1/memory/records/mem_contract_1?version=1",
         "match_reasons": [
           "exact_path",
@@ -3587,23 +2964,23 @@ export const MEMORY_CONTRACT_FIXTURES = {
   },
   "MemoryHarnessSearchV1": {
     "schema_version": "pim.memory-harness-search.v1",
-    "request_id": "fiesta-harness-search-contract-1",
+    "request_id": "example-harness-a-harness-search-contract-1",
     "consumer": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version": "7b6e858",
       "workflow_version": "code-change.v3",
-      "adapter_version": "fiesta-pim-adapter.v1",
-      "consumer_run_id": "fiesta:test:harness-shadow:run-1"
+      "adapter_version": "example-harness-a-pim-adapter.v1",
+      "consumer_run_id": "example-harness-a:test:harness:run-1"
     },
     "tenant": {
       "project_id": "project-checkout"
     },
     "plane": "harness",
     "applicability": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version_range": "7b6e858",
       "workflow_version_range": "code-change.v3",
-      "adapter_version_range": "fiesta-pim-adapter.v1",
+      "adapter_version_range": "example-harness-a-pim-adapter.v1",
       "configuration_ids": [
         "routing-default-v2"
       ]
@@ -3622,18 +2999,14 @@ export const MEMORY_CONTRACT_FIXTURES = {
   },
   "MemoryHarnessSearchResultV1": {
     "schema_version": "pim.memory-harness-search-result.v1",
-    "request_id": "fiesta-harness-search-contract-1",
+    "request_id": "example-harness-a-harness-search-contract-1",
     "retrieval_pack_id": "pack_harness_contract_1",
-    "policy_version": "retrieval-harness-shadow-v1",
+    "policy_version": "retrieval-harness-v1",
     "tenant": {
       "project_id": "project-checkout"
     },
     "plane": "harness",
-    "harness_id": "fiesta",
-    "shadow_only": true,
-    "routing_influence": false,
-    "prompt_eligible": false,
-    "evaluation_arm": "shadow",
+    "harness_id": "example-harness-a",
     "token_count": 82,
     "items": [
       {
@@ -3646,10 +3019,10 @@ export const MEMORY_CONTRACT_FIXTURES = {
           "status": "active"
         },
         "applicability": {
-          "harness_id": "fiesta",
+          "harness_id": "example-harness-a",
           "harness_version_range": "7b6e858",
           "workflow_version_range": "code-change.v3",
-          "adapter_version_range": "fiesta-pim-adapter.v1",
+          "adapter_version_range": "example-harness-a-pim-adapter.v1",
           "configuration_ids": [
             "routing-default-v2"
           ]
@@ -3660,7 +3033,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
         "compatibility": {
           "harness_version_range": "7b6e858",
           "workflow_version_range": "code-change.v3",
-          "adapter_version_range": "fiesta-pim-adapter.v1"
+          "adapter_version_range": "example-harness-a-pim-adapter.v1"
         },
         "validation": {
           "strategy": "stable_failure_fingerprint",
@@ -3674,7 +3047,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
           "last_confirmed_at": "2026-08-02T18:00:00Z",
           "expires_at": null
         },
-        "prompt_eligible": false,
         "match_reasons": [
           "exact_configuration",
           "task_lexical_match"
@@ -3686,7 +3058,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
   },
   "MemoryCandidateV1": {
     "schema_version": "pim.memory-candidate.v1",
-    "client_candidate_id": "fiesta-candidate-contract-1",
+    "client_candidate_id": "example-harness-a-candidate-contract-1",
     "plane": "codebase",
     "kind": "constraint",
     "content": {
@@ -3708,7 +3080,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
     },
     "exceptions": [],
     "source_run_ids": [
-      "fiesta:test:thread-1:run-1"
+      "example-harness-a:test:thread-1:run-1"
     ],
     "evidence_refs": [
       "diff_contract_1",
@@ -3716,13 +3088,13 @@ export const MEMORY_CONTRACT_FIXTURES = {
     ],
     "extraction": {
       "method": "model_then_deterministic_validation",
-      "extractor_version": "fiesta-candidate-extractor.v1",
+      "extractor_version": "example-harness-a-candidate-extractor.v1",
       "confidence": 0.86
     },
     "activation_requirement_requested": "verified_merge"
   },
-  "FiestaCodeEvidenceV2": {
-    "schema_version": "fiesta.code-evidence.v2",
+  "CodeEvidenceManifestV2": {
+    "schema_version": "pim.memory-code-evidence.v2",
     "manifest_id": "manifest_contract_1",
     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "refs": [
@@ -3739,12 +3111,12 @@ export const MEMORY_CONTRACT_FIXTURES = {
   },
   "RunReceiptV1": {
     "schema_version": "pim.run-receipt.v1",
-    "external_session_id": "fiesta-thread-contract-1",
+    "external_session_id": "example-harness-a-thread-contract-1",
     "producer": {
-      "harness_id": "fiesta",
+      "harness_id": "example-harness-a",
       "harness_version": "7b6e858",
       "workflow_version": "code-change.v3",
-      "adapter_version": "fiesta-pim-adapter.v1"
+      "adapter_version": "example-harness-a-pim-adapter.v1"
     },
     "tenant": {
       "project_id": "project-checkout"
@@ -3777,7 +3149,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
   "RunReceiptResultV1": {
     "schema_version": "pim.run-receipt-result.v1",
     "receipt_id": "receipt_contract_1",
-    "producer_run_id": "fiesta:test:thread-1:run-1",
+    "producer_run_id": "example-harness-a:test:thread-1:run-1",
     "request_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
     "status": "accepted",
     "candidate_results": []
@@ -3785,7 +3157,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
   "MemoryCandidateStatusV1": {
     "schema_version": "pim.memory-candidate-status.v1",
     "candidate_id": "candidate_contract_1",
-    "client_candidate_id": "fiesta-candidate-contract-1",
+    "client_candidate_id": "example-harness-a-candidate-contract-1",
     "plane": "codebase",
     "kind": "constraint",
     "status": "pending_merge",
@@ -3865,7 +3237,6 @@ export const MEMORY_CONTRACT_FIXTURES = {
     "lifecycle": {
       "status": "active"
     },
-    "prompt_eligible": false,
     "transition_summary": {
       "transition_id": "transition_record_contract_1",
       "from_status": null,
@@ -4001,7 +3372,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
     "retrieval_pack_id": "pack_contract_1",
     "record_id": "mem_contract_1",
     "record_version": 1,
-    "producer_run_id": "fiesta:test:thread-2:run-1",
+    "producer_run_id": "example-harness-a:test:thread-2:run-1",
     "repository_id": "github.com/acme/checkout",
     "base_sha": "0123456789abcdef0123456789abcdef01234567",
     "disposition": "helpful",
@@ -4070,7 +3441,7 @@ export const MEMORY_CONTRACT_FIXTURES = {
     "schema_version": "pim.error.v1",
     "code": "schema_invalid",
     "message": "Request does not match pim.memory-search.v1",
-    "request_id": "fiesta-search-contract-1",
+    "request_id": "example-harness-a-search-contract-1",
     "details": [
       {
         "path": "/unexpected",
@@ -4168,8 +3539,6 @@ export type LifecycleV1 = {
   "status": "active" | "stale" | "superseded" | "revoked" | "expired";
 };
 
-export type MemoryEvaluationArmV1 = "shadow" | "memory_off" | "memory_on";
-
 export type MemorySearchItemV1 = {
   "record_id": string;
   "record_version": number;
@@ -4183,7 +3552,6 @@ export type MemorySearchItemV1 = {
   "validation": ValidationV1;
   "evidence_summary": EvidenceSummaryV1;
   "freshness": FreshnessV1;
-  "prompt_eligible": boolean;
   "detail_href": string;
   "match_reasons": Array<string>;
 };
@@ -4218,8 +3586,8 @@ export type EvidenceRefV2 = {
   "source_authority": "observed" | "verified" | "authorized_review";
 };
 
-export type FiestaCodeEvidenceV2 = {
-  "schema_version": "fiesta.code-evidence.v2";
+export type CodeEvidenceManifestV2 = {
+  "schema_version": "pim.memory-code-evidence.v2";
   "manifest_id": string;
   "digest": string;
   "refs": Array<EvidenceRefV2>;
@@ -4252,82 +3620,6 @@ export type MemoryCapabilitiesV1 = {
     "deprecated_at": string;
     "sunset_at": string;
   }>;
-};
-
-export type MemoryPromptPolicyUpdateV1 = {
-  "schema_version": "pim.memory-prompt-policy-update.v1";
-  "expected_revision": number;
-  "enabled": boolean;
-  "kill_switch": boolean;
-  "automatic_activation_enabled": boolean;
-  "canary_percentage": number;
-  "allowed_repository_ids": Array<string>;
-  "allowed_kinds": Array<"decision" | "constraint" | "anti_pattern" | "test_strategy">;
-  "max_prompt_items": number;
-  "max_prompt_tokens": number;
-};
-
-export type MemoryPromptPolicyV1 = {
-  "schema_version": "pim.memory-prompt-policy.v1";
-  "project_id": string;
-  "policy_revision": number;
-  "enabled": boolean;
-  "kill_switch": boolean;
-  "automatic_activation_enabled": boolean;
-  "canary_percentage": number;
-  "allowed_repository_ids": Array<string>;
-  "allowed_kinds": Array<"decision" | "constraint" | "anti_pattern" | "test_strategy">;
-  "max_prompt_items": number;
-  "max_prompt_tokens": number;
-  "global_enabled": boolean;
-  "effective_enabled": boolean;
-  "updated_at": string | null;
-};
-
-export type MemoryReleaseGateSnapshotV1 = {
-  "representative_sample_count": number;
-  "reviewed_candidate_count": number;
-  "known_boundary_leakage_count": number;
-  "provenance_completeness_rate": number | null;
-  "typed_round_trip_conformance_rate": number | null;
-  "unresolved_active_pointer_count": number;
-  "extraction_precision_rate": number | null;
-  "resolvable_evidence_rate": number | null;
-  "harmful_or_stale_prompt_exposure_rate": number | null;
-  "critical_policy_violation_count": number;
-  "evidence_bypass_incident_count": number;
-  "critical_harm_incident_count": number;
-  "pim_outage_blocked_execution_count": number | null;
-  "pim_outage_lost_queued_receipt_count": number | null;
-  "memory_on_off_pair_count": number | null;
-  "task_pass_lift_percentage_points": number | null;
-  "paired_95ci_lower_percentage_points": number | null;
-  "pass_rate_delta_percentage_points": number | null;
-  "noninferiority_margin_percentage_points": number | null;
-  "efficiency_reduction_rate": number | null;
-  "same_record_helpful_independent_runs": number | null;
-  "latency_or_cost_increase_rate": number | null;
-  "disciplined_no_lift_cycles": number | null;
-};
-
-export type MemoryReleaseGateEvaluationV1 = {
-  "schema_version": "pim.memory-release-gate-evaluation.v1";
-  "stage": "pre_canary" | "expansion";
-  "dataset_digest": string;
-  "metric_snapshot": MemoryReleaseGateSnapshotV1;
-};
-
-export type MemoryReleaseGateDecisionV1 = {
-  "schema_version": "pim.memory-release-gate-decision.v1";
-  "project_id": string;
-  "decision_id": string;
-  "stage": "pre_canary" | "expansion";
-  "decision": "continue" | "pause";
-  "status": "pass" | "fail" | "insufficient_data";
-  "dataset_digest": string;
-  "metric_snapshot_digest": string;
-  "reasons": Array<string>;
-  "created_at": string;
 };
 
 export type MemorySearchV1 = {
@@ -4364,8 +3656,6 @@ export type MemorySearchResultV1 = {
   "plane": "codebase";
   "repository_id": string;
   "token_count": number;
-  "prompt_eligible": boolean;
-  "evaluation_arm": MemoryEvaluationArmV1;
   "items": Array<MemorySearchItemV1>;
   "omitted_count": number;
   "expires_at": string;
@@ -4384,7 +3674,6 @@ export type MemoryHarnessSearchItemV1 = {
   "validation": ValidationV1;
   "evidence_summary": EvidenceSummaryV1;
   "freshness": FreshnessV1;
-  "prompt_eligible": false;
   "match_reasons": Array<string>;
 };
 
@@ -4416,10 +3705,6 @@ export type MemoryHarnessSearchResultV1 = {
   "tenant": TenantV1;
   "plane": "harness";
   "harness_id": string;
-  "shadow_only": true;
-  "routing_influence": false;
-  "prompt_eligible": false;
-  "evaluation_arm": "shadow";
   "token_count": number;
   "items": Array<MemoryHarnessSearchItemV1>;
   "omitted_count": number;
@@ -4434,10 +3719,6 @@ export type ReceiptFeedbackItemV1 = {
     "reason_code": string;
   };
   "terminal_outcome": {
-    "exposure": {
-      "status": "not_exposed" | "exposed";
-      "consumer_phase": string;
-    };
     "use_disposition": "applied" | "ignored" | "not_applicable" | "unknown" | "not_attributable";
     "use_attribution_confidence": number;
     "utility": "helpful" | "neutral" | "harmful" | "unknown";
@@ -4477,7 +3758,7 @@ export type RunReceiptV1 = {
     "retrieval_pack_id": string;
     "items": Array<ReceiptFeedbackItemV1>;
   }>;
-  "evidence_manifest"?: FiestaCodeEvidenceV2;
+  "evidence_manifest"?: CodeEvidenceManifestV2;
   "candidates": Array<MemoryCandidateV1>;
 };
 
@@ -4547,7 +3828,6 @@ export type MemoryRecordV1 = {
   "evidence_summary": EvidenceSummaryV1;
   "freshness": FreshnessV1;
   "lifecycle": LifecycleV1;
-  "prompt_eligible": boolean;
   "transition_summary": TransitionSummaryV1;
   "recorded_at": string;
 };
@@ -4703,17 +3983,11 @@ export interface MemoryContractTypeMap {
   "EvidenceSummaryV1": EvidenceSummaryV1;
   "FreshnessV1": FreshnessV1;
   "LifecycleV1": LifecycleV1;
-  "MemoryEvaluationArmV1": MemoryEvaluationArmV1;
   "MemorySearchItemV1": MemorySearchItemV1;
   "MemoryCandidateV1": MemoryCandidateV1;
   "EvidenceRefV2": EvidenceRefV2;
-  "FiestaCodeEvidenceV2": FiestaCodeEvidenceV2;
+  "CodeEvidenceManifestV2": CodeEvidenceManifestV2;
   "MemoryCapabilitiesV1": MemoryCapabilitiesV1;
-  "MemoryPromptPolicyUpdateV1": MemoryPromptPolicyUpdateV1;
-  "MemoryPromptPolicyV1": MemoryPromptPolicyV1;
-  "MemoryReleaseGateSnapshotV1": MemoryReleaseGateSnapshotV1;
-  "MemoryReleaseGateEvaluationV1": MemoryReleaseGateEvaluationV1;
-  "MemoryReleaseGateDecisionV1": MemoryReleaseGateDecisionV1;
   "MemorySearchV1": MemorySearchV1;
   "MemorySearchResultV1": MemorySearchResultV1;
   "MemoryHarnessSearchItemV1": MemoryHarnessSearchItemV1;

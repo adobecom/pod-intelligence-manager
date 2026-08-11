@@ -28,6 +28,19 @@ import {
   importActiveMemoryRecord,
 } from "./memory-records.js";
 import { deriveActivationRequirement } from "./memory-candidates.js";
+import {
+  assertMemoryV2StoredFacetQuarantine,
+  assertMemoryV2StoredRecordFacet,
+  insertMemoryV2CandidateFacet,
+  insertMemoryV2FacetQuarantine,
+  insertMemoryV2ReceiptFacet,
+} from "./memory-v2-canonical-writes.js";
+import {
+  memoryV2RepositoryResourceRowId,
+  projectMemoryV2Resources,
+  reconcileMemoryV2Resources,
+  resolveMemoryV2HarnessResourceRowId,
+} from "./memory-v2-resources.js";
 import type { LegacyGraphInventoryReport } from "./legacy-graph-inventory.js";
 import {
   memoryStructuralIssues,
@@ -1380,13 +1393,12 @@ function assertCanonicalVersion(input: {
   mapping: MemoryLegacyCanonicalMapping;
   provenance: Record<string, unknown>;
   requireCurrentActive?: boolean;
-  requireSafeNewImport?: boolean;
   expectedEmbedding?: number[] | null;
 }): void {
   const row = db.prepare(
     `SELECT record.org_id, record.project_id, record.plane, record.kind,
             record.repository_row_id, record.harness_id, record.current_version,
-            record.current_status, record.prompt_eligible, record.shadow_recall_eligible,
+            record.current_status,
             version.content_json, version.applicability_json, version.exceptions_json,
             version.compatibility_json, version.validation_json, version.evidence_json,
             version.evidence_summary_json, version.freshness_json, version.provenance_json,
@@ -1433,10 +1445,6 @@ function assertCanonicalVersion(input: {
       || row.current_status !== "active")) {
     throw new MemoryLegacyMigrationConflictError(`Canonical record did not activate safely: ${input.recordId}`);
   }
-  if (input.requireSafeNewImport && (Number(row.prompt_eligible) !== 0
-      || Number(row.shadow_recall_eligible) !== 1)) {
-    throw new MemoryLegacyMigrationConflictError(`Imported record exposure state is unsafe: ${input.recordId}`);
-  }
   if (!db.prepare(
     `SELECT 1 FROM memory_transitions
      WHERE aggregate_type = 'record' AND aggregate_id = ?
@@ -1467,6 +1475,10 @@ function assertCanonicalVersion(input: {
   if (row.content_digest !== expectedCanonicalContentDigest(input.mapping, input.provenance)) {
     throw new MemoryLegacyMigrationConflictError(`Canonical content digest mismatch: ${input.recordId}`);
   }
+  assertMemoryV2StoredRecordFacet({
+    recordId: input.recordId,
+    recordVersion: input.recordVersion,
+  });
 }
 
 function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationPlan, actorId: string): void {
@@ -1517,7 +1529,6 @@ function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationP
       embedding,
       validFrom: item.sourceTimestamp ?? mapping.freshness.last_confirmed_at,
       expiresAt: mapping.freshness.expires_at ?? null,
-      promptEligible: false,
       actorId,
       actorType: "system",
       reasonCode: "legacy_memory_imported",
@@ -1561,7 +1572,6 @@ function importActivePlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationP
     mapping,
     provenance,
     requireCurrentActive: true,
-    requireSafeNewImport: true,
     expectedEmbedding: mapping.plane === "codebase" ? verifiedLegacyEmbedding(item) : undefined,
   });
 }
@@ -1622,6 +1632,260 @@ function pendingIds(importItemId: string): { candidateId: string; receiptId: str
     receiptId: deterministicId("receipt_legacy", importItemId),
     transitionId: deterministicId("transition_legacy", importItemId),
   };
+}
+
+function assertMemoryV2ResourceProjection(): void {
+  const reconciliation = reconcileMemoryV2Resources();
+  if (!reconciliation.ok) {
+    throw new MemoryLegacyMigrationConflictError(
+      "Memory v2 resource projection is incomplete or conflicts with its v1 authority",
+    );
+  }
+}
+
+function memoryV2ResourceRowIdForMapping(mapping: MemoryLegacyCanonicalMapping): string {
+  let resourceRowId: string | null = null;
+  if (mapping.plane === "codebase") {
+    const repository = db.prepare(
+      `SELECT repository_row_id FROM memory_repository_registry
+       WHERE org_id = ? AND project_id = ? AND repository_id = ? AND valid_until IS NULL`,
+    ).get(
+      mapping.org_id,
+      mapping.project_id,
+      (mapping.applicability as CodebaseApplicabilityV1).repository_id,
+    ) as { repository_row_id: string } | undefined;
+    if (repository) resourceRowId = memoryV2RepositoryResourceRowId(repository.repository_row_id);
+  } else if (mapping.plane === "harness") {
+    resourceRowId = resolveMemoryV2HarnessResourceRowId({
+      orgId: mapping.org_id,
+      projectId: mapping.project_id,
+      harnessId: (mapping.applicability as HarnessApplicabilityV1).harness_id,
+    });
+  }
+  if (!resourceRowId) {
+    throw new MemoryLegacyMigrationConflictError(
+      `Exact ${mapping.plane} resource authority is unavailable for a legacy canonical companion`,
+    );
+  }
+  const resource = db.prepare(
+    `SELECT org_id, project_id, plane FROM memory_v2_resources WHERE resource_row_id = ?`,
+  ).get(resourceRowId) as {
+    org_id: string;
+    project_id: string;
+    plane: string;
+  } | undefined;
+  if (!resource || resource.org_id !== mapping.org_id || resource.project_id !== mapping.project_id
+      || resource.plane !== mapping.plane) {
+    throw new MemoryLegacyMigrationConflictError(
+      "Legacy canonical companion resource is missing or bound to a different scope",
+    );
+  }
+  return resourceRowId;
+}
+
+const LEGACY_MIGRATION_PRODUCER_HARNESS_ID = "pim-legacy-migration";
+
+function pendingHarnessQuarantineReason(
+  mapping: MemoryLegacyCanonicalMapping,
+): "authority_mismatch" | "resource_missing" | null {
+  if (mapping.plane !== "harness") return null;
+  const targetHarnessId = (mapping.applicability as HarnessApplicabilityV1).harness_id;
+  // The v1 receipt/candidate authority column identifies the producer. A
+  // different applicability target cannot be represented as the same exact
+  // v2 resource without mislabeling the stored aggregate.
+  if (targetHarnessId !== LEGACY_MIGRATION_PRODUCER_HARNESS_ID) return "authority_mismatch";
+  return resolveMemoryV2HarnessResourceRowId({
+    orgId: mapping.org_id,
+    projectId: mapping.project_id,
+    harnessId: targetHarnessId,
+  }) ? null : "resource_missing";
+}
+
+function insertPendingMemoryV2Quarantine(input: {
+  mapping: MemoryLegacyCanonicalMapping;
+  ids: ReturnType<typeof pendingIds>;
+  candidateDigest: string;
+  sourcePlane: "harness" | "org";
+  reasonCode: "authority_mismatch" | "resource_missing" | "unsupported_plane";
+  now: string;
+}): void {
+  for (const [aggregateType, aggregateId] of [
+    ["receipt", input.ids.receiptId],
+    ["candidate", input.ids.candidateId],
+  ] as const) {
+    insertMemoryV2FacetQuarantine({
+      quarantineRowId: deterministicId("v2facetq", { aggregateType, aggregateId }),
+      aggregateType,
+      aggregateId,
+      aggregateVersion: 0,
+      orgId: input.mapping.org_id,
+      projectId: input.mapping.project_id,
+      sourcePlane: input.sourcePlane,
+      reasonCode: aggregateType === "candidate"
+          && input.mapping.plane === "harness"
+          && input.mapping.kind === "constraint"
+        ? "subtype_ambiguous"
+        : input.reasonCode,
+      sourceDigest: input.candidateDigest,
+      now: input.now,
+    });
+  }
+}
+
+function insertPendingMemoryV2Companions(input: {
+  mapping: MemoryLegacyCanonicalMapping;
+  ids: ReturnType<typeof pendingIds>;
+  candidateDigest: string;
+  producerRunId: string;
+  now: string;
+}): void {
+  if (input.mapping.plane === "org") {
+    insertPendingMemoryV2Quarantine({
+      ...input,
+      sourcePlane: "org",
+      reasonCode: "unsupported_plane",
+      now: input.now,
+    });
+    return;
+  }
+  const harnessQuarantineReason = pendingHarnessQuarantineReason(input.mapping);
+  if (harnessQuarantineReason) {
+    insertPendingMemoryV2Quarantine({
+      ...input,
+      sourcePlane: "harness",
+      reasonCode: harnessQuarantineReason,
+      now: input.now,
+    });
+    return;
+  }
+  const resourceRowId = memoryV2ResourceRowIdForMapping(input.mapping);
+  insertMemoryV2ReceiptFacet({
+    receiptId: input.ids.receiptId,
+    producerRunId: input.producerRunId,
+    orgId: input.mapping.org_id,
+    projectId: input.mapping.project_id,
+    plane: input.mapping.plane,
+    resourceRowId,
+    now: input.now,
+  });
+  insertMemoryV2CandidateFacet({
+    candidateId: input.ids.candidateId,
+    orgId: input.mapping.org_id,
+    projectId: input.mapping.project_id,
+    plane: input.mapping.plane,
+    resourceRowId,
+    broadKind: input.mapping.kind,
+    now: input.now,
+  });
+}
+
+function expectedHarnessSubtype(kind: ThinV1MemoryKind): string | null {
+  if (kind === "decision") return "workflow_strategy";
+  if (kind === "anti_pattern") return "failure_pattern";
+  if (kind === "test_strategy") return "verification_sequence";
+  return null;
+}
+
+function assertPendingMemoryV2Companions(input: {
+  mapping: MemoryLegacyCanonicalMapping;
+  ids: ReturnType<typeof pendingIds>;
+  candidateDigest: string;
+  producerRunId: string;
+}): void {
+  const harnessQuarantineReason = pendingHarnessQuarantineReason(input.mapping);
+  const quarantine = input.mapping.plane === "org"
+    ? { sourcePlane: "org" as const, reasonCode: "unsupported_plane" as const }
+    : input.mapping.plane === "harness" && harnessQuarantineReason
+      ? {
+        sourcePlane: "harness" as const,
+        reasonCode: harnessQuarantineReason,
+      }
+      : null;
+  if (quarantine) {
+    for (const [aggregateType, aggregateId] of [
+      ["receipt", input.ids.receiptId],
+      ["candidate", input.ids.candidateId],
+    ] as const) {
+      const reasonCode = aggregateType === "candidate"
+          && input.mapping.plane === "harness"
+          && input.mapping.kind === "constraint"
+        ? "subtype_ambiguous"
+        : quarantine.reasonCode;
+      assertMemoryV2StoredFacetQuarantine({
+        aggregateType,
+        aggregateId,
+        aggregateVersion: 0,
+        orgId: input.mapping.org_id,
+        projectId: input.mapping.project_id,
+        sourcePlane: quarantine.sourcePlane,
+        reasonCode,
+        sourceDigest: input.candidateDigest,
+      });
+    }
+    return;
+  }
+  const resourceRowId = memoryV2ResourceRowIdForMapping(input.mapping);
+  const receiptFacet = db.prepare(
+    `SELECT org_id, project_id, plane, resource_row_id, facet_json
+     FROM memory_v2_receipt_facets WHERE receipt_id = ?`,
+  ).get(input.ids.receiptId) as Record<string, unknown> | undefined;
+  if (!receiptFacet || receiptFacet.org_id !== input.mapping.org_id
+      || receiptFacet.project_id !== input.mapping.project_id
+      || receiptFacet.plane !== input.mapping.plane
+      || receiptFacet.resource_row_id !== resourceRowId) {
+    throw new MemoryLegacyMigrationConflictError(
+      `Pending receipt companion is missing or mismatched: ${input.ids.receiptId}`,
+    );
+  }
+  assertSameJson(JSON.parse(String(receiptFacet.facet_json)), {
+    projection: "v1",
+    producer_run_id: input.producerRunId,
+  }, `${input.ids.receiptId}.v2_facet`);
+
+  if (input.mapping.plane === "harness" && input.mapping.kind === "constraint") {
+    assertMemoryV2StoredFacetQuarantine({
+      aggregateType: "candidate",
+      aggregateId: input.ids.candidateId,
+      aggregateVersion: 0,
+      orgId: input.mapping.org_id,
+      projectId: input.mapping.project_id,
+      sourcePlane: "harness",
+      reasonCode: "subtype_ambiguous",
+      sourceDigest: input.candidateDigest,
+    });
+    if (db.prepare(
+      "SELECT 1 FROM memory_v2_candidate_facets WHERE candidate_id = ?",
+    ).get(input.ids.candidateId)) {
+      throw new MemoryLegacyMigrationConflictError(
+        `Ambiguous pending candidate must not have a mapped facet: ${input.ids.candidateId}`,
+      );
+    }
+    return;
+  }
+
+  const candidateFacet = db.prepare(
+    `SELECT org_id, project_id, plane, resource_row_id, broad_kind, subtype,
+            projection_status, facet_json
+     FROM memory_v2_candidate_facets WHERE candidate_id = ?`,
+  ).get(input.ids.candidateId) as Record<string, unknown> | undefined;
+  const expectedSubtype = input.mapping.plane === "harness"
+    ? expectedHarnessSubtype(input.mapping.kind)
+    : null;
+  if (!candidateFacet || candidateFacet.org_id !== input.mapping.org_id
+      || candidateFacet.project_id !== input.mapping.project_id
+      || candidateFacet.plane !== input.mapping.plane
+      || candidateFacet.resource_row_id !== resourceRowId
+      || candidateFacet.broad_kind !== input.mapping.kind
+      || candidateFacet.subtype !== expectedSubtype
+      || candidateFacet.projection_status !== "mapped") {
+    throw new MemoryLegacyMigrationConflictError(
+      `Pending candidate companion is missing or mismatched: ${input.ids.candidateId}`,
+    );
+  }
+  assertSameJson(JSON.parse(String(candidateFacet.facet_json)), {
+    projection: "v1",
+    source_plane: input.mapping.plane,
+  }, `${input.ids.candidateId}.v2_facet`);
 }
 
 function insertPendingPlannedItem(item: PlannedItem, plan: MemoryLegacyMigrationPlan, actorId: string): void {
@@ -1746,6 +2010,13 @@ function insertPendingPlannedItem(item: PlannedItem, plan: MemoryLegacyMigration
     plan.created_at,
     plan.created_at,
   );
+  insertPendingMemoryV2Companions({
+    mapping,
+    ids,
+    candidateDigest,
+    producerRunId: pendingProducerRunId(item.importItemId),
+    now: plan.created_at,
+  });
 }
 
 function insertLegacyImportItem(item: PlannedItem, importRunId: string, createdAt: string): void {
@@ -1836,6 +2107,7 @@ export function reconcileMemoryLegacyMigration(importRunId: string): MemoryLegac
       throw new MemoryLegacyMigrationConflictError(`Stored run metadata mismatch for ${rowField}`);
     }
   }
+  assertMemoryV2ResourceProjection();
   const ledger = db.prepare(
     `SELECT * FROM memory_legacy_import_items
      WHERE import_run_id = ? ORDER BY source_kind, source_key`,
@@ -2071,6 +2343,12 @@ export function reconcileMemoryLegacyMigration(importRunId: string): MemoryLegac
       if (!receiptLink || receiptLink.candidate_digest !== canonicalJsonSha256(candidate) || !transition) {
         throw new MemoryLegacyMigrationConflictError(`Pending candidate lineage mismatch: ${ids.candidateId}`);
       }
+      assertPendingMemoryV2Companions({
+        mapping,
+        ids,
+        candidateDigest: canonicalJsonSha256(candidate),
+        producerRunId: pendingProducerRunId(item.import_item_id),
+      });
     } else if (item.disposition === "deduplicated") {
       const target = item.duplicate_of_item_id ? ledgerById.get(item.duplicate_of_item_id) : undefined;
       if (!target || target.import_run_id !== importRunId
@@ -2343,6 +2621,8 @@ export function applyMemoryLegacyMigration(input: MemoryLegacyMigrationInput): M
       source_bundle_digest: plan.source_bundle_digest,
       items: plan.items,
     }, "locked migration plan");
+    projectMemoryV2Resources();
+    assertMemoryV2ResourceProjection();
     const finalReport = reportFromPlan(plan, "canonical");
     db.prepare(
       `INSERT INTO memory_legacy_import_runs

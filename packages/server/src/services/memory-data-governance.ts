@@ -142,6 +142,31 @@ const TERMINAL_CANDIDATE_STATUSES = [
 ] as const;
 
 const GOVERNED_TABLES = [
+  "memory_v2_reverification_policies",
+  "memory_v2_reverification_state",
+  "memory_v2_reverification_decisions",
+  "memory_v2_reverification_jobs",
+  "memory_v2_reverification_job_attempts",
+  "memory_v2_resources",
+  "memory_v2_resource_aliases",
+  "memory_v2_service_token_resource_bindings",
+  "memory_v2_service_token_mcp_profiles",
+  "memory_v2_record_facets",
+  "memory_v2_candidate_facets",
+  "memory_v2_receipt_facets",
+  "memory_v2_feedback_facets",
+  "memory_v2_facet_quarantine",
+  "memory_v2_retrieval_packs",
+  "memory_v2_retrieval_pack_items",
+  "memory_v2_scope_snapshots",
+  "memory_v2_feedback_bindings",
+  "memory_v2_feedback_review_signals",
+  "memory_v2_corroboration_domains",
+  "memory_v2_origins",
+  "memory_v2_origin_derivations",
+  "memory_v2_origin_roots",
+  "memory_v2_candidate_origins",
+  "memory_v2_review_signals",
   "memory_repository_registry",
   "memory_repository_aliases",
   "memory_records",
@@ -169,8 +194,6 @@ const GOVERNED_TABLES = [
   "memory_record_supersessions",
   "memory_candidate_decisions",
   "memory_review_signals",
-  "memory_prompt_policies",
-  "memory_release_gate_decisions",
   "memory_service_token_repository_bindings",
   "memory_harness_principal_bindings",
   "memory_legacy_import_items",
@@ -180,6 +203,9 @@ const GOVERNED_TABLES = [
   "memory_entities",
   "memory_relationships",
 ] as const;
+
+const V2_FEEDBACK_TARGET_PREFIX = "memory_v2_feedback_bindings:";
+const V2_RUNTIME_EVIDENCE_TARGET_PREFIX = "memory_v2_runtime_receipt:";
 
 function requireNonEmpty(value: string, label: string): string {
   const normalized = value.trim();
@@ -517,6 +543,263 @@ function target(
   };
 }
 
+function reverificationRowsForRecords(
+  database: DatabaseSync,
+  recordIds: readonly string[],
+): Record<string, unknown> {
+  if (recordIds.length === 0
+      || !tableExists(database, "memory_v2_reverification_policies")) return {};
+  const marks = placeholders(recordIds);
+  const jobs = allRows(
+    database,
+    `SELECT * FROM memory_v2_reverification_jobs
+     WHERE record_id IN (${marks})
+     ORDER BY record_id, record_version, scheduled_for, job_id`,
+    [...recordIds],
+  );
+  const jobIds = jobs.map((row) => String(row.job_id));
+  return {
+    policies: allRows(
+      database,
+      `SELECT * FROM memory_v2_reverification_policies
+       WHERE record_id IN (${marks})
+       ORDER BY record_id, record_version, policy_revision, policy_id`,
+      [...recordIds],
+    ),
+    state: allRows(
+      database,
+      `SELECT * FROM memory_v2_reverification_state
+       WHERE record_id IN (${marks})
+       ORDER BY record_id, record_version`,
+      [...recordIds],
+    ),
+    decisions: allRows(
+      database,
+      `SELECT * FROM memory_v2_reverification_decisions
+       WHERE record_id IN (${marks})
+       ORDER BY record_id, record_version, created_at, decision_id`,
+      [...recordIds],
+    ),
+    jobs,
+    attempts: jobIds.length === 0
+      ? []
+      : allRows(
+        database,
+        `SELECT * FROM memory_v2_reverification_job_attempts
+         WHERE job_id IN (${placeholders(jobIds)})
+         ORDER BY job_id, attempt_number, attempt_id`,
+        jobIds,
+      ),
+  };
+}
+
+function v2PackTarget(
+  database: DatabaseSync,
+  pack: Record<string, unknown>,
+): MemoryErasureTarget {
+  const packId = String(pack.retrieval_pack_id);
+  const items = allRows(
+    database,
+    `SELECT * FROM memory_v2_retrieval_pack_items
+     WHERE retrieval_pack_id = ? ORDER BY item_order`,
+    [packId],
+  );
+  const idempotencyClaims = allRows(
+    database,
+    `SELECT * FROM memory_idempotency_keys
+     WHERE operation = 'memory_search_v2' AND response_resource_id = ?
+     ORDER BY org_id, project_id, idempotency_key`,
+    [packId],
+  );
+  return target(
+    "retrieval_pack",
+    packId,
+    { pack, items, idempotency_claims: idempotencyClaims },
+    "field_redaction",
+  );
+}
+
+function v2FeedbackTarget(
+  database: DatabaseSync,
+  feedback: Record<string, unknown>,
+): MemoryErasureTarget {
+  const feedbackId = String(feedback.feedback_id);
+  const reviewSignals = tableExists(database, "memory_v2_feedback_review_signals")
+    ? allRows(
+      database,
+      `SELECT * FROM memory_v2_feedback_review_signals
+       WHERE feedback_id = ? ORDER BY signal_id`,
+      [feedbackId],
+    )
+    : [];
+  const jobIds = reviewSignals.map((row) => String(row.outbox_job_id));
+  const jobs = jobIds.length > 0
+    ? allRows(
+      database,
+      `SELECT * FROM memory_outbox
+       WHERE job_id IN (${jobIds.map(() => "?").join(",")}) ORDER BY job_id`,
+      jobIds,
+    )
+    : [];
+  const attempts = jobIds.length > 0
+    ? allRows(
+      database,
+      `SELECT * FROM memory_outbox_attempts
+       WHERE job_id IN (${jobIds.map(() => "?").join(",")})
+       ORDER BY job_id, attempt_number`,
+      jobIds,
+    )
+    : [];
+  const deadLetters = jobIds.length > 0
+    ? allRows(
+      database,
+      `SELECT * FROM memory_dead_letters
+       WHERE job_id IN (${jobIds.map(() => "?").join(",")}) ORDER BY job_id`,
+      jobIds,
+    )
+    : [];
+  const idempotencyClaims = allRows(
+    database,
+    `SELECT * FROM memory_idempotency_keys
+     WHERE operation = 'memory_feedback_v2' AND response_resource_id = ?
+     ORDER BY org_id, project_id, idempotency_key`,
+    [feedbackId],
+  );
+  return target(
+    "feedback",
+    `${V2_FEEDBACK_TARGET_PREFIX}${feedbackId}`,
+    {
+      feedback,
+      review_signals: reviewSignals,
+      outbox_jobs: jobs,
+      outbox_attempts: attempts,
+      dead_letters: deadLetters,
+      idempotency_claims: idempotencyClaims,
+    },
+    "physical_delete",
+  );
+}
+
+function runtimeReceiptEvidenceRows(
+  database: DatabaseSync,
+  receiptId: string,
+): Record<string, unknown> {
+  if (!tableExists(database, "memory_v2_origins")) return {};
+  const origins = allRows(
+    database,
+    "SELECT * FROM memory_v2_origins WHERE receipt_id = ? ORDER BY origin_id",
+    [receiptId],
+  );
+  const originIds = origins.map((row) => String(row.origin_id));
+  if (originIds.length === 0) return {};
+  const marks = placeholders(originIds);
+  const domainIds = [...new Set(
+    origins.map((row) => String(row.corroboration_domain_id)),
+  )].sort();
+  const domainMarks = placeholders(domainIds);
+  return {
+    corroboration_domains: allRows(
+      database,
+      `SELECT * FROM memory_v2_corroboration_domains
+       WHERE corroboration_domain_id IN (${domainMarks})
+       ORDER BY corroboration_domain_id`,
+      domainIds,
+    ),
+    origins,
+    derivations: allRows(
+      database,
+      `SELECT * FROM memory_v2_origin_derivations
+       WHERE origin_id IN (${marks}) ORDER BY origin_id, parent_origin_id`,
+      originIds,
+    ),
+    roots: allRows(
+      database,
+      `SELECT * FROM memory_v2_origin_roots
+       WHERE origin_id IN (${marks}) ORDER BY origin_id, root_origin_id`,
+      originIds,
+    ),
+    candidate_links: allRows(
+      database,
+      `SELECT * FROM memory_v2_candidate_origins
+       WHERE origin_id IN (${marks}) ORDER BY origin_id, candidate_id`,
+      originIds,
+    ),
+    review_signals: allRows(
+      database,
+      `SELECT * FROM memory_v2_review_signals
+       WHERE first_origin_id IN (${marks}) OR repeated_origin_id IN (${marks})
+       ORDER BY signal_id`,
+      [...originIds, ...originIds],
+    ),
+  };
+}
+
+function runtimeEvidenceTarget(
+  database: DatabaseSync,
+  receiptId: string,
+): MemoryErasureTarget {
+  return target(
+    "evidence",
+    `${V2_RUNTIME_EVIDENCE_TARGET_PREFIX}${receiptId}`,
+    runtimeReceiptEvidenceRows(database, receiptId),
+    "physical_delete",
+  );
+}
+
+function legacyFeedbackTarget(
+  database: DatabaseSync,
+  feedback: Record<string, unknown>,
+): MemoryErasureTarget {
+  const feedbackId = String(feedback.feedback_id);
+  const reviewSignals = allRows(
+    database,
+    "SELECT * FROM memory_review_signals WHERE feedback_id = ? ORDER BY signal_id",
+    [feedbackId],
+  );
+  const jobs = allRows(
+    database,
+    `SELECT * FROM memory_outbox
+     WHERE json_valid(payload_json)
+       AND json_extract(payload_json, '$.feedback_id') = ?
+       AND (
+         json_extract(payload_json, '$.feedback_source') IS NULL
+         OR json_extract(payload_json, '$.feedback_source') = 'memory_feedback'
+       )
+     ORDER BY job_id`,
+    [feedbackId],
+  );
+  const jobIds = jobs.map((row) => String(row.job_id));
+  const attempts = jobIds.length > 0
+    ? allRows(
+      database,
+      `SELECT * FROM memory_outbox_attempts
+       WHERE job_id IN (${jobIds.map(() => "?").join(",")})
+       ORDER BY job_id, attempt_number`,
+      jobIds,
+    )
+    : [];
+  const deadLetters = jobIds.length > 0
+    ? allRows(
+      database,
+      `SELECT * FROM memory_dead_letters
+       WHERE job_id IN (${jobIds.map(() => "?").join(",")}) ORDER BY job_id`,
+      jobIds,
+    )
+    : [];
+  return target(
+    "feedback",
+    feedbackId,
+    {
+      feedback,
+      review_signals: reviewSignals,
+      outbox_jobs: jobs,
+      outbox_attempts: attempts,
+      dead_letters: deadLetters,
+    },
+    "physical_delete",
+  );
+}
+
 function recordTargets(
   database: DatabaseSync,
   scope: GovernanceScope,
@@ -542,12 +825,22 @@ function recordTargets(
     params,
   );
   const roots = rows.map((row) => {
+    const recordId = String(row.record_id);
     const versions = allRows(
       database,
       "SELECT * FROM memory_record_versions WHERE record_id = ? ORDER BY record_version",
-      [String(row.record_id)],
+      [recordId],
     );
-    return target("record", String(row.record_id), { record: row, versions }, "physical_delete");
+    return target(
+      "record",
+      recordId,
+      {
+        record: row,
+        versions,
+        reverification: reverificationRowsForRecords(database, [recordId]),
+      },
+      "physical_delete",
+    );
   });
   const recordIds = roots.map((entry) => entry.resource_id);
   if (recordIds.length === 0) return roots;
@@ -569,11 +862,28 @@ function recordTargets(
      WHERE item.record_id IN (${marks})`,
     recordIds,
   )) collateral.push(target("retrieval_pack", String(row.retrieval_pack_id), row, "field_redaction"));
+  if (tableExists(database, "memory_v2_retrieval_pack_items")) {
+    for (const row of allRows(
+      database,
+      `SELECT DISTINCT pack.* FROM memory_v2_retrieval_packs AS pack
+       JOIN memory_v2_retrieval_pack_items AS item
+         ON item.retrieval_pack_id = pack.retrieval_pack_id
+       WHERE item.record_id IN (${marks})`,
+      recordIds,
+    )) collateral.push(v2PackTarget(database, row));
+  }
   for (const row of allRows(
     database,
     `SELECT * FROM memory_feedback WHERE record_id IN (${marks})`,
     recordIds,
-  )) collateral.push(target("feedback", String(row.feedback_id), row, "physical_delete"));
+  )) collateral.push(legacyFeedbackTarget(database, row));
+  if (tableExists(database, "memory_v2_feedback_bindings")) {
+    for (const row of allRows(
+      database,
+      `SELECT * FROM memory_v2_feedback_bindings WHERE record_id IN (${marks})`,
+      recordIds,
+    )) collateral.push(v2FeedbackTarget(database, row));
+  }
   if (tableExists(database, "memory_legacy_import_items")) {
     for (const row of legacyImportRowsForRecords(database, recordIds)) {
       collateral.push(target("legacy_import", String(row.import_item_id), row, "field_redaction"));
@@ -725,12 +1035,25 @@ function feedbackTargets(
   const params = [...where.params];
   const cutoffSql = cutoffAt ? " AND feedback.created_at <= ?" : "";
   if (cutoffAt) params.push(cutoffAt);
-  return allRows(
+  const targets = allRows(
     database,
     `SELECT feedback.* FROM memory_feedback AS feedback
      WHERE ${where.sql}${cutoffSql} ORDER BY feedback.feedback_id`,
     params,
-  ).map((row) => target("feedback", String(row.feedback_id), row, "physical_delete"));
+  ).map((row) => legacyFeedbackTarget(database, row));
+  if (tableExists(database, "memory_v2_feedback_bindings")) {
+    const v2Where = scopedWhere("feedback", scope);
+    const v2Params = [...v2Where.params];
+    const v2CutoffSql = cutoffAt ? " AND feedback.created_at <= ?" : "";
+    if (cutoffAt) v2Params.push(cutoffAt);
+    for (const row of allRows(
+      database,
+      `SELECT feedback.* FROM memory_v2_feedback_bindings AS feedback
+       WHERE ${v2Where.sql}${v2CutoffSql} ORDER BY feedback.feedback_id`,
+      v2Params,
+    )) targets.push(v2FeedbackTarget(database, row));
+  }
+  return sortTargets(targets);
 }
 
 function packTargets(
@@ -746,7 +1069,7 @@ function packTargets(
     cutoffSql = " AND pack.created_at <= ? AND pack.expires_at <= ?";
     params.push(cutoffAt, plannedAt ?? cutoffAt);
   }
-  return allRows(
+  const targets = allRows(
     database,
     `SELECT pack.* FROM memory_retrieval_packs AS pack
      WHERE ${where.sql}${cutoffSql}
@@ -763,6 +1086,28 @@ function packTargets(
     row,
     "field_redaction",
   ));
+  if (tableExists(database, "memory_v2_retrieval_packs")) {
+    const v2Where = scopedWhere("pack", scope);
+    const v2Params = [...v2Where.params];
+    let v2CutoffSql = "";
+    if (cutoffAt) {
+      v2CutoffSql = " AND pack.created_at <= ? AND pack.expires_at <= ?";
+      v2Params.push(cutoffAt, plannedAt ?? cutoffAt);
+    }
+    for (const row of allRows(
+      database,
+      `SELECT pack.* FROM memory_v2_retrieval_packs AS pack
+       WHERE ${v2Where.sql}${v2CutoffSql}
+         AND NOT EXISTS (
+           SELECT 1 FROM memory_erasure_tombstones AS tombstone
+           WHERE tombstone.resource_class = 'retrieval_pack'
+             AND tombstone.resource_id = pack.retrieval_pack_id
+         )
+       ORDER BY pack.retrieval_pack_id`,
+      v2Params,
+    )) targets.push(v2PackTarget(database, row));
+  }
+  return sortTargets(targets);
 }
 
 function receiptTargets(
@@ -792,8 +1137,36 @@ function receiptTargets(
      ORDER BY receipt.receipt_id`,
     params,
   );
-  const roots = rows.map((row) =>
-    target("receipt", String(row.receipt_id), row, "field_redaction"));
+  const roots = rows.map((row) => {
+    const receiptId = String(row.receipt_id);
+    const scopeSnapshot = tableExists(database, "memory_v2_scope_snapshots")
+      ? allRows(
+        database,
+        "SELECT * FROM memory_v2_scope_snapshots WHERE receipt_id = ?",
+        [receiptId],
+      )
+      : [];
+    const receiptFeedback = tableExists(database, "memory_v2_feedback_bindings")
+      ? allRows(
+        database,
+        `SELECT * FROM memory_v2_feedback_bindings
+         WHERE receipt_id = ? AND feedback_stage = 'receipt' ORDER BY feedback_id`,
+        [receiptId],
+      )
+      : [];
+    const runtimeEvidence = runtimeReceiptEvidenceRows(database, receiptId);
+    const value = scopeSnapshot.length > 0
+        || receiptFeedback.length > 0
+        || Object.keys(runtimeEvidence).length > 0
+      ? {
+          receipt: row,
+          scope_snapshot: scopeSnapshot,
+          receipt_feedback: receiptFeedback,
+          runtime_evidence: runtimeEvidence,
+        }
+      : row;
+    return target("receipt", receiptId, value, "field_redaction");
+  });
   return sortTargets([
     ...roots,
     ...legacyImportRowsForPendingCandidateLineage(
@@ -839,7 +1212,7 @@ function evidenceTargets(
      ORDER BY manifest.evidence_manifest_row_id`,
     params,
   );
-  return manifests.map((manifest) => {
+  const targets = manifests.map((manifest) => {
     const refs = allRows(
       database,
       `SELECT * FROM memory_evidence_refs
@@ -853,6 +1226,34 @@ function evidenceTargets(
       "field_redaction",
     );
   });
+  if (tableExists(database, "memory_v2_origins")) {
+    const runtimeWhere = scopedWhere("origin", scope);
+    const runtimeParams = [...runtimeWhere.params];
+    const receipts = database.prepare(
+      `SELECT origin.receipt_id, MAX(origin.created_at) AS newest_at
+       FROM memory_v2_origins AS origin
+       WHERE ${runtimeWhere.sql}
+         AND NOT EXISTS (
+           SELECT 1
+           FROM memory_v2_candidate_origins AS link
+           JOIN memory_candidates_v1 AS candidate
+             ON candidate.candidate_id = link.candidate_id
+           WHERE link.receipt_id = origin.receipt_id
+             AND candidate.current_status NOT IN (
+               'rejected','quarantined','validation_failed','activation_failed'
+             )
+         )
+       GROUP BY origin.receipt_id
+       ${cutoffAt ? "HAVING MAX(origin.created_at) <= ?" : ""}
+       ORDER BY origin.receipt_id`,
+    ).all(...runtimeParams, ...(cutoffAt ? [cutoffAt] : [])) as unknown as Array<{
+      receipt_id: string;
+    }>;
+    for (const receipt of receipts) {
+      targets.push(runtimeEvidenceTarget(database, receipt.receipt_id));
+    }
+  }
+  return targets;
 }
 
 function tenantAuditTargets(database: DatabaseSync, scope: GovernanceScope): MemoryErasureTarget[] {
@@ -921,6 +1322,9 @@ function tenantScopeSnapshotDigest(database: DatabaseSync, scope: GovernanceScop
     ["memory_retrieval_pack_items", `SELECT child.* FROM memory_retrieval_pack_items child
       JOIN memory_retrieval_packs parent ON parent.retrieval_pack_id = child.retrieval_pack_id
       WHERE ${direct("parent")}`, scopeParams],
+    ["memory_v2_retrieval_pack_items", `SELECT child.* FROM memory_v2_retrieval_pack_items child
+      JOIN memory_v2_retrieval_packs parent ON parent.retrieval_pack_id = child.retrieval_pack_id
+      WHERE ${direct("parent")}`, scopeParams],
     ["memory_evidence_refs", `SELECT child.* FROM memory_evidence_refs child
       JOIN memory_evidence_manifests parent
         ON parent.evidence_manifest_row_id = child.evidence_manifest_row_id
@@ -931,6 +1335,10 @@ function tenantScopeSnapshotDigest(database: DatabaseSync, scope: GovernanceScop
       JOIN memory_candidates_v1 parent ON parent.candidate_id = child.candidate_id WHERE ${direct("parent")}`, scopeParams],
     ["memory_outbox_attempts", `SELECT child.* FROM memory_outbox_attempts child
       JOIN memory_outbox parent ON parent.job_id = child.job_id WHERE ${direct("parent")}`, scopeParams],
+    ["memory_v2_reverification_job_attempts", `SELECT child.*
+      FROM memory_v2_reverification_job_attempts child
+      JOIN memory_v2_reverification_jobs parent ON parent.job_id = child.job_id
+      WHERE ${direct("parent")}`, scopeParams],
   );
   for (const [table, sql, params] of childQueries) {
     if (!tableExists(database, table)) continue;
@@ -1249,6 +1657,50 @@ function idsForClass(plan: MemoryErasurePlan, resourceClass: MemoryErasureTarget
 function redactPacks(database: DatabaseSync, packIds: readonly string[]): void {
   if (packIds.length === 0) return;
   const marks = placeholders(packIds);
+  if (tableExists(database, "memory_v2_retrieval_pack_items")) {
+    if (tableExists(database, "memory_v2_feedback_bindings")) {
+      database.prepare(
+        `UPDATE memory_v2_retrieval_pack_items
+         SET token_count = 0, rank_score = 0, match_reasons_json = '[]'
+         WHERE retrieval_pack_id IN (${marks})
+           AND EXISTS (
+             SELECT 1 FROM memory_v2_feedback_bindings AS feedback
+             WHERE feedback.retrieval_pack_id
+               = memory_v2_retrieval_pack_items.retrieval_pack_id
+               AND feedback.record_id = memory_v2_retrieval_pack_items.record_id
+               AND feedback.record_version = memory_v2_retrieval_pack_items.record_version
+           )`,
+      ).run(...packIds);
+      database.prepare(
+        `DELETE FROM memory_v2_retrieval_pack_items
+         WHERE retrieval_pack_id IN (${marks})
+           AND NOT EXISTS (
+             SELECT 1 FROM memory_v2_feedback_bindings AS feedback
+             WHERE feedback.retrieval_pack_id
+               = memory_v2_retrieval_pack_items.retrieval_pack_id
+               AND feedback.record_id = memory_v2_retrieval_pack_items.record_id
+               AND feedback.record_version = memory_v2_retrieval_pack_items.record_version
+           )`,
+      ).run(...packIds);
+    } else {
+      database.prepare(
+        `DELETE FROM memory_v2_retrieval_pack_items
+         WHERE retrieval_pack_id IN (${marks})`,
+      ).run(...packIds);
+    }
+    database.prepare(
+      `UPDATE memory_v2_retrieval_packs
+       SET response_json = '{}', token_count = 0, omitted_count = 0
+       WHERE retrieval_pack_id IN (${marks})`,
+    ).run(...packIds);
+    // V2 replay reads its idempotency response independently from the pack body,
+    // so erase that copy in the same exclusive transaction as the pack.
+    database.prepare(
+      `UPDATE memory_idempotency_keys SET response_json = '{}'
+       WHERE operation = 'memory_search_v2'
+         AND response_resource_id IN (${marks})`,
+    ).run(...packIds);
+  }
   database.prepare(
     `DELETE FROM memory_retrieval_pack_items WHERE retrieval_pack_id IN (${marks})`,
   ).run(...packIds);
@@ -1265,9 +1717,91 @@ function redactPacks(database: DatabaseSync, packIds: readonly string[]): void {
   ).run(...packIds);
 }
 
+function deleteRuntimeOriginsForReceipts(
+  database: DatabaseSync,
+  receiptIds: readonly string[],
+): void {
+  if (receiptIds.length === 0 || !tableExists(database, "memory_v2_origins")) return;
+  const receiptMarks = placeholders(receiptIds);
+  const rows = database.prepare(
+    `SELECT origin_id, corroboration_domain_id
+     FROM memory_v2_origins WHERE receipt_id IN (${receiptMarks})`,
+  ).all(...receiptIds) as unknown as Array<{
+    origin_id: string;
+    corroboration_domain_id: string;
+  }>;
+  const originIds = rows.map((row) => row.origin_id);
+  if (originIds.length === 0) return;
+  const originMarks = placeholders(originIds);
+  database.prepare(
+    `DELETE FROM memory_v2_review_signals
+     WHERE first_origin_id IN (${originMarks}) OR repeated_origin_id IN (${originMarks})`,
+  ).run(...originIds, ...originIds);
+  database.prepare(
+    `DELETE FROM memory_v2_candidate_origins WHERE origin_id IN (${originMarks})`,
+  ).run(...originIds);
+  database.prepare(
+    `DELETE FROM memory_v2_origin_roots WHERE origin_id IN (${originMarks})`,
+  ).run(...originIds);
+  database.prepare(
+    `DELETE FROM memory_v2_origin_derivations
+     WHERE origin_id IN (${originMarks}) OR parent_origin_id IN (${originMarks})`,
+  ).run(...originIds, ...originIds);
+  database.prepare(
+    `DELETE FROM memory_v2_origins WHERE origin_id IN (${originMarks})`,
+  ).run(...originIds);
+  const domainIds = [...new Set(rows.map((row) => row.corroboration_domain_id))].sort();
+  if (domainIds.length > 0) {
+    const domainMarks = placeholders(domainIds);
+    database.prepare(
+      `DELETE FROM memory_v2_corroboration_domains
+       WHERE corroboration_domain_id IN (${domainMarks})
+         AND NOT EXISTS (
+           SELECT 1 FROM memory_v2_origins AS origin
+           WHERE origin.corroboration_domain_id
+             = memory_v2_corroboration_domains.corroboration_domain_id
+         )`,
+    ).run(...domainIds);
+  }
+}
+
+function deleteRuntimeCandidateLinks(
+  database: DatabaseSync,
+  candidateIds: readonly string[],
+): void {
+  if (candidateIds.length === 0 || !tableExists(database, "memory_v2_candidate_origins")) return;
+  const marks = placeholders(candidateIds);
+  database.prepare(
+    `DELETE FROM memory_v2_review_signals WHERE candidate_id IN (${marks})`,
+  ).run(...candidateIds);
+  database.prepare(
+    `DELETE FROM memory_v2_candidate_origins WHERE candidate_id IN (${marks})`,
+  ).run(...candidateIds);
+}
+
 function redactReceipts(database: DatabaseSync, receiptIds: readonly string[]): void {
   if (receiptIds.length === 0) return;
   const marks = placeholders(receiptIds);
+  deleteRuntimeOriginsForReceipts(database, receiptIds);
+  if (tableExists(database, "memory_v2_receipt_facets")) {
+    database.prepare(
+      `UPDATE memory_v2_receipt_facets SET facet_json = '{"erased":true}'
+       WHERE receipt_id IN (${marks})`,
+    ).run(...receiptIds);
+  }
+  if (tableExists(database, "memory_v2_scope_snapshots")) {
+    database.prepare(
+      `UPDATE memory_v2_scope_snapshots
+       SET scope_snapshot_json = '{}', response_json = '{}'
+       WHERE receipt_id IN (${marks})`,
+    ).run(...receiptIds);
+  }
+  if (tableExists(database, "memory_v2_feedback_bindings")) {
+    database.prepare(
+      `UPDATE memory_v2_feedback_bindings SET response_json = '{}'
+       WHERE feedback_stage = 'receipt' AND receipt_id IN (${marks})`,
+    ).run(...receiptIds);
+  }
   database.prepare(
     `UPDATE memory_run_receipts
      SET receipt_json = '{}', response_json = '{}', base_sha = NULL
@@ -1281,11 +1815,18 @@ function redactReceipts(database: DatabaseSync, receiptIds: readonly string[]): 
 
 function redactEvidence(database: DatabaseSync, manifestIds: readonly string[]): void {
   if (manifestIds.length === 0) return;
-  const marks = placeholders(manifestIds);
+  const runtimeReceiptIds = manifestIds
+    .filter((id) => id.startsWith(V2_RUNTIME_EVIDENCE_TARGET_PREFIX))
+    .map((id) => id.slice(V2_RUNTIME_EVIDENCE_TARGET_PREFIX.length));
+  deleteRuntimeOriginsForReceipts(database, runtimeReceiptIds);
+  const legacyManifestIds = manifestIds
+    .filter((id) => !id.startsWith(V2_RUNTIME_EVIDENCE_TARGET_PREFIX));
+  if (legacyManifestIds.length === 0) return;
+  const marks = placeholders(legacyManifestIds);
   const evidenceRows = database.prepare(
     `SELECT evidence_row_id FROM memory_evidence_refs
      WHERE evidence_manifest_row_id IN (${marks})`,
-  ).all(...manifestIds) as unknown as Array<{ evidence_row_id: string }>;
+  ).all(...legacyManifestIds) as unknown as Array<{ evidence_row_id: string }>;
   const evidenceIds = evidenceRows.map((row) => row.evidence_row_id);
   if (evidenceIds.length > 0) {
     const evidenceMarks = placeholders(evidenceIds);
@@ -1305,7 +1846,7 @@ function redactEvidence(database: DatabaseSync, manifestIds: readonly string[]):
   database.prepare(
     `UPDATE memory_evidence_manifests SET manifest_json = '{}'
      WHERE evidence_manifest_row_id IN (${marks})`,
-  ).run(...manifestIds);
+  ).run(...legacyManifestIds);
 }
 
 function deleteOutboxForAggregates(
@@ -1319,7 +1860,10 @@ function deleteOutboxForAggregates(
     `SELECT job_id FROM memory_outbox
      WHERE aggregate_type = ? AND aggregate_id IN (${marks})`,
   ).all(aggregateType, ...ids) as unknown as Array<{ job_id: string }>;
-  const jobIds = jobs.map((row) => row.job_id);
+  deleteOutboxJobs(database, jobs.map((row) => row.job_id));
+}
+
+function deleteOutboxJobs(database: DatabaseSync, jobIds: readonly string[]): void {
   if (jobIds.length === 0) return;
   const jobMarks = placeholders(jobIds);
   database.prepare(`DELETE FROM memory_dead_letters WHERE job_id IN (${jobMarks})`).run(...jobIds);
@@ -1327,16 +1871,61 @@ function deleteOutboxForAggregates(
   database.prepare(`DELETE FROM memory_outbox WHERE job_id IN (${jobMarks})`).run(...jobIds);
 }
 
-function deleteFeedback(database: DatabaseSync, feedbackIds: readonly string[]): void {
-  if (feedbackIds.length === 0) return;
-  const marks = placeholders(feedbackIds);
-  database.prepare(`DELETE FROM memory_review_signals WHERE feedback_id IN (${marks})`).run(...feedbackIds);
-  database.prepare(`DELETE FROM memory_feedback WHERE feedback_id IN (${marks})`).run(...feedbackIds);
+function deleteFeedback(database: DatabaseSync, targetIds: readonly string[]): void {
+  const legacyIds = targetIds.filter((id) => !id.startsWith(V2_FEEDBACK_TARGET_PREFIX));
+  const v2Ids = targetIds
+    .filter((id) => id.startsWith(V2_FEEDBACK_TARGET_PREFIX))
+    .map((id) => id.slice(V2_FEEDBACK_TARGET_PREFIX.length));
+  if (v2Ids.length > 0 && tableExists(database, "memory_v2_feedback_bindings")) {
+    const v2Marks = placeholders(v2Ids);
+    const signalRows = tableExists(database, "memory_v2_feedback_review_signals")
+      ? database.prepare(
+        `SELECT outbox_job_id FROM memory_v2_feedback_review_signals
+         WHERE feedback_id IN (${v2Marks})`,
+      ).all(...v2Ids) as unknown as Array<{ outbox_job_id: string }>
+      : [];
+    const jobIds = signalRows.map((row) => row.outbox_job_id);
+    if (tableExists(database, "memory_v2_feedback_review_signals")) {
+      database.prepare(
+        `DELETE FROM memory_v2_feedback_review_signals
+         WHERE feedback_id IN (${v2Marks})`,
+      ).run(...v2Ids);
+    }
+    deleteOutboxJobs(database, jobIds);
+    database.prepare(
+      `DELETE FROM memory_idempotency_keys
+       WHERE operation = 'memory_feedback_v2'
+         AND response_resource_id IN (${v2Marks})`,
+    ).run(...v2Ids);
+    database.prepare(
+      `DELETE FROM memory_v2_feedback_bindings WHERE feedback_id IN (${v2Marks})`,
+    ).run(...v2Ids);
+  }
+  if (legacyIds.length === 0) return;
+  const marks = placeholders(legacyIds);
+  const legacyJobRows = database.prepare(
+    `SELECT job_id FROM memory_outbox
+     WHERE json_valid(payload_json)
+       AND json_extract(payload_json, '$.feedback_id') IN (${marks})
+       AND (
+         json_extract(payload_json, '$.feedback_source') IS NULL
+         OR json_extract(payload_json, '$.feedback_source') = 'memory_feedback'
+       )`,
+  ).all(...legacyIds) as unknown as Array<{ job_id: string }>;
+  if (tableExists(database, "memory_v2_feedback_facets")) {
+    database.prepare(
+      `DELETE FROM memory_v2_feedback_facets WHERE feedback_id IN (${marks})`,
+    ).run(...legacyIds);
+  }
+  database.prepare(`DELETE FROM memory_review_signals WHERE feedback_id IN (${marks})`).run(...legacyIds);
+  deleteOutboxJobs(database, legacyJobRows.map((row) => row.job_id));
+  database.prepare(`DELETE FROM memory_feedback WHERE feedback_id IN (${marks})`).run(...legacyIds);
 }
 
 function deleteCandidateClosure(database: DatabaseSync, candidateIds: readonly string[]): void {
   if (candidateIds.length === 0) return;
   const marks = placeholders(candidateIds);
+  deleteRuntimeCandidateLinks(database, candidateIds);
   const receiptRows = database.prepare(
     `SELECT DISTINCT receipt_id FROM memory_receipt_candidates
      WHERE candidate_id IN (${marks})
@@ -1371,6 +1960,17 @@ function deleteCandidateClosure(database: DatabaseSync, candidateIds: readonly s
   ).run(...candidateIds);
   database.prepare(`DELETE FROM memory_candidate_evidence WHERE candidate_id IN (${marks})`).run(...candidateIds);
   database.prepare(`DELETE FROM memory_receipt_candidates WHERE candidate_id IN (${marks})`).run(...candidateIds);
+  if (tableExists(database, "memory_v2_candidate_facets")) {
+    database.prepare(
+      `DELETE FROM memory_v2_candidate_facets WHERE candidate_id IN (${marks})`,
+    ).run(...candidateIds);
+  }
+  if (tableExists(database, "memory_v2_facet_quarantine")) {
+    database.prepare(
+      `DELETE FROM memory_v2_facet_quarantine
+       WHERE aggregate_type = 'candidate' AND aggregate_id IN (${marks})`,
+    ).run(...candidateIds);
+  }
   database.prepare(`DELETE FROM memory_candidates_v1 WHERE candidate_id IN (${marks})`).run(...candidateIds);
   redactReceipts(database, receiptRows.map((row) => row.receipt_id));
 }
@@ -1396,6 +1996,62 @@ function redactLegacyItemsForRecords(database: DatabaseSync, recordIds: readonly
   );
 }
 
+function deleteReverificationForRecords(
+  database: DatabaseSync,
+  recordIds: readonly string[],
+): void {
+  if (recordIds.length === 0
+      || !tableExists(database, "memory_v2_reverification_policies")) return;
+  const marks = placeholders(recordIds);
+  const jobs = database.prepare(
+    `SELECT job_id FROM memory_v2_reverification_jobs
+     WHERE record_id IN (${marks})`,
+  ).all(...recordIds) as unknown as Array<{ job_id: string }>;
+  const jobIds = jobs.map((row) => row.job_id);
+  if (jobIds.length > 0) {
+    const jobMarks = placeholders(jobIds);
+    database.prepare(
+      `DELETE FROM memory_v2_reverification_job_attempts
+       WHERE job_id IN (${jobMarks})`,
+    ).run(...jobIds);
+  }
+  database.prepare(
+    `DELETE FROM memory_v2_reverification_decisions
+     WHERE record_id IN (${marks})`,
+  ).run(...recordIds);
+  database.prepare(
+    `DELETE FROM memory_v2_reverification_jobs
+     WHERE record_id IN (${marks})`,
+  ).run(...recordIds);
+  database.prepare(
+    `DELETE FROM memory_v2_reverification_state
+     WHERE record_id IN (${marks})`,
+  ).run(...recordIds);
+  database.prepare(
+    `DELETE FROM memory_v2_reverification_policies
+     WHERE record_id IN (${marks})`,
+  ).run(...recordIds);
+}
+
+function deleteScopedReverification(database: DatabaseSync, scope: GovernanceScope): void {
+  if (!tableExists(database, "memory_v2_reverification_policies")) return;
+  const condition = directScopeCondition(scope);
+  const jobs = database.prepare(
+    `SELECT job_id FROM memory_v2_reverification_jobs WHERE ${condition.sql}`,
+  ).all(...condition.params) as unknown as Array<{ job_id: string }>;
+  const jobIds = jobs.map((row) => row.job_id);
+  if (jobIds.length > 0) {
+    database.prepare(
+      `DELETE FROM memory_v2_reverification_job_attempts
+       WHERE job_id IN (${placeholders(jobIds)})`,
+    ).run(...jobIds);
+  }
+  deleteScopedDirect(database, "memory_v2_reverification_decisions", scope);
+  deleteScopedDirect(database, "memory_v2_reverification_jobs", scope);
+  deleteScopedDirect(database, "memory_v2_reverification_state", scope);
+  deleteScopedDirect(database, "memory_v2_reverification_policies", scope);
+}
+
 function deleteRecordClosure(database: DatabaseSync, recordIds: readonly string[]): void {
   if (recordIds.length === 0) return;
   const marks = placeholders(recordIds);
@@ -1406,11 +2062,29 @@ function deleteRecordClosure(database: DatabaseSync, recordIds: readonly string[
     `SELECT DISTINCT retrieval_pack_id FROM memory_retrieval_pack_items
      WHERE record_id IN (${marks})`,
   ).all(...recordIds) as unknown as Array<{ retrieval_pack_id: string }>;
+  const v2PackRows = tableExists(database, "memory_v2_retrieval_pack_items")
+    ? database.prepare(
+      `SELECT DISTINCT retrieval_pack_id FROM memory_v2_retrieval_pack_items
+       WHERE record_id IN (${marks})`,
+    ).all(...recordIds) as unknown as Array<{ retrieval_pack_id: string }>
+    : [];
   const feedbackRows = database.prepare(
     `SELECT feedback_id FROM memory_feedback WHERE record_id IN (${marks})`,
   ).all(...recordIds) as unknown as Array<{ feedback_id: string }>;
-  redactPacks(database, packRows.map((row) => row.retrieval_pack_id));
-  deleteFeedback(database, feedbackRows.map((row) => row.feedback_id));
+  const v2FeedbackRows = tableExists(database, "memory_v2_feedback_bindings")
+    ? database.prepare(
+      `SELECT feedback_id FROM memory_v2_feedback_bindings
+       WHERE record_id IN (${marks})`,
+    ).all(...recordIds) as unknown as Array<{ feedback_id: string }>
+    : [];
+  deleteFeedback(database, [
+    ...feedbackRows.map((row) => row.feedback_id),
+    ...v2FeedbackRows.map((row) => `${V2_FEEDBACK_TARGET_PREFIX}${row.feedback_id}`),
+  ]);
+  redactPacks(database, [
+    ...packRows.map((row) => row.retrieval_pack_id),
+    ...v2PackRows.map((row) => row.retrieval_pack_id),
+  ]);
   deleteCandidateClosure(database, candidateRows.map((row) => row.candidate_id));
   redactLegacyItemsForRecords(database, recordIds);
   deleteOutboxForAggregates(database, "record", recordIds);
@@ -1433,6 +2107,18 @@ function deleteRecordClosure(database: DatabaseSync, recordIds: readonly string[
   ).all(...recordIds) as unknown as Array<{ record_id: string; record_version: number }>;
   const deleteFts = database.prepare("DELETE FROM memory_record_versions_fts WHERE record_key = ?");
   for (const version of versionRows) deleteFts.run(`${version.record_id}:${version.record_version}`);
+  deleteReverificationForRecords(database, recordIds);
+  if (tableExists(database, "memory_v2_record_facets")) {
+    database.prepare(
+      `DELETE FROM memory_v2_record_facets WHERE record_id IN (${marks})`,
+    ).run(...recordIds);
+  }
+  if (tableExists(database, "memory_v2_facet_quarantine")) {
+    database.prepare(
+      `DELETE FROM memory_v2_facet_quarantine
+       WHERE aggregate_type = 'record' AND aggregate_id IN (${marks})`,
+    ).run(...recordIds);
+  }
   database.prepare(`DELETE FROM memory_record_versions WHERE record_id IN (${marks})`).run(...recordIds);
   database.prepare(`DELETE FROM memory_records WHERE record_id IN (${marks})`).run(...recordIds);
 }
@@ -1479,18 +2165,48 @@ function deleteTenantScope(database: DatabaseSync, scope: GovernanceScope): void
   ).all(...condition.params) as unknown as Array<{ candidate_id: string }>;
   deleteCandidateClosure(database, candidateRows.map((row) => row.candidate_id));
 
-  const feedbackRows = database.prepare(
-    `SELECT feedback_id FROM memory_feedback WHERE ${condition.sql}`,
-  ).all(...condition.params) as unknown as Array<{ feedback_id: string }>;
-  deleteFeedback(database, feedbackRows.map((row) => row.feedback_id));
+  deleteFeedback(
+    database,
+    feedbackTargets(database, scope).map((entry) => entry.resource_id),
+  );
+
+  if (tableExists(database, "memory_v2_origins")) {
+    const runtimeReceiptRows = database.prepare(
+      `SELECT DISTINCT receipt_id FROM memory_v2_origins WHERE ${condition.sql}`,
+    ).all(...condition.params) as unknown as Array<{ receipt_id: string }>;
+    deleteRuntimeOriginsForReceipts(
+      database,
+      runtimeReceiptRows.map((row) => row.receipt_id),
+    );
+  }
 
   // Origins must go before their evidence, attestation, and decision parents.
+  deleteScopedDirect(database, "memory_v2_review_signals", scope);
+  deleteScopedDirect(database, "memory_v2_candidate_origins", scope);
+  deleteScopedDirect(database, "memory_v2_origins", scope);
+  deleteScopedDirect(database, "memory_v2_corroboration_domains", scope);
   deleteScopedDirect(database, "memory_origins", scope);
   deleteScopedDirect(database, "memory_review_signals", scope);
+  deleteScopedDirect(database, "memory_v2_feedback_review_signals", scope);
+  deleteScopedDirect(database, "memory_v2_feedback_bindings", scope);
   deleteScopedDirect(database, "memory_candidate_decisions", scope);
   deleteScopedDirect(database, "memory_record_supersessions", scope);
   deleteScopedDirect(database, "memory_activation_claims", scope);
   deleteScopedDirect(database, "memory_transitions", scope);
+
+  if (tableExists(database, "memory_v2_retrieval_packs")) {
+    const v2PackRows = database.prepare(
+      `SELECT retrieval_pack_id FROM memory_v2_retrieval_packs WHERE ${condition.sql}`,
+    ).all(...condition.params) as unknown as Array<{ retrieval_pack_id: string }>;
+    const v2PackIds = v2PackRows.map((row) => row.retrieval_pack_id);
+    if (v2PackIds.length > 0) {
+      const marks = placeholders(v2PackIds);
+      database.prepare(
+        `DELETE FROM memory_v2_retrieval_pack_items WHERE retrieval_pack_id IN (${marks})`,
+      ).run(...v2PackIds);
+    }
+    deleteScopedDirect(database, "memory_v2_retrieval_packs", scope);
+  }
 
   const packRows = database.prepare(
     `SELECT retrieval_pack_id FROM memory_retrieval_packs WHERE ${condition.sql}`,
@@ -1531,6 +2247,7 @@ function deleteTenantScope(database: DatabaseSync, scope: GovernanceScope): void
   }
   deleteScopedDirect(database, "memory_candidates_v1", scope);
   deleteScopedDirect(database, "memory_evidence_manifests", scope);
+  deleteScopedDirect(database, "memory_v2_scope_snapshots", scope);
   deleteScopedDirect(database, "memory_run_receipts", scope);
 
   const jobRows = database.prepare(
@@ -1548,8 +2265,18 @@ function deleteTenantScope(database: DatabaseSync, scope: GovernanceScope): void
   deleteScopedDirect(database, "memory_attestations", scope);
   deleteScopedDirect(database, "memory_inbox", scope);
   deleteScopedDirect(database, "memory_provider_cursors", scope);
-  deleteScopedDirect(database, "memory_release_gate_decisions", scope);
-  deleteScopedDirect(database, "memory_prompt_policies", scope);
+  // Record closure normally removes every row. Keep a scope-qualified defensive
+  // sweep before facets/resources so a partially migrated tenant cannot strand
+  // a reverification child or cross-delete an identically named legacy job.
+  deleteScopedReverification(database, scope);
+  deleteScopedDirect(database, "memory_v2_feedback_facets", scope);
+  deleteScopedDirect(database, "memory_v2_facet_quarantine", scope);
+  deleteScopedDirect(database, "memory_v2_receipt_facets", scope);
+  deleteScopedDirect(database, "memory_v2_candidate_facets", scope);
+  deleteScopedDirect(database, "memory_v2_record_facets", scope);
+  deleteScopedDirect(database, "memory_v2_service_token_resource_bindings", scope);
+  deleteScopedDirect(database, "memory_v2_resource_aliases", scope);
+  deleteScopedDirect(database, "memory_v2_resources", scope);
   deleteScopedDirect(database, "memory_service_token_repository_bindings", scope);
   deleteScopedDirect(database, "memory_harness_principal_bindings", scope);
   deleteScopedDirect(database, "memory_repository_aliases", scope);

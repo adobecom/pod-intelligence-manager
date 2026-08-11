@@ -7,6 +7,7 @@
 import type { EnhancedPodLearning } from "@pim/shared";
 import { getGraph } from "../services/knowledge-graph.js";
 import { ingestLearnings } from "../services/ingestion-gateway.js";
+import { legacyMemoryWritesFrozen } from "../services/memory-authority.js";
 
 // --- Event CRUD v1 (pod-emc-event-crud, completed 2026-04-04) ---
 
@@ -219,6 +220,10 @@ const registrationLearnings: EnhancedPodLearning[] = [
 ];
 
 export async function seedKnowledgeGraph(orgId: string): Promise<void> {
+  if (legacyMemoryWritesFrozen()) {
+    console.log(`[knowledge-graph] Skipping development seed because legacy memory authority is frozen (org "${orgId}").`);
+    return;
+  }
   const graph = getGraph(orgId);
   if (graph.nodes.length > 0) return; // Already seeded
 

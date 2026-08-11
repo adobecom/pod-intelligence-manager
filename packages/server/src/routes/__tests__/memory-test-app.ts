@@ -6,7 +6,12 @@ import Fastify, {
 import db from "../../db/connection.js";
 import { createTables } from "../../db/schema.js";
 import { createAuthHook } from "../../middleware/auth.js";
-import { isMemoryApiPath, sendMemoryError } from "../../middleware/memory-errors.js";
+import {
+  isMemoryApiPath,
+  isMemoryV2ApiPath,
+  sendMemoryError,
+  sendMemoryV2Error,
+} from "../../middleware/memory-errors.js";
 import { resolveRequestOrg } from "../../middleware/org-context.js";
 import { registerJsonBodyParser } from "../../middleware/validation.js";
 import memoryCapabilitiesRoutes from "../memory-capabilities.js";
@@ -15,15 +20,21 @@ import memoryCandidatesRoutes from "../memory-candidates.js";
 import memoryReceiptsRoutes from "../memory-receipts.js";
 import memoryFeedbackRoutes from "../memory-feedback.js";
 import memoryDecisionRoutes from "../memory-decisions.js";
-import memoryPromptPolicyRoutes from "../memory-prompt-policy.js";
-import memoryReleaseGateRoutes from "../memory-release-gates.js";
 import memorySearchRoutes from "../memory-search.js";
 import memoryHarnessSearchRoutes from "../memory-harness-search.js";
+import memoryV2BindingRoutes from "../memory-v2-binding.js";
+import memoryV2CapabilitiesRoutes from "../memory-v2-capabilities.js";
+import memoryV2ReadinessRoutes from "../memory-v2-readiness.js";
+import memoryV2SearchRoutes from "../memory-v2-search.js";
+import memoryV2WriteRoutes, {
+  MEMORY_V2_PATH_PARAM_MAX_LENGTH,
+} from "../memory-v2-write.js";
 import { createOrg } from "../../services/orgs.js";
 import { seedMemoryReadFixture } from "../../services/memory-seed.js";
 import { registerMemoryRepository } from "../../services/memory-repository-registry.js";
 import { createServiceToken } from "../../services/service-tokens.js";
 import { upsertUserByIms } from "../../services/users.js";
+import { ensureMemoryV2EvidenceVerifiedTrust } from "../../services/memory-v2-trust.js";
 
 export interface MemoryTestContext {
   app: FastifyInstance;
@@ -56,6 +67,11 @@ export interface MemoryTestContext {
   otherTenantRecordId: string;
 }
 
+export interface MemoryTestRouteOptions {
+  v2Reads?: boolean;
+  v2Writes?: boolean;
+}
+
 function insertProject(input: {
   projectId: string;
   orgId: string;
@@ -78,6 +94,7 @@ function insertProject(input: {
 
 export async function createMemoryTestContext(
   appOptions: FastifyServerOptions = {},
+  routeOptions: MemoryTestRouteOptions = {},
 ): Promise<MemoryTestContext> {
   createTables();
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -149,6 +166,18 @@ export async function createMemoryTestContext(
     displaySlug: "Acme/Checkout",
     providerRepositoryId: `github-repo-checkout-b-${suffix}`,
   });
+  for (const seededTarget of [
+    { seeded, orgId: orgA.org_id, projectId: projectA },
+    { seeded: otherTenant, orgId: orgB.org_id, projectId: projectB },
+  ]) {
+    ensureMemoryV2EvidenceVerifiedTrust({
+      recordId: seededTarget.seeded.record.record_id,
+      recordVersion: seededTarget.seeded.record.record_version,
+      orgId: seededTarget.orgId,
+      projectId: seededTarget.projectId,
+      evidenceVerifiedAt: seededTarget.seeded.record.freshness.last_confirmed_at,
+    });
+  }
 
   const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
   const tokenA = createServiceToken({
@@ -287,55 +316,67 @@ export async function createMemoryTestContext(
   }).token;
   const harnessReceiptTokenA = createServiceToken({
     orgId: orgA.org_id,
-    name: "Fiesta harness receipt writer A",
+    name: "Example harness A receipt writer",
     scopes: ["memory:harness:receipt:write"],
     createdByUserId: owner.user_id,
     projectId: projectA,
-    harnessIds: ["fiesta"],
+    harnessIds: ["example-harness-a"],
     expiresAt,
   }).token;
   const harnessReviewerTokenA = createServiceToken({
     orgId: orgA.org_id,
-    name: "Fiesta harness reviewer A",
+    name: "Example harness A reviewer",
     scopes: ["memory:harness:review"],
     createdByUserId: owner.user_id,
     projectId: projectA,
-    harnessIds: ["fiesta"],
+    harnessIds: ["example-harness-a"],
     expiresAt,
   }).token;
   const harnessSearchTokenA = createServiceToken({
     orgId: orgA.org_id,
-    name: "Fiesta harness shadow consumer A",
+    name: "Example harness A search consumer",
     scopes: ["memory:harness:search"],
     createdByUserId: owner.user_id,
     projectId: projectA,
-    harnessIds: ["fiesta"],
+    harnessIds: ["example-harness-a"],
     expiresAt,
   }).token;
   const otherHarnessSearchTokenA = createServiceToken({
     orgId: orgA.org_id,
-    name: "Other harness shadow consumer A",
+    name: "Example harness B search consumer",
     scopes: ["memory:harness:search"],
     createdByUserId: owner.user_id,
     projectId: projectA,
-    harnessIds: ["other-harness"],
+    harnessIds: ["example-harness-b"],
     expiresAt,
   }).token;
   const otherProjectHarnessSearchTokenA = createServiceToken({
     orgId: orgA.org_id,
-    name: "Fiesta harness shadow consumer A2",
+    name: "Example harness A search consumer in project A2",
     scopes: ["memory:harness:search"],
     createdByUserId: owner.user_id,
     projectId: projectA2,
-    harnessIds: ["fiesta"],
+    harnessIds: ["example-harness-a"],
     expiresAt,
   }).token;
 
-  const app = Fastify(appOptions);
+  const app = Fastify({
+    routerOptions: { maxParamLength: MEMORY_V2_PATH_PARAM_MAX_LENGTH },
+    ...appOptions,
+  });
   registerJsonBodyParser(app);
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
     const statusCode = error.statusCode ?? 500;
     if (isMemoryApiPath(request.url)) {
+      if (isMemoryV2ApiPath(request.url)) {
+        sendMemoryV2Error(
+          reply,
+          statusCode,
+          statusCode >= 500 ? "temporarily_unavailable" : "schema_invalid",
+          statusCode >= 500 ? "Memory service is temporarily unavailable" : error.message,
+        );
+        return;
+      }
       sendMemoryError(
         reply,
         statusCode,
@@ -357,10 +398,17 @@ export async function createMemoryTestContext(
   await app.register(memoryCandidatesRoutes);
   await app.register(memoryFeedbackRoutes);
   await app.register(memoryDecisionRoutes);
-  await app.register(memoryPromptPolicyRoutes);
-  await app.register(memoryReleaseGateRoutes);
   await app.register(memorySearchRoutes);
   await app.register(memoryHarnessSearchRoutes);
+  if (routeOptions.v2Reads) {
+    await app.register(memoryV2CapabilitiesRoutes);
+    await app.register(memoryV2BindingRoutes);
+    await app.register(memoryV2ReadinessRoutes);
+    await app.register(memoryV2SearchRoutes);
+  }
+  if (routeOptions.v2Writes) {
+    await app.register(memoryV2WriteRoutes);
+  }
   await app.ready();
 
   return {

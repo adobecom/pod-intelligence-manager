@@ -233,11 +233,25 @@ function dispatch(row: OutboxRow): void {
     return;
   }
   if (row.job_type === "review_notification" || row.job_type === "record_revalidation") {
-    const payload = JSON.parse(row.payload_json) as {
+    let payload: {
+      feedback_source?: unknown;
+      feedback_id?: unknown;
       signal_id?: unknown;
       candidate_id?: unknown;
     };
-    if (typeof payload.candidate_id === "string") {
+    try {
+      const parsed = JSON.parse(row.payload_json) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("invalid review payload");
+      }
+      payload = parsed;
+    } catch {
+      throw Object.assign(new Error("Review job payload is invalid"), {
+        code: "outbox_payload_invalid",
+      });
+    }
+    if (typeof payload.candidate_id === "string"
+        && payload.feedback_source === undefined) {
       const candidate = db.prepare(
         `SELECT 1 FROM memory_candidates_v1
          WHERE org_id = ? AND project_id = ? AND candidate_id = ?`,
@@ -247,6 +261,56 @@ function dispatch(row: OutboxRow): void {
     }
     if (typeof payload.signal_id !== "string") {
       throw Object.assign(new Error("Review job payload is invalid"), { code: "outbox_payload_invalid" });
+    }
+    if (payload.feedback_source === "memory_v2_feedback_bindings") {
+      if (typeof payload.feedback_id !== "string"
+          || row.aggregate_type !== "record") {
+        throw Object.assign(new Error("Review job payload is invalid"), {
+          code: "outbox_payload_invalid",
+        });
+      }
+      const signal = db.prepare(
+        `SELECT 1
+         FROM memory_v2_feedback_review_signals AS signal
+         INNER JOIN memory_v2_feedback_bindings AS feedback
+           ON feedback.feedback_id = signal.feedback_id
+         WHERE signal.org_id = ? AND signal.project_id = ?
+           AND signal.signal_id = ? AND signal.feedback_id = ?
+           AND signal.status = 'open' AND signal.outbox_job_id = ?
+           AND signal.record_id = ?
+           AND feedback.org_id = signal.org_id
+           AND feedback.project_id = signal.project_id
+           AND feedback.feedback_stage = 'later'
+           AND feedback.record_id = signal.record_id
+           AND feedback.record_version = signal.record_version
+           AND (
+             (? = 'review_notification'
+               AND signal.signal_type IN ('harmful_review','stale_review'))
+             OR (? = 'record_revalidation'
+               AND signal.signal_type = 'checkout_anchor_revalidation')
+           )`,
+      ).get(
+        row.org_id,
+        row.project_id,
+        payload.signal_id,
+        payload.feedback_id,
+        row.job_id,
+        row.aggregate_id,
+        row.job_type,
+        row.job_type,
+      );
+      if (!signal) {
+        throw Object.assign(new Error("Review signal is unavailable"), {
+          code: "review_signal_not_found",
+        });
+      }
+      return;
+    }
+    if (payload.feedback_source !== undefined
+        && payload.feedback_source !== "memory_feedback") {
+      throw Object.assign(new Error("Review job payload is invalid"), {
+        code: "outbox_payload_invalid",
+      });
     }
     const signal = db.prepare(
       `SELECT 1 FROM memory_review_signals

@@ -70,7 +70,14 @@ const sectionHeader = style({ display: "flex", alignItems: "center", justifyCont
 type ArchiveFlow =
   | { kind: "pod"; phase: "confirm"; podId: string; podName: string }
   | { kind: "pod"; phase: "running"; podId: string; podName: string }
-  | { kind: "pod"; phase: "success"; podId: string; podName: string; learnings_extracted?: number }
+  | {
+      kind: "pod";
+      phase: "success";
+      podId: string;
+      podName: string;
+      learnings_extracted?: number;
+      candidates_submitted?: number;
+    }
   | { kind: "pod"; phase: "error"; podId: string; podName: string; message: string }
   | { kind: "project"; phase: "confirm"; projectId: string; projectName: string }
   | { kind: "project"; phase: "running"; projectId: string; projectName: string }
@@ -219,6 +226,7 @@ export function OrgDashboard() {
               podId: archiveFlow.podId,
               podName: archiveFlow.podName,
               learnings_extracted: res.learnings_extracted,
+              candidates_submitted: res.canonical_memory_intake?.candidates_submitted,
             });
           }
         } else {
@@ -958,9 +966,11 @@ export function OrgDashboard() {
                   <Content>
                     <Text>
                       &quot;{archiveFlow.podName}&quot; was archived successfully.
-                      {typeof archiveFlow.learnings_extracted === "number" && (
-                        <> {archiveFlow.learnings_extracted} learning(s) added to org memory.</>
-                      )}
+                      {typeof archiveFlow.candidates_submitted === "number" ? (
+                        <> {archiveFlow.candidates_submitted} learning candidate(s) were submitted for validation and review; they are not active yet.</>
+                      ) : typeof archiveFlow.learnings_extracted === "number" ? (
+                        <> {archiveFlow.learnings_extracted} learning(s) were added to the legacy graph.</>
+                      ) : null}
                     </Text>
                   </Content>
                   <ButtonGroup>

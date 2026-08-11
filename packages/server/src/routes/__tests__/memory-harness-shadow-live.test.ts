@@ -4,7 +4,7 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateDecisionV1,
   type MemoryCandidateV1,
   type MemoryHarnessSearchV1,
@@ -30,23 +30,23 @@ function fixture(): {
   receipt: RunReceiptV1;
 } {
   const suffix = randomUUID();
-  const producerRunId = `fiesta:test:harness-live:${suffix}`;
+  const producerRunId = `example-harness-a:test:harness-live:${suffix}`;
   const evidenceRefId = `harness-live-failure-${suffix}`;
-  const fingerprint = `fiesta:harness-live:timeout:${suffix}`;
-  const manifestBody: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const fingerprint = `example-harness-a:harness-live:timeout:${suffix}`;
+  const manifestBody: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `harness-live-manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
       type: "failure",
       uri: `https://github.com/acme/checkout/commit/${TREE_SHA}.log`,
       digest: canonicalJsonSha256({ failure: suffix }),
-      origin_id: `fiesta:${producerRunId}:failure`,
+      origin_id: `example-harness-a:${producerRunId}:failure`,
       occurred_at: EVENT_TIME,
       source_authority: "observed",
     }],
   };
-  const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+  const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
     ...manifestBody,
     digest: canonicalJsonSha256(manifestBody),
   });
@@ -57,14 +57,14 @@ function fixture(): {
     kind: "test_strategy",
     content: {
       summary: `Inspect terminal state before retrying live timeout ${suffix}.`,
-      details: `The real listener fixture ${suffix} requires Fiesta to inspect terminal tool state before retrying an ambiguous side-effecting timeout.`,
+      details: `The real listener fixture ${suffix} requires example harness A to inspect terminal tool state before retrying an ambiguous side-effecting timeout.`,
       rationale: "The exact failure fingerprint bounds this lesson to the observed harness failure mode.",
     },
     applicability: {
-      harness_id: "fiesta",
-      harness_version_range: "harness-shadow-v1",
+      harness_id: "example-harness-a",
+      harness_version_range: "harness-v1",
       workflow_version_range: "code-change.v3",
-      adapter_version_range: "fiesta-pim-adapter.v1",
+      adapter_version_range: "example-adapter-a.v1",
       configuration_ids: ["routing-default-v2"],
     },
     validation: { strategy: "stable_failure_fingerprint", failure_fingerprint: fingerprint },
@@ -73,7 +73,7 @@ function fixture(): {
     evidence_refs: [evidenceRefId],
     extraction: {
       method: "deterministic",
-      extractor_version: "fiesta-harness-live.v1",
+      extractor_version: "example-harness-live.v1",
       confidence: 1,
     },
     activation_requirement_requested: "authorized_review",
@@ -82,10 +82,10 @@ function fixture(): {
     schema_version: "pim.run-receipt.v1",
     external_session_id: `harness-live-thread-${suffix}`,
     producer: {
-      harness_id: "fiesta",
-      harness_version: "harness-shadow-v1",
+      harness_id: "example-harness-a",
+      harness_version: "harness-v1",
       workflow_version: "code-change.v3",
-      adapter_version: "fiesta-pim-adapter.v1",
+      adapter_version: "example-adapter-a.v1",
     },
     tenant: { project_id: context.projectA },
     task: { task_class: "recovery", summary: `Recover live harness timeout ${suffix}.` },
@@ -105,7 +105,7 @@ function fixture(): {
   return { producerRunId, evidenceRefId, receipt };
 }
 
-function searchRequest(harnessId = "fiesta"): MemoryHarnessSearchV1 {
+function searchRequest(harnessId = "example-harness-a"): MemoryHarnessSearchV1 {
   const base = structuredClone(
     MEMORY_CONTRACT_FIXTURES.MemoryHarnessSearchV1,
   ) as unknown as MemoryHarnessSearchV1;
@@ -114,17 +114,17 @@ function searchRequest(harnessId = "fiesta"): MemoryHarnessSearchV1 {
     request_id: `harness-live-search-${randomUUID()}`,
     consumer: {
       harness_id: harnessId,
-      harness_version: "harness-shadow-v1",
+      harness_version: "harness-v1",
       workflow_version: "code-change.v3",
-      adapter_version: "fiesta-pim-adapter.v1",
+      adapter_version: "example-adapter-a.v1",
       consumer_run_id: `harness-live-consumer-${randomUUID()}`,
     },
     tenant: { project_id: context.projectA },
     applicability: {
       harness_id: harnessId,
-      harness_version_range: "harness-shadow-v1",
+      harness_version_range: "harness-v1",
       workflow_version_range: "code-change.v3",
-      adapter_version_range: "fiesta-pim-adapter.v1",
+      adapter_version_range: "example-adapter-a.v1",
       configuration_ids: ["routing-default-v2"],
     },
     task: { query: "Inspect terminal state before retrying live timeout", task_class: "recovery" },
@@ -144,8 +144,8 @@ afterAll(async () => {
   if (context) await context.app.close();
 });
 
-describe("live SDK harness shadow loop", () => {
-  it("receipts, reviews, and retrieves only through exact-bound permanent shadow", async () => {
+describe("live SDK harness memory loop", () => {
+  it("receipts, reviews, and retrieves only through an exact harness binding", async () => {
     const input = fixture();
     const accepted = await receiptClient.putRunReceipt(input.producerRunId, input.receipt);
     expect(accepted.candidate_results[0]).toMatchObject({
@@ -167,24 +167,16 @@ describe("live SDK harness shadow loop", () => {
     const recordId = activated.active_record!.record_id;
 
     const result = await harnessClient.harnessSearch(searchRequest());
-    expect(result).toMatchObject({
-      shadow_only: true,
-      routing_influence: false,
-      prompt_eligible: false,
-      evaluation_arm: "shadow",
-    });
     expect(result.items.map((item) => item.record_id)).toContain(recordId);
-    expect(result.items.every((item) => item.prompt_eligible === false)).toBe(true);
     expect(db.prepare(
-      `SELECT repository_row_id, harness_id, prompt_eligible
+      `SELECT repository_row_id, harness_id
        FROM memory_records WHERE record_id = ?`,
     ).get(recordId)).toEqual({
       repository_row_id: null,
-      harness_id: "fiesta",
-      prompt_eligible: 0,
+      harness_id: "example-harness-a",
     });
 
-    const otherResult = await otherHarnessClient.harnessSearch(searchRequest("other-harness"));
+    const otherResult = await otherHarnessClient.harnessSearch(searchRequest("example-harness-b"));
     expect(otherResult.items).toEqual([]);
     await expect(otherHarnessClient.harnessSearch(searchRequest())).rejects.toMatchObject({
       statusCode: 403,

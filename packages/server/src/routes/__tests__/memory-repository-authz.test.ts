@@ -4,9 +4,8 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateV1,
-  type MemoryPromptPolicyUpdateV1,
   type MemorySearchV1,
   type RunReceiptV1,
 } from "@pim/shared";
@@ -84,8 +83,8 @@ async function createCheckoutCandidate(): Promise<string> {
   const suffix = randomUUID();
   const producerRunId = `fiesta:repository-authz:${suffix}`;
   const evidenceRefId = `authz-diff-${suffix}`;
-  const manifestBody: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const manifestBody: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `authz-manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
@@ -97,7 +96,7 @@ async function createCheckoutCandidate(): Promise<string> {
       source_authority: "observed",
     }],
   };
-  const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+  const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
     ...manifestBody,
     digest: canonicalJsonSha256(manifestBody),
   });
@@ -215,24 +214,6 @@ describe("memory service-token repository authorization", () => {
     ).get(candidateId) as { count: number }).count).toBe(0);
   });
 
-  it("does not let a checkout-only admin configure the registered empty repository", async () => {
-    const update = structuredClone(
-      MEMORY_CONTRACT_FIXTURES.MemoryPromptPolicyUpdateV1,
-    ) as unknown as MemoryPromptPolicyUpdateV1;
-    update.allowed_repository_ids = ["github.com/acme/empty"];
-    const response = await context.app.inject({
-      method: "PUT",
-      url: `/api/v1/memory/projects/${context.projectA}/prompt-policy`,
-      headers: auth(checkoutAdminToken),
-      payload: update,
-    });
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toMatchObject({ code: "resource_binding_mismatch" });
-    expect(db.prepare(
-      "SELECT project_id FROM memory_prompt_policies WHERE project_id = ?",
-    ).get(context.projectA)).toBeUndefined();
-  });
-
   it("protects record detail with the same exact repository binding", async () => {
     const response = await context.app.inject({
       method: "GET",
@@ -270,6 +251,11 @@ describe("memory service-token repository authorization", () => {
         (binding) => binding.repositoryId,
       ),
     ).toEqual(["github.com/acme/checkout", "github.com/acme/empty"]);
+    expect(db.prepare(
+      `SELECT COUNT(*) AS count
+       FROM memory_v2_service_token_resource_bindings
+       WHERE token_id = ?`,
+    ).get(legacy.token_id)).toEqual({ count: 2 });
     // Tokens minted with explicit bindings keep their narrow set.
     expect(verifyServiceToken(emptyReviewerToken)?.auth.repositoryBindings).toEqual([{
       repositoryRowId: expect.any(String),

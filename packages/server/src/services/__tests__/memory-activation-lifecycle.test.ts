@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryAttestationV1,
   type MemoryCandidateV1,
   type RunReceiptV1,
@@ -60,8 +60,8 @@ function prepareActivation(input: {
   const evidenceRefId = `diff-${suffix}`;
   const providerPullRequestId = `github:acme/checkout#${suffix}`;
   const diffDigest = canonicalJsonSha256({ diff: suffix });
-  const manifestBody: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const manifestBody: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
@@ -73,7 +73,7 @@ function prepareActivation(input: {
       source_authority: "observed",
     }],
   };
-  const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+  const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
     ...manifestBody,
     digest: canonicalEvidenceManifestDigest(manifestBody),
   });

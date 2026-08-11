@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { ProjectResources } from "@pim/shared";
 import db, { withImmediateTransaction } from "../db/connection.js";
 import { normalizeRepositoryId } from "./memory-structural-validator.js";
+import {
+  projectMemoryV2RepositoryAlias,
+  projectMemoryV2RepositoryResource,
+  synchronizeMemoryV2RepositoryResource,
+} from "./memory-v2-resources.js";
 
 export interface MemoryRepositoryBinding {
   repository_row_id: string;
@@ -129,7 +134,10 @@ export function registerMemoryRepository(input: {
       "SELECT * FROM memory_repository_registry WHERE org_id = ? AND provider = 'github' AND provider_repository_id = ?",
     ).get(input.orgId, providerRepositoryId) as unknown as MemoryRepositoryBinding | undefined;
     if (existing) {
-      if (existing.project_id === input.projectId && existing.repository_id === canonical) return existing;
+      if (existing.project_id === input.projectId && existing.repository_id === canonical) {
+        projectMemoryV2RepositoryResource(existing.repository_row_id);
+        return existing;
+      }
       throw new MemoryRepositoryConflictError("Immutable provider repository is already registered; use an explicit rename or transfer");
     }
     assertNoIdentityCollision(input.orgId, canonical);
@@ -150,6 +158,7 @@ export function registerMemoryRepository(input: {
       now,
       now,
     );
+    projectMemoryV2RepositoryResource(repositoryRowId);
     return getRegistryRow(repositoryRowId)!;
   });
 }
@@ -171,15 +180,19 @@ export function renameMemoryRepository(input: {
     ).get(input.orgId, input.providerRepositoryId) as unknown as MemoryRepositoryBinding | undefined;
     if (!current) throw new MemoryRepositoryBindingError("Repository is not registered in the authenticated organization");
     requireConfiguredRepository(input.orgId, current.project_id, canonical);
-    if (current.repository_id === canonical) return current;
+    if (current.repository_id === canonical) {
+      projectMemoryV2RepositoryResource(current.repository_row_id);
+      return current;
+    }
     assertNoIdentityCollision(input.orgId, canonical, current.repository_row_id);
+    const aliasId = `alias_${randomUUID()}`;
     db.prepare(
       `INSERT INTO memory_repository_aliases
          (alias_id, repository_row_id, org_id, project_id, alias_repository_id, reason,
           valid_from, valid_until, created_at)
        VALUES (?, ?, ?, ?, ?, 'rename', ?, NULL, ?)`,
     ).run(
-      `alias_${randomUUID()}`,
+      aliasId,
       current.repository_row_id,
       input.orgId,
       current.project_id,
@@ -192,6 +205,8 @@ export function renameMemoryRepository(input: {
        SET repository_id = ?, display_slug = ?, updated_at = ?
        WHERE repository_row_id = ?`,
     ).run(canonical, displaySlug, now, current.repository_row_id);
+    synchronizeMemoryV2RepositoryResource(current.repository_row_id);
+    projectMemoryV2RepositoryAlias(aliasId);
     return getRegistryRow(current.repository_row_id)!;
   });
 }
@@ -209,14 +224,18 @@ export function transferMemoryRepository(input: {
     ).get(input.orgId, input.providerRepositoryId) as unknown as MemoryRepositoryBinding | undefined;
     if (!current) throw new MemoryRepositoryBindingError("Repository is not registered in the authenticated organization");
     requireConfiguredRepository(input.orgId, input.projectId, current.repository_id);
-    if (current.project_id === input.projectId) return current;
+    if (current.project_id === input.projectId) {
+      projectMemoryV2RepositoryResource(current.repository_row_id);
+      return current;
+    }
+    const aliasId = `alias_${randomUUID()}`;
     db.prepare(
       `INSERT INTO memory_repository_aliases
          (alias_id, repository_row_id, org_id, project_id, alias_repository_id, reason,
           valid_from, valid_until, created_at)
        VALUES (?, ?, ?, ?, ?, 'transfer', ?, ?, ?)`,
     ).run(
-      `alias_${randomUUID()}`,
+      aliasId,
       current.repository_row_id,
       input.orgId,
       current.project_id,
@@ -225,6 +244,9 @@ export function transferMemoryRepository(input: {
       now,
       now,
     );
+    // The transfer alias belongs to the pre-transfer scope. Insert its
+    // immutable companion while the resource still has that exact scope.
+    projectMemoryV2RepositoryAlias(aliasId);
     db.prepare(
       "UPDATE memory_repository_aliases SET project_id = ? WHERE repository_row_id = ? AND valid_until IS NULL",
     ).run(input.projectId, current.repository_row_id);
@@ -233,6 +255,15 @@ export function transferMemoryRepository(input: {
        SET project_id = ?, valid_from = ?, updated_at = ?
        WHERE repository_row_id = ?`,
     ).run(input.projectId, now, now, current.repository_row_id);
+    synchronizeMemoryV2RepositoryResource(current.repository_row_id);
+    db.prepare(
+      `UPDATE memory_v2_resource_aliases
+       SET project_id = ?
+       WHERE resource_row_id = ? AND valid_until IS NULL`,
+    ).run(
+      input.projectId,
+      `v2res_repository:${current.repository_row_id}`,
+    );
     return getRegistryRow(current.repository_row_id)!;
   });
 }

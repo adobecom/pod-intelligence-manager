@@ -4,7 +4,7 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateDecisionResultV1,
   type MemoryCandidateDecisionV1,
   type MemoryCandidateV1,
@@ -46,8 +46,8 @@ async function createCandidate(variant: CandidateVariant): Promise<CandidateFixt
   const evidenceRefId = `decision-evidence-${suffix}`;
   const antiPattern = variant !== "positive";
   const evidenceType = variant === "missing_failure" ? "git_diff" : antiPattern ? "failure" : "git_diff";
-  const manifestBody: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const manifestBody: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `decision-manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
@@ -59,7 +59,7 @@ async function createCandidate(variant: CandidateVariant): Promise<CandidateFixt
       source_authority: "observed",
     }],
   };
-  const manifest = parseMemoryContract("FiestaCodeEvidenceV2", {
+  const manifest = parseMemoryContract("CodeEvidenceManifestV2", {
     ...manifestBody,
     digest: canonicalJsonSha256(manifestBody),
   });
@@ -335,7 +335,7 @@ describe("Slice 4 reviewed candidate decisions", () => {
     });
   });
 
-  it("activates a valid reviewed anti-pattern exactly once and exposes it to current search", async () => {
+  it("activates a valid reviewed anti-pattern without automatic reverification enrollment while disabled", async () => {
     const fixture = await createCandidate("valid_anti_pattern");
     const body = decisionFor(fixture);
     const first = await postDecision(fixture, body);
@@ -364,14 +364,31 @@ describe("Slice 4 reviewed candidate decisions", () => {
       "SELECT COUNT(*) AS count FROM memory_records WHERE record_id = ?",
     ).get(recordId) as { count: number }).count).toBe(1);
     expect(db.prepare(
-      `SELECT current_status, current_version, shadow_recall_eligible, prompt_eligible
+      `SELECT current_status, current_version, shadow_recall_eligible
        FROM memory_records WHERE record_id = ?`,
     ).get(recordId)).toEqual({
       current_status: "active",
       current_version: 1,
       shadow_recall_eligible: 1,
-      prompt_eligible: 1,
     });
+    expect(db.prepare(
+      `SELECT trust_status, trust_basis, cutover_decided_at, evidence_verified_at
+       FROM memory_v2_record_trust
+       WHERE record_id = ? AND record_version = 1`,
+    ).get(recordId)).toEqual({
+      trust_status: "trusted",
+      trust_basis: "evidence_verified",
+      cutover_decided_at: null,
+      evidence_verified_at: EVENT_TIME,
+    });
+    expect((db.prepare(
+      `SELECT COUNT(*) AS count FROM memory_v2_reverification_policies
+       WHERE record_id = ? AND record_version = 1`,
+    ).get(recordId) as { count: number }).count).toBe(0);
+    expect((db.prepare(
+      `SELECT COUNT(*) AS count FROM memory_v2_reverification_state
+       WHERE record_id = ? AND record_version = 1`,
+    ).get(recordId) as { count: number }).count).toBe(0);
     expect(db.prepare(
       `SELECT source_type, source_authority, source_identity, decision_id
        FROM memory_origins WHERE source_type = 'authorized_review'
@@ -412,6 +429,48 @@ describe("Slice 4 reviewed candidate decisions", () => {
         active_record_id: null,
         active_record_version: null,
       });
+    }
+  });
+
+  it("rolls back the reviewed activation when reverification admission is misconfigured", async () => {
+    const fixture = await createCandidate("valid_anti_pattern");
+    const recordId = `mem_${fixture.candidateId.slice("candidate_".length)}`;
+    const previousEnabled = process.env.MEMORY_V2_REVERIFICATION_ENABLED;
+    const previous = process.env.MEMORY_V2_REVERIFICATION_POLICY_INTERVAL_SECONDS;
+    process.env.MEMORY_V2_REVERIFICATION_ENABLED = "1";
+    process.env.MEMORY_V2_REVERIFICATION_POLICY_INTERVAL_SECONDS = "invalid";
+    try {
+      const response = await postDecision(fixture, decisionFor(fixture));
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toMatchObject({ code: "temporarily_unavailable" });
+      expect((db.prepare(
+        "SELECT COUNT(*) AS count FROM memory_candidate_decisions WHERE candidate_id = ?",
+      ).get(fixture.candidateId) as { count: number }).count).toBe(0);
+      expect((db.prepare(
+        "SELECT COUNT(*) AS count FROM memory_records WHERE record_id = ?",
+      ).get(recordId) as { count: number }).count).toBe(0);
+      expect((db.prepare(
+        "SELECT COUNT(*) AS count FROM memory_v2_reverification_policies WHERE record_id = ?",
+      ).get(recordId) as { count: number }).count).toBe(0);
+      expect(db.prepare(
+        `SELECT current_status, active_record_id, active_record_version
+         FROM memory_candidates_v1 WHERE candidate_id = ?`,
+      ).get(fixture.candidateId)).toEqual({
+        current_status: "pending_review",
+        active_record_id: null,
+        active_record_version: null,
+      });
+    } finally {
+      if (previousEnabled === undefined) {
+        delete process.env.MEMORY_V2_REVERIFICATION_ENABLED;
+      } else {
+        process.env.MEMORY_V2_REVERIFICATION_ENABLED = previousEnabled;
+      }
+      if (previous === undefined) {
+        delete process.env.MEMORY_V2_REVERIFICATION_POLICY_INTERVAL_SECONDS;
+      } else {
+        process.env.MEMORY_V2_REVERIFICATION_POLICY_INTERVAL_SECONDS = previous;
+      }
     }
   });
 });

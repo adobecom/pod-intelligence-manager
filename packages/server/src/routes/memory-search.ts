@@ -152,13 +152,6 @@ export default async function memorySearchRoutes(app: FastifyInstance) {
         fields,
       });
       recordMemoryMetric({
-        name: "PromptVisibleRecordCount",
-        value: result.items.filter((item) => item.prompt_eligible).length,
-        unit: "Count",
-        dimensions: { plane: request.plane, evaluation_arm: result.evaluation_arm },
-        fields,
-      });
-      recordMemoryMetric({
         name: "SearchLatency",
         value: Math.max(0, Date.now() - startedAt),
         unit: "Milliseconds",

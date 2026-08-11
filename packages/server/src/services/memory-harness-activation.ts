@@ -10,11 +10,21 @@ import db, { withImmediateTransaction } from "../db/connection.js";
 import {
   getStoredMemoryCandidate,
   markMemoryCandidateActive,
+  type StoredMemoryCandidate,
 } from "./memory-candidates.js";
 import {
   importActiveHarnessMemoryRecord,
   type HarnessMemoryRecord,
 } from "./memory-harness-records.js";
+import {
+  assertMemoryV2StoredCandidateFacet,
+  memoryV2NativeHarnessRecordProjectionDigest,
+  memoryV2NativeHarnessRuntimeEvidenceDigest,
+  type MemoryV2HarnessSubtype,
+} from "./memory-v2-canonical-writes.js";
+import { ensureMemoryV2ReverificationAdmission } from "./memory-v2-reverification-admission.js";
+import { memoryV2ReverificationEnabled } from "./memory-v2-reverification.js";
+import { ensureMemoryV2EvidenceVerifiedTrust } from "./memory-v2-trust.js";
 
 interface EvidenceRow {
   evidence_row_id: string;
@@ -25,13 +35,30 @@ interface EvidenceRow {
   source_authority: EvidenceHandleV1["source_authority"];
 }
 
-interface VerifiedFiestaMergeRow {
-  attestation_row_id: string;
-  provider_event_id: string;
-  payload_digest: string;
-  repository_id: string;
-  merge_sha: string;
+interface NativeHarnessScopeRow {
+  receipt_id: string;
+  resource_row_id: string;
+  producer_run_id: string;
+  scope_snapshot_digest: string;
+  scope_snapshot_json: string;
 }
+
+interface NativeRuntimeEvidenceRow {
+  evidence_ref_id: string;
+  origin_id: string;
+  corroboration_domain_id: string;
+  immutable_digest: string;
+  source_authority: "observed" | "verified";
+  effective_root_origin_id: string | null;
+  observation_type: string;
+  outcome_json: string;
+  occurred_at: string;
+}
+
+type NativeHarnessValidationStrategy =
+  | "stable_failure_fingerprint"
+  | "runtime_attestation"
+  | "authorized_review";
 
 export class MemoryHarnessActivationError extends Error {
   constructor(
@@ -59,40 +86,6 @@ function candidateEvidence(candidateId: string): EvidenceRow[] {
   ).all(candidateId) as unknown as EvidenceRow[];
 }
 
-function verifiedFiestaMerge(input: {
-  orgId: string;
-  projectId: string;
-  manifestDigest: string;
-  diffDigest: string;
-}): VerifiedFiestaMergeRow | null {
-  const repositoryId = process.env.MEMORY_FIESTA_REPOSITORY_ID?.trim().toLowerCase();
-  if (!repositoryId?.startsWith("github.com/") || repositoryId.split("/").length !== 3) {
-    return null;
-  }
-  return (db.prepare(
-    `SELECT attestation.attestation_row_id, attestation.provider_event_id,
-            attestation.payload_digest, repository.repository_id,
-            attestation.merge_sha
-     FROM memory_attestations attestation
-     INNER JOIN memory_repository_registry repository
-       ON repository.repository_row_id = attestation.repository_row_id
-     WHERE attestation.org_id = ? AND attestation.project_id = ?
-       AND attestation.attestation_type = 'github_merge'
-       AND repository.repository_id = ?
-       AND attestation.manifest_digest = ?
-       AND attestation.authoritative_diff_digest = ?
-       AND attestation.merge_sha IS NOT NULL
-     ORDER BY attestation.verified_at, attestation.attestation_row_id
-     LIMIT 1`,
-  ).get(
-    input.orgId,
-    input.projectId,
-    repositoryId,
-    input.manifestDigest,
-    input.diffDigest,
-  ) as VerifiedFiestaMergeRow | undefined) ?? null;
-}
-
 function persistReviewEvidence(input: {
   orgId: string;
   projectId: string;
@@ -100,7 +93,6 @@ function persistReviewEvidence(input: {
   reviewerId: string;
   decision: MemoryCandidateDecisionV1;
   evidence: EvidenceRow[];
-  verifiedMerge: VerifiedFiestaMergeRow | null;
   now: string;
 }): EvidenceHandleV1[] {
   const handles: EvidenceHandleV1[] = [];
@@ -140,35 +132,6 @@ function persistReviewEvidence(input: {
     });
   }
 
-  if (input.verifiedMerge) {
-    const mergeOriginKey = canonicalJsonSha256({
-      source_type: "github_attestation",
-      source_identity: input.verifiedMerge.provider_event_id,
-      immutable_digest: input.verifiedMerge.payload_digest,
-    });
-    insert.run(
-      `origin_${randomUUID()}`,
-      input.orgId,
-      input.projectId,
-      mergeOriginKey,
-      "github_attestation",
-      input.verifiedMerge.provider_event_id,
-      input.verifiedMerge.payload_digest,
-      "verified",
-      null,
-      input.verifiedMerge.attestation_row_id,
-      null,
-      input.now,
-    );
-    handles.push({
-      evidence_ref_id: input.verifiedMerge.attestation_row_id,
-      type: "github_merge",
-      digest: input.verifiedMerge.payload_digest,
-      origin_id: input.verifiedMerge.provider_event_id,
-      source_authority: "verified",
-    });
-  }
-
   const decisionDigest = canonicalJsonSha256(input.decision);
   const reviewOriginKey = canonicalJsonSha256({
     source_type: "authorized_review",
@@ -199,6 +162,366 @@ function persistReviewEvidence(input: {
   return handles;
 }
 
+function persistNativeReviewOrigin(input: {
+  orgId: string;
+  projectId: string;
+  decisionId: string;
+  reviewerId: string;
+  decision: MemoryCandidateDecisionV1;
+  now: string;
+}): EvidenceHandleV1 {
+  const decisionDigest = canonicalJsonSha256(input.decision);
+  const reviewOriginKey = canonicalJsonSha256({
+    source_type: "authorized_review",
+    source_identity: `${input.reviewerId}:${input.decisionId}`,
+    immutable_digest: decisionDigest,
+  });
+  db.prepare(
+    `INSERT OR IGNORE INTO memory_origins
+       (origin_row_id, org_id, project_id, origin_key, source_type, source_identity,
+        immutable_digest, source_authority, evidence_row_id, attestation_row_id,
+        decision_id, created_at)
+     VALUES (?, ?, ?, ?, 'authorized_review', ?, ?, 'authorized_review',
+             NULL, NULL, ?, ?)`,
+  ).run(
+    `origin_${randomUUID()}`,
+    input.orgId,
+    input.projectId,
+    reviewOriginKey,
+    `${input.reviewerId}:${input.decisionId}`,
+    decisionDigest,
+    input.decisionId,
+    input.now,
+  );
+  return {
+    evidence_ref_id: input.decisionId,
+    type: "authorized_review",
+    digest: decisionDigest,
+    origin_id: input.reviewerId,
+    source_authority: "authorized_review",
+  };
+}
+
+function nativeHarnessScope(receiptId: string): NativeHarnessScopeRow | null {
+  return (db.prepare(
+    `SELECT receipt_id, resource_row_id, producer_run_id, scope_snapshot_digest,
+            scope_snapshot_json
+     FROM memory_v2_scope_snapshots
+     WHERE receipt_id = ? AND plane = 'harness'`,
+  ).get(receiptId) as NativeHarnessScopeRow | undefined) ?? null;
+}
+
+function activateReviewedNativeHarnessMemoryCandidate(input: {
+  stored: StoredMemoryCandidate;
+  scope: NativeHarnessScopeRow;
+  orgId: string;
+  projectId: string;
+  reviewerId: string;
+  decisionId: string;
+  decision: MemoryCandidateDecisionV1;
+  now: string;
+}): HarnessMemoryRecord {
+  assertMemoryV2StoredCandidateFacet(input.stored.row.candidate_id);
+  const facet = db.prepare(
+    `SELECT resource_row_id, broad_kind, subtype, projection_status
+     FROM memory_v2_candidate_facets
+     WHERE candidate_id = ? AND org_id = ? AND project_id = ? AND plane = 'harness'`,
+  ).get(
+    input.stored.row.candidate_id,
+    input.orgId,
+    input.projectId,
+  ) as {
+    resource_row_id: string;
+    broad_kind: string;
+    subtype: MemoryV2HarnessSubtype | null;
+    projection_status: string;
+  } | undefined;
+  if (!facet || facet.resource_row_id !== input.scope.resource_row_id
+      || facet.broad_kind !== input.stored.candidate.kind
+      || facet.projection_status !== "mapped" || !facet.subtype) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness candidate classification is unavailable",
+      409,
+      "activation_requirement_unsatisfied",
+    );
+  }
+  const receipt = db.prepare(
+    `SELECT receipt_json, producer_run_id, producer_harness_id
+     FROM memory_run_receipts
+     WHERE receipt_id = ? AND org_id = ? AND project_id = ?`,
+  ).get(input.stored.row.receipt_id, input.orgId, input.projectId) as {
+    receipt_json: string;
+    producer_run_id: string;
+    producer_harness_id: string;
+  } | undefined;
+  if (!receipt || receipt.producer_run_id !== input.scope.producer_run_id) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness receipt scope is unavailable",
+      422,
+      "evidence_unresolvable",
+    );
+  }
+  const receiptPayload = JSON.parse(receipt.receipt_json) as RunReceiptV1;
+  const applicability = input.stored.candidate.applicability as HarnessApplicabilityV1;
+  const extensions = input.stored.candidate.extensions ?? {};
+  const strategy = extensions.v2_validation_strategy;
+  if (applicability.harness_id !== receipt.producer_harness_id
+      || applicability.harness_id !== receiptPayload.producer.harness_id
+      || extensions.v2_scope_snapshot_digest !== input.scope.scope_snapshot_digest) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness identity does not match its receipt",
+      422,
+      "evidence_mismatch",
+    );
+  }
+  if (strategy !== "stable_failure_fingerprint"
+      && strategy !== "runtime_attestation"
+      && strategy !== "authorized_review") {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness validation strategy is unavailable",
+      422,
+      "evidence_mismatch",
+    );
+  }
+  const validationStrategy = strategy as NativeHarnessValidationStrategy;
+  const failureFingerprint = input.stored.candidate.validation.failure_fingerprint;
+  const failureDerived = validationStrategy === "stable_failure_fingerprint";
+  if (failureDerived
+      ? input.stored.candidate.validation.strategy !== "stable_failure_fingerprint"
+        || !failureFingerprint
+        || failureFingerprint !== receiptPayload.outcome.failure_fingerprint
+      : input.stored.candidate.validation.strategy !== "policy_owner_review"
+        || failureFingerprint !== undefined
+        || receiptPayload.outcome.status !== "completed"
+        || receiptPayload.outcome.verification_status !== "passed"
+        || receiptPayload.outcome.failure_fingerprint !== null) {
+    throw new MemoryHarnessActivationError(
+      failureDerived
+        ? "Native v2 harness failure fingerprint does not match its receipt"
+        : "Native v2 harness successful-run validation does not match its receipt",
+      422,
+      "evidence_mismatch",
+    );
+  }
+  const evidenceRows = db.prepare(
+    `SELECT origin.evidence_ref_id, origin.origin_id,
+            origin.corroboration_domain_id, origin.immutable_digest,
+            origin.source_authority, origin.effective_root_origin_id,
+            origin.observation_type, origin.outcome_json, origin.occurred_at
+     FROM memory_v2_candidate_origins AS link
+     INNER JOIN memory_v2_origins AS origin ON origin.origin_id = link.origin_id
+     WHERE link.candidate_id = ? AND link.receipt_id = ?
+       AND link.producer_run_id = ? AND link.resource_row_id = ?
+       AND origin.receipt_id = link.receipt_id
+       AND origin.evidence_ref_id = link.evidence_ref_id
+     ORDER BY origin.occurred_at, origin.evidence_ref_id`,
+  ).all(
+    input.stored.row.candidate_id,
+    input.scope.receipt_id,
+    input.scope.producer_run_id,
+    input.scope.resource_row_id,
+  ) as unknown as NativeRuntimeEvidenceRow[];
+  const evidenceRefs = evidenceRows.map((item) => item.evidence_ref_id).sort();
+  const evidenceRequired = validationStrategy !== "authorized_review";
+  if ((evidenceRequired && evidenceRows.length === 0)
+      || extensions.v2_evidence_refs_digest !== canonicalJsonSha256(evidenceRefs)) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness runtime evidence is incomplete",
+      422,
+      "evidence_unresolvable",
+    );
+  }
+  if (evidenceRows.some((item) => {
+    try {
+      const outcome = JSON.parse(item.outcome_json) as {
+        status?: unknown;
+        verification_status?: unknown;
+        failure_fingerprint?: unknown;
+      };
+      return failureDerived
+        ? outcome.failure_fingerprint !== failureFingerprint
+        : outcome.status !== "completed"
+          || outcome.verification_status !== "passed"
+          || outcome.failure_fingerprint !== null
+          || (validationStrategy === "runtime_attestation"
+            && item.source_authority !== "verified");
+    } catch {
+      return true;
+    }
+  })) {
+    throw new MemoryHarnessActivationError(
+      failureDerived
+        ? "Native v2 runtime evidence does not match the stable failure fingerprint"
+        : "Native v2 runtime evidence does not verify the successful-run strategy",
+      422,
+      "evidence_mismatch",
+    );
+  }
+  const producerRefs = new Set(evidenceRows.map((item) => item.evidence_ref_id));
+  if ((input.decision.evidence_refs ?? []).some((ref) => !producerRefs.has(ref))) {
+    throw new MemoryHarnessActivationError(
+      "Review cites runtime evidence outside the candidate receipt",
+      422,
+      "evidence_unresolvable",
+    );
+  }
+
+  // Multiple roots, retries, summaries, and derived artifacts in one approved
+  // authority domain contribute one runtime observation to the activated row.
+  const representativeByDomain = new Map<string, NativeRuntimeEvidenceRow>();
+  for (const row of evidenceRows) {
+    const current = representativeByDomain.get(row.corroboration_domain_id);
+    if (!current || (row.observation_type === "root" && current.observation_type !== "root")) {
+      representativeByDomain.set(row.corroboration_domain_id, row);
+    }
+  }
+  const runtimeEvidence: EvidenceHandleV1[] = [...representativeByDomain.values()]
+    .map((row) => ({
+      evidence_ref_id: row.origin_id,
+      type: "runtime_attestation",
+      digest: row.immutable_digest,
+      origin_id: row.effective_root_origin_id ?? row.origin_id,
+      source_authority: row.source_authority,
+    }));
+  const reviewEvidence = persistNativeReviewOrigin({
+    orgId: input.orgId,
+    projectId: input.projectId,
+    decisionId: input.decisionId,
+    reviewerId: input.reviewerId,
+    decision: input.decision,
+    now: input.now,
+  });
+  const evidence = [...runtimeEvidence, reviewEvidence];
+  const scopePayload = JSON.parse(input.scope.scope_snapshot_json) as {
+    configuration_digest?: unknown;
+  };
+  const configurationDigest = typeof scopePayload.configuration_digest === "string"
+    ? scopePayload.configuration_digest
+    : null;
+  if (!configurationDigest) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness configuration scope is unavailable",
+      422,
+      "evidence_unresolvable",
+    );
+  }
+  const configurationSelectorDigest = extensions.v2_configuration_selector_digest;
+  if (configurationSelectorDigest !== null
+      && configurationSelectorDigest !== configurationDigest) {
+    throw new MemoryHarnessActivationError(
+      "Native v2 harness configuration selector does not match its authenticated scope",
+      422,
+      "evidence_mismatch",
+    );
+  }
+  const domainIds = [...representativeByDomain.keys()].sort();
+  const runtimeOriginIds = evidenceRows.map((row) => row.origin_id).sort();
+  const runtimeEvidenceDigest = memoryV2NativeHarnessRuntimeEvidenceDigest(
+    evidenceRows.map((row) => ({
+      evidenceRefId: row.evidence_ref_id,
+      originId: row.origin_id,
+      corroborationDomainId: row.corroboration_domain_id,
+    })),
+  );
+  const configurationDigests = configurationSelectorDigest === null
+    ? []
+    : [configurationDigest];
+  const recordId = `mem_${input.stored.row.candidate_id.slice("candidate_".length)}`;
+  const record = importActiveHarnessMemoryRecord({
+    orgId: input.orgId,
+    projectId: input.projectId,
+    recordId,
+    kind: input.stored.candidate.kind,
+    subtype: facet.subtype,
+    configurationDigests,
+    content: input.stored.candidate.content,
+    applicability,
+    exceptions: input.stored.candidate.exceptions,
+    compatibility: {
+      harness_version_range: applicability.harness_version_range
+        ?? receiptPayload.producer.harness_version,
+      workflow_version_range: applicability.workflow_version_range
+        ?? receiptPayload.producer.workflow_version,
+      adapter_version_range: applicability.adapter_version_range
+        ?? receiptPayload.producer.adapter_version,
+    },
+    validation: input.stored.candidate.validation,
+    evidence,
+    evidenceSummary: { strength: "reviewed", ref_count: evidence.length },
+    freshness: { last_confirmed_at: input.decision.event_time, expires_at: null },
+    provenance: {
+      candidate_id: input.stored.row.candidate_id,
+      producer_run_id: receipt.producer_run_id,
+      producer: receiptPayload.producer,
+      extraction: input.stored.candidate.extraction,
+      extractor_version: input.stored.candidate.extraction.extractor_version,
+      runtime_evidence_digest: runtimeEvidenceDigest,
+      runtime_origin_ids: runtimeOriginIds,
+      v2_corroboration_domain_ids: domainIds,
+      v2_distinct_corroboration_domain_count: domainIds.length,
+      v2_scope_configuration_digest: configurationDigest,
+      v2_configuration_digests: configurationDigests,
+      v2_subtype: facet.subtype,
+      v2_validation_strategy: validationStrategy,
+      scope_snapshot_digest: input.scope.scope_snapshot_digest,
+      v2_projection_digest: memoryV2NativeHarnessRecordProjectionDigest({
+        candidateId: input.stored.row.candidate_id,
+        recordId,
+        recordVersion: 1,
+        resourceRowId: input.scope.resource_row_id,
+        subtype: facet.subtype,
+        scopeSnapshotDigest: input.scope.scope_snapshot_digest,
+        scopeConfigurationDigest: configurationDigest,
+        runtimeOriginIds,
+        corroborationDomainIds: domainIds,
+        distinctCorroborationDomainCount: domainIds.length,
+        configurationDigests,
+        runtimeEvidenceDigest,
+      }),
+      failure_fingerprint: receiptPayload.outcome.failure_fingerprint,
+      decision_id: input.decisionId,
+      reviewer_principal_id: input.reviewerId,
+    },
+    actorId: input.reviewerId,
+    decisionRefs: [input.decisionId],
+    reasonCode: input.decision.reason_code,
+    explanation: input.decision.explanation
+      ?? "Authorized review approved this native v2 harness lesson for retrieval.",
+    now: input.now,
+  });
+  const trust = ensureMemoryV2EvidenceVerifiedTrust({
+    recordId: record.recordId,
+    recordVersion: record.recordVersion,
+    orgId: input.orgId,
+    projectId: input.projectId,
+    evidenceVerifiedAt: input.decision.event_time,
+    now: input.now,
+  });
+  if (trust.trustBasis === "evidence_verified" && memoryV2ReverificationEnabled()) {
+    ensureMemoryV2ReverificationAdmission({
+      recordId: record.recordId,
+      recordVersion: record.recordVersion,
+      createdBy: "memory-v2-harness-activation",
+      now: input.now,
+    });
+  }
+  markMemoryCandidateActive({
+    candidateId: input.stored.row.candidate_id,
+    expectedVersion: input.stored.row.aggregate_version,
+    recordId: record.recordId,
+    recordVersion: record.recordVersion,
+    actorId: input.reviewerId,
+    actorType: "reviewer",
+    fromStatus: "pending_review",
+    decisionRefs: [input.decisionId],
+    reasonCode: input.decision.reason_code,
+    explanation: input.decision.explanation
+      ?? "Authorized review activated this native v2 harness lesson.",
+    now: input.now,
+  });
+  return record;
+}
+
 export function activateReviewedHarnessMemoryCandidate(input: {
   orgId: string;
   projectId: string;
@@ -220,7 +543,19 @@ export function activateReviewedHarnessMemoryCandidate(input: {
         "activation_requirement_unsatisfied",
       );
     }
-    const blockers = JSON.parse(stored.row.blockers_json) as string[];
+    const nativeScope = nativeHarnessScope(stored.row.receipt_id);
+    if (nativeScope) {
+      return activateReviewedNativeHarnessMemoryCandidate({
+        stored,
+        scope: nativeScope,
+        orgId: input.orgId,
+        projectId: input.projectId,
+        reviewerId: input.reviewerId,
+        decisionId: input.decisionId,
+        decision: input.decision,
+        now,
+      });
+    }
 
     const receipt = db.prepare(
       `SELECT run.receipt_json, run.producer_run_id, run.producer_harness_id,
@@ -268,25 +603,6 @@ export function activateReviewedHarnessMemoryCandidate(input: {
         "evidence_unresolvable",
       );
     }
-    const gitDiffs = evidenceRows.filter((row) => row.type === "git_diff");
-    let verifiedMerge: VerifiedFiestaMergeRow | null = null;
-    if (blockers.includes("verified_fiesta_merge_required") || gitDiffs.length > 0) {
-      verifiedMerge = gitDiffs.length === 1
-        ? verifiedFiestaMerge({
-            orgId: input.orgId,
-            projectId: input.projectId,
-            manifestDigest: receipt.manifest_digest,
-            diffDigest: gitDiffs[0]!.digest,
-          })
-        : null;
-      if (!verifiedMerge) {
-        throw new MemoryHarnessActivationError(
-          "Harness code-change lessons require verified Fiesta merge evidence",
-          409,
-          "activation_requirement_unsatisfied",
-        );
-      }
-    }
     const producerRefs = new Set(evidenceRows.map((row) => row.producer_ref_id));
     if ((input.decision.evidence_refs ?? []).some((ref) => !producerRefs.has(ref))) {
       throw new MemoryHarnessActivationError(
@@ -303,7 +619,6 @@ export function activateReviewedHarnessMemoryCandidate(input: {
       reviewerId: input.reviewerId,
       decision: input.decision,
       evidence: evidenceRows,
-      verifiedMerge,
       now,
     });
     const record = importActiveHarnessMemoryRecord({
@@ -336,18 +651,30 @@ export function activateReviewedHarnessMemoryCandidate(input: {
         failure_fingerprint: stored.candidate.validation.failure_fingerprint,
         decision_id: input.decisionId,
         reviewer_principal_id: input.reviewerId,
-        fiesta_merge_attestation_id: verifiedMerge?.attestation_row_id ?? null,
-        fiesta_merge_repository_id: verifiedMerge?.repository_id ?? null,
-        fiesta_merge_sha: verifiedMerge?.merge_sha ?? null,
-        shadow_only: true,
       },
       actorId: input.reviewerId,
       decisionRefs: [input.decisionId],
       reasonCode: input.decision.reason_code,
       explanation: input.decision.explanation
-        ?? "Authorized review approved this harness lesson for shadow-only retrieval.",
+        ?? "Authorized review approved this harness lesson for retrieval.",
       now,
     });
+    const trust = ensureMemoryV2EvidenceVerifiedTrust({
+      recordId: record.recordId,
+      recordVersion: record.recordVersion,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      evidenceVerifiedAt: input.decision.event_time,
+      now,
+    });
+    if (trust.trustBasis === "evidence_verified" && memoryV2ReverificationEnabled()) {
+      ensureMemoryV2ReverificationAdmission({
+        recordId: record.recordId,
+        recordVersion: record.recordVersion,
+        createdBy: "memory-v2-harness-activation",
+        now,
+      });
+    }
     markMemoryCandidateActive({
       candidateId: stored.row.candidate_id,
       expectedVersion: stored.row.aggregate_version,
@@ -359,7 +686,7 @@ export function activateReviewedHarnessMemoryCandidate(input: {
       decisionRefs: [input.decisionId],
       reasonCode: input.decision.reason_code,
       explanation: input.decision.explanation
-        ?? "Authorized review activated this harness lesson in permanent shadow mode.",
+        ?? "Authorized review activated this harness lesson.",
       now,
     });
     return record;

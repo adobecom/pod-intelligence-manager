@@ -10,6 +10,7 @@ import db, { withImmediateTransaction } from "../db/connection.js";
 import type { ServiceTokenAuthMetadata } from "./service-tokens.js";
 import { recordMemoryMetric } from "./memory-metrics.js";
 import type { MemoryRepositoryBinding } from "./memory-repository-registry.js";
+import type { MemoryV2ReverificationProviderResult } from "./memory-v2-reverification.js";
 import {
   reconcileVerifiedGithubState,
   type AuthoritativeGithubState,
@@ -278,6 +279,277 @@ let githubResolver: MemoryGithubResolver = resolveGithubMemoryState;
 
 export function setMemoryGithubResolver(resolver: MemoryGithubResolver | null): void {
   githubResolver = resolver ?? resolveGithubMemoryState;
+}
+
+interface GithubReverificationRecordRow {
+  provenance_json: string;
+  evidence_json: string;
+  repository_row_id: string;
+  org_id: string;
+  project_id: string;
+  provider: "github";
+  provider_repository_id: string;
+  repository_id: string;
+  display_slug: string;
+  valid_from: string;
+  valid_until: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface GithubReverificationAttestationRow {
+  attestation_row_id: string;
+  provider_event_id: string;
+  producer_attestation_id: string;
+  attestation_type: string;
+  payload_digest: string;
+  attestation_json: string;
+  provider_pull_request_id: string | null;
+  base_sha: string | null;
+  head_sha: string | null;
+  merge_sha: string | null;
+  manifest_digest: string;
+  occurred_at: string;
+  authoritative_diff_digest: string | null;
+}
+
+export interface ReverifyGithubMemoryRecordInput {
+  recordId: string;
+  recordVersion: number;
+  orgId: string;
+  projectId: string;
+  resourceRowId: string;
+  attemptedAt: string;
+}
+
+function unavailableGithubReverification(
+  errorCode: string,
+): MemoryV2ReverificationProviderResult {
+  return { outcome: "unavailable", errorCode };
+}
+
+function githubReverificationDigest(input: {
+  outcome: "verified" | "contradicted" | "withdrawn";
+  attestationRowId: string;
+  payloadDigest: string;
+  authoritativeDiffDigest: string;
+  state: AuthoritativeGithubState;
+}): string {
+  return canonicalJsonSha256({
+    schema_version: "pim.memory-v2-github-reverification-evidence.v1",
+    outcome: input.outcome,
+    attestation_row_id: input.attestationRowId,
+    payload_digest: input.payloadDigest,
+    authoritative_diff_digest: input.authoritativeDiffDigest,
+    provider_state: {
+      repository_id: input.state.repositoryId,
+      provider_pull_request_id: input.state.providerPullRequestId,
+      merged: input.state.merged,
+      reverted: input.state.reverted === true,
+      base_sha: input.state.baseSha,
+      head_sha: input.state.headSha,
+      merge_sha: input.state.mergeSha,
+      manifest_digest: input.state.manifestDigest,
+      final_diff_digest: input.state.finalDiffDigest,
+      occurred_at: input.state.occurredAt,
+    },
+  });
+}
+
+/**
+ * Re-check one active codebase record against the same immutable GitHub
+ * attestation that activated it. The returned evidence is digest-only; raw
+ * provider material never leaves this service boundary.
+ */
+export async function reverifyGithubMemoryRecord(
+  input: ReverifyGithubMemoryRecordInput,
+): Promise<MemoryV2ReverificationProviderResult> {
+  if (!Number.isFinite(Date.parse(input.attemptedAt))) {
+    return unavailableGithubReverification("github_reverification_time_invalid");
+  }
+  const source = db.prepare(
+    `SELECT version.provenance_json, version.evidence_json,
+            repository.repository_row_id, repository.org_id, repository.project_id,
+            repository.provider, repository.provider_repository_id,
+            repository.repository_id, repository.display_slug, repository.valid_from,
+            repository.valid_until, repository.created_at, repository.updated_at
+     FROM memory_records AS record
+     JOIN memory_record_versions AS version
+       ON version.record_id = record.record_id AND version.record_version = ?
+     JOIN memory_v2_record_facets AS facet
+       ON facet.record_id = record.record_id AND facet.record_version = ?
+     JOIN memory_v2_resources AS resource
+       ON resource.resource_row_id = facet.resource_row_id
+     JOIN memory_repository_registry AS repository
+       ON repository.repository_row_id = record.repository_row_id
+      AND repository.repository_row_id = resource.source_row_id
+     WHERE record.record_id = ? AND record.current_version = ?
+       AND record.current_status = 'active'
+       AND record.org_id = ? AND record.project_id = ? AND record.plane = 'codebase'
+       AND facet.org_id = record.org_id AND facet.project_id = record.project_id
+       AND facet.plane = 'codebase' AND facet.resource_row_id = ?
+       AND facet.projection_status = 'mapped'
+       AND resource.org_id = record.org_id AND resource.project_id = record.project_id
+       AND resource.plane = 'codebase' AND resource.resource_type = 'repository'
+       AND resource.source_authority = 'memory_repository_registry'
+       AND resource.valid_until IS NULL AND repository.valid_until IS NULL`,
+  ).get(
+    input.recordVersion,
+    input.recordVersion,
+    input.recordId,
+    input.recordVersion,
+    input.orgId,
+    input.projectId,
+    input.resourceRowId,
+  ) as unknown as GithubReverificationRecordRow | undefined;
+  if (!source) return unavailableGithubReverification("github_record_source_unavailable");
+
+  let attestationRowId: string | null = null;
+  let evidence: unknown = null;
+  try {
+    const provenance = JSON.parse(source.provenance_json) as Record<string, unknown>;
+    attestationRowId = typeof provenance.attestation_id === "string"
+      ? provenance.attestation_id
+      : null;
+    evidence = JSON.parse(source.evidence_json) as unknown;
+  } catch {
+    return unavailableGithubReverification("github_record_provenance_invalid");
+  }
+  if (!attestationRowId || !Array.isArray(evidence)) {
+    return unavailableGithubReverification("github_record_attestation_unavailable");
+  }
+
+  const stored = db.prepare(
+    `SELECT attestation_row_id, provider_event_id, producer_attestation_id,
+            attestation_type, payload_digest, attestation_json,
+            provider_pull_request_id, base_sha, head_sha, merge_sha,
+            manifest_digest, occurred_at, authoritative_diff_digest
+     FROM memory_attestations
+     WHERE attestation_row_id = ? AND org_id = ? AND project_id = ?
+       AND repository_row_id = ? AND provider = 'github'`,
+  ).get(
+    attestationRowId,
+    input.orgId,
+    input.projectId,
+    source.repository_row_id,
+  ) as GithubReverificationAttestationRow | undefined;
+  if (!stored || stored.attestation_type !== "github_merge"
+      || !/^sha256:[0-9a-f]{64}$/.test(stored.payload_digest)
+      || !stored.authoritative_diff_digest
+      || !/^sha256:[0-9a-f]{64}$/.test(stored.authoritative_diff_digest)) {
+    return unavailableGithubReverification("github_activation_attestation_invalid");
+  }
+
+  let attestation: MemoryAttestationV1;
+  try {
+    attestation = parseMemoryContract(
+      "MemoryAttestationV1",
+      JSON.parse(stored.attestation_json) as unknown,
+    );
+  } catch {
+    return unavailableGithubReverification("github_activation_attestation_invalid");
+  }
+  const exactEvidence = evidence.some((item) => {
+    if (!item || typeof item !== "object") return false;
+    const handle = item as Record<string, unknown>;
+    return handle.evidence_ref_id === stored.attestation_row_id
+      && handle.type === "github_merge"
+      && handle.digest === stored.payload_digest
+      && handle.origin_id === stored.provider_event_id
+      && handle.source_authority === "verified";
+  });
+  if (!exactEvidence
+      || attestation.type !== "github_merge"
+      || attestation.attestation_id !== stored.producer_attestation_id
+      || attestation.provider_event_id !== stored.provider_event_id
+      || attestation.provider_pull_request_id !== stored.provider_pull_request_id
+      || attestation.base_sha !== stored.base_sha
+      || attestation.head_sha !== stored.head_sha
+      || attestation.merge_sha !== stored.merge_sha
+      || attestation.manifest_digest !== stored.manifest_digest
+      || attestation.occurred_at !== stored.occurred_at
+      || !stored.merge_sha) {
+    return unavailableGithubReverification("github_activation_attestation_invalid");
+  }
+
+  let probe: MemoryAttestationV1;
+  try {
+    // A revert probe preserves the exact activating correlation while asking
+    // the existing resolver to scan the bounded base-branch revert history.
+    probe = parseMemoryContract("MemoryAttestationV1", {
+      ...attestation,
+      type: "github_revert",
+    });
+  } catch {
+    return unavailableGithubReverification("github_reverification_probe_invalid");
+  }
+
+  let state: AuthoritativeGithubState;
+  try {
+    state = await githubResolver({ attestation: probe, repository: source });
+  } catch (error) {
+    return unavailableGithubReverification(
+      error instanceof MemoryAttestationIngressError
+        && error.code === "evidence_unresolvable"
+        ? "github_source_unresolvable"
+        : "github_provider_unavailable",
+    );
+  }
+  if (!Number.isFinite(Date.parse(state.occurredAt))
+      || !/^sha256:[0-9a-f]{64}$/.test(state.finalDiffDigest)) {
+    return unavailableGithubReverification("github_provider_result_invalid");
+  }
+
+  if (!state.merged || state.reverted === true) {
+    return {
+      outcome: "withdrawn",
+      evidenceDigest: githubReverificationDigest({
+        outcome: "withdrawn",
+        attestationRowId,
+        payloadDigest: stored.payload_digest,
+        authoritativeDiffDigest: stored.authoritative_diff_digest,
+        state,
+      }),
+      sourceOccurredAt: state.occurredAt,
+      reasonCode: state.reverted === true
+        ? "github_activating_merge_reverted"
+        : "github_activating_merge_withdrawn",
+    };
+  }
+
+  const exact = state.repositoryId === source.repository_id
+    && state.providerPullRequestId === stored.provider_pull_request_id
+    && state.baseSha === stored.base_sha
+    && state.headSha === stored.head_sha
+    && state.mergeSha === stored.merge_sha
+    && state.manifestDigest === stored.manifest_digest
+    && state.finalDiffDigest === stored.authoritative_diff_digest;
+  if (!exact) {
+    return {
+      outcome: "contradicted",
+      evidenceDigest: githubReverificationDigest({
+        outcome: "contradicted",
+        attestationRowId,
+        payloadDigest: stored.payload_digest,
+        authoritativeDiffDigest: stored.authoritative_diff_digest,
+        state,
+      }),
+      sourceOccurredAt: state.occurredAt,
+      reasonCode: "github_authoritative_state_changed",
+    };
+  }
+  return {
+    outcome: "verified",
+    verifiedAt: input.attemptedAt,
+    evidenceDigest: githubReverificationDigest({
+      outcome: "verified",
+      attestationRowId,
+      payloadDigest: stored.payload_digest,
+      authoritativeDiffDigest: stored.authoritative_diff_digest,
+      state,
+    }),
+    sourceOccurredAt: state.occurredAt,
+  };
 }
 
 interface GithubCandidateCorrelation {

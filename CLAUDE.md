@@ -15,12 +15,15 @@ Active implementation. Core backend (Fastify server, SQLite, WebSocket), PIM orc
 2. **PIM (Brain)** — Context bus: agents submit structured updates → orchestrator routes to Committee agents → living `.md` is assembled from DynamoDB state and written to S3
 3. **PIM UI (Surface)** — React + Spectrum 2 SPA for pod health, conflicts, and the live doc
 
-## Knowledge Graph — load-bearing rules
+## Knowledge Graph and canonical memory — load-bearing rules
 
-The graph is the org's persistent memory. Two ingestion paths only — do not add a third:
+The legacy graph remains the Pod-context read source, but it is read-only once legacy memory authority is frozen. Do not add another legacy graph writer.
 
-1. **Pod archival** — `POST /api/pods/:podId/archive` → `extractKnowledgeEnhanced()` → `addLearningsToGraph()`. The graph crystallizes here. Live context updates do *not* flow into the graph during a sprint (that proved noisy and racy).
-2. **Ad-hoc submission** — `POST /api/knowledge/nodes` (REST), `submitLearning()` (SDK), `submit_knowledge_learning` (MCP) for confirmed learnings outside any pod. Synchronous embedding + dedup; community detection is **deferred** to the periodic `refreshAnalysisIfStale` interval. Defaults: `confidence_score: 0.7`, `curated: false`.
+1. **Pod archival** — `POST /api/pods/:podId/archive` always runs `extractKnowledgeEnhanced()`. Under legacy authority it retains the existing `addLearningsToGraph()` path. Under frozen authority, selected learnings go through the in-process canonical v1 receipt service as internal `org` candidates pending validation and policy-owner review; the job/event says `memory_candidates_submitted`, never that memory is active.
+2. **Ad-hoc submission** — `POST /api/knowledge/nodes` (and the SDK/MCP methods that call it) retains legacy embedding/dedup before cutover. Under frozen authority it submits the same review-gated canonical candidates and returns `202 candidate_submitted`.
+3. **Agent run/session rollups** — under frozen authority they use the same canonical intake and never insert or auto-promote legacy `memory_candidates`.
+
+Scheduled graph synthesis and development graph seeding no-op under frozen authority. Project evidence may remain searchable, but legacy project/agent candidate creation and promotion are retired after the freeze.
 
 Agents query via `getRelevantLearnings(tokenBudget)` — never dump the full graph. Full details, confidence scoring, pruning, and storage layout in [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md#knowledge-graph-persistent-org-memory).
 

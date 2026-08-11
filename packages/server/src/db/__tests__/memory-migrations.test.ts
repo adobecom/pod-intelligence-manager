@@ -6,14 +6,33 @@ const SHA256_A = `sha256:${"a".repeat(64)}`;
 const SHA256_B = `sha256:${"b".repeat(64)}`;
 const SHA256_C = `sha256:${"c".repeat(64)}`;
 
+function migrationDatabase(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  database.exec(`
+    CREATE TABLE orgs (org_id TEXT PRIMARY KEY);
+    CREATE TABLE projects (project_id TEXT PRIMARY KEY);
+    CREATE TABLE service_principals (
+      service_principal_id TEXT PRIMARY KEY,
+      org_id TEXT
+    );
+    CREATE TABLE service_tokens (
+      token_id TEXT PRIMARY KEY,
+      service_principal_id TEXT,
+      scopes_json TEXT NOT NULL DEFAULT '[]',
+      project_id TEXT
+    );
+  `);
+  return database;
+}
+
 describe("numbered memory schema migrations", () => {
   it("records an immutable migration exactly once and fails on checksum drift", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     database.exec("PRAGMA foreign_keys = ON");
     runSchemaMigrations(database);
     runSchemaMigrations(database);
     const rows = database.prepare("SELECT version, name, checksum FROM schema_migrations").all() as unknown[];
-    expect(memorySchemaMigrationCount()).toBe(11);
+    expect(memorySchemaMigrationCount()).toBe(18);
     expect(rows).toHaveLength(memorySchemaMigrationCount());
     expect(rows[0]).toMatchObject({ version: 1, name: "memory_read_path" });
     expect(rows[1]).toMatchObject({ version: 2, name: "memory_receipt_candidate_ledger" });
@@ -26,6 +45,13 @@ describe("numbered memory schema migrations", () => {
     expect(rows[8]).toMatchObject({ version: 9, name: "memory_offline_legacy_cutover" });
     expect(rows[9]).toMatchObject({ version: 10, name: "memory_retention_erasure" });
     expect(rows[10]).toMatchObject({ version: 11, name: "memory_attestation_diff_proof" });
+    expect(rows[11]).toMatchObject({ version: 12, name: "memory_v2_resources" });
+    expect(rows[12]).toMatchObject({ version: 13, name: "memory_v2_facets" });
+    expect(rows[13]).toMatchObject({ version: 14, name: "memory_v2_retrieval_packs" });
+    expect(rows[14]).toMatchObject({ version: 15, name: "memory_v2_scope_feedback" });
+    expect(rows[15]).toMatchObject({ version: 16, name: "memory_v2_runtime_origins" });
+    expect(rows[16]).toMatchObject({ version: 17, name: "memory_v2_reverification" });
+    expect(rows[17]).toMatchObject({ version: 18, name: "memory_experiment_cleanup" });
     expect(database.prepare(
       "SELECT name FROM pragma_table_info('memory_attestations') WHERE name = 'authoritative_diff_digest'",
     ).get()).toEqual({ name: "authoritative_diff_digest" });
@@ -38,7 +64,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("installs append-only retention, legal-hold, erasure, and tombstone controls", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const names = new Set((database.prepare(
       `SELECT name FROM sqlite_schema
@@ -75,7 +101,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("installs the receipt, candidate, evidence, feedback, and durable outbox ledger", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const expected = [
       "memory_run_receipts",
@@ -98,7 +124,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("enforces append-only lifecycle transitions in storage", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     database.exec("PRAGMA foreign_keys = OFF");
     database.prepare(
@@ -131,7 +157,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("installs the trusted provider inbox, attestation, origin, and reconciliation schema", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const expected = [
       "memory_attestations",
@@ -172,7 +198,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("deduplicates provider deliveries and enforces durable inbox state", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     database.exec("PRAGMA foreign_keys = OFF");
     const insert = database.prepare(
@@ -219,7 +245,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("keeps trusted origins unique and activation relationships version-pinned", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     database.exec("PRAGMA foreign_keys = OFF");
     database.prepare(
@@ -270,7 +296,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("installs append-only review decisions and stale/harmful review queues", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const names = new Set((database.prepare(
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memory_%'`,
@@ -294,8 +320,8 @@ describe("numbered memory schema migrations", () => {
     database.close();
   });
 
-  it("installs fail-closed prompt policy state and append-only release decisions", () => {
-    const database = new DatabaseSync(":memory:");
+  it("retains immutable legacy columns while removing the empty experiment tables", () => {
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const recordColumns = database.prepare("PRAGMA table_info(memory_records)").all() as unknown as Array<{
       name: string;
@@ -313,22 +339,17 @@ describe("numbered memory schema migrations", () => {
     expect(packColumns.find((column) => column.name === "evaluation_arm")?.dflt_value).toBe("'shadow'");
     expect(packColumns.find((column) => column.name === "prompt_item_count")?.dflt_value).toBe("0");
 
-    database.exec("PRAGMA foreign_keys = OFF");
-    database.prepare(
-      `INSERT INTO memory_release_gate_decisions
-         (decision_id, org_id, project_id, stage, decision, status,
-          metric_snapshot_json, dataset_digest, reasons_json, created_at)
-       VALUES ('gate-1', 'org-1', 'project-1', 'expansion', 'continue', 'pass',
-               '{}', 'sha256:test', '[]', '2026-08-03T00:00:00Z')`,
-    ).run();
-    expect(() => database.prepare(
-      "UPDATE memory_release_gate_decisions SET decision = 'pause' WHERE decision_id = 'gate-1'",
-    ).run()).toThrow(/append-only/);
+    expect(database.prepare(
+      "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'memory_prompt_policies'",
+    ).get()).toBeUndefined();
+    expect(database.prepare(
+      "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'memory_release_gate_decisions'",
+    ).get()).toBeUndefined();
     database.close();
   });
 
   it("installs immutable service-token repository bindings without widening legacy tokens", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     expect(database.prepare(
       `SELECT name FROM sqlite_master
@@ -350,11 +371,9 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("rebuilds canonical record and pack tables without losing version-pinned dependents", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     database.exec(`
       PRAGMA foreign_keys = ON;
-      CREATE TABLE orgs (org_id TEXT PRIMARY KEY);
-      CREATE TABLE projects (project_id TEXT PRIMARY KEY);
       INSERT INTO orgs VALUES ('org-1');
       INSERT INTO projects VALUES ('project-1');
     `);
@@ -437,6 +456,17 @@ describe("numbered memory schema migrations", () => {
               NULL, NULL, 'transition-1', '2026-08-01T00:00:00Z');
     `);
 
+    runSchemaMigrations(database, { throughVersion: 9 });
+    database.exec(`
+      INSERT INTO memory_authority_transitions (
+        transition_id, revision, from_authority, to_authority,
+        legacy_writes_frozen, import_run_id, actor_id, reason_code, occurred_at
+      ) VALUES
+        ('rebuild-authority-lock', 1, 'legacy', 'migration_locked', 1, NULL,
+         'migration-test', 'offline_migration_started', '2026-08-02T23:59:58Z'),
+        ('rebuild-authority-canonical', 2, 'migration_locked', 'canonical', 1, NULL,
+         'migration-test', 'offline_migration_reconciled', '2026-08-02T23:59:59Z');
+    `);
     runSchemaMigrations(database);
 
     expect(database.prepare("PRAGMA foreign_keys").get()).toEqual({ foreign_keys: 1 });
@@ -475,7 +505,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("installs an immutable, fully reconciled legacy import ledger", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
     const legacyTables = database.prepare(
       `SELECT name FROM sqlite_master
@@ -688,7 +718,7 @@ describe("numbered memory schema migrations", () => {
   });
 
   it("makes the legacy write freeze monotonic and canonical authority terminal", () => {
-    const database = new DatabaseSync(":memory:");
+    const database = migrationDatabase();
     runSchemaMigrations(database);
 
     const insertTransition = database.prepare(

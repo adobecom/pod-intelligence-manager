@@ -4,14 +4,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   MEMORY_CONTRACT_FIXTURES,
+  MEMORY_CONTRACT_FIXTURES_V2,
   MEMORY_CONTRACT_MAX_DEPTH,
   MEMORY_CONTRACT_SCHEMA,
+  MEMORY_CONTRACT_SCHEMA_V2,
   MemoryContractValidationError,
   canonicalJsonSha256,
   canonicalizeJson,
   parseMemoryContract,
+  parseMemoryContractV2,
   sha256Hex,
   type MemoryContractName,
+  type MemoryContractNameV2,
 } from "@pim/shared";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -184,21 +188,59 @@ describe("memory v1 generated contracts", () => {
     }
   });
 
-  it("keeps generated TypeScript and Python artifacts current and fixture-identical", () => {
+  it("keeps generated TypeScript artifacts current", () => {
     const generator = path.join(sharedDir, "scripts", "generate-memory-contracts.mjs");
     execFileSync(process.execPath, [generator, "--check"], { stdio: "pipe" });
-    const pythonModule = path.join(sharedDir, "contracts", "generated", "memory_contracts_v1.py");
-    const pythonJson = execFileSync(
-      "python3",
-      [
-        "-c",
-        "import importlib.util,json,sys; s=importlib.util.spec_from_file_location('contracts',sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); print(json.dumps(m.MEMORY_CONTRACT_FIXTURES,sort_keys=True,separators=(',',':')))",
-        pythonModule,
-      ],
-      { encoding: "utf8" },
-    ).trim();
-    expect(JSON.parse(pythonJson)).toEqual(MEMORY_CONTRACT_FIXTURES);
   });
+});
+
+describe("memory v2 generated contracts", () => {
+  it("validates every fixture and freezes explicit MCP non-exposure of history", () => {
+    for (const [name, fixture] of Object.entries(MEMORY_CONTRACT_FIXTURES_V2)) {
+      expect(parseMemoryContractV2(name as MemoryContractNameV2, fixture)).toEqual(fixture);
+    }
+
+    expect(MEMORY_CONTRACT_SCHEMA_V2.$defs.MemoryOperationSurfaceV2.properties.restricted_mcp.enum)
+      .toEqual(["exposed", "not_exposed", "receipt_embedded", "excluded_control_plane"]);
+    for (const planeName of ["codebase", "harness"] as const) {
+      const plane = MEMORY_CONTRACT_FIXTURES_V2.MemoryCapabilitiesV2.planes
+        .find(({ plane }) => plane === planeName);
+      expect(plane?.operation_surfaces).toContainEqual({
+        operation: "history",
+        canonical_http: "available",
+        restricted_mcp: "not_exposed",
+      });
+    }
+  });
+
+  it("publishes only supported planes and no retired standalone roots", () => {
+    expect(MEMORY_CONTRACT_SCHEMA_V2.$defs.MemoryPlaneV2.enum)
+      .toEqual(["codebase", "harness"]);
+    expect(MEMORY_CONTRACT_SCHEMA_V2.$defs.MemoryResourceTypeV2.enum)
+      .toEqual(["repository", "harness"]);
+    const definitions = MEMORY_CONTRACT_SCHEMA_V2.$defs as Record<string, unknown>;
+    for (const retired of [
+      "ContentApplicabilityV2Alpha1",
+      "OrgApplicabilityV2Alpha1",
+      "ContentScopeSnapshotV2Alpha1",
+      "OrgScopeSnapshotV2Alpha1",
+      "ScopeSnapshotV2",
+      "MemoryMcpScopeSnapshotV2",
+      "ContentMemorySearchV2Alpha1",
+      "OrgMemorySearchV2Alpha1",
+      "MemoryCandidateV2",
+      "MemoryCandidateSubmissionV2",
+      "MemoryRuntimeAttestationV2",
+      "MemoryRuntimeAttestationResultV2",
+      "MemoryMcpCapabilitiesInputV2",
+      "MemoryMcpCapabilitiesOutputV2",
+      "MemoryMcpBindingInputV2",
+      "MemoryMcpBindingOutputV2",
+    ]) {
+      expect(definitions).not.toHaveProperty(retired);
+    }
+  });
+
 });
 
 describe("RFC 8785 canonical JSON", () => {

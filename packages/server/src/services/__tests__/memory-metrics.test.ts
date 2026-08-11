@@ -2,13 +2,18 @@ import { createHmac, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import {
   MEMORY_CONTRACT_FIXTURES,
+  MEMORY_CONTRACT_FIXTURES_V2,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodebaseMemorySearchV2,
+  type CodebaseRunReceiptV2,
+  type CodeEvidenceManifestV2,
   type MemoryAttestationV1,
   type MemoryCandidateV1,
+  type MemoryFeedbackV2,
   type MemoryFeedbackV1,
   type MemorySearchResultV1,
+  type MemorySearchResultV2,
   type MemorySearchV1,
   type RunReceiptResultV1,
   type RunReceiptV1,
@@ -23,6 +28,7 @@ import {
   getMemoryIdChainTrace,
   getMemoryOperationalSnapshot,
   getMemorySloSnapshot,
+  recordCodeMemoryTransportMeasure,
   recordMemoryMetric,
   setMemoryMetricSink,
   type MemoryMetric,
@@ -32,6 +38,17 @@ import {
   type MemoryTestContext,
 } from "../../routes/__tests__/memory-test-app.js";
 import db from "../../db/connection.js";
+import { canonicalEvidenceManifestDigest } from "../memory-receipts.js";
+import { searchCodeMemoryV2 } from "../memory-v2-code-read.js";
+import {
+  appendCodeMemoryFeedbackV2,
+  submitCodeMemoryRunReceiptV2,
+} from "../memory-v2-code-write.js";
+import {
+  createServiceToken,
+  verifyMemoryV2ServiceToken,
+  type MemoryV2RequestAuthorizationSnapshot,
+} from "../service-tokens.js";
 
 const BASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
@@ -43,14 +60,300 @@ interface MetricCandidateRun {
   producerRunId: string;
   candidate: MemoryCandidateV1;
   receipt: RunReceiptV1;
-  manifest: FiestaCodeEvidenceV2;
+  manifest: CodeEvidenceManifestV2;
   diffDigest: string;
 }
 
 let context: MemoryTestContext;
 let previousWebhookSecret: string | undefined;
 let previousActivationRepositories: string | undefined;
+let v2FeedbackPrincipal: MemoryV2RequestAuthorizationSnapshot;
 const authoritativeStates = new Map<string, AuthoritativeGithubState>();
+
+interface V2MetricResource {
+  resource_row_id: string;
+  org_id: string;
+  project_id: string;
+  plane: "codebase" | "harness";
+  resource_type: "repository" | "harness";
+  canonical_resource_id: string;
+  provider: string | null;
+  provider_resource_id: string | null;
+  display_label: string;
+}
+
+function insertV2MetricPack(input: {
+  packId: string;
+  requestId: string;
+  boundaryRecordId: string;
+  itemRecordId?: string;
+}): void {
+  const resource = db.prepare(
+    `SELECT resource.resource_row_id, resource.org_id, resource.project_id,
+            resource.plane, resource.resource_type, resource.canonical_resource_id,
+            resource.provider, resource.provider_resource_id, resource.display_label
+     FROM memory_v2_record_facets facet
+     INNER JOIN memory_v2_resources resource
+       ON resource.resource_row_id = facet.resource_row_id
+     WHERE facet.record_id = ? AND facet.record_version = 1
+       AND facet.projection_status = 'mapped'`,
+  ).get(input.boundaryRecordId) as V2MetricResource | undefined;
+  if (!resource) throw new Error("Missing mapped v2 metric resource fixture");
+
+  const createdAt = "2026-08-10T00:00:00.000Z";
+  const expiresAt = "2026-08-10T01:00:00.000Z";
+  const binding = {
+    resource_row_id: resource.resource_row_id,
+    organization_id: resource.org_id,
+    project_id: resource.project_id,
+    plane: resource.plane,
+    resource_type: resource.resource_type,
+    canonical_resource_id: resource.canonical_resource_id,
+    display_label: resource.display_label,
+    provider: resource.provider,
+    provider_resource_id: resource.provider_resource_id,
+    permitted_operations: ["search", "detail", "history", "pack"],
+  };
+  db.prepare(
+    `INSERT INTO memory_v2_retrieval_packs
+       (retrieval_pack_id, schema_version, org_id, project_id, request_id,
+        request_digest, principal_id, plane, resource_row_id, resource_binding_json,
+        scope_snapshot_digest, policy_version, ranker_version, budget_json,
+        authorized_scopes_json, response_json,
+        token_count, omitted_count, created_at, expires_at)
+     VALUES (?, 'pim.memory-retrieval-pack.v2', ?, ?, ?, ?, 'metrics-principal', ?, ?, ?,
+             ?, 'metrics-policy-v2', 'metrics-ranker-v2', ?, '["memory:search"]',
+             '{}', 1, 0, ?, ?)`,
+  ).run(
+    input.packId,
+    resource.org_id,
+    resource.project_id,
+    input.requestId,
+    canonicalJsonSha256({ request_id: input.requestId }),
+    resource.plane,
+    resource.resource_row_id,
+    JSON.stringify(binding),
+    canonicalJsonSha256({ resource_row_id: resource.resource_row_id }),
+    JSON.stringify({ max_tokens: 100, max_items: 1 }),
+    createdAt,
+    expiresAt,
+  );
+  db.prepare(
+    `INSERT INTO memory_v2_retrieval_pack_items
+       (retrieval_pack_id, item_order, record_id, record_version, token_count,
+        rank_score, match_reasons_json)
+     VALUES (?, 0, ?, 1, 1, 1.0, '[]')`,
+  ).run(
+    input.packId,
+    input.itemRecordId ?? input.boundaryRecordId,
+  );
+}
+
+async function createV2MetricFeedback(): Promise<{
+  feedbackId: string;
+  signalId: string;
+  receiptId: string;
+  producerRunId: string;
+  recordId: string;
+  recordVersion: number;
+  resourceRowId: string;
+  now: string;
+}> {
+  const suffix = randomUUID();
+  const producerRunId = `metrics-v2-feedback-run-${suffix}`;
+  const baseSha = "c".repeat(40);
+  const searchFixture = structuredClone(
+    MEMORY_CONTRACT_FIXTURES_V2.MemorySearchV2,
+  ) as unknown as CodebaseMemorySearchV2;
+  const pack = await searchCodeMemoryV2({
+    principal: v2FeedbackPrincipal,
+    request: {
+      ...searchFixture,
+      request_id: `metrics-v2-feedback-search-${suffix}`,
+      consumer: {
+        ...searchFixture.consumer,
+        consumer_run_id: producerRunId,
+      },
+      tenant: { project_id: context.projectA },
+      resource_selector: { canonical_resource_id: REPOSITORY_ID },
+      applicability: {
+        ...searchFixture.applicability,
+        repository_id: REPOSITORY_ID,
+        base_sha: baseSha,
+      },
+    },
+  }) as MemorySearchResultV2;
+  const item = pack.items[0];
+  if (!item) throw new Error("Missing native-v2 metrics search fixture item");
+
+  const receiptFixture = structuredClone(
+    MEMORY_CONTRACT_FIXTURES_V2.RunReceiptV2,
+  ) as unknown as CodebaseRunReceiptV2;
+  const evidenceBody = {
+    schema_version: "pim.memory-code-evidence.v2" as const,
+    manifest_id: `metrics-v2-feedback-manifest-${suffix}`,
+    refs: [{
+      ...receiptFixture.evidence_manifest.refs[0]!,
+      id: `metrics-v2-feedback-evidence-${suffix}`,
+      uri: `https://github.com/acme/checkout/commit/${baseSha}.diff`,
+      digest: canonicalJsonSha256({ suffix }),
+      origin_id: `${REPOSITORY_ID}:${baseSha}:${suffix}`,
+    }],
+  };
+  const receipt: CodebaseRunReceiptV2 = {
+    ...receiptFixture,
+    external_session_id: `metrics-v2-feedback-session-${suffix}`,
+    producer: {
+      ...receiptFixture.producer,
+      consumer_run_id: producerRunId,
+    },
+    tenant: { project_id: context.projectA },
+    resource_selector: { canonical_resource_id: REPOSITORY_ID },
+    scope_snapshot: {
+      schema_version: "pim.memory-scope-snapshot.codebase.v2",
+      plane: "codebase",
+      resource_binding: pack.resource_binding,
+      repository_id: REPOSITORY_ID,
+      base_sha: baseSha,
+      scope_snapshot_digest: pack.scope_snapshot_digest,
+    },
+    retrieval_feedback: [],
+    evidence_manifest: {
+      ...evidenceBody,
+      digest: canonicalEvidenceManifestDigest(evidenceBody),
+    },
+    candidates: [],
+  };
+  const now = new Date().toISOString();
+  const acceptedReceipt = submitCodeMemoryRunReceiptV2({
+    principal: v2FeedbackPrincipal,
+    producerRunId,
+    idempotencyKey: `metrics-v2-feedback-receipt-${suffix}`,
+    receipt,
+    now,
+  });
+  const feedback: MemoryFeedbackV2 = {
+    schema_version: "pim.memory-feedback.v2",
+    feedback_revision: 1,
+    retrieval_pack_id: pack.retrieval_pack_id,
+    record_id: item.record_id,
+    record_version: item.record_version,
+    producer_run_id: producerRunId,
+    plane: "codebase",
+    resource_row_id: pack.resource_binding.resource_row_id,
+    scope_snapshot_digest: pack.scope_snapshot_digest,
+    disposition: "harmful",
+    reason_code: "metrics_v2_source_qualified_review",
+    outcome_evidence_refs: [],
+    event_time: now,
+  };
+  const acceptedFeedback = appendCodeMemoryFeedbackV2({
+    principal: v2FeedbackPrincipal,
+    idempotencyKey: `metrics-v2-feedback-${suffix}`,
+    feedback,
+    now,
+  });
+  const signalId = acceptedFeedback.review_signal_ids[0];
+  if (!signalId) throw new Error("Missing native-v2 metrics review signal");
+  return {
+    feedbackId: acceptedFeedback.feedback_id,
+    signalId,
+    receiptId: acceptedReceipt.receipt_id,
+    producerRunId,
+    recordId: item.record_id,
+    recordVersion: item.record_version,
+    resourceRowId: pack.resource_binding.resource_row_id,
+    now,
+  };
+}
+
+function insertLegacyMetricCollision(input: Awaited<ReturnType<typeof createV2MetricFeedback>>): void {
+  const packId = `metrics-v1-collision-pack-${randomUUID()}`;
+  const repository = db.prepare(
+    `SELECT repository_row_id FROM memory_repository_registry
+     WHERE org_id = ? AND project_id = ? AND repository_id = ?`,
+  ).get(context.orgA.id, context.projectA, REPOSITORY_ID) as {
+    repository_row_id: string;
+  } | undefined;
+  if (!repository) throw new Error("Missing legacy metrics repository fixture");
+  db.prepare(
+    `INSERT INTO memory_retrieval_packs
+       (retrieval_pack_id, org_id, project_id, request_id, request_digest,
+        repository_row_id, repository_id, harness_id, plane, query, policy_version,
+        ranker_version, authorized_scope_json, token_count, omitted_count,
+        response_json, created_at, expires_at, consumer_run_id, request_base_sha)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'codebase', 'metrics collision',
+             'metrics-v1', 'metrics-v1', '[]', 1, 0, '{}', ?, ?, ?, ?)`,
+  ).run(
+    packId,
+    context.orgA.id,
+    context.projectA,
+    `metrics-v1-collision-request-${randomUUID()}`,
+    canonicalJsonSha256({ pack_id: packId }),
+    repository.repository_row_id,
+    REPOSITORY_ID,
+    input.now,
+    new Date(Date.parse(input.now) + 60_000).toISOString(),
+    input.producerRunId,
+    "c".repeat(40),
+  );
+  db.prepare(
+    `INSERT INTO memory_retrieval_pack_items
+       (retrieval_pack_id, item_order, record_id, record_version, token_count,
+        rank_score, match_reasons_json, prompt_eligible)
+     VALUES (?, 0, ?, ?, 1, 1, '[]', 0)`,
+  ).run(packId, input.recordId, input.recordVersion);
+  const feedbackJson = {
+    disposition: "harmful",
+    reason_code: "metrics_v1_source_qualified_review",
+  };
+  db.prepare(
+    `INSERT INTO memory_feedback
+       (feedback_id, org_id, project_id, receipt_id, producer_run_id,
+        retrieval_pack_id, record_id, record_version, feedback_stage,
+        feedback_revision, feedback_json, feedback_digest, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'later', 1, ?, ?, ?)`,
+  ).run(
+    input.feedbackId,
+    context.orgA.id,
+    context.projectA,
+    input.receiptId,
+    input.producerRunId,
+    packId,
+    input.recordId,
+    input.recordVersion,
+    JSON.stringify(feedbackJson),
+    canonicalJsonSha256(feedbackJson),
+    input.now,
+  );
+  db.prepare(
+    `INSERT INTO memory_v2_feedback_facets
+       (feedback_id, org_id, project_id, plane, resource_row_id, facet_json, created_at)
+     VALUES (?, ?, ?, 'codebase', ?, ?, ?)`,
+  ).run(
+    input.feedbackId,
+    context.orgA.id,
+    context.projectA,
+    input.resourceRowId,
+    JSON.stringify({ projection: "v1", retrieval_pack_id: packId }),
+    input.now,
+  );
+  db.prepare(
+    `INSERT INTO memory_review_signals
+       (signal_id, org_id, project_id, feedback_id, record_id, record_version,
+        signal_type, reason_code, status, created_at, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'harmful_review',
+             'metrics_v1_source_qualified_review', 'open', ?, NULL)`,
+  ).run(
+    input.signalId,
+    context.orgA.id,
+    context.projectA,
+    input.feedbackId,
+    input.recordId,
+    input.recordVersion,
+    input.now,
+  );
+}
 
 function auth(token: string): Record<string, string> {
   return { authorization: `Bearer ${token}` };
@@ -111,8 +414,8 @@ function buildCandidateRun(
   const suffix = randomUUID();
   const evidenceRefId = `metrics-diff-${suffix}`;
   const diffDigest = canonicalJsonSha256({ metrics_diff: suffix });
-  const manifestContents: Omit<FiestaCodeEvidenceV2, "digest"> = {
-    schema_version: "fiesta.code-evidence.v2",
+  const manifestContents: Omit<CodeEvidenceManifestV2, "digest"> = {
+    schema_version: "pim.memory-code-evidence.v2",
     manifest_id: `metrics-manifest-${suffix}`,
     refs: [{
       id: evidenceRefId,
@@ -124,7 +427,7 @@ function buildCandidateRun(
       source_authority: "observed",
     }],
   };
-  const manifest: FiestaCodeEvidenceV2 = {
+  const manifest: CodeEvidenceManifestV2 = {
     ...manifestContents,
     digest: canonicalJsonSha256(manifestContents),
   };
@@ -161,10 +464,10 @@ function buildCandidateRun(
     schema_version: "pim.run-receipt.v1",
     external_session_id: `metrics-session-${suffix}`,
     producer: {
-      harness_id: "fiesta",
+      harness_id: "example-harness-a",
       harness_version: "memory-metrics-test",
       workflow_version: "code-change.v3",
-      adapter_version: "fiesta-pim-adapter.v1",
+      adapter_version: "example-harness-a-pim-adapter.v1",
     },
     tenant: { project_id: context.projectA },
     repository: {
@@ -199,7 +502,6 @@ function buildCandidateRun(
           reason_code: "metrics_fixture_validated",
         },
         terminal_outcome: {
-          exposure: { status: "not_exposed", consumer_phase: "shadow" },
           use_disposition: "unknown",
           use_attribution_confidence: 1,
           utility: "unknown",
@@ -297,6 +599,19 @@ beforeAll(async () => {
   process.env.MEMORY_GITHUB_WEBHOOK_SECRET = WEBHOOK_SECRET;
   process.env.MEMORY_ACTIVATION_REPOSITORIES = REPOSITORY_ID;
   context = await createMemoryTestContext();
+  const owner = db.prepare(
+    "SELECT created_by_user_id FROM projects WHERE project_id = ?",
+  ).get(context.projectA) as { created_by_user_id: string };
+  const token = createServiceToken({
+    orgId: context.orgA.id,
+    name: "Memory v2 metrics test authority",
+    scopes: ["memory:search", "memory:receipt:write", "memory:feedback:write"],
+    createdByUserId: owner.created_by_user_id,
+    projectId: context.projectA,
+    repositoryIds: [REPOSITORY_ID],
+    expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+  });
+  v2FeedbackPrincipal = verifyMemoryV2ServiceToken(token.token)!.authorization;
   setMemoryGithubResolver(async ({ attestation }) => {
     const state = authoritativeStates.get(attestation.provider_event_id);
     if (!state) throw new Error("Missing authoritative state for metrics fixture");
@@ -319,6 +634,53 @@ afterAll(async () => {
 });
 
 describe("Slice 4 memory observability", () => {
+  it("predeclares bounded timeout and parity-mismatch measures for code-read conformance", () => {
+    const captured: MemoryMetric[] = [];
+    setMemoryMetricSink((metric) => captured.push(metric));
+
+    recordCodeMemoryTransportMeasure({
+      measure: "timeout",
+      transport: "mcp",
+      operation: "code_search",
+    });
+    recordCodeMemoryTransportMeasure({
+      measure: "parity_mismatch",
+      transport: "direct_http",
+      operation: "search",
+    });
+
+    expect(captured).toEqual([
+      expect.objectContaining({
+        name: "SearchTimeout",
+        value: 1,
+        unit: "Count",
+        dimensions: {
+          transport: "mcp",
+          operation: "code_search",
+          plane: "codebase",
+          resource_type: "repository",
+          contract_version: "pim.memory.v2",
+          outcome: "timeout",
+          reason: "timeout",
+        },
+      }),
+      expect.objectContaining({
+        name: "SearchParityMismatch",
+        value: 1,
+        unit: "Count",
+        dimensions: {
+          transport: "direct_http",
+          operation: "search",
+          plane: "codebase",
+          resource_type: "repository",
+          contract_version: "pim.memory.v2",
+          outcome: "error",
+          reason: "parity_mismatch",
+        },
+      }),
+    ]);
+  });
+
   it("isolates sink failures and emits bounded CloudWatch dimensions", async () => {
     setMemoryMetricSink(() => {
       throw new Error("telemetry unavailable");
@@ -369,7 +731,7 @@ describe("Slice 4 memory observability", () => {
     });
   });
 
-  it("reports DB-backed operational counts with zero prompt visibility and boundary leakage", () => {
+  it("reports DB-backed operational counts with zero boundary leakage", () => {
     const snapshot = getMemoryOperationalSnapshot(
       context.orgA.id,
       context.projectA,
@@ -379,12 +741,121 @@ describe("Slice 4 memory observability", () => {
       generatedAt: "2026-08-03T22:00:00.000Z",
       orgId: context.orgA.id,
       projectId: context.projectA,
-      promptVisibleRecordCount: 0,
       crossBoundaryLeakageCount: 0,
       activeCandidatesWithoutCanonicalRecords: 0,
     });
     expect(snapshot.recordsByStatus.active).toBeGreaterThanOrEqual(1);
     expect(snapshot.retrievalPackCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("adds distinct v2 pack identities", () => {
+    const snapshotTime = "2026-08-10T02:00:00.000Z";
+    const baseline = getMemoryOperationalSnapshot(
+      context.orgA.id,
+      context.projectA,
+      snapshotTime,
+    );
+    const suffix = randomUUID();
+
+    db.exec("SAVEPOINT memory_metrics_v2_visibility");
+    try {
+      insertV2MetricPack({
+        packId: `metrics-v2-pack-a-${suffix}`,
+        requestId: `metrics-v2-request-a-${suffix}`,
+        boundaryRecordId: context.seededRecordId,
+      });
+      insertV2MetricPack({
+        packId: `metrics-v2-pack-b-${suffix}`,
+        requestId: `metrics-v2-request-b-${suffix}`,
+        boundaryRecordId: context.seededRecordId,
+      });
+
+      const snapshot = getMemoryOperationalSnapshot(
+        context.orgA.id,
+        context.projectA,
+        snapshotTime,
+      );
+      expect(snapshot.retrievalPackCount).toBe(baseline.retrievalPackCount + 2);
+      expect(snapshot.crossBoundaryLeakageCount).toBe(
+        baseline.crossBoundaryLeakageCount,
+      );
+    } finally {
+      db.exec("ROLLBACK TO memory_metrics_v2_visibility");
+      db.exec("RELEASE memory_metrics_v2_visibility");
+    }
+
+    expect(getMemoryOperationalSnapshot(
+      context.orgA.id,
+      context.projectA,
+      snapshotTime,
+    )).toMatchObject(baseline);
+  });
+
+  it("counts and traces colliding legacy and native-v2 feedback identities separately", async () => {
+    const baseline = getMemoryOperationalSnapshot(context.orgA.id, context.projectA);
+    const fixture = await createV2MetricFeedback();
+    insertLegacyMetricCollision(fixture);
+
+    const snapshot = getMemoryOperationalSnapshot(context.orgA.id, context.projectA);
+    expect(snapshot.laterFeedbackBySource).toEqual({
+      memory_feedback: baseline.laterFeedbackBySource.memory_feedback + 1,
+      memory_v2_feedback_bindings:
+        baseline.laterFeedbackBySource.memory_v2_feedback_bindings + 1,
+    });
+    expect(snapshot.laterFeedbackCount).toBe(baseline.laterFeedbackCount + 2);
+    expect(snapshot.openReviewSignalsBySource).toEqual({
+      memory_review_signals:
+        baseline.openReviewSignalsBySource.memory_review_signals + 1,
+      memory_v2_feedback_review_signals:
+        baseline.openReviewSignalsBySource.memory_v2_feedback_review_signals + 1,
+      memory_v2_review_signals:
+        baseline.openReviewSignalsBySource.memory_v2_review_signals,
+    });
+    expect(snapshot.openReviewSignalCount).toBe(baseline.openReviewSignalCount + 2);
+
+    const trace = getMemoryIdChainTrace(
+      context.orgA.id,
+      context.projectA,
+      fixture.producerRunId,
+    );
+    expect(trace).toMatchObject({
+      producerRunId: fixture.producerRunId,
+      receiptId: fixture.receiptId,
+    });
+    const collidedFeedback = trace!.retrievals
+      .filter((retrieval) => retrieval.feedbackId === fixture.feedbackId);
+    expect(collidedFeedback).toHaveLength(2);
+    expect(collidedFeedback.map((retrieval) => retrieval.feedbackSource).sort()).toEqual([
+      "memory_feedback",
+      "memory_v2_feedback_bindings",
+    ]);
+    expect(collidedFeedback.every((retrieval) => (
+      retrieval.recordId === fixture.recordId
+      && retrieval.recordVersion === fixture.recordVersion
+      && retrieval.feedbackStage === "later"
+    ))).toBe(true);
+
+    const collidedSignals = trace!.reviewSignals
+      .filter((signal) => signal.signalId === fixture.signalId);
+    expect(collidedSignals).toHaveLength(2);
+    expect(collidedSignals.map((signal) => ({
+      signalSource: signal.signalSource,
+      feedbackSource: signal.feedbackSource,
+    })).sort((left, right) => left.signalSource.localeCompare(right.signalSource))).toEqual([
+      {
+        signalSource: "memory_review_signals",
+        feedbackSource: "memory_feedback",
+      },
+      {
+        signalSource: "memory_v2_feedback_review_signals",
+        feedbackSource: "memory_v2_feedback_bindings",
+      },
+    ]);
+    expect(getMemoryIdChainTrace(
+      context.orgB.id,
+      context.projectB,
+      fixture.producerRunId,
+    )).toBeNull();
   });
 
   it("publishes low-cardinality SLO health and excludes replayed dead-letter history", () => {
@@ -582,6 +1053,10 @@ describe("Slice 4 memory observability", () => {
       payload: laterFeedback,
     });
     expect(feedbackResponse.statusCode, feedbackResponse.body).toBe(200);
+    const legacyFeedbackResult = feedbackResponse.json() as {
+      feedback_id: string;
+      review_signal_ids: string[];
+    };
 
     const trace = getMemoryIdChainTrace(context.orgA.id, context.projectA, producerRunId);
     expect(trace).not.toBeNull();
@@ -591,16 +1066,28 @@ describe("Slice 4 memory observability", () => {
     });
     expect(trace!.retrievals).toEqual(expect.arrayContaining([
       expect.objectContaining({
+        feedbackSource: "memory_feedback",
         feedbackStage: "receipt",
         retrievalPackId: initialPack.retrieval_pack_id,
         recordId: initialItem.record_id,
         recordVersion: initialItem.record_version,
       }),
       expect.objectContaining({
+        feedbackSource: "memory_feedback",
         feedbackStage: "later",
         retrievalPackId: initialPack.retrieval_pack_id,
         recordId: initialItem.record_id,
         recordVersion: initialItem.record_version,
+      }),
+    ]));
+    expect(trace!.reviewSignals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        signalSource: "memory_review_signals",
+        signalId: legacyFeedbackResult.review_signal_ids[0],
+        feedbackSource: "memory_feedback",
+        feedbackId: legacyFeedbackResult.feedback_id,
+        signalType: "harmful_review",
+        status: "open",
       }),
     ]));
     expect(trace!.candidates).toHaveLength(1);
@@ -653,7 +1140,6 @@ describe("Slice 4 memory observability", () => {
 
     const snapshot = getMemoryOperationalSnapshot(context.orgA.id, context.projectA);
     expect(snapshot).toMatchObject({
-      promptVisibleRecordCount: 0,
       crossBoundaryLeakageCount: 0,
       activeCandidatesWithoutCanonicalRecords: 0,
     });
@@ -717,5 +1203,55 @@ describe("Slice 4 memory observability", () => {
       context.orgA.id,
       context.projectA,
     ).crossBoundaryLeakageCount).toBe(0);
+  });
+
+  it("detects a corrupted cross-boundary v2 item in project and global leakage counts", () => {
+    const projectBaseline = getMemoryOperationalSnapshot(context.orgA.id, context.projectA);
+    const sloBaseline = getMemorySloSnapshot();
+    const trigger = db.prepare(
+      `SELECT sql FROM sqlite_schema
+       WHERE type = 'trigger' AND name = 'memory_v2_retrieval_pack_items_validate_facet'`,
+    ).get() as { sql: string } | undefined;
+    expect(trigger?.sql).toContain("memory v2 pack item facet binding mismatch");
+    const suffix = randomUUID();
+
+    // DDL is transactional in SQLite. The savepoint makes both the deliberate
+    // corruption and the temporary trigger suspension rollback-only test state.
+    db.exec("SAVEPOINT memory_metrics_v2_boundary_corruption");
+    try {
+      insertV2MetricPack({
+        packId: `metrics-v2-leak-${suffix}`,
+        requestId: `metrics-v2-leak-request-${suffix}`,
+        boundaryRecordId: context.seededRecordId,
+      });
+      db.exec("DROP TRIGGER memory_v2_retrieval_pack_items_validate_facet");
+      db.prepare(
+        `INSERT INTO memory_v2_retrieval_pack_items
+           (retrieval_pack_id, item_order, record_id, record_version, token_count,
+            rank_score, match_reasons_json)
+         VALUES (?, 1, ?, 1, 1, 0, '[]')`,
+      ).run(`metrics-v2-leak-${suffix}`, context.otherTenantRecordId);
+
+      expect(getMemoryOperationalSnapshot(
+        context.orgA.id,
+        context.projectA,
+      ).crossBoundaryLeakageCount).toBe(projectBaseline.crossBoundaryLeakageCount + 1);
+      expect(getMemorySloSnapshot().boundaryLeakageCount).toBe(
+        sloBaseline.boundaryLeakageCount + 1,
+      );
+    } finally {
+      db.exec("ROLLBACK TO memory_metrics_v2_boundary_corruption");
+      db.exec("RELEASE memory_metrics_v2_boundary_corruption");
+    }
+
+    expect(db.prepare(
+      `SELECT sql FROM sqlite_schema
+       WHERE type = 'trigger' AND name = 'memory_v2_retrieval_pack_items_validate_facet'`,
+    ).get()).toEqual(trigger);
+    expect(getMemoryOperationalSnapshot(
+      context.orgA.id,
+      context.projectA,
+    ).crossBoundaryLeakageCount).toBe(projectBaseline.crossBoundaryLeakageCount);
+    expect(getMemorySloSnapshot().boundaryLeakageCount).toBe(sloBaseline.boundaryLeakageCount);
   });
 });

@@ -12,6 +12,10 @@
     "./hosted-skills": {
       "types": "./dist/hosted-skills.d.ts",
       "import": "./dist/hosted-skills.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js"
     }
   },
   "bin": {
@@ -27,6 +31,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/server": "^2.0.0",
     "@pim/shared": "workspace:*",
     "zod": "^3.23.0"
   },

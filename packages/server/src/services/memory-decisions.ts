@@ -22,7 +22,11 @@ import {
   activateReviewedHarnessMemoryCandidate,
   MemoryHarnessActivationError,
 } from "./memory-harness-activation.js";
-import { findActiveHarnessMemoryRecordByClaim } from "./memory-harness-records.js";
+import {
+  findActiveHarnessMemoryRecordByClaim,
+  MemoryHarnessRecordConflictError,
+} from "./memory-harness-records.js";
+import type { MemoryV2HarnessSubtype } from "./memory-v2-canonical-writes.js";
 
 type DecisionErrorCode = PimErrorV1["code"];
 
@@ -115,16 +119,29 @@ export function decideMemoryCandidate(input: {
       }
       const decisionId = `decision_${randomUUID()}`;
       const defaultRecordId = `mem_${input.candidateId.slice("candidate_".length)}`;
-      const activeRecordId = current.candidate.plane === "harness"
+      const nativeSubtype = typeof current.candidate.extensions?.v2_subtype === "string"
+        ? current.candidate.extensions.v2_subtype as MemoryV2HarnessSubtype
+        : undefined;
+      const nativeConfigurationSelector = current.candidate.extensions
+        ?.v2_configuration_selector_digest;
+      const existingHarnessRecord = current.candidate.plane === "harness"
         ? findActiveHarnessMemoryRecordByClaim({
           orgId: input.orgId,
           projectId: input.projectId,
           kind: current.candidate.kind,
+          subtype: nativeSubtype,
           content: current.candidate.content,
           applicability: current.candidate.applicability as HarnessApplicabilityV1,
+          configurationDigests: nativeSubtype
+            ? typeof nativeConfigurationSelector === "string"
+              ? [nativeConfigurationSelector]
+              : []
+            : undefined,
           extractorVersion: current.candidate.extraction.extractor_version,
-        })?.recordId ?? defaultRecordId
-        : defaultRecordId;
+        })
+        : null;
+      const activeRecordId = existingHarnessRecord?.recordId ?? defaultRecordId;
+      const activeRecordVersion = existingHarnessRecord?.recordVersion ?? 1;
       const result = input.decision.decision === "approve"
         ? parseMemoryContract("MemoryCandidateDecisionResultV1", {
           schema_version: "pim.memory-candidate-decision-result.v1",
@@ -135,7 +152,7 @@ export function decideMemoryCandidate(input: {
           candidate_status: "active",
           active_record: {
             record_id: activeRecordId,
-            record_version: 1,
+            record_version: activeRecordVersion,
           },
           duplicate: false,
         })
@@ -225,6 +242,9 @@ export function decideMemoryCandidate(input: {
       throw new MemoryDecisionError(error.message, error.statusCode, error.code);
     }
     if (error instanceof MemoryHarnessActivationError) {
+      throw new MemoryDecisionError(error.message, error.statusCode, error.code);
+    }
+    if (error instanceof MemoryHarnessRecordConflictError) {
       throw new MemoryDecisionError(error.message, error.statusCode, error.code);
     }
     if (error instanceof MemoryCandidateTransitionError) {

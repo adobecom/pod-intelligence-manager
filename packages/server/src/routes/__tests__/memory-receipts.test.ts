@@ -4,7 +4,8 @@ import {
   MEMORY_CONTRACT_FIXTURES,
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  parseMemoryContractV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateStatusV1,
   type MemoryCandidateV1,
   type MemorySearchResultV1,
@@ -32,9 +33,9 @@ function evidenceManifest(input: {
   manifestId: string;
   refId: string;
   uri?: string;
-  type?: FiestaCodeEvidenceV2["refs"][number]["type"];
-}): FiestaCodeEvidenceV2 {
-  const refs: FiestaCodeEvidenceV2["refs"] = [{
+  type?: CodeEvidenceManifestV2["refs"][number]["type"];
+}): CodeEvidenceManifestV2 {
+  const refs: CodeEvidenceManifestV2["refs"] = [{
     id: input.refId,
     type: input.type ?? "git_diff",
     uri: input.uri ?? `https://github.com/acme/checkout/commit/${TREE_SHA}.diff`,
@@ -44,11 +45,11 @@ function evidenceManifest(input: {
     source_authority: "observed",
   }];
   const manifestWithoutDigest = {
-    schema_version: "fiesta.code-evidence.v2" as const,
+    schema_version: "pim.memory-code-evidence.v2" as const,
     manifest_id: input.manifestId,
     refs,
   };
-  return parseMemoryContract("FiestaCodeEvidenceV2", {
+  return parseMemoryContractV2("CodeEvidenceManifestV2", {
     ...manifestWithoutDigest,
     digest: canonicalJsonSha256(manifestWithoutDigest),
   });
@@ -109,7 +110,7 @@ function harnessCandidate(input: {
       rationale: "One producer run cannot make a harness routing lesson active codebase memory.",
     },
     applicability: {
-      harness_id: "fiesta",
+      harness_id: "example-harness-a",
       harness_version_range: ">=1.0.0",
       workflow_version_range: "code-change.v3",
     },
@@ -122,7 +123,7 @@ function harnessCandidate(input: {
     evidence_refs: [input.evidenceRefId],
     extraction: {
       method: "deterministic",
-      extractor_version: "fiesta-harness-fixture.v1",
+      extractor_version: "example-harness-a-harness-fixture.v1",
       confidence: 1,
     },
     activation_requirement_requested: "authorized_review",
@@ -134,7 +135,7 @@ function receipt(input: {
   projectId: string;
   repositoryId?: string;
   outcomeStatus?: "completed" | "failed" | "cancelled";
-  manifest?: FiestaCodeEvidenceV2;
+  manifest?: CodeEvidenceManifestV2;
   candidates?: MemoryCandidateV1[];
   retrievalFeedback?: RunReceiptV1["retrieval_feedback"];
   taskSummary?: string;
@@ -179,7 +180,7 @@ function receipt(input: {
 
 async function putReceipt(
   producerRunId: string,
-  body: RunReceiptV1,
+  body: object,
   token = context.receiptTokenA,
 ) {
   return context.app.inject({
@@ -347,6 +348,104 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
     ).get(candidate.client_candidate_id) as { count: number }).count).toBe(1);
   });
 
+  it("replays an exact historical repository-optional receipt without parsing legacy response fields", async () => {
+    const producerRunId = uniqueId("historical-empty-replay");
+    const receiptId = uniqueId("historical-receipt");
+    const currentRequest = receipt({
+      producerRunId,
+      projectId: context.projectA,
+      candidates: [],
+    });
+    delete currentRequest.repository;
+    const historicalManifest = {
+      schema_version: "fiesta.code-evidence.v2",
+      manifest_id: uniqueId("historical-manifest"),
+      refs: [],
+    };
+    const historicalRequest = {
+      ...currentRequest,
+      evidence_manifest: {
+        ...historicalManifest,
+        digest: canonicalJsonSha256(historicalManifest),
+      },
+    };
+    expect(() => parseMemoryContract("RunReceiptV1", historicalRequest)).toThrow();
+    const requestDigest = canonicalJsonSha256(historicalRequest);
+    const historicalResponseJson = JSON.stringify({
+      schema_version: "pim.run-receipt-result.v1",
+      receipt_id: receiptId,
+      producer_run_id: producerRunId,
+      request_digest: requestDigest,
+      status: "accepted",
+      candidate_results: [],
+      evaluation_arm: "shadow",
+      shadow_only: true,
+      shadow_summary: {
+        selected_arm: "shadow",
+        prompt_eligible: false,
+        routing_eligible: false,
+      },
+    });
+    expect(() => parseMemoryContract(
+      "RunReceiptResultV1",
+      JSON.parse(historicalResponseJson),
+    )).toThrow();
+
+    db.prepare(`
+      INSERT INTO memory_run_receipts (
+        receipt_id, org_id, project_id, producer_run_id, schema_major,
+        idempotency_key, request_digest, receipt_json, response_json,
+        producer_harness_id, repository_row_id, repository_id, base_sha,
+        outcome_status, created_at
+      ) VALUES (?, ?, ?, ?, 'pim.run-receipt.v1', NULL, ?, ?, ?, ?, NULL, NULL, NULL,
+                'completed', ?)
+    `).run(
+      receiptId,
+      context.orgA.id,
+      context.projectA,
+      producerRunId,
+      requestDigest,
+      JSON.stringify(historicalRequest),
+      historicalResponseJson,
+      historicalRequest.producer.harness_id,
+      "2026-08-03T18:42:00.000Z",
+    );
+    expect(db.prepare(
+      "SELECT 1 FROM memory_v2_receipt_facets WHERE receipt_id = ?",
+    ).get(receiptId)).toBeUndefined();
+
+    const replay = await putReceipt(producerRunId, historicalRequest);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.headers["content-type"]).toContain("application/json");
+    expect(replay.body).toBe(historicalResponseJson);
+    expect(db.prepare(
+      "SELECT 1 FROM memory_v2_receipt_facets WHERE receipt_id = ?",
+    ).get(receiptId)).toBeUndefined();
+
+    const changedRequest = structuredClone(historicalRequest);
+    changedRequest.task.summary = "Changed historical content must conflict.";
+    const conflict = await putReceipt(producerRunId, changedRequest);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json()).toMatchObject({
+      schema_version: "pim.error.v1",
+      code: "idempotency_conflict",
+    });
+
+    const widenedRequest = structuredClone(historicalRequest);
+    widenedRequest.repository = {
+      repository_id: "github.com/acme/empty",
+      display_slug: "Acme/Empty",
+      base_sha: BASE_SHA,
+      candidate_tree_sha: TREE_SHA,
+      provider_pull_request_id: "github:acme/empty#1",
+      pr_head_sha: TREE_SHA,
+      pull_request_url: "https://github.com/acme/empty/pull/1",
+    };
+    const unauthorizedSelector = await putReceipt(producerRunId, widenedRequest);
+    expect(unauthorizedSelector.statusCode).toBe(403);
+    expect(unauthorizedSelector.json()).toMatchObject({ code: "resource_binding_mismatch" });
+  });
+
   it("rejects receipt project and repository scope widening before persistence", async () => {
     const projectRunId = uniqueId("fiesta-project-mismatch");
     const projectMismatch = await putReceipt(
@@ -427,7 +526,6 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
               reason_code: `${outcomeStatus}_checkout_fixture`,
             },
             terminal_outcome: {
-              exposure: { status: "exposed", consumer_phase: "planner" },
               use_disposition: outcomeStatus === "failed" ? "ignored" : "applied",
               use_attribution_confidence: 1,
               utility: outcomeStatus === "failed" ? "unknown" : "neutral",
@@ -465,7 +563,6 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
         record_version: item.record_version,
         checkout_validation: { disposition: "validated" as const, reason_code: "exact_fixture" },
         terminal_outcome: {
-          exposure: { status: "not_exposed" as const, consumer_phase: "shadow" },
           use_disposition: "unknown" as const,
           use_attribution_confidence: 1,
           utility: "unknown" as const,
@@ -506,7 +603,7 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
   });
 
   it("retains a fingerprint-mismatched harness candidate as a rejected plane-separated audit row", async () => {
-    const producerRunId = uniqueId("fiesta-harness-run");
+    const producerRunId = uniqueId("example-harness-a-harness-run");
     const refId = uniqueId("failure");
     const manifest = evidenceManifest({
       manifestId: uniqueId("harness-manifest"),
@@ -521,9 +618,10 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
       manifest,
       candidates: [candidate],
     });
+    body.producer.harness_id = (candidate.applicability as { harness_id: string }).harness_id;
     delete body.repository;
     const response = await putReceipt(producerRunId, body, context.harnessReceiptTokenA);
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode, response.body).toBe(200);
     const result = parseMemoryContract("RunReceiptResultV1", response.json());
     expect(result.candidate_results[0]).toMatchObject({
       client_candidate_id: candidate.client_candidate_id,
@@ -607,7 +705,7 @@ describe("Slice 2 receipt and candidate HTTP path", () => {
       source_authority: "verified" as const,
     }));
     const manifestBody = {
-      schema_version: "fiesta.code-evidence.v2" as const,
+      schema_version: "pim.memory-code-evidence.v2" as const,
       manifest_id: uniqueId("oversized-manifest"),
       refs,
     };

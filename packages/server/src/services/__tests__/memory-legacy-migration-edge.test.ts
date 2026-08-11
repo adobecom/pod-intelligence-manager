@@ -243,7 +243,6 @@ beforeAll(() => {
     evidenceSummary: reuseMapping.evidence_summary,
     freshness: reuseMapping.freshness,
     provenance: reuseMapping.provenance,
-    promptEligible: false,
     now: NOW,
   });
 

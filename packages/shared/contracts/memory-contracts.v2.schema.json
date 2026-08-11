@@ -1,0 +1,1657 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pim.adobe.dev/contracts/memory-contracts.v2.schema.json",
+  "title": "PIM universal memory contracts v2",
+  "$defs": {
+    "MemoryPlaneV2": {
+      "type": "string",
+      "enum": ["codebase", "harness"]
+    },
+    "MemoryImplementedPlaneV2": {
+      "type": "string",
+      "enum": ["codebase", "harness"]
+    },
+    "MemoryResourceTypeV2": {
+      "type": "string",
+      "enum": ["repository", "harness"]
+    },
+    "MemoryOperationV2": {
+      "type": "string",
+      "enum": [
+        "search",
+        "detail",
+        "history",
+        "pack",
+        "receipt_write",
+        "candidate_read",
+        "candidate_write",
+        "feedback_write",
+        "readiness",
+        "review",
+        "activation",
+        "runtime_attestation_write"
+      ]
+    },
+    "MemoryHarnessScopeV2": {
+      "type": "string",
+      "enum": [
+        "memory:harness:search",
+        "memory:harness:receipt:write",
+        "memory:harness:candidate:read",
+        "memory:harness:review"
+      ]
+    },
+    "MemoryScopeV2": {
+      "type": "string",
+      "enum": [
+        "memory:search",
+        "memory:receipt:write",
+        "memory:candidate:read",
+        "memory:attest",
+        "memory:feedback:write",
+        "memory:review",
+        "memory:admin",
+        "memory:harness:search",
+        "memory:harness:receipt:write",
+        "memory:harness:candidate:read",
+        "memory:harness:review"
+      ]
+    },
+    "MemoryMcpToolNameV2": {
+      "type": "string",
+      "enum": [
+        "pim_memory_capabilities",
+        "pim_memory_binding",
+        "pim_code_memory_search",
+        "pim_run_receipt_submit",
+        "pim_feedback_submit",
+        "pim_candidate_status",
+        "pim_harness_memory_search",
+        "pim_memory_readiness"
+      ]
+    },
+    "MemoryMcpResourceTemplateV2": {
+      "type": "string",
+      "enum": [
+        "pim-memory://records/{record_id}/versions/{version}",
+        "pim-memory://packs/{pack_id}"
+      ]
+    },
+    "MemoryKindV2": {
+      "type": "string",
+      "enum": ["decision", "constraint", "anti_pattern", "test_strategy"]
+    },
+    "MemoryHarnessSubkindV2": {
+      "type": "string",
+      "enum": [
+        "workflow_strategy",
+        "failure_pattern",
+        "verification_sequence",
+        "tool_constraint",
+        "escalation_requirement"
+      ]
+    },
+    "MemoryHarnessSubkindMappingV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflow_strategy",
+        "failure_pattern",
+        "verification_sequence",
+        "tool_constraint",
+        "escalation_requirement"
+      ],
+      "properties": {
+        "workflow_strategy": { "const": "decision" },
+        "failure_pattern": { "const": "anti_pattern" },
+        "verification_sequence": { "const": "test_strategy" },
+        "tool_constraint": { "const": "constraint" },
+        "escalation_requirement": { "const": "constraint" }
+      }
+    },
+    "MemoryTenantSelectorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id"],
+      "properties": {
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryTenantV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organization_id", "project_id"],
+      "properties": {
+        "organization_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "ResourceBindingV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_row_id",
+        "organization_id",
+        "project_id",
+        "plane",
+        "resource_type",
+        "canonical_resource_id",
+        "display_label",
+        "permitted_operations"
+      ],
+      "properties": {
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "organization_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "project_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plane": { "$ref": "#/$defs/MemoryPlaneV2" },
+        "resource_type": { "$ref": "#/$defs/MemoryResourceTypeV2" },
+        "canonical_resource_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "provider": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+        "provider_resource_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 256 },
+        "display_label": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "permitted_operations": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryOperationV2" }
+        }
+      }
+    },
+    "ResourceRowSelectorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_row_id"],
+      "properties": {
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "CanonicalResourceSelectorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonical_resource_id"],
+      "properties": {
+        "canonical_resource_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "ResourceSelectorV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/ResourceRowSelectorV2" },
+        { "$ref": "#/$defs/CanonicalResourceSelectorV2" },
+        { "type": "null" }
+      ]
+    },
+    "MemoryMcpResourceSelectorV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/ResourceRowSelectorV2" },
+        { "$ref": "#/$defs/CanonicalResourceSelectorV2" }
+      ]
+    },
+    "MemoryConsumerV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "harness_id",
+        "harness_version",
+        "workflow_version",
+        "adapter_version",
+        "consumer_run_id"
+      ],
+      "properties": {
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "CodebaseApplicabilityV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "repository_id", "base_sha", "components", "paths", "symbols", "task_classes"],
+      "properties": {
+        "plane": { "const": "codebase" },
+        "repository_id": {
+          "type": "string",
+          "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$",
+          "maxLength": 256
+        },
+        "base_sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40,64}$" },
+        "components": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 160 }
+        },
+        "paths": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        },
+        "symbols": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "task_classes": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+        }
+      }
+    },
+    "HarnessApplicabilityV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plane",
+        "harness_id",
+        "harness_version_range",
+        "workflow_version_range",
+        "adapter_version_range",
+        "configuration_ids",
+        "configuration_digests",
+        "model_ids",
+        "tool_ids"
+      ],
+      "properties": {
+        "plane": { "const": "harness" },
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "configuration_digests": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+        },
+        "model_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "tool_ids": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        }
+      }
+    },
+    "MemoryApplicabilityV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/CodebaseApplicabilityV2" },
+        { "$ref": "#/$defs/HarnessApplicabilityV2" }
+      ]
+    },
+    "CodebaseScopeSnapshotV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "plane",
+        "resource_binding",
+        "repository_id",
+        "base_sha",
+        "scope_snapshot_digest"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-scope-snapshot.codebase.v2" },
+        "plane": { "const": "codebase" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "repository_id": {
+          "type": "string",
+          "pattern": "^github\\.com/[a-z0-9_.-]+/[a-z0-9_.-]+$",
+          "maxLength": 256
+        },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "HarnessScopeSnapshotV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "plane",
+        "resource_binding",
+        "harness_id",
+        "harness_version",
+        "workflow_version",
+        "adapter_version",
+        "configuration_id",
+        "configuration_digest",
+        "scope_snapshot_digest"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-scope-snapshot.harness.v2" },
+        "plane": { "const": "harness" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "harness_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "MemoryMcpCodebaseScopeSnapshotV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "plane", "repository_id", "base_sha", "scope_snapshot_digest"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-scope-snapshot.codebase.v2" },
+        "plane": { "const": "codebase" },
+        "repository_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "MemoryMcpHarnessScopeSnapshotV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "plane", "harness_id", "harness_version", "workflow_version", "adapter_version", "configuration_id", "configuration_digest", "scope_snapshot_digest"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-scope-snapshot.harness.v2" },
+        "plane": { "const": "harness" },
+        "harness_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "harness_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "configuration_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "MemoryContentV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "details", "rationale"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "details": { "type": "string", "minLength": 1, "maxLength": 8192 },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      }
+    },
+    "CodebaseRunReceiptCandidateContentV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "details", "rationale"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 10, "maxLength": 500 },
+        "details": { "type": "string", "minLength": 30, "maxLength": 8000 },
+        "rationale": { "type": "string", "minLength": 10, "maxLength": 4000 }
+      }
+    },
+    "MemoryCompatibilityV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness_version_range", "workflow_version_range", "adapter_version_range"],
+      "properties": {
+        "harness_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "workflow_version_range": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version_range": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryValidationV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "anchor_refs", "failure_fingerprint"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["repository_anchors", "stable_failure_fingerprint", "runtime_attestation", "authorized_review"]
+        },
+        "anchor_refs": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "failure_fingerprint": { "type": ["string", "null"], "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "EvidenceRefV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "uri", "digest", "origin_id", "occurred_at", "source_authority"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["git_diff", "test_run", "failure", "review", "incident", "policy_decision"] },
+        "uri": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "origin_id": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "source_authority": { "type": "string", "enum": ["observed", "verified", "authorized_review"] }
+      }
+    },
+    "CodeEvidenceManifestV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "manifest_id", "digest", "refs"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-code-evidence.v2" },
+        "manifest_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "refs": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/EvidenceRefV2" } }
+      }
+    },
+    "HarnessRootOriginEvidenceHandleV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_ref_id",
+        "handle_type",
+        "provider",
+        "provider_identity",
+        "provider_domain_key",
+        "provider_event_id",
+        "immutable_digest",
+        "producer_principal_id",
+        "effective_root_origin_id",
+        "corroboration_domain_id",
+        "observation_type",
+        "outcome",
+        "occurred_at",
+        "verified_at",
+        "source_authority",
+        "derivation_parent_refs"
+      ],
+      "properties": {
+        "evidence_ref_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "handle_type": { "const": "root_origin" },
+        "provider": { "const": "runtime_attestation" },
+        "provider_identity": { "type": "null" },
+        "provider_domain_key": { "type": "null" },
+        "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "immutable_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "producer_principal_id": { "type": "null" },
+        "effective_root_origin_id": { "type": "null" },
+        "corroboration_domain_id": { "type": "null" },
+        "observation_type": { "const": "root" },
+        "outcome": { "$ref": "#/$defs/MemoryRuntimeOutcomeV2" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "verified_at": { "type": "null" },
+        "source_authority": { "type": "null" },
+        "derivation_parent_refs": {
+          "type": "array",
+          "maxItems": 0,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "HarnessDerivationEvidenceHandleV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_ref_id",
+        "handle_type",
+        "provider",
+        "provider_identity",
+        "provider_domain_key",
+        "provider_event_id",
+        "immutable_digest",
+        "producer_principal_id",
+        "effective_root_origin_id",
+        "corroboration_domain_id",
+        "observation_type",
+        "outcome",
+        "occurred_at",
+        "verified_at",
+        "source_authority",
+        "derivation_parent_refs"
+      ],
+      "properties": {
+        "evidence_ref_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "handle_type": { "const": "derivation" },
+        "provider": { "const": "runtime_attestation" },
+        "provider_identity": { "type": "null" },
+        "provider_domain_key": { "type": "null" },
+        "provider_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "immutable_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "producer_principal_id": { "type": "null" },
+        "effective_root_origin_id": { "type": "null" },
+        "corroboration_domain_id": { "type": "null" },
+        "observation_type": {
+          "type": "string",
+          "enum": ["retry", "rerun", "summary", "tool_echo", "derived"]
+        },
+        "outcome": { "$ref": "#/$defs/MemoryRuntimeOutcomeV2" },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "verified_at": { "type": "null" },
+        "source_authority": { "type": "null" },
+        "derivation_parent_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "HarnessRuntimeEvidenceHandleV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/HarnessRootOriginEvidenceHandleV2" },
+        { "$ref": "#/$defs/HarnessDerivationEvidenceHandleV2" }
+      ]
+    },
+    "MemoryEvidenceHandleV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_ref_id", "type", "digest", "origin_id", "source_authority"],
+      "properties": {
+        "evidence_ref_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["git_diff", "test", "failure", "runtime_attestation", "authorized_review"] },
+        "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "origin_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source_authority": {
+          "type": "string",
+          "enum": ["observed", "reviewed", "verified", "independently_verified_runtime", "authorized_review"]
+        }
+      }
+    },
+    "MemoryEvidenceSummaryV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strength", "ref_count", "distinct_corroboration_domain_count"],
+      "properties": {
+        "strength": {
+          "type": "string",
+          "enum": ["observed", "reviewed", "verified_merge", "verified_merge_and_test", "verified_runtime"]
+        },
+        "ref_count": { "type": "integer", "minimum": 0, "maximum": 128 },
+        "distinct_corroboration_domain_count": { "type": "integer", "minimum": 0, "maximum": 128 }
+      }
+    },
+    "MemoryFreshnessV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "last_confirmed_at",
+        "last_verified_at",
+        "next_reverify_at",
+        "expires_at"
+      ],
+      "properties": {
+        "status": { "type": "string", "enum": ["fresh", "pending", "stale", "contradicted", "withdrawn", "expired"] },
+        "last_confirmed_at": { "type": "string", "format": "date-time" },
+        "last_verified_at": { "type": ["string", "null"], "format": "date-time" },
+        "next_reverify_at": { "type": ["string", "null"], "format": "date-time" },
+        "expires_at": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "MemoryLifecycleV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["active", "stale", "superseded", "revoked", "expired"] }
+      }
+    },
+    "MemoryTransitionSummaryV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transition_id", "from_status", "to_status", "reason_code", "committed_at"],
+      "properties": {
+        "transition_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "from_status": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+        "to_status": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "committed_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryTaskV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query", "task_class"],
+      "properties": {
+        "query": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "task_class": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "MemoryTemporalV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "valid_at", "recorded_at"],
+      "properties": {
+        "mode": { "const": "current" },
+        "valid_at": { "type": "string", "format": "date-time" },
+        "recorded_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryBudgetV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_tokens", "max_items"],
+      "properties": {
+        "max_tokens": { "type": "integer", "minimum": 1, "maximum": 8000 },
+        "max_items": { "type": "integer", "minimum": 1, "maximum": 32 }
+      }
+    },
+    "MemorySearchOptionsV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["include_explanations"],
+      "properties": {
+        "include_explanations": { "type": "boolean" }
+      }
+    },
+    "CodebaseMemorySearchV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "tenant", "plane", "resource_selector", "applicability", "task", "temporal", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search.v2" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantSelectorV2" },
+        "plane": { "const": "codebase" },
+        "resource_selector": { "$ref": "#/$defs/ResourceSelectorV2" },
+        "applicability": { "$ref": "#/$defs/CodebaseApplicabilityV2" },
+        "task": { "$ref": "#/$defs/MemoryTaskV2" },
+        "temporal": { "$ref": "#/$defs/MemoryTemporalV2" },
+        "budget": { "$ref": "#/$defs/MemoryBudgetV2" },
+        "options": { "$ref": "#/$defs/MemorySearchOptionsV2" }
+      }
+    },
+    "HarnessMemorySearchV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "tenant", "plane", "resource_selector", "applicability", "task", "temporal", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search.v2" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantSelectorV2" },
+        "plane": { "const": "harness" },
+        "resource_selector": { "$ref": "#/$defs/ResourceSelectorV2" },
+        "applicability": { "$ref": "#/$defs/HarnessApplicabilityV2" },
+        "task": { "$ref": "#/$defs/MemoryTaskV2" },
+        "temporal": { "$ref": "#/$defs/MemoryTemporalV2" },
+        "budget": { "$ref": "#/$defs/MemoryBudgetV2" },
+        "options": { "$ref": "#/$defs/MemorySearchOptionsV2" }
+      }
+    },
+    "MemorySearchV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/CodebaseMemorySearchV2" },
+        { "$ref": "#/$defs/HarnessMemorySearchV2" }
+      ]
+    },
+    "MemorySearchItemV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "record_version",
+        "tenant",
+        "plane",
+        "resource_binding",
+        "kind",
+        "subkind",
+        "summary",
+        "lifecycle",
+        "applicability",
+        "exceptions",
+        "compatibility",
+        "validation",
+        "evidence_summary",
+        "freshness",
+        "detail_href",
+        "match_reasons"
+      ],
+      "properties": {
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "kind": { "$ref": "#/$defs/MemoryKindV2" },
+        "subkind": {
+          "oneOf": [
+            { "$ref": "#/$defs/MemoryHarnessSubkindV2" },
+            { "type": "null" }
+          ]
+        },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "lifecycle": { "$ref": "#/$defs/MemoryLifecycleV2" },
+        "applicability": { "$ref": "#/$defs/MemoryApplicabilityV2" },
+        "exceptions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "compatibility": { "$ref": "#/$defs/MemoryCompatibilityV2" },
+        "validation": { "$ref": "#/$defs/MemoryValidationV2" },
+        "evidence_summary": { "$ref": "#/$defs/MemoryEvidenceSummaryV2" },
+        "freshness": { "$ref": "#/$defs/MemoryFreshnessV2" },
+        "detail_href": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "match_reasons": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "MemorySearchResultV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "request_id",
+        "retrieval_pack_id",
+        "tenant",
+        "plane",
+        "resource_binding",
+        "scope_snapshot_digest",
+        "policy_version",
+        "ranker_version",
+        "token_count",
+        "items",
+        "omitted_count",
+        "expires_at"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search-result.v2" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ranker_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/MemorySearchItemV2" } },
+        "omitted_count": { "type": "integer", "minimum": 0 },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryRetrievalPackItemV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_order",
+        "record_id",
+        "record_version",
+        "token_count",
+        "rank_score",
+        "match_reasons"
+      ],
+      "properties": {
+        "item_order": { "type": "integer", "minimum": 0 },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "rank_score": { "type": "number" },
+        "match_reasons": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "MemoryRetrievalPackV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "retrieval_pack_id",
+        "request_id",
+        "request_digest",
+        "tenant",
+        "plane",
+        "resource_binding",
+        "scope_snapshot_digest",
+        "policy_version",
+        "ranker_version",
+        "budget",
+        "authorized_scopes",
+        "token_count",
+        "omitted_count",
+        "items",
+        "created_at",
+        "expires_at"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-retrieval-pack.v2" },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "request_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "policy_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "ranker_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "budget": { "$ref": "#/$defs/MemoryBudgetV2" },
+        "authorized_scopes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryScopeV2" }
+        },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "omitted_count": { "type": "integer", "minimum": 0 },
+        "items": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/MemoryRetrievalPackItemV2" }
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryReadinessV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "tenant",
+        "plane",
+        "resource_binding",
+        "status",
+        "reverification_supported",
+        "worker_status",
+        "fresh_count",
+        "due_count",
+        "pending_count",
+        "dead_letter_count",
+        "oldest_due_at",
+        "oldest_dead_letter_at",
+        "last_success_at",
+        "checked_at"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-readiness.v2" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "status": { "type": "string", "enum": ["healthy", "degraded", "unavailable"] },
+        "reverification_supported": { "type": "boolean" },
+        "worker_status": { "type": "string", "enum": ["running", "disabled", "unavailable"] },
+        "fresh_count": { "type": "integer", "minimum": 0 },
+        "due_count": { "type": "integer", "minimum": 0 },
+        "pending_count": { "type": "integer", "minimum": 0 },
+        "dead_letter_count": { "type": "integer", "minimum": 0 },
+        "oldest_due_at": { "type": ["string", "null"], "format": "date-time" },
+        "oldest_dead_letter_at": { "type": ["string", "null"], "format": "date-time" },
+        "last_success_at": { "type": ["string", "null"], "format": "date-time" },
+        "checked_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryOperationSurfaceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "canonical_http", "restricted_mcp"],
+      "properties": {
+        "operation": { "$ref": "#/$defs/MemoryOperationV2" },
+        "canonical_http": { "const": "available" },
+        "restricted_mcp": {
+          "type": "string",
+          "enum": ["exposed", "not_exposed", "receipt_embedded", "excluded_control_plane"]
+        }
+      }
+    },
+    "MemoryPlaneAvailabilityV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "status", "operations", "operation_surfaces", "applicability_schema"],
+      "properties": {
+        "plane": { "$ref": "#/$defs/MemoryPlaneV2" },
+        "status": { "type": "string", "enum": ["available", "unavailable"] },
+        "operations": {
+          "type": "array",
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryOperationV2" }
+        },
+        "operation_surfaces": {
+          "type": "array",
+          "maxItems": 24,
+          "items": { "$ref": "#/$defs/MemoryOperationSurfaceV2" }
+        },
+        "applicability_schema": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryMcpSurfaceV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "authentication_profile",
+        "production_enabled",
+        "committed_tools",
+        "exposed_tools",
+        "resource_templates",
+        "excluded_control_plane_operations"
+      ],
+      "properties": {
+        "protocol_version": { "const": "2026-07-28" },
+        "authentication_profile": { "const": "private_pim_service_token" },
+        "production_enabled": { "const": true },
+        "committed_tools": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryMcpToolNameV2" }
+        },
+        "exposed_tools": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryMcpToolNameV2" }
+        },
+        "resource_templates": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryMcpResourceTemplateV2" }
+        },
+        "excluded_control_plane_operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryOperationV2" }
+        }
+      }
+    },
+    "MemoryLimitsV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_receipt_bytes", "max_candidate_bytes", "max_evidence_refs", "max_feedback_items", "max_search_tokens", "max_search_items"],
+      "properties": {
+        "max_receipt_bytes": { "type": "integer", "minimum": 1 },
+        "max_candidate_bytes": { "type": "integer", "minimum": 1 },
+        "max_evidence_refs": { "type": "integer", "minimum": 1 },
+        "max_feedback_items": { "type": "integer", "minimum": 1 },
+        "max_search_tokens": { "type": "integer", "minimum": 1 },
+        "max_search_items": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "MemoryCapabilitiesV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "contract_revision",
+        "server_build",
+        "known_planes",
+        "planes",
+        "supported_schemas",
+        "exact_harness_scopes",
+        "harness_subkind_mapping",
+        "mcp_surface",
+        "limits",
+        "temporal_modes"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-capabilities.v2" },
+        "contract_revision": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "server_build": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "known_planes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryPlaneV2" }
+        },
+        "planes": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/MemoryPlaneAvailabilityV2" }
+        },
+        "supported_schemas": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["requests", "responses"],
+          "properties": {
+            "requests": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            },
+            "responses": {
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          }
+        },
+        "exact_harness_scopes": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryHarnessScopeV2" }
+        },
+        "harness_subkind_mapping": { "$ref": "#/$defs/MemoryHarnessSubkindMappingV2" },
+        "mcp_surface": { "$ref": "#/$defs/MemoryMcpSurfaceV2" },
+        "limits": { "$ref": "#/$defs/MemoryLimitsV2" },
+        "temporal_modes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "const": "current" }
+        }
+      }
+    },
+    "MemoryBindingV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "service_principal_id", "tenant", "scopes", "resources"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-binding.v2" },
+        "service_principal_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "scopes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/MemoryScopeV2" }
+        },
+        "resources": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/$defs/ResourceBindingV2" }
+        }
+      }
+    },
+    "MemoryRecordV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_id",
+        "record_version",
+        "tenant",
+        "plane",
+        "resource_binding",
+        "kind",
+        "subkind",
+        "content",
+        "applicability",
+        "compatibility",
+        "exceptions",
+        "validation",
+        "evidence",
+        "evidence_summary",
+        "freshness",
+        "lifecycle",
+        "transition_summary",
+        "recorded_at",
+        "classification"
+      ],
+      "properties": {
+        "schema_version": { "const": "pim.memory-record.v2" },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "kind": { "$ref": "#/$defs/MemoryKindV2" },
+        "subkind": {
+          "oneOf": [
+            { "$ref": "#/$defs/MemoryHarnessSubkindV2" },
+            { "type": "null" }
+          ]
+        },
+        "content": { "$ref": "#/$defs/MemoryContentV2" },
+        "applicability": { "$ref": "#/$defs/MemoryApplicabilityV2" },
+        "compatibility": { "$ref": "#/$defs/MemoryCompatibilityV2" },
+        "exceptions": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "validation": { "$ref": "#/$defs/MemoryValidationV2" },
+        "evidence": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/MemoryEvidenceHandleV2" } },
+        "evidence_summary": { "$ref": "#/$defs/MemoryEvidenceSummaryV2" },
+        "freshness": { "$ref": "#/$defs/MemoryFreshnessV2" },
+        "lifecycle": { "$ref": "#/$defs/MemoryLifecycleV2" },
+        "transition_summary": { "$ref": "#/$defs/MemoryTransitionSummaryV2" },
+        "recorded_at": { "type": "string", "format": "date-time" },
+        "classification": { "type": "string", "enum": ["internal", "confidential", "restricted"] }
+      }
+    },
+    "MemoryRecordHistoryV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "record_id", "tenant", "plane", "resource_binding", "current_version", "lifecycle", "versions", "transitions"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-record-history.v2" },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "current_version": { "type": "integer", "minimum": 1 },
+        "lifecycle": { "$ref": "#/$defs/MemoryLifecycleV2" },
+        "versions": { "type": "array", "minItems": 1, "maxItems": 256, "items": { "$ref": "#/$defs/MemoryRecordV2" } },
+        "transitions": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/MemoryTransitionSummaryV2" } }
+      }
+    },
+    "CodebaseRunReceiptCandidateV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "client_candidate_id", "plane", "resource_row_id", "scope_snapshot_digest", "kind", "subkind", "content", "applicability", "validation", "exceptions", "source_run_ids", "evidence_refs", "extraction", "activation_requirement_requested"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate.v2" },
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plane": { "const": "codebase" },
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "kind": { "$ref": "#/$defs/MemoryKindV2" },
+        "subkind": { "type": "null" },
+        "content": { "$ref": "#/$defs/CodebaseRunReceiptCandidateContentV2" },
+        "applicability": { "$ref": "#/$defs/CodebaseApplicabilityV2" },
+        "validation": { "$ref": "#/$defs/MemoryValidationV2" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+        "source_run_ids": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "evidence_refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "extraction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "extractor_version", "confidence"],
+          "properties": {
+            "method": { "type": "string", "enum": ["model_then_deterministic_validation", "deterministic", "authorized_review"] },
+            "extractor_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "activation_requirement_requested": { "type": "string", "enum": ["verified_merge", "verified_merge_and_test", "authorized_review"] }
+      }
+    },
+    "HarnessRunReceiptCandidateV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "client_candidate_id", "plane", "resource_row_id", "scope_snapshot_digest", "kind", "subkind", "content", "applicability", "validation", "exceptions", "source_run_ids", "evidence_refs", "extraction", "activation_requirement_requested"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate.v2" },
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "plane": { "const": "harness" },
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "kind": { "$ref": "#/$defs/MemoryKindV2" },
+        "subkind": { "$ref": "#/$defs/MemoryHarnessSubkindV2" },
+        "content": { "$ref": "#/$defs/MemoryContentV2" },
+        "applicability": { "$ref": "#/$defs/HarnessApplicabilityV2" },
+        "validation": { "$ref": "#/$defs/MemoryValidationV2" },
+        "exceptions": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+        "source_run_ids": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "evidence_refs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "extraction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "extractor_version", "confidence"],
+          "properties": {
+            "method": { "type": "string", "enum": ["model_then_deterministic_validation", "deterministic", "authorized_review"] },
+            "extractor_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "activation_requirement_requested": { "type": "string", "enum": ["independently_verified_runtime", "authorized_review"] }
+      }
+    },
+    "MemoryCandidateStatusV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "candidate_id", "client_candidate_id", "tenant", "plane", "resource_binding", "kind", "subkind", "status", "activation_requirement", "blockers", "latest_transition", "active_record", "created_at", "updated_at"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-status.v2" },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "client_candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "kind": { "$ref": "#/$defs/MemoryKindV2" },
+        "subkind": { "oneOf": [{ "$ref": "#/$defs/MemoryHarnessSubkindV2" }, { "type": "null" }] },
+        "status": { "type": "string", "enum": ["accepted", "validating", "pending_evidence", "pending_review", "active", "rejected", "failed"] },
+        "activation_requirement": { "type": "string", "enum": ["verified_merge", "verified_merge_and_test", "independently_verified_runtime", "authorized_review"] },
+        "blockers": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "latest_transition": { "$ref": "#/$defs/MemoryTransitionSummaryV2" },
+        "active_record": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["record_id", "record_version"],
+              "properties": {
+                "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "record_version": { "type": "integer", "minimum": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryReceiptFeedbackItemV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retrieval_pack_id", "scope_snapshot_digest", "record_id", "record_version", "disposition", "reason_code"],
+      "properties": {
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "disposition": { "type": "string", "enum": ["helpful", "harmful", "stale", "conflicting", "not_used", "unknown"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryRunOutcomeV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "terminal_stage", "reason_code", "verification_status", "failure_fingerprint"],
+      "properties": {
+        "status": { "type": "string", "enum": ["completed", "failed", "cancelled"] },
+        "terminal_stage": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "verification_status": { "type": "string", "enum": ["passed", "failed", "not_run", "inconclusive"] },
+        "failure_fingerprint": { "type": ["string", "null"], "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "MemoryReceiptTaskV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_class", "summary"],
+      "properties": {
+        "task_class": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    },
+    "CodebaseRunReceiptV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "external_session_id", "producer", "tenant", "plane", "resource_selector", "scope_snapshot", "task", "outcome", "retrieval_feedback", "evidence_manifest", "candidates"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt.v2" },
+        "external_session_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantSelectorV2" },
+        "plane": { "const": "codebase" },
+        "resource_selector": { "$ref": "#/$defs/ResourceSelectorV2" },
+        "scope_snapshot": { "$ref": "#/$defs/CodebaseScopeSnapshotV2" },
+        "task": { "$ref": "#/$defs/MemoryReceiptTaskV2" },
+        "outcome": { "$ref": "#/$defs/MemoryRunOutcomeV2" },
+        "retrieval_feedback": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/MemoryReceiptFeedbackItemV2" } },
+        "evidence_manifest": { "$ref": "#/$defs/CodeEvidenceManifestV2" },
+        "candidates": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/CodebaseRunReceiptCandidateV2" } }
+      }
+    },
+    "HarnessRunReceiptV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "external_session_id", "producer", "tenant", "plane", "resource_selector", "scope_snapshot", "task", "outcome", "retrieval_feedback", "evidence_handles", "candidates"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt.v2" },
+        "external_session_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantSelectorV2" },
+        "plane": { "const": "harness" },
+        "resource_selector": { "$ref": "#/$defs/ResourceSelectorV2" },
+        "scope_snapshot": { "$ref": "#/$defs/HarnessScopeSnapshotV2" },
+        "task": { "$ref": "#/$defs/MemoryReceiptTaskV2" },
+        "outcome": { "$ref": "#/$defs/MemoryRunOutcomeV2" },
+        "retrieval_feedback": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/MemoryReceiptFeedbackItemV2" } },
+        "evidence_handles": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/HarnessRuntimeEvidenceHandleV2" } },
+        "candidates": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/HarnessRunReceiptCandidateV2" } }
+      }
+    },
+    "RunReceiptV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/CodebaseRunReceiptV2" },
+        { "$ref": "#/$defs/HarnessRunReceiptV2" }
+      ]
+    },
+    "RunReceiptResultV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "receipt_id", "producer_run_id", "request_digest", "tenant", "plane", "resource_binding", "scope_snapshot_digest", "status", "duplicate", "candidate_results"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt-result.v2" },
+        "receipt_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "request_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "status": { "type": "string", "enum": ["accepted", "replayed"] },
+        "duplicate": { "type": "boolean" },
+        "candidate_results": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/MemoryCandidateStatusV2" } }
+      }
+    },
+    "MemoryFeedbackV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feedback_revision", "retrieval_pack_id", "record_id", "record_version", "producer_run_id", "plane", "resource_row_id", "scope_snapshot_digest", "disposition", "reason_code", "outcome_evidence_refs", "event_time"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-feedback.v2" },
+        "feedback_revision": { "type": "integer", "minimum": 1 },
+        "retrieval_pack_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "plane": { "const": "codebase" },
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "scope_snapshot_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "disposition": { "type": "string", "enum": ["helpful", "harmful", "stale", "conflicting", "not_used"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "outcome_evidence_refs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "event_time": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryFeedbackResultV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "feedback_id", "feedback_revision", "tenant", "plane", "resource_binding", "duplicate", "review_signal_ids"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-feedback-result.v2" },
+        "feedback_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "feedback_revision": { "type": "integer", "minimum": 1 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "const": "codebase" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "duplicate": { "type": "boolean" },
+        "review_signal_ids": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+      }
+    },
+    "MemoryCandidateDecisionV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "decision_revision", "plane", "resource_row_id", "decision", "reason_code", "explanation", "evidence_refs", "event_time"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-decision.v2" },
+        "decision_revision": { "type": "integer", "minimum": 1 },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_row_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "evidence_refs": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "event_time": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MemoryCandidateDecisionResultV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "decision_id", "candidate_id", "decision_revision", "tenant", "plane", "resource_binding", "decision", "candidate_status", "active_record", "duplicate"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-candidate-decision-result.v2" },
+        "decision_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "decision_revision": { "type": "integer", "minimum": 1 },
+        "tenant": { "$ref": "#/$defs/MemoryTenantV2" },
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_binding": { "$ref": "#/$defs/ResourceBindingV2" },
+        "decision": { "type": "string", "enum": ["approve", "reject"] },
+        "candidate_status": { "type": "string", "enum": ["pending_evidence", "pending_review", "active", "rejected", "failed"] },
+        "active_record": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["record_id", "record_version"],
+              "properties": {
+                "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+                "record_version": { "type": "integer", "minimum": 1 }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "duplicate": { "type": "boolean" }
+      }
+    },
+    "MemoryRuntimeOutcomeV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason_code", "verification_status", "failure_fingerprint"],
+      "properties": {
+        "status": { "type": "string", "enum": ["completed", "failed"] },
+        "reason_code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "verification_status": { "type": "string", "enum": ["passed", "failed", "inconclusive"] },
+        "failure_fingerprint": { "type": ["string", "null"], "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "MemoryMcpIdempotencyKeyV2": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "MemoryMcpCodeSearchInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "plane", "resource_selector", "applicability", "task", "temporal", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search.v2" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "plane": { "const": "codebase" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "applicability": { "$ref": "#/$defs/CodebaseApplicabilityV2" },
+        "task": { "$ref": "#/$defs/MemoryTaskV2" },
+        "temporal": { "$ref": "#/$defs/MemoryTemporalV2" },
+        "budget": { "$ref": "#/$defs/MemoryBudgetV2" },
+        "options": { "$ref": "#/$defs/MemorySearchOptionsV2" }
+      }
+    },
+    "MemoryMcpCodeSearchOutputV2": { "$ref": "#/$defs/MemorySearchResultV2" },
+    "MemoryMcpHarnessSearchInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "request_id", "consumer", "plane", "resource_selector", "applicability", "task", "temporal", "budget", "options"],
+      "properties": {
+        "schema_version": { "const": "pim.memory-search.v2" },
+        "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "consumer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "plane": { "const": "harness" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "applicability": { "$ref": "#/$defs/HarnessApplicabilityV2" },
+        "task": { "$ref": "#/$defs/MemoryTaskV2" },
+        "temporal": { "$ref": "#/$defs/MemoryTemporalV2" },
+        "budget": { "$ref": "#/$defs/MemoryBudgetV2" },
+        "options": { "$ref": "#/$defs/MemorySearchOptionsV2" }
+      }
+    },
+    "MemoryMcpHarnessSearchOutputV2": { "$ref": "#/$defs/MemorySearchResultV2" },
+    "MemoryMcpCodebaseRunReceiptV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "external_session_id", "producer", "plane", "resource_selector", "scope_snapshot", "task", "outcome", "retrieval_feedback", "evidence_manifest", "candidates"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt.v2" },
+        "external_session_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "plane": { "const": "codebase" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "scope_snapshot": { "$ref": "#/$defs/MemoryMcpCodebaseScopeSnapshotV2" },
+        "task": { "$ref": "#/$defs/MemoryReceiptTaskV2" },
+        "outcome": { "$ref": "#/$defs/MemoryRunOutcomeV2" },
+        "retrieval_feedback": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/MemoryReceiptFeedbackItemV2" } },
+        "evidence_manifest": { "$ref": "#/$defs/CodeEvidenceManifestV2" },
+        "candidates": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/CodebaseRunReceiptCandidateV2" } }
+      }
+    },
+    "MemoryMcpHarnessRunReceiptV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "external_session_id", "producer", "plane", "resource_selector", "scope_snapshot", "task", "outcome", "retrieval_feedback", "evidence_handles", "candidates"],
+      "properties": {
+        "schema_version": { "const": "pim.run-receipt.v2" },
+        "external_session_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "producer": { "$ref": "#/$defs/MemoryConsumerV2" },
+        "plane": { "const": "harness" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "scope_snapshot": { "$ref": "#/$defs/MemoryMcpHarnessScopeSnapshotV2" },
+        "task": { "$ref": "#/$defs/MemoryReceiptTaskV2" },
+        "outcome": { "$ref": "#/$defs/MemoryRunOutcomeV2" },
+        "retrieval_feedback": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/MemoryReceiptFeedbackItemV2" } },
+        "evidence_handles": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/HarnessRuntimeEvidenceHandleV2" } },
+        "candidates": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/HarnessRunReceiptCandidateV2" } }
+      }
+    },
+    "MemoryMcpRunReceiptV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/MemoryMcpCodebaseRunReceiptV2" },
+        { "$ref": "#/$defs/MemoryMcpHarnessRunReceiptV2" }
+      ]
+    },
+    "MemoryMcpRunReceiptSubmitInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idempotency_key", "producer_run_id", "receipt"],
+      "properties": {
+        "idempotency_key": { "$ref": "#/$defs/MemoryMcpIdempotencyKeyV2" },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "receipt": { "$ref": "#/$defs/MemoryMcpRunReceiptV2" }
+      }
+    },
+    "MemoryMcpRunReceiptSubmitOutputV2": { "$ref": "#/$defs/RunReceiptResultV2" },
+    "MemoryMcpFeedbackSubmitInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idempotency_key", "feedback"],
+      "properties": {
+        "idempotency_key": { "$ref": "#/$defs/MemoryMcpIdempotencyKeyV2" },
+        "feedback": { "$ref": "#/$defs/MemoryFeedbackV2" }
+      }
+    },
+    "MemoryMcpFeedbackSubmitOutputV2": { "$ref": "#/$defs/MemoryFeedbackResultV2" },
+    "MemoryMcpCodeCandidateStatusInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "resource_selector", "candidate_id"],
+      "properties": {
+        "plane": { "const": "codebase" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryMcpHarnessCandidateStatusInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "resource_selector", "receipt_id", "producer_run_id", "candidate_id"],
+      "properties": {
+        "plane": { "const": "harness" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "receipt_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "producer_run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "candidate_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryMcpCandidateStatusInputV2": {
+      "oneOf": [
+        { "$ref": "#/$defs/MemoryMcpCodeCandidateStatusInputV2" },
+        { "$ref": "#/$defs/MemoryMcpHarnessCandidateStatusInputV2" }
+      ]
+    },
+    "MemoryMcpCandidateStatusOutputV2": { "$ref": "#/$defs/MemoryCandidateStatusV2" },
+    "MemoryMcpReadinessInputV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "resource_selector"],
+      "properties": {
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" }
+      }
+    },
+    "MemoryMcpReadinessOutputV2": { "$ref": "#/$defs/MemoryReadinessV2" },
+    "MemoryMcpRecordResourceSelectorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "resource_selector", "record_id", "record_version"],
+      "properties": {
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "record_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "MemoryMcpRecordResourceResultV2": { "$ref": "#/$defs/MemoryRecordV2" },
+    "MemoryMcpPackResourceSelectorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plane", "resource_selector", "pack_id"],
+      "properties": {
+        "plane": { "$ref": "#/$defs/MemoryImplementedPlaneV2" },
+        "resource_selector": { "$ref": "#/$defs/MemoryMcpResourceSelectorV2" },
+        "pack_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "MemoryMcpPackResourceResultV2": { "$ref": "#/$defs/MemoryRetrievalPackV2" },
+    "PimErrorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "code", "message", "request_id", "plane", "retryable", "details"],
+      "properties": {
+        "schema_version": { "const": "pim.error.v2" },
+        "code": {
+          "type": "string",
+          "enum": [
+            "schema_invalid",
+            "contract_version_unsupported",
+            "authentication_required",
+            "scope_required",
+            "resource_binding_mismatch",
+            "resource_not_found",
+            "idempotency_conflict",
+            "evidence_unresolvable",
+            "evidence_mismatch",
+            "transition_invalid",
+            "activation_requirement_unsatisfied",
+            "provider_unavailable",
+            "rate_limited",
+            "temporarily_unavailable",
+            "reverification_required"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "request_id": { "type": ["string", "null"], "minLength": 1, "maxLength": 128 },
+        "plane": {
+          "oneOf": [
+            { "$ref": "#/$defs/MemoryPlaneV2" },
+            { "type": "null" }
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "details": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "reason"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+              "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

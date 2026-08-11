@@ -17,8 +17,17 @@ import {
   assertMemoryStructure,
   type ThinV1MemoryKind,
 } from "./memory-structural-validator.js";
+import {
+  assertMemoryV2StoredRecordFacet,
+  insertMemoryV2RecordFacet,
+} from "./memory-v2-canonical-writes.js";
+import {
+  memoryV2RepositoryResourceRowId,
+  projectMemoryV2RepositoryResource,
+} from "./memory-v2-resources.js";
+import { markMemoryV2RecordUntrusted } from "./memory-v2-trust.js";
 
-type RecordStatus = "active" | "stale" | "superseded" | "revoked" | "expired";
+export type RecordStatus = "active" | "stale" | "superseded" | "revoked" | "expired";
 
 interface RecordRow {
   record_id: string;
@@ -29,7 +38,6 @@ interface RecordRow {
   kind: ThinV1MemoryKind;
   current_version: number;
   current_status: RecordStatus;
-  prompt_eligible: number;
   aggregate_version: number;
   claim_key: string;
   valid_from: string;
@@ -54,6 +62,12 @@ interface VersionRow {
   embedding_json: string | null;
   content_digest: string;
   recorded_at: string;
+}
+
+interface CanonicalLifecycleRecordRow extends Omit<RecordRow, "repository_row_id" | "plane"> {
+  repository_row_id: string | null;
+  harness_id: string | null;
+  plane: "codebase" | "harness";
 }
 
 interface TransitionRow {
@@ -82,7 +96,6 @@ export interface ImportActiveMemoryRecordInput {
   embedding?: number[] | null;
   validFrom?: string;
   expiresAt?: string | null;
-  promptEligible?: boolean;
   actorId?: string;
   actorType?: string;
   decisionRefs?: string[];
@@ -351,7 +364,6 @@ function rowToDetail(record: RecordRow, version: VersionRow): MemoryRecordV1 {
     evidence_summary: parseJson(version.evidence_summary_json),
     freshness: parseJson(version.freshness_json),
     lifecycle: { status: record.current_status },
-    prompt_eligible: record.prompt_eligible === 1,
     transition_summary: {
       transition_id: transition.transition_id,
       from_status: transition.from_status,
@@ -424,6 +436,10 @@ export function importActiveMemoryRecord(input: ImportActiveMemoryRecordInput): 
       if (existingById.org_id !== input.orgId || existingById.project_id !== input.projectId || existingById.content_digest !== contentDigest) {
         throw new MemoryRecordConflictError("Record ID is already assigned to different immutable content");
       }
+      assertMemoryV2StoredRecordFacet({
+        recordId,
+        recordVersion: existingById.current_version,
+      });
       return getMemoryRecord(input.orgId, input.projectId, recordId, existingById.current_version)!;
     }
     const duplicate = db.prepare(
@@ -439,22 +455,26 @@ export function importActiveMemoryRecord(input: ImportActiveMemoryRecordInput): 
           "Canonical claim exists only in inactive history and requires explicit revalidation",
         );
       }
+      assertMemoryV2StoredRecordFacet({ recordId: duplicate.record_id });
       return getMemoryRecord(input.orgId, input.projectId, duplicate.record_id)!;
     }
 
+    // A fresh legacy/offline authority row may predate the v2 projection. Create
+    // its exact resource in this same transaction; replay paths above only
+    // verify existing companions and never repair them.
+    projectMemoryV2RepositoryResource(input.repositoryRowId);
     db.prepare(
       `INSERT INTO memory_records
          (record_id, org_id, project_id, repository_row_id, plane, kind, current_version,
-          current_status, prompt_eligible, claim_key, valid_from, valid_until, expires_at,
+          current_status, claim_key, valid_from, valid_until, expires_at,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'codebase', ?, 1, 'active', ?, ?, ?, NULL, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, 'codebase', ?, 1, 'active', ?, ?, NULL, ?, ?, ?)`,
     ).run(
       recordId,
       input.orgId,
       input.projectId,
       input.repositoryRowId,
       input.kind,
-      input.promptEligible ? 1 : 0,
       claimKey,
       validFrom,
       expiresAt,
@@ -482,6 +502,16 @@ export function importActiveMemoryRecord(input: ImportActiveMemoryRecordInput): 
       contentDigest,
       now,
     );
+    insertMemoryV2RecordFacet({
+      recordId,
+      recordVersion: 1,
+      orgId: input.orgId,
+      projectId: input.projectId,
+      plane: "codebase",
+      resourceRowId: memoryV2RepositoryResourceRowId(input.repositoryRowId),
+      broadKind: input.kind,
+      now,
+    });
     db.prepare(
       `INSERT INTO memory_transitions
          (transition_id, org_id, project_id, aggregate_type, aggregate_id, from_status,
@@ -549,7 +579,88 @@ const ALLOWED_RECORD_TRANSITIONS: Record<RecordStatus, RecordStatus[]> = {
   expired: [],
 };
 
-export function transitionMemoryRecordStatus(input: {
+function reverificationWorkerOwnsStateTransition(policyVersion: string | undefined): boolean {
+  return /^memory-v2-reverification:[1-9][0-9]*$/.test(policyVersion ?? "");
+}
+
+/**
+ * Canonical lifecycle remains the only writer of memory_records.current_status.
+ * When another lifecycle path retires the exact active version, close only its
+ * mutable v2 reverification companion and any open jobs in this same database
+ * transaction. Scheduled reverification bypasses this hook because its worker
+ * commits the immutable decision and richer outcome state immediately after
+ * the canonical transition in the encompassing transaction.
+ */
+function closeMemoryV2ReverificationForCanonicalTransition(input: {
+  recordId: string;
+  recordVersion: number;
+  toStatus: Exclude<RecordStatus, "active">;
+  now: string;
+}): void {
+  markMemoryV2RecordUntrusted({
+    recordId: input.recordId,
+    recordVersion: input.recordVersion,
+    now: input.now,
+  });
+  const state = db.prepare(
+    `SELECT state_version, policy_id, policy_revision
+     FROM memory_v2_reverification_state
+     WHERE record_id = ? AND record_version = ?`,
+  ).get(input.recordId, input.recordVersion) as {
+    state_version: number;
+    policy_id: string;
+    policy_revision: number;
+  } | undefined;
+  if (!state) return;
+  const marker = `canonical_lifecycle_${input.toStatus}`;
+  const nextStateVersion = state.state_version + 1;
+  const terminalStateStatus = input.toStatus === "expired" ? "expired" : "withdrawn";
+  const stateUpdated = db.prepare(
+    `UPDATE memory_v2_reverification_state
+     SET state_version = ?, status = ?, influence_eligible = 0,
+         next_reverify_at = ?, last_error_code = ?, updated_at = ?
+     WHERE record_id = ? AND record_version = ? AND state_version = ?
+       AND policy_id = ? AND policy_revision = ?`,
+  ).run(
+    nextStateVersion,
+    terminalStateStatus,
+    input.now,
+    marker,
+    input.now,
+    input.recordId,
+    input.recordVersion,
+    state.state_version,
+    state.policy_id,
+    state.policy_revision,
+  );
+  if (stateUpdated.changes !== 1) {
+    throw new MemoryRecordConflictError(
+      "Reverification state changed during canonical lifecycle transition",
+    );
+  }
+  db.prepare(
+    `UPDATE memory_v2_reverification_jobs
+     SET expected_state_version = ?, status = 'dead_letter',
+         lease_owner = NULL, lease_expires_at = NULL,
+         next_attempt_at = ?, last_error_code = ?,
+         updated_at = ?, dead_lettered_at = ?
+     WHERE record_id = ? AND record_version = ?
+       AND policy_id = ? AND policy_revision = ?
+       AND status IN ('pending','leased')`,
+  ).run(
+    nextStateVersion,
+    input.now,
+    marker,
+    input.now,
+    input.now,
+    input.recordId,
+    input.recordVersion,
+    state.policy_id,
+    state.policy_revision,
+  );
+}
+
+export interface TransitionMemoryRecordStatusInput {
   orgId: string;
   projectId: string;
   recordId: string;
@@ -557,28 +668,89 @@ export function transitionMemoryRecordStatus(input: {
   actorId: string;
   reasonCode: string;
   explanation: string;
+  expectedCurrentVersion?: number;
+  expectedCurrentStatus?: RecordStatus;
+  decisionRefs?: readonly string[];
+  policyVersion?: string;
   now?: string;
-}): MemoryRecordV1 | null {
+}
+
+export interface MemoryRecordStatusTransition {
+  recordId: string;
+  recordVersion: number;
+  plane: "codebase" | "harness";
+  fromStatus: RecordStatus;
+  toStatus: Exclude<RecordStatus, "active">;
+  aggregateVersion: number;
+  transitionId: string;
+  committedAt: string;
+}
+
+export function transitionMemoryRecordStatus(
+  input: TransitionMemoryRecordStatusInput & { canonicalResult: true },
+): MemoryRecordStatusTransition | null;
+export function transitionMemoryRecordStatus(
+  input: TransitionMemoryRecordStatusInput & { canonicalResult?: false },
+): MemoryRecordV1 | null;
+export function transitionMemoryRecordStatus(
+  input: TransitionMemoryRecordStatusInput & { canonicalResult?: boolean },
+): MemoryRecordV1 | MemoryRecordStatusTransition | null {
   const now = input.now ?? new Date().toISOString();
   return withImmediateTransaction(() => {
     const record = db.prepare(
       "SELECT * FROM memory_records WHERE org_id = ? AND project_id = ? AND record_id = ?",
-    ).get(input.orgId, input.projectId, input.recordId) as unknown as RecordRow | undefined;
+    ).get(input.orgId, input.projectId, input.recordId) as unknown as
+      | CanonicalLifecycleRecordRow
+      | undefined;
     if (!record) return null;
-    if (record.current_status === input.toStatus) return getMemoryRecord(input.orgId, input.projectId, input.recordId);
+    if (input.expectedCurrentVersion !== undefined
+        && record.current_version !== input.expectedCurrentVersion) {
+      throw new MemoryRecordConflictError("Record current version changed before lifecycle transition");
+    }
+    if (input.expectedCurrentStatus !== undefined
+        && record.current_status !== input.expectedCurrentStatus) {
+      throw new MemoryRecordConflictError("Record current status changed before lifecycle transition");
+    }
+    const currentTransition = transitionFor(record.org_id, record.project_id, record.record_id);
+    if (record.current_status === input.toStatus) {
+      if (input.canonicalResult) {
+        if (!currentTransition) {
+          throw new MemoryRecordConflictError("Record lifecycle transition history is missing");
+        }
+        return {
+          recordId: record.record_id,
+          recordVersion: record.current_version,
+          plane: record.plane,
+          fromStatus: input.toStatus,
+          toStatus: input.toStatus,
+          aggregateVersion: record.aggregate_version,
+          transitionId: currentTransition.transition_id,
+          committedAt: currentTransition.committed_at,
+        };
+      }
+      if (record.plane !== "codebase") {
+        throw new MemoryRecordConflictError(
+          "Harness lifecycle transitions require the canonical transition result",
+        );
+      }
+      return getMemoryRecord(input.orgId, input.projectId, input.recordId);
+    }
     if (!ALLOWED_RECORD_TRANSITIONS[record.current_status].includes(input.toStatus)) {
       throw new MemoryRecordConflictError(`Invalid record transition ${record.current_status} -> ${input.toStatus}`);
     }
+    const transitionId = `transition_${randomUUID()}`;
     const updated = db.prepare(
       `UPDATE memory_records
        SET current_status = ?, valid_until = ?, updated_at = ?,
            aggregate_version = aggregate_version + 1
-       WHERE record_id = ? AND current_status = ? AND aggregate_version = ?`,
+       WHERE record_id = ? AND current_version = ?
+         AND current_status = ? AND aggregate_version = ?`,
     ).run(
       input.toStatus,
       now,
       now,
       record.record_id,
+      record.current_version,
       record.current_status,
       record.aggregate_version,
     );
@@ -590,10 +762,10 @@ export function transitionMemoryRecordStatus(input: {
          (transition_id, org_id, project_id, aggregate_type, aggregate_id, from_status,
           to_status, actor_type, actor_id, reason_code, explanation, evidence_refs_json,
           decision_refs_json, policy_version, occurred_at, committed_at)
-       VALUES (?, ?, ?, 'record', ?, ?, ?, 'system', ?, ?, ?, '[]', '[]',
-               'memory-lifecycle-v1', ?, ?)`,
+       VALUES (?, ?, ?, 'record', ?, ?, ?, 'system', ?, ?, ?, '[]', ?,
+               ?, ?, ?)`,
     ).run(
-      `transition_${randomUUID()}`,
+      transitionId,
       input.orgId,
       input.projectId,
       input.recordId,
@@ -602,9 +774,36 @@ export function transitionMemoryRecordStatus(input: {
       input.actorId,
       input.reasonCode,
       input.explanation.slice(0, 1000),
+      JSON.stringify(input.decisionRefs ?? []),
+      input.policyVersion ?? "memory-lifecycle-v1",
       now,
       now,
     );
+    if (!reverificationWorkerOwnsStateTransition(input.policyVersion)) {
+      closeMemoryV2ReverificationForCanonicalTransition({
+        recordId: record.record_id,
+        recordVersion: record.current_version,
+        toStatus: input.toStatus,
+        now,
+      });
+    }
+    if (input.canonicalResult) {
+      return {
+        recordId: record.record_id,
+        recordVersion: record.current_version,
+        plane: record.plane,
+        fromStatus: record.current_status,
+        toStatus: input.toStatus,
+        aggregateVersion: record.aggregate_version + 1,
+        transitionId,
+        committedAt: now,
+      };
+    }
+    if (record.plane !== "codebase") {
+      throw new MemoryRecordConflictError(
+        "Harness lifecycle transitions require the canonical transition result",
+      );
+    }
     return getMemoryRecord(input.orgId, input.projectId, input.recordId)!;
   });
 }
@@ -632,7 +831,6 @@ export function listAuthorizedCurrentMemoryRecords(input: {
        ON version.record_id = record.record_id AND version.record_version = record.current_version
      WHERE record.org_id = ? AND record.project_id = ? AND record.plane = 'codebase'
        AND record.repository_row_id = ? AND record.current_status = 'active'
-       AND record.shadow_recall_eligible = 1
        AND record.valid_from <= ?
        AND (record.valid_until IS NULL OR record.valid_until > ?)
        AND (record.expires_at IS NULL OR record.expires_at > ?)

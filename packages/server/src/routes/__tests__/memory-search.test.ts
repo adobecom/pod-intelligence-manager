@@ -340,7 +340,7 @@ describe("Slice 1 memory HTTP authorization and retrieval", () => {
 });
 
 describe("Slice 1 ranking, lifecycle exclusion, and repository identity", () => {
-  it("returns instruction-shaped memory only as typed, prompt-ineligible data", async () => {
+  it("returns instruction-shaped memory only as typed inert data", async () => {
     const repository = resolveMemoryRepository(
       context.orgA.id,
       context.projectA,
@@ -395,7 +395,6 @@ describe("Slice 1 ranking, lifecycle exclusion, and repository identity", () => 
     expect(item).toMatchObject({
       record_id: record.record_id,
       summary: instruction,
-      prompt_eligible: false,
     });
     expect(Object.keys(item)).not.toEqual(expect.arrayContaining(["role", "system", "tool_call"]));
 
@@ -408,7 +407,6 @@ describe("Slice 1 ranking, lifecycle exclusion, and repository identity", () => 
     expect(detail.json()).toMatchObject({
       record_id: record.record_id,
       content: { summary: instruction },
-      prompt_eligible: false,
     });
   });
 

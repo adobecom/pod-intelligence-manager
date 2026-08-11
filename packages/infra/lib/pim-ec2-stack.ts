@@ -753,6 +753,7 @@ function handler(event) {
       },
       additionalBehaviors: {
         "/mcp": apiBehavior,
+        "/mcp/*": apiBehavior,
         "/api/*": apiBehavior,
         "/ws": apiBehavior,
         "/ws/*": apiBehavior,

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   canonicalJsonSha256,
   parseMemoryContract,
-  type FiestaCodeEvidenceV2,
+  type CodeEvidenceManifestV2,
   type MemoryCandidateV1,
   type PimErrorV1,
   type RunReceiptResultV1,
@@ -14,6 +14,19 @@ import {
   insertMemoryCandidate,
   MemoryCandidateIdempotencyError,
 } from "./memory-candidates.js";
+import {
+  assertMemoryV2StoredReceiptAggregateFacets,
+  insertMemoryV2FeedbackFacet,
+  insertMemoryV2FacetQuarantine,
+  insertMemoryV2ReceiptFacet,
+  MemoryV2CanonicalWriteError,
+  type MemoryV2CanonicalPlane,
+  type MemoryV2HarnessSubtype,
+} from "./memory-v2-canonical-writes.js";
+import {
+  memoryV2RepositoryResourceRowId,
+  resolveMemoryV2HarnessResourceRowId,
+} from "./memory-v2-resources.js";
 
 const RECEIPT_SCHEMA_MAJOR = "pim.run-receipt.v1";
 const RECEIPT_IDEMPOTENCY_OPERATION = "memory.run-receipt.v1";
@@ -40,6 +53,15 @@ export interface AcceptMemoryRunReceiptInput {
   idempotencyKey?: string;
   repository: MemoryRepositoryBinding | null;
   receipt: RunReceiptV1;
+  /** Preallocated by native-v2 intake so evidence verification can bind the receipt before commit. */
+  receiptId?: string;
+  /** Native-v2 subtype classification keyed by the stable client candidate id. */
+  candidateSubtypes?: ReadonlyMap<string, MemoryV2HarnessSubtype>;
+  /** Exact resource authority already established by a native-v2 adapter. */
+  authorizedScope?: {
+    plane: MemoryV2CanonicalPlane;
+    resourceRowId: string;
+  };
   now?: string;
 }
 
@@ -55,6 +77,17 @@ interface ReceiptRow {
   producer_run_id: string;
   request_digest: string;
   response_json: string;
+}
+
+export interface StoredMemoryRunReceiptReplay {
+  receiptId: string;
+  requestDigest: string;
+  requestMatches: boolean;
+  receiptJson: string;
+  responseJson: string;
+  producerHarnessId: string;
+  repositoryRowId: string | null;
+  repositoryId: string | null;
 }
 
 interface EvidenceManifestRow {
@@ -99,8 +132,32 @@ function isImmutableHttpsUri(raw: string): boolean {
   return Boolean(version && /^[0-9a-f]{40,64}$/i.test(version));
 }
 
+function isImmutableInternalPimUri(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "pim:"
+      || url.hostname !== "memory-source"
+      || url.username
+      || url.password
+      || url.search
+      || url.hash) return false;
+  const segments = url.pathname.split("/").filter(Boolean);
+  return segments.length === 3
+    && /^[a-z_]+$/.test(segments[0]!)
+    && /^[0-9a-f]{32}$/.test(segments[1]!)
+    && /^[0-9a-f]{64}$/.test(segments[2]!);
+}
+
 export function canonicalEvidenceManifestDigest(
-  manifest: Omit<FiestaCodeEvidenceV2, "digest"> | FiestaCodeEvidenceV2,
+  manifest: {
+    schema_version: string;
+    manifest_id: string;
+    refs: readonly unknown[];
+  },
 ): string {
   return canonicalJsonSha256({
     schema_version: manifest.schema_version,
@@ -109,7 +166,10 @@ export function canonicalEvidenceManifestDigest(
   });
 }
 
-export function validateReceiptEvidenceManifest(manifest: FiestaCodeEvidenceV2 | undefined): void {
+export function validateReceiptEvidenceManifest(
+  manifest: CodeEvidenceManifestV2 | undefined,
+  options: { allowInternalPimUri?: boolean } = {},
+): void {
   if (!manifest) return;
   if (canonicalEvidenceManifestDigest(manifest) !== manifest.digest) {
     throw new MemoryReceiptError(
@@ -128,9 +188,10 @@ export function validateReceiptEvidenceManifest(manifest: FiestaCodeEvidenceV2 |
       );
     }
     seen.add(ref.id);
-    if (!isImmutableHttpsUri(ref.uri)) {
+    if (!isImmutableHttpsUri(ref.uri)
+        && !(options.allowInternalPimUri && isImmutableInternalPimUri(ref.uri))) {
       throw new MemoryReceiptError(
-        "Evidence references must use an allowlisted immutable HTTPS URI",
+        "Evidence references must use an authorized immutable URI",
         422,
         "evidence_unresolvable",
       );
@@ -188,6 +249,92 @@ function validateReceiptRelationships(receipt: RunReceiptV1): void {
   }
 }
 
+type ReceiptCompanionScope = {
+  plane: MemoryV2CanonicalPlane;
+  resourceRowId: string;
+} | {
+  plane: "org";
+  resourceRowId: null;
+};
+
+function receiptCompanionScope(input: AcceptMemoryRunReceiptInput): ReceiptCompanionScope {
+  if (input.authorizedScope) {
+    const { plane, resourceRowId } = input.authorizedScope;
+    if (input.receipt.candidates.some((candidate) => candidate.plane !== plane)) {
+      throw new MemoryReceiptError(
+        "Receipt candidates do not match the authorized resource plane",
+        403,
+        "resource_binding_mismatch",
+      );
+    }
+    if (plane === "codebase") {
+      if (!input.repository
+          || memoryV2RepositoryResourceRowId(input.repository.repository_row_id) !== resourceRowId) {
+        throw new MemoryReceiptError(
+          "Codebase receipt does not match the authorized repository resource",
+          403,
+          "resource_binding_mismatch",
+        );
+      }
+      return { plane, resourceRowId };
+    }
+    if (input.repository !== null) {
+      throw new MemoryReceiptError(
+        "Harness receipt cannot carry a repository binding",
+        403,
+        "resource_binding_mismatch",
+      );
+    }
+    return { plane, resourceRowId };
+  }
+  if (input.repository) {
+    return {
+      plane: "codebase",
+      resourceRowId: memoryV2RepositoryResourceRowId(input.repository.repository_row_id),
+    };
+  }
+  if (input.receipt.candidates.length > 0
+      && input.receipt.candidates.every((candidate) => candidate.plane === "harness")) {
+    const binding = db.prepare(
+      `SELECT 1 FROM memory_harness_principal_bindings
+       WHERE service_principal_id = ? AND org_id = ? AND project_id = ? AND harness_id = ?`,
+    ).get(
+      input.principalId,
+      input.orgId,
+      input.projectId,
+      input.receipt.producer.harness_id,
+    );
+    if (!binding) {
+      throw new MemoryReceiptError(
+        "Harness receipt does not match the authenticated producer binding",
+        403,
+        "resource_binding_mismatch",
+      );
+    }
+    const resourceRowId = resolveMemoryV2HarnessResourceRowId({
+      orgId: input.orgId,
+      projectId: input.projectId,
+      harnessId: input.receipt.producer.harness_id,
+    });
+    if (resourceRowId) return { plane: "harness", resourceRowId };
+    throw new MemoryReceiptError(
+      "Harness receipt resource is unavailable",
+      403,
+      "resource_binding_mismatch",
+    );
+  }
+  if (input.principalId.startsWith("pim-internal:")
+      && input.receipt.candidates.length > 0
+      && input.receipt.candidates.every((candidate) => candidate.plane === "org")) {
+    return { plane: "org", resourceRowId: null };
+  }
+  throw new MemoryReceiptError(
+    "Receipt must resolve to one implemented repository or harness resource",
+    400,
+    "schema_invalid",
+  );
+}
+
 function assertFeedbackTargets(
   orgId: string,
   projectId: string,
@@ -241,7 +388,7 @@ function persistEvidenceManifest(input: {
   orgId: string;
   projectId: string;
   receiptId: string;
-  manifest: FiestaCodeEvidenceV2 | undefined;
+  manifest: CodeEvidenceManifestV2 | undefined;
   now: string;
 }): { manifestRowId: string | null; evidenceRowsByProducerRef: Map<string, string> } {
   if (!input.manifest) return { manifestRowId: null, evidenceRowsByProducerRef: new Map() };
@@ -311,6 +458,7 @@ function persistReceiptFeedback(input: {
   receiptId: string;
   producerRunId: string;
   receipt: RunReceiptV1;
+  resourceRowId: string;
   now: string;
 }): void {
   const insert = db.prepare(
@@ -322,8 +470,9 @@ function persistReceiptFeedback(input: {
   );
   for (const pack of input.receipt.retrieval_feedback ?? []) {
     for (const item of pack.items) {
+      const feedbackId = `feedback_${randomUUID()}`;
       insert.run(
-        `feedback_${randomUUID()}`,
+        feedbackId,
         input.orgId,
         input.projectId,
         input.receiptId,
@@ -335,6 +484,15 @@ function persistReceiptFeedback(input: {
         canonicalJsonSha256(item),
         input.now,
       );
+      insertMemoryV2FeedbackFacet({
+        feedbackId,
+        retrievalPackId: pack.retrieval_pack_id,
+        orgId: input.orgId,
+        projectId: input.projectId,
+        plane: "codebase",
+        resourceRowId: input.resourceRowId,
+        now: input.now,
+      });
     }
   }
 }
@@ -375,13 +533,65 @@ function findReceipt(orgId: string, projectId: string, producerRunId: string): R
   ).get(orgId, projectId, RECEIPT_SCHEMA_MAJOR, producerRunId) as ReceiptRow | undefined) ?? null;
 }
 
+/**
+ * Looks up a finalized v1 receipt without interpreting either stored payload.
+ * Historical replay authorization is performed by the HTTP adapter using the
+ * raw and stored resource selectors returned here.
+ */
+export function lookupStoredMemoryRunReceiptReplay(input: {
+  orgId: string;
+  projectId: string;
+  schemaVersion: string;
+  producerRunId: string;
+  rawRequest: unknown;
+}): StoredMemoryRunReceiptReplay | null {
+  const row = db.prepare(
+    `SELECT receipt_id, request_digest, receipt_json, response_json,
+            producer_harness_id, repository_row_id, repository_id
+     FROM memory_run_receipts
+     WHERE org_id = ? AND project_id = ? AND schema_major = ? AND producer_run_id = ?`,
+  ).get(
+    input.orgId,
+    input.projectId,
+    input.schemaVersion,
+    input.producerRunId,
+  ) as {
+    receipt_id: string;
+    request_digest: string;
+    receipt_json: string;
+    response_json: string;
+    producer_harness_id: string;
+    repository_row_id: string | null;
+    repository_id: string | null;
+  } | undefined;
+  if (!row) return null;
+  return {
+    receiptId: row.receipt_id,
+    requestDigest: row.request_digest,
+    requestMatches: row.request_digest === canonicalJsonSha256(input.rawRequest),
+    receiptJson: row.receipt_json,
+    responseJson: row.response_json,
+    producerHarnessId: row.producer_harness_id,
+    repositoryRowId: row.repository_row_id,
+    repositoryId: row.repository_id,
+  };
+}
+
 function replayOrConflict(existing: ReceiptRow, requestDigest: string): AcceptedMemoryRunReceipt {
+  // This is the current-intake race path. The v1 HTTP adapter handles historical
+  // rows through lookupStoredMemoryRunReceiptReplay before contract validation.
   if (existing.request_digest !== requestDigest) {
     throw new MemoryReceiptError(
       "Producer run is already finalized with different receipt content",
       409,
       "idempotency_conflict",
     );
+  }
+  try {
+    assertMemoryV2StoredReceiptAggregateFacets(existing.receipt_id);
+  } catch (error) {
+    if (!(error instanceof MemoryV2CanonicalWriteError)) throw error;
+    throw new MemoryReceiptError(error.message, 409, "idempotency_conflict");
   }
   return {
     result: parseMemoryContract("RunReceiptResultV1", parseJson(existing.response_json)),
@@ -399,7 +609,10 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
       "schema_invalid",
     );
   }
-  validateReceiptEvidenceManifest(input.receipt.evidence_manifest);
+  const companionScope = receiptCompanionScope(input);
+  validateReceiptEvidenceManifest(input.receipt.evidence_manifest, {
+    allowInternalPimUri: companionScope.plane === "org",
+  });
   const requestDigest = canonicalJsonSha256(input.receipt);
   const existing = findReceipt(input.orgId, input.projectId, input.producerRunId);
   if (existing) return replayOrConflict(existing, requestDigest);
@@ -416,7 +629,7 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
         input.repository,
         input.receipt,
       );
-      const receiptId = `receipt_${randomUUID()}`;
+      const receiptId = input.receiptId ?? `receipt_${randomUUID()}`;
       db.prepare(
         `INSERT INTO memory_run_receipts
            (receipt_id, org_id, project_id, producer_run_id, schema_major, idempotency_key,
@@ -439,6 +652,30 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
         input.receipt.outcome.status,
         now,
       );
+      if (companionScope.plane === "org") {
+        insertMemoryV2FacetQuarantine({
+          quarantineRowId: `v2facetq:${randomUUID()}`,
+          aggregateType: "receipt",
+          aggregateId: receiptId,
+          aggregateVersion: 0,
+          orgId: input.orgId,
+          projectId: input.projectId,
+          sourcePlane: "org",
+          reasonCode: "unsupported_plane",
+          sourceDigest: requestDigest,
+          now,
+        });
+      } else {
+        insertMemoryV2ReceiptFacet({
+          receiptId,
+          producerRunId: input.producerRunId,
+          orgId: input.orgId,
+          projectId: input.projectId,
+          plane: companionScope.plane,
+          resourceRowId: companionScope.resourceRowId,
+          now,
+        });
+      }
       const evidence = persistEvidenceManifest({
         orgId: input.orgId,
         projectId: input.projectId,
@@ -446,14 +683,17 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
         manifest: input.receipt.evidence_manifest,
         now,
       });
-      persistReceiptFeedback({
-        orgId: input.orgId,
-        projectId: input.projectId,
-        receiptId,
-        producerRunId: input.producerRunId,
-        receipt: input.receipt,
-        now,
-      });
+      if (companionScope.plane !== "org") {
+        persistReceiptFeedback({
+          orgId: input.orgId,
+          projectId: input.projectId,
+          receiptId,
+          producerRunId: input.producerRunId,
+          receipt: input.receipt,
+          resourceRowId: companionScope.resourceRowId,
+          now,
+        });
+      }
       for (const candidate of input.receipt.candidates) {
         insertMemoryCandidate({
           orgId: input.orgId,
@@ -465,6 +705,7 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
           evidenceManifestRowId: evidence.manifestRowId,
           evidenceRowsByProducerRef: evidence.evidenceRowsByProducerRef,
           candidate,
+          candidateSubtype: input.candidateSubtypes?.get(candidate.client_candidate_id),
           now,
         });
       }
@@ -500,6 +741,9 @@ export function acceptMemoryRunReceipt(input: AcceptMemoryRunReceiptInput): Acce
     if (error instanceof MemoryCandidateIdempotencyError) {
       throw new MemoryReceiptError(error.message, 409, "idempotency_conflict");
     }
+    if (error instanceof MemoryV2CanonicalWriteError) {
+      throw new MemoryReceiptError(error.message, 409, "idempotency_conflict");
+    }
     throw error;
   }
 }
@@ -511,6 +755,7 @@ export function refreshMemoryReceiptResult(receiptId: string): RunReceiptResultV
        FROM memory_run_receipts WHERE receipt_id = ?`,
     ).get(receiptId) as ReceiptRow | undefined;
     if (!row) return null;
+    assertMemoryV2StoredReceiptAggregateFacets(receiptId);
     const result = buildReceiptResult(row);
     const responseJson = JSON.stringify(result);
     db.prepare("UPDATE memory_run_receipts SET response_json = ? WHERE receipt_id = ?")

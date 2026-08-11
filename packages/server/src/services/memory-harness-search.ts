@@ -13,8 +13,8 @@ import {
   type HarnessMemoryRecord,
 } from "./memory-harness-records.js";
 
-const POLICY_VERSION = "retrieval-harness-shadow-v1";
-const RANKER_VERSION = "lexical-harness-shadow-v1";
+const POLICY_VERSION = "retrieval-harness-v1";
+const RANKER_VERSION = "lexical-harness-v1";
 const PACK_TTL_MS = 15 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -33,6 +33,44 @@ interface RankedHarnessRecord {
   record: HarnessMemoryRecord;
   score: number;
   matchReasons: string[];
+}
+
+export interface HarnessMemorySearchDependencies {
+  now?: () => Date;
+}
+
+export interface HarnessMemorySearchProjectionItem {
+  record: HarnessMemoryRecord;
+  tokenCount: number;
+  rankScore: number;
+  matchReasons: string[];
+}
+
+export interface HarnessMemorySearchProjectionContext {
+  requestDigest: string;
+  retrievalPackId: string;
+  policyVersion: string;
+  rankerVersion: string;
+  createdAt: string;
+  expiresAt: string;
+  response: MemoryHarnessSearchResultV1;
+  items: HarnessMemorySearchProjectionItem[];
+}
+
+/**
+ * Persistence/version seam for harness retrieval. Exact applicability,
+ * ranking, explanations, token budgeting, and omission accounting remain in
+ * this service and run once before the selected immutable pack is committed.
+ */
+export interface HarnessMemorySearchProjection<T> {
+  requestDigest: string;
+  replay(): T | null;
+  assertCommitAuthorized?(): void;
+  filterAuthorizedRecords?(
+    records: readonly HarnessMemoryRecord[],
+  ): readonly HarnessMemoryRecord[];
+  assertCommitRecords?(records: readonly HarnessMemoryRecord[]): void;
+  commit(context: HarnessMemorySearchProjectionContext): T;
 }
 
 function words(value: string): Set<string> {
@@ -115,7 +153,6 @@ function toSearchItem(ranked: RankedHarnessRecord, includeExplanations: boolean)
     validation: record.validation,
     evidence_summary: record.evidenceSummary,
     freshness: record.freshness,
-    prompt_eligible: false,
     match_reasons: includeExplanations ? ranked.matchReasons : [],
   });
 }
@@ -124,7 +161,7 @@ function tokens(item: MemoryHarnessSearchItemV1): number {
   return Math.max(1, Math.ceil(JSON.stringify(item).length / 4));
 }
 
-function replay(input: {
+function existingReplay(input: {
   orgId: string;
   projectId: string;
   requestId: string;
@@ -179,40 +216,129 @@ export function executeHarnessMemorySearch(input: {
   request: MemoryHarnessSearchV1;
   now?: Date;
 }): MemoryHarnessSearchResultV1 {
-  assertExactBinding(input);
   const digest = canonicalJsonSha256(input.request);
-  const identity = {
-    orgId: input.orgId,
-    projectId: input.projectId,
-    requestId: input.request.request_id,
-    digest,
-  };
-  const existing = replay(identity);
+  return executeHarnessMemorySearchWithProjection(
+    input,
+    input.now ? { now: () => input.now! } : {},
+    {
+      requestDigest: digest,
+      replay: () => existingReplay({
+        orgId: input.orgId,
+        projectId: input.projectId,
+        requestId: input.request.request_id,
+        digest,
+      }),
+      assertCommitAuthorized: () => {
+        const conflictingPack = db.prepare(
+          `SELECT 1 FROM memory_retrieval_packs
+           WHERE org_id = ? AND project_id = ? AND request_id = ?`,
+        ).get(input.orgId, input.projectId, input.request.request_id);
+        if (conflictingPack) {
+          throw new MemoryHarnessSearchError(
+            "Harness search request_id conflicts with another retrieval pack",
+            409,
+            "idempotency_conflict",
+          );
+        }
+      },
+      commit: (context) => {
+        const responseJson = JSON.stringify(context.response);
+        db.prepare(
+          `INSERT INTO memory_retrieval_packs
+             (retrieval_pack_id, org_id, project_id, request_id, request_digest,
+              repository_row_id, repository_id, harness_id, plane, query, policy_version,
+              ranker_version, authorized_scope_json, token_count, omitted_count, response_json,
+              created_at, expires_at, consumer_run_id, request_base_sha)
+           VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 'harness', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   NULL)`,
+        ).run(
+          context.retrievalPackId,
+          input.orgId,
+          input.projectId,
+          input.request.request_id,
+          context.requestDigest,
+          input.binding.harnessId,
+          input.request.task.query,
+          context.policyVersion,
+          context.rankerVersion,
+          JSON.stringify({
+            org_id: input.orgId,
+            project_id: input.projectId,
+            service_principal_id: input.principalId,
+            harness_binding_id: input.binding.bindingId,
+            harness_id: input.binding.harnessId,
+          }),
+          context.response.token_count,
+          context.response.omitted_count,
+          responseJson,
+          context.createdAt,
+          context.expiresAt,
+          input.request.consumer.consumer_run_id,
+        );
+        const insertItem = db.prepare(
+          `INSERT INTO memory_retrieval_pack_items
+             (retrieval_pack_id, item_order, record_id, record_version, token_count,
+              rank_score, match_reasons_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        );
+        context.items.forEach((entry, index) => insertItem.run(
+          context.retrievalPackId,
+          index,
+          entry.record.recordId,
+          entry.record.recordVersion,
+          entry.tokenCount,
+          entry.rankScore,
+          JSON.stringify(entry.matchReasons),
+        ));
+        db.prepare(
+          `INSERT INTO memory_idempotency_keys
+             (org_id, project_id, operation, idempotency_key, request_digest,
+              response_resource_type, response_resource_id, response_json, created_at, expires_at)
+           VALUES (?, ?, 'memory_harness_search', ?, ?, 'retrieval_pack', ?, ?, ?, ?)`,
+        ).run(
+          input.orgId,
+          input.projectId,
+          input.request.request_id,
+          context.requestDigest,
+          context.retrievalPackId,
+          responseJson,
+          context.createdAt,
+          new Date(Date.parse(context.createdAt) + IDEMPOTENCY_TTL_MS).toISOString(),
+        );
+        return context.response;
+      },
+    },
+  );
+}
+
+export function executeHarnessMemorySearchWithProjection<T>(input: {
+  orgId: string;
+  projectId: string;
+  principalId: string;
+  binding: MemoryHarnessPrincipalBinding;
+  request: MemoryHarnessSearchV1;
+}, dependencies: HarnessMemorySearchDependencies, projection: HarnessMemorySearchProjection<T>): T {
+  assertExactBinding(input);
+  const existing = projection.replay();
   if (existing) return existing;
 
-  return withImmediateTransaction(() => {
-    const concurrent = replay(identity);
+  return withImmediateTransaction((): unknown => {
+    const concurrent = projection.replay();
     if (concurrent) return concurrent;
-    const conflictingPack = db.prepare(
-      `SELECT 1 FROM memory_retrieval_packs
-       WHERE org_id = ? AND project_id = ? AND request_id = ?`,
-    ).get(input.orgId, input.projectId, input.request.request_id);
-    if (conflictingPack) {
-      throw new MemoryHarnessSearchError(
-        "Harness search request_id conflicts with another retrieval pack",
-        409,
-        "idempotency_conflict",
-      );
-    }
+    projection.assertCommitAuthorized?.();
 
-    const nowDate = input.now ?? new Date();
+    const nowDate = dependencies.now?.() ?? new Date();
     const now = nowDate.toISOString();
-    const ranked = listCurrentHarnessMemoryRecords({
+    const authorized = listCurrentHarnessMemoryRecords({
       orgId: input.orgId,
       projectId: input.projectId,
       harnessId: input.binding.harnessId,
       now,
-    }).map((record) => rankRecord(record, input.request))
+    });
+    const eligible = projection.filterAuthorizedRecords
+      ? projection.filterAuthorizedRecords(authorized)
+      : authorized;
+    const ranked = eligible.map((record) => rankRecord(record, input.request))
       .filter((record): record is RankedHarnessRecord => record !== null)
       .sort((left, right) => right.score - left.score || left.record.recordId.localeCompare(right.record.recordId));
 
@@ -237,82 +363,26 @@ export function executeHarnessMemorySearch(input: {
       tenant: { project_id: input.projectId },
       plane: "harness",
       harness_id: input.binding.harnessId,
-      shadow_only: true,
-      routing_influence: false,
-      prompt_eligible: false,
-      evaluation_arm: "shadow",
       token_count: tokenCount,
       items: selected.map((item) => item.item),
       omitted_count: Math.max(0, ranked.length - selected.length),
       expires_at: expiresAt,
     });
-    const responseJson = JSON.stringify(response);
-
-    db.prepare(
-      `INSERT INTO memory_retrieval_packs
-         (retrieval_pack_id, org_id, project_id, request_id, request_digest,
-          repository_row_id, repository_id, harness_id, plane, query, policy_version,
-          ranker_version, authorized_scope_json, token_count, omitted_count, response_json,
-          created_at, expires_at, consumer_run_id, request_base_sha, prompt_eligible,
-          evaluation_arm, prompt_policy_revision, prompt_policy_snapshot_json,
-          prompt_item_count, prompt_token_count)
-       VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, 'harness', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-               NULL, 0, 'shadow', 0, ?, 0, 0)`,
-    ).run(
-      packId,
-      input.orgId,
-      input.projectId,
-      input.request.request_id,
-      digest,
-      input.binding.harnessId,
-      input.request.task.query,
-      POLICY_VERSION,
-      RANKER_VERSION,
-      JSON.stringify({
-        org_id: input.orgId,
-        project_id: input.projectId,
-        service_principal_id: input.principalId,
-        harness_binding_id: input.binding.bindingId,
-        harness_id: input.binding.harnessId,
-      }),
-      tokenCount,
-      response.omitted_count,
-      responseJson,
-      now,
+    projection.assertCommitRecords?.(selected.map((entry) => entry.ranked.record));
+    return projection.commit({
+      requestDigest: projection.requestDigest,
+      retrievalPackId: packId,
+      policyVersion: POLICY_VERSION,
+      rankerVersion: RANKER_VERSION,
+      createdAt: now,
       expiresAt,
-      input.request.consumer.consumer_run_id,
-      JSON.stringify({ mode: "permanent_shadow", routing_influence: false }),
-    );
-    const insertItem = db.prepare(
-      `INSERT INTO memory_retrieval_pack_items
-         (retrieval_pack_id, item_order, record_id, record_version, token_count,
-          rank_score, match_reasons_json, prompt_eligible)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-    );
-    selected.forEach((entry, index) => insertItem.run(
-      packId,
-      index,
-      entry.ranked.record.recordId,
-      entry.ranked.record.recordVersion,
-      entry.tokenCount,
-      entry.ranked.score,
-      JSON.stringify(entry.item.match_reasons),
-    ));
-    db.prepare(
-      `INSERT INTO memory_idempotency_keys
-         (org_id, project_id, operation, idempotency_key, request_digest,
-          response_resource_type, response_resource_id, response_json, created_at, expires_at)
-       VALUES (?, ?, 'memory_harness_search', ?, ?, 'retrieval_pack', ?, ?, ?, ?)`,
-    ).run(
-      input.orgId,
-      input.projectId,
-      input.request.request_id,
-      digest,
-      packId,
-      responseJson,
-      now,
-      new Date(nowDate.getTime() + IDEMPOTENCY_TTL_MS).toISOString(),
-    );
-    return response;
-  });
+      response,
+      items: selected.map((entry) => ({
+        record: entry.ranked.record,
+        tokenCount: entry.tokenCount,
+        rankScore: entry.ranked.score,
+        matchReasons: [...entry.item.match_reasons],
+      })),
+    });
+  }) as T;
 }
