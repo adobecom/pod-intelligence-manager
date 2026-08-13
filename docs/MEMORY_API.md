@@ -136,8 +136,9 @@ There is no list operation for records or packs. Discovery is recomputed for the
 Candidate review/activation, token/resource administration, and runtime-attestation control are
 excluded from MCP.
 
-See [MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md](./MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md) and
-[MEMORY_V2_HTTP_MCP_CONFORMANCE_REPORT.md](./MEMORY_V2_HTTP_MCP_CONFORMANCE_REPORT.md).
+See [MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md](./MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md).
+Transport parity is enforced by the `memory-v2-code-*-parity`, `memory-mcp`, and
+`memory-v2-conformance-live` server test suites rather than a separately maintained report.
 
 ## SDK
 

@@ -2,8 +2,7 @@
 
 > **Historical branch review.** Findings in this document drove the simplification that removed
 > the benchmark/exposure/canary subsystem. See [MEMORY_API.md](./MEMORY_API.md) for the current
-> surface and [PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md](./PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md)
-> for the current consumer handoff.
+> surface and [MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md) for current operating behavior.
 
 **Scope:** every change on `podFix` (baseline `5161be7`), all uncommitted working-tree work implementing the Universal Memory Platform (slices 0-8).
 **Reviewed:** 2026-08-10 | **135** changed paths | **~70k** new lines (~25.5k production TypeScript)

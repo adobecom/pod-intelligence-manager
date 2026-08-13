@@ -21,8 +21,7 @@ documents in **Current system** as the source of truth.
 | Context and project search | [Context search](./CONTEXT_SEARCH.md), [connector configuration](./PROJECT_SEARCH_CONNECTORS.md), [corpus scrub](./PROJECT_SEARCH_SCRUB_RUNBOOK.md) |
 | Skill catalog | [Skill catalog user guide](./SKILL_CATALOG_USER_GUIDE.md) |
 | Interactive MCP clients | [ADO sidecar integration](../packages/mcp-server/ADO_INTEGRATION.md) |
-| Canonical memory | [API and MCP surface](./MEMORY_API.md), [operations](./MEMORY_OPERATIONS.md), [retention and erasure](./MEMORY_RETENTION_ERASURE.md), [backup and restore](./BACKUP_RESTORE.md) |
-| Memory v2 integration | [PIM-to-Fiesta handoff](./PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md), [HTTP/MCP conformance](./MEMORY_V2_HTTP_MCP_CONFORMANCE_REPORT.md), [private MCP service-token profile](./MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md), [plain-language guide](./UNIVERSAL_MEMORY_PLATFORM_PIM_LAYMAN_GUIDE.md) |
+| Canonical memory | [API and MCP surface](./MEMORY_API.md), [operations](./MEMORY_OPERATIONS.md), [private MCP service-token profile](./MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md), [retention and erasure](./MEMORY_RETENTION_ERASURE.md), [backup and restore](./BACKUP_RESTORE.md) |
 | Deployment | [AWS deployment](./DEPLOY.md), [manual agent deploy](./AGENT_MANUAL_DEPLOY.md), [EDR/Splunk runbook](./EDR_INSTALL_RUNBOOK.md) |
 | Package publishing | [npm and Artifactory](./NPM_ARTIFACTORY.md) |
 
@@ -51,13 +50,13 @@ rollout stages, and status statements are not current operational instructions:
 - `MEMORY_V2_SLICE_1_WRITER_INVENTORY.md`
 - `MEMORY_V2_SLICE_6_FROZEN_WRITER_INVENTORY.md`
 - `PLAN_POD_LEARNINGS_TO_CANONICAL_MEMORY.md`
-- `UNIVERSAL_MEMORY_PLATFORM_PIM_CHANGES.md`
-- `UNIVERSAL_MEMORY_PLATFORM_FIESTA_CHANGES.md`
-- `UNIVERSAL_MEMORY_PLATFORM_PIM_SLICES.md`
-- `FIESTA_MEMORY_GRAPH_ARCHITECTURE_REVIEW.md`
-- `PIM_ON_SCOUT_STYLE_BENCHMARK_PLAN.md`
-- `SCOUT_BENCHMARKING_REPORT.md`
 - `qa/PIM_TEST_PLAYBOOK.md` (repository root) — dated live-QA record
+
+## Local research
+
+Long-form research, one-off handoffs, and external-system review notes belong in the ignored
+`docs/research/` directory. They are useful working material, but they are not maintained product
+documentation and must not be linked from current guides.
 
 ## Documentation maintenance
 
@@ -65,4 +64,5 @@ rollout stages, and status statements are not current operational instructions:
 - Keep generated contract details in schemas and link to them instead of copying large payloads.
 - Add a dated **Historical** or **Superseded** notice to plans that no longer direct implementation.
 - Remove commands for deleted scripts and endpoints from active runbooks.
+- Keep exploratory research and one-time handoffs under ignored `docs/research/`, not in Git.
 - Run `pnpm docs:check` to validate local links and documented `pnpm` scripts.

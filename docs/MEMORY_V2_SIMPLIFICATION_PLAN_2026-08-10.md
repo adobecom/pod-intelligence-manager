@@ -2,15 +2,14 @@
 
 > **Implementation/release record.** It explains the simplification decisions and retained Slice
 > 8/9 exits; it is not the current API or operations runbook. Use
-> [MEMORY_API.md](./MEMORY_API.md) and
-> [PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md](./PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md) for current
-> integration behavior.
+> [MEMORY_API.md](./MEMORY_API.md) and [MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md) for current
+> integration and operating behavior.
 
 **Date:** 2026-08-10 (revision 6; removes the standalone backup/baseline slice, folds a disposable production-copy rehearsal into Slice 1, and captures the authoritative backup manifest only after writers stop in Slice 7)
 **Branch:** `podFix` (working tree is not yet organized into reviewable commits)
 **Basis:** [Memory v2 full branch review](./MEMORY_V2_BRANCH_REVIEW_2026-08-10.md), direct verification against the working tree and production database, and the decisions recorded below
 **Status:** implementation plan
-**Supersedes:** revisions 3-5 of this document, and the shadow, exposure, benchmark, and HTTP-only guidance in [PIM-to-Fiesta implementation handoff](./PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md)
+**Supersedes:** revisions 3-5 of this document and the shadow, exposure, benchmark, and HTTP-only guidance in the older PIM-to-Fiesta research handoff
 
 ## 0. Operating constraints and launch order
 

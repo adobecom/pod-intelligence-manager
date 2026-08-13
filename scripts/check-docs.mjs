@@ -21,7 +21,7 @@ const markdownFiles = gitLines([
   "--exclude-standard",
   "--",
   "*.md",
-]);
+]).filter((relativeFile) => fs.existsSync(path.join(root, relativeFile)));
 
 const failures = [];
 const markdownLink = /!?\[[^\]]*\]\(([^)]+)\)/g;
