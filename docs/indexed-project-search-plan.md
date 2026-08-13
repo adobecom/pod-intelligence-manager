@@ -1,5 +1,9 @@
 # Indexed Project Search Plan
 
+> **Historical implementation plan.** For current behavior and operator controls, use
+> [CONTEXT_SEARCH.md](./CONTEXT_SEARCH.md), [PROJECT_SEARCH_CONNECTORS.md](./PROJECT_SEARCH_CONNECTORS.md),
+> and [PROJECT_SEARCH_SCRUB_RUNBOOK.md](./PROJECT_SEARCH_SCRUB_RUNBOOK.md).
+
 Status: **Phases 1–3 implemented** (schema + index, hybrid retrieval, deterministic mind-map). Phase 4 (KG promotion) reuses the existing project-memory promotion path; Phase 5 (evals) has a focused test suite — see [Implementation status](#implementation-status).
 
 This plan restores the mind-map side of PIM without expanding workflow-management scope. It focuses on project-scoped search over current project artifacts, while keeping the org knowledge graph reserved for durable learnings.

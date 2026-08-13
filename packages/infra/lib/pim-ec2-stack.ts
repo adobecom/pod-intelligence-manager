@@ -7,8 +7,9 @@
  * SSM Parameter Store at /pim/*. Portable core backups mirror to S3 via a cron;
  * AWS Backup takes incremental recovery points of the complete /data volume.
  *
- * Not multi-AZ, not zero-downtime, not IMS-authed. Chosen to ship fast; see
- * pim-stack.ts for the eventual Lambda+DynamoDB design.
+ * Not multi-AZ or zero-downtime. The server supports trust and IMS auth modes;
+ * hosted auth configuration is supplied through SSM. See pim-stack.ts for the
+ * historical Lambda/DynamoDB target design.
  */
 
 import * as cdk from "aws-cdk-lib";

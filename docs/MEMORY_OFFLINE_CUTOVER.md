@@ -1,5 +1,8 @@
 # PIM memory offline cutover
 
+**Status:** retained one-time authority-transition and recovery procedure. The normal deployment
+path must not rerun this cutover after canonical authority is terminal.
+
 This runbook moves the legacy SQLite candidates and JSON knowledge graphs into the
 canonical memory tables. PIM is offline for the entire operation. The cutover does
 not delete or rewrite any legacy row or graph file.
@@ -9,13 +12,15 @@ every source item and the database authority is `canonical`.
 
 ## Preconditions
 
-- Disable prompt exposure and stop the PIM API, workers, scheduled graph jobs, and
-  backup job. Confirm no process is writing the database or graph directories.
+- Stop the PIM API, workers, scheduled graph jobs, and backup job. Disable or revoke
+  the exact consumer service tokens for the maintenance window. Confirm no process
+  is writing the database or graph directories.
 - While PIM remains stopped, deploy the reviewed authority-fence build and its
   read-only legacy-bucket IAM policy. The build must contain migration
-  `009-memory-offline-legacy-cutover`, the runtime write guards, and the persistent
-  SQL barriers. Do not let the deployment start PIM yet. Pin that build's immutable
-  image digest as the rollback floor.
+  `009-memory-offline-legacy-cutover`, all later committed migrations through `018`,
+  the runtime write guards, and the persistent SQL barriers. Do not let the
+  deployment start PIM yet. Pin that build's immutable image digest as the rollback
+  floor.
 - The EC2 unit is restart-enabled. On a legacy database the new startup gate fails
   closed; explicitly stop and runtime-mask the unit after deployment:
 
@@ -47,7 +52,7 @@ pnpm --filter @pim/server migrate-legacy-memory -- prepare \
   --db /data/pim.db
 ```
 
-The command must report all eleven migrations and `legacy` authority at revision
+The command must report all eighteen migrations and `legacy` authority at revision
 zero. Then checkpoint the WAL:
 
 ```sh
@@ -66,15 +71,13 @@ The output must contain `ok` followed by no foreign-key rows.
 ## 2. Create verified recovery copies
 
 Create a dedicated, empty cutover directory on durable storage. Capture the
-deterministic non-search DB/org/KG manifest and a transactionally consistent SQLite
-copy while every writer remains stopped:
+authoritative non-search table counts and a transactionally consistent SQLite copy
+while every writer remains stopped. The table-count manifest covers SQLite only;
+the graph archives and their hashes below cover each graph authority separately:
 
 ```sh
-pnpm --filter @pim/server capture-transfer-manifest -- create \
-  --db /data/pim.db \
-  --graph-root primary=/data/knowledge-graph \
-  --recovery-set-id pre-cutover-YYYYMMDDTHHMMSSZ \
-  --output /data/pim-cutover-YYYYMMDDTHHMMSSZ/pre-cutover.transfer-manifest.json
+packages/server/scripts/capture-manifest.sh --core /data/pim.db \
+  > /data/pim-cutover-YYYYMMDDTHHMMSSZ/pre-cutover.core-manifest.txt
 sqlite3 /data/pim.db \
   ".backup '/data/pim-cutover-YYYYMMDDTHHMMSSZ/pim.pre-cutover.db'"
 sqlite3 -readonly /data/pim-cutover-YYYYMMDDTHHMMSSZ/pim.pre-cutover.db \
@@ -315,24 +318,26 @@ Required results:
 - `GET /api/v1/memory/records/:record_id/history` returns the immutable versions,
   lifecycle reasons, and predecessor/successor link for a representative record;
 - organization records remain non-active/manual; and
-- prompt exposure remains disabled until the normal release gates pass.
+- consumer service tokens remain disabled/revoked until the integration owner has
+  reviewed the post-cutover binding, readiness, and scoped search evidence.
 
-Capture a new deterministic manifest and post-cutover database backup after all
-gates pass. Bind the final logical backup, every local/S3 KG archive, S3 version inventory,
-completed stopped-state snapshot, reviewed image digest, authority state, and alert
-subscription into the single final recovery-set manifest described in
-[DEPLOY.md](./DEPLOY.md). Compute and retain an independent SHA-256 of the manifest
-file itself.
-
-Restore-test the final DB, every KG archive, and snapshot clone, then require the verifier
-to return no mismatch:
+Capture a new core table-count manifest and post-cutover database backup after all
+gates pass:
 
 ```sh
-pnpm --filter @pim/server capture-transfer-manifest -- verify \
-  --db /restore/pim.db \
-  --graph-root primary=/restore/knowledge-graph \
-  --manifest /data/pim-cutover-YYYYMMDDTHHMMSSZ/final-transfer-manifest.json
+packages/server/scripts/capture-manifest.sh --core /data/pim.db \
+  > /data/pim-cutover-YYYYMMDDTHHMMSSZ/post-cutover.core-manifest.txt
+sha256sum /data/pim-cutover-YYYYMMDDTHHMMSSZ/post-cutover.core-manifest.txt \
+  > /data/pim-cutover-YYYYMMDDTHHMMSSZ/post-cutover.core-manifest.txt.sha256
 ```
+
+Bind that manifest, the final logical backup, every local/S3 graph archive, S3
+version inventory, completed stopped-state snapshot, reviewed image digest,
+authority state, and alert subscription into the final recovery set. Restore-test
+the final database, every graph archive, and the snapshot clone in isolation. Use
+the `PIM_RESTORE_MANIFEST_KEY` gate from [BACKUP_RESTORE.md](./BACKUP_RESTORE.md)
+against the manifest paired with the exact logical backup; require integrity,
+foreign-key, authority, organization, and representative v1/v2 read checks to pass.
 
 ## 7. Permanently retire legacy writers
 
@@ -398,8 +403,9 @@ No legacy source deletion or retention cleanup is part of this cutover.
   PIM stays stopped.
 - A crash after commit is a canonical recovery, not a rollback to a legacy writer.
   Re-run reconciliation or replay the identical apply command.
-- To disable behavior after commit, keep prompt exposure off and use the project
-  kill switches. Fix forward or restore a verified **post-cutover canonical** backup.
+- To disable behavior after commit, revoke the exact consumer service tokens and,
+  when containment requires it, stop the server. Fix forward or restore a verified
+  **post-cutover canonical** backup.
 - Never start PIM directly from the pre-cutover database after canonical authority
   has committed. If that copy is needed for disaster recovery, restore it in an
   isolated environment, rerun this cutover, verify canonical authority, and only

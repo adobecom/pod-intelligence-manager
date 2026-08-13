@@ -1,5 +1,9 @@
 # Plan: Route Pod Learnings into Canonical Memory
 
+> **Implemented design record.** This explains the Slice 6 decisions; it is not a current operator
+> runbook. See [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md) and
+> [MEMORY_API.md](./MEMORY_API.md).
+
 **Status:** Implemented on 2026-08-10 as Memory v2 simplification Slice 6
 **Scope:** Closure of the post-cutover ingestion gap that previously left Pod archival and agent rollups pointed at frozen legacy memory stores.
 

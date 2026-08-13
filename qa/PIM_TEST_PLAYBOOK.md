@@ -1,6 +1,11 @@
 # PIM Test Playbook (reproducible)
 
-This is a step-by-step playbook for testing PIM end to end against a live deployment. It documents exactly what was run on 2026-06-03, in what order, and which test caught which bug, so the next agent can reproduce and extend it. Pair this with `PIM_TEST_REPORT_2026-06-03.md`.
+> **Historical live-QA record (2026-06-03).** Exact pass counts, observed bugs, routes, org data,
+> and deployment state below describe that run and may no longer be current. Use the root README,
+> `docs/README.md`, and package test scripts for current validation; retain this file only for the
+> original reproduction evidence.
+
+This records what was run on 2026-06-03, in what order, and which check found each issue.
 
 > Convention: a check FAILS only when actual behavior contradicts the documented contract. Tag every artifact you create with a run marker (for example `QA-<area>-<date>`) so it is identifiable and cleanable.
 

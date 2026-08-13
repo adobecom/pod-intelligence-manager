@@ -1,5 +1,9 @@
 # PIM System — Living Doc
 
+> **Document role:** Historical product vision. It contains proposed Lambda/DynamoDB and milestone
+> material that does not describe the current EC2/Fastify/SQLite implementation. Use
+> [README.md](README.md) and [docs/README.md](docs/README.md) for current behavior.
+>
 > **Status:** v1 Spec Complete — Ready for Implementation Planning
 > **Last Updated:** 2026-04-03
 > **Pod Lifecycle:** 5-day sprints (3-4 days dev, 1-2 days QA/polish)

@@ -1,5 +1,9 @@
 # EDR + Splunk Compliance Migration — Execution Plan (for independent review)
 
+> **Historical migration plan.** The current operational procedure is
+> [EDR_INSTALL_RUNBOOK.md](./EDR_INSTALL_RUNBOOK.md); deployment commands belong in
+> [DEPLOY.md](./DEPLOY.md).
+
 Date: 2026-07-09 (rev 2, stop-and-restore). Purpose: remediate two security-
 compliance requirements on the PIM host by booting from an Adobe Image Factory (IF)
 base image, **without data loss** on the live hosted service. For an independent

@@ -1,5 +1,8 @@
 # Slice 6 Frozen Legacy Writer Inventory
 
+> **Historical release evidence.** Retained to document the freeze review; current operating rules
+> are in [MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md).
+
 **Status:** Implemented and regression-tested on 2026-08-10
 **Scope:** PIM production code only. Migration/import tools are listed separately because they are explicit operator workflows, not normal producers.
 

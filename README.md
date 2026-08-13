@@ -1,574 +1,227 @@
-# PIM
+# PIM — Pod Intelligence Manager
 
-An orchestration layer for cross-functional AI+human "pods" (5-day sprints). Agents and humans submit structured context updates to **PIM (Pod Intelligence Manager)**, which classifies, merges, detects conflicts, and assembles a read-only "living doc" that keeps everyone synchronized.
+PIM is an Adobe-internal coordination and memory platform for AI-assisted engineering work. It
+combines short-lived pod orchestration with long-lived project context, governed memory, search,
+and agent integrations.
 
-Three pillars:
+The repository is a pnpm/Turborepo monorepo. The implemented runtime is a Fastify service backed by
+SQLite, a React UI, a TypeScript SDK and CLI, two MCP surfaces, and an AWS CDK deployment.
 
-1. **PIM (Brain)** -- A context bus: agents submit updates, a PIM orchestrator routes to Committee agents (Merge, Conflict, Summary), and a living `.md` doc is assembled from the current state.
-2. **PIM UI (Surface)** -- React + Spectrum 2 SPA for observing pod health, resolving conflicts, and viewing the live doc.
-3. **FE Tunneling** -- Expo-style localhost tunneling (**prototype implemented**: CLI + server routes for WebSocket request proxying).
+## What PIM provides
 
-## Quick Start
+- **Pods:** submit structured progress, blockers, decisions, and questions; detect conflicts; keep a
+  generated living document current; and archive completed work.
+- **Projects:** retain context between pods and search bounded evidence from GitHub, Jira,
+  Confluence, Slack, and local Git sources.
+- **Canonical memory:** store governed codebase and harness lessons with exact resource bindings,
+  immutable retrieval packs, evidence, review, retention, and reverification.
+- **Agent access:** use the TypeScript SDK, `pim` CLI, hosted MCP tools, or the restricted Memory v2
+  MCP data plane.
+- **Skill catalog:** register, synchronize, search, and conflict-check reusable skills.
+- **Development tunnels:** proxy a local development server through PIM for shared previews.
 
-**Hosted instance (no setup required):** Open **https://d1ygncl0yqo6sv.cloudfront.net/** to use the shared deployment.
+## Quick start
 
-**Local development:** Run these commands in separate terminals:
+### Prerequisites
 
-```bash
+- Node.js 24 or newer
+- pnpm 10.33.x (the workspace pins `pnpm@10.33.0`)
+
+```sh
+corepack enable
+corepack prepare pnpm@10.33.0 --activate
 pnpm install
-pnpm --filter @pim/server dev      # Terminal 1 — backend on :4000
-pnpm --filter @pim/ui dev          # Terminal 2 — UI on :5173
+cp .env.example .env
 ```
 
-Open **http://localhost:5173**. The database auto-seeds with three demo pods on first run.
+Run the API and UI in separate terminals:
 
-## Prerequisites
-
-- **Node.js** >= 20
-- **pnpm** >= 10 (`corepack enable && corepack prepare pnpm@10.33.0 --activate`)
-
-Optional:
-
-- **`AWS_BEARER_TOKEN_BEDROCK`** -- Enables LLM-powered merge analysis (Haiku) and conflict analysis (Sonnet) via AWS Bedrock. Set `AWS_REGION` (defaults to `us-west-2`) and optionally override `BEDROCK_MODEL_FAST` / `BEDROCK_MODEL_SMART`. The system works fully without it using deterministic classification and merging.
-
-## Setup (pick one path)
-
-| Goal | Easiest command |
-|------|----------------|
-| **Just the CLI** (no clone needed) | Install from Artifactory: `npm install -g ado-pim --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/` — then `pim --help`. You’ll need Artifactory credentials (see below). |
-| **Just the MCP for Claude Desktop** (no clone needed) | Log in to Artifactory once (see below), `npm install -g @pim/mcp-server`, then add the `node` config to your Claude Desktop `mcpServers`. See **`@pim/mcp-server`** later in this file. |
-| **Contributors — global `pim` CLI + built MCP server** | From this repo’s root, run **`pnpm bootstrap`** once per clone. It installs deps, builds `@pim/mcp-server` and **`ado-pim`** (CLI package), links `pim` globally, then prints a **PATH** reminder if `pim` is not visible in new terminals. Same as **`pnpm install-cli`**. |
-| **Run the stack only** (backend + UI in dev; no global `pim`) | **`pnpm install`**, then follow **Quick Start** below (`pnpm --filter @pim/server dev` and `pnpm --filter @pim/ui dev`). Use **`pnpm pim`** from the repo root when you need the CLI without linking (example: `pnpm pim pod list`). |
-
-### Artifactory credentials (for the "Just the CLI" and "Just the MCP" paths)
-
-The `npm-adobe-pim-release` registry requires authentication. Log in once:
-
-```bash
-npm login --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/ --auth-type=web --scope=@pim
-```
-
-This uses browser-based Adobe SSO — no API key needed. The token is written to `~/.npmrc` and persists across installs.
-
-For MCP + Claude Desktop setup details, see **`@pim/mcp-server`** later in this file.
-
-## Project Structure
-
-```
-pim/
-├── packages/
-│   ├── shared/          # Types, interfaces, constants (single source of truth)
-│   ├── server/          # Fastify backend + PIM orchestrator + Committee agents
-│   ├── ui/              # React 19 + Vite 6 + Adobe Spectrum 2 SPA
-│   ├── sdk/             # @pim/sdk -- TypeScript client for agent integration
-│   ├── mcp-server/      # MCP server for Claude.ai artifact integration
-│   ├── cli/             # pim CLI — pods, context, hooks, tunnel, init, leave
-│   └── infra/           # AWS CDK stack (tables, lambdas, APIs, buckets, CloudFront)
-├── prompts/             # Version-controlled LLM system prompts
-├── SPEC.md              # Full system specification
-├── CLAUDE.md            # Guidance for Claude Code
-├── turbo.json           # Turborepo pipeline config
-└── pnpm-workspace.yaml  # Workspace definition
-```
-
-## Packages
-
-### `@pim/shared`
-
-TypeScript types and constants shared across all packages. No runtime dependencies.
-
-Key exports: `Pod`, `Conflict`, `ContextUpdate`, `Tunnel`, `OrgPodSummary`, `CrossPodOverlap`, `ArchivedPod`, `PendingWork`, `PRESSURE_THRESHOLDS`, `getPressureLevel()`.
-
-### `@pim/server`
-
-Fastify server running on `localhost:4000`. Uses SQLite via Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) (`DatabaseSync`) for storage and WebSocket for real-time events.
-
-**API endpoints:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Health check |
-| GET | `/api/pods/:podId` | Get pod with areas |
-| POST | `/api/pods` | Create a new pod |
-| PATCH | `/api/pods/:podId/milestone` | Update milestone fields (`name`, `target_date`, `percent_complete`) and regenerate living doc |
-| GET | `/api/pods/:podId/conflicts` | List conflicts |
-| GET | `/api/pods/:podId/conflicts/:id` | Get single conflict |
-| POST | `/api/pods/:podId/conflicts/:id/resolve` | Resolve a conflict |
-| GET | `/api/pods/:podId/context-updates` | List context updates |
-| POST | `/api/pods/:podId/context-updates` | Submit a context update (full pipeline) |
-| GET | `/api/pods/:podId/tunnels` | List tunnels |
-| GET | `/api/pods/:podId/living-doc` | Get rendered living doc (markdown) |
-| GET | `/api/pods/:podId/lint-findings` | Get lint findings |
-| POST | `/api/pods/:podId/lint` | Trigger a manual lint pass |
-| GET | `/api/org/pods` | List active pods (org view) |
-| GET | `/api/org/overlaps` | List cross-pod overlaps |
-| GET | `/api/org/archived` | List archived pods |
-| POST | `/api/pods/:podId/archive` | Start pod archive; returns `202` with an archive job |
-| GET/POST | `/api/pods/:podId/archive/status` | Poll archive completion/failure; completed payload includes the archived pod |
-| WS | `/ws?podId=X` | WebSocket for real-time events |
-
-**WebSocket events:** `context_update_added`, `conflict_created`, `conflict_resolved`, `conflict_escalated`, `pressure_changed`, `living_doc_updated`, `tunnel_status_changed`, `lint_completed`.
-
-**PIM orchestrator pipeline:** When a context update is submitted via POST, it flows through:
-
-1. **Zod validation** -- Schema enforcement
-2. **Secret scan** -- Regex patterns for AWS keys, JWTs, connection strings, PEM blocks
-3. **DB write** -- Persisted to SQLite
-4. **Pod snapshot refresh** -- Denormalize `pod_areas` from the latest context update per scope (updates with `type: blocker` force that scope to `blocked`), recompute milestone `percent_complete` as a sprint-health proxy (round of done scopes / 6), and refresh org `agent_count` (distinct `agent_id` values). This is deterministic, not LLM-inferred.
-5. **WebSocket broadcast** -- All connected clients notified
-6. **Classification** -- Categorized as `additive`, `overlapping`, or `contradictory`
-7. **Routing** -- Additive: deterministic merge (no LLM). Overlapping: LLM merge (Haiku) or deterministic fallback. Contradictory: conflict record created with optional LLM analysis (Sonnet).
-8. **Living doc regeneration** -- Template-based markdown assembled from current DB state (including the updated areas and milestone)
-9. **Cross-pod overlap detection** -- Keyword analysis across active pods
-
-The living doc’s **Current Status** and milestone progress line follow this snapshot plus conflicts/pressure from the DB. Humans may override milestone fields with `PATCH /api/pods/:podId/milestone`; **`percent_complete` is recomputed again on the next context ingestion** from scope `done` counts, while `name` and `target_date` persist until changed.
-
-**Periodic tasks:**
-
-| Task | Default interval | Env var | Description |
-|------|-----------------|---------|-------------|
-| Escalation check | 5 min | `ESCALATION_INTERVAL_MS` | Auto-escalates unresolved conflicts at 4h/8h/16h/24h |
-| Lint pass | 2 hours | `LINT_INTERVAL_MS` | Scans for staleness, coverage gaps, dependency risks |
-
-For faster demo cycles, set shorter intervals:
-
-```bash
-ESCALATION_INTERVAL_MS=30000 LINT_INTERVAL_MS=60000 pnpm --filter @pim/server dev
-```
-
-**Database:** SQLite file at `.data/pim.db`. Auto-created and seeded on first run. Delete the file to reset:
-
-```bash
-rm .data/pim.db
-```
-
-### `@pim/ui`
-
-React 19 SPA built with Vite 6 and Adobe Spectrum 2.
-
-**Views:**
-
-| Route | View | Description |
-|-------|------|-------------|
-| `/org` | Org Dashboard | All active pods, cross-pod overlaps, archived pods, pod creation |
-| `/pod/:podId` | Pod Dashboard | Health, milestones, area status, conflicts, tunnels, lint findings |
-| `/pod/:podId/conflicts` | Conflict Center | Filterable table of all conflicts |
-| `/pod/:podId/conflict/:id` | Conflict Detail | Side-by-side positions, analysis, pending work, resolution buttons |
-| `/pod/:podId/doc` | Live Doc | Real-time rendered living doc (updates via WebSocket) |
-| `/pod/:podId/feed` | Context Feed | Filterable stream of all context updates + submission form |
-| `/pod/:podId/tunnels` | Tunnel Dashboard | Active dev tunnels with status |
-
-**State management:** Zustand stores (`podStore`, `orgStore`) with API fetching and optimistic updates.
-
-**Real-time:** WebSocket connection managed by `useWebSocket` hook. Connection status shown in the pod sidebar. All views refresh automatically on relevant events.
-
-The Vite dev server proxies `/api` and `/ws` to `localhost:4000`.
-
-### `@pim/sdk`
-
-TypeScript client for AI agent integration.
-
-```typescript
-import { PimClient } from '@pim/sdk';
-
-const pim = new PimClient({
-  baseUrl: 'http://localhost:4000',
-  podId: 'pod-checkout-redesign',
-  agentId: 'my-agent',
-  scope: 'frontend',
-});
-
-// Submit a context update
-const result = await pim.report({
-  type: 'progress',
-  summary: 'Implemented cart summary component',
-  details: 'CartSummary.tsx renders line items with discounts.',
-  status: 'completed',
-});
-
-console.log(result.pim.classification); // "additive" | "overlapping" | "contradictory"
-
-// Fetch the living doc
-const doc = await pim.getContext();
-
-// Fetch pod state, conflicts, updates
-const pod = await pim.getPod();
-const conflicts = await pim.getConflicts();
-const updates = await pim.getUpdates();
-```
-
-#### Agent Memory Rollup Metadata
-
-Agent sessions and runs accept a free-form `metadata` object. PIM reads rollup metadata from run metadata first, then session metadata, then session `working_state`.
-
-`rollup_policy` controls automatic candidate and KG promotion behavior:
-
-| Policy | Behavior |
-|--------|----------|
-| `none` | Do not create a memory candidate |
-| `candidate_only` | Create/keep a pending candidate, but do not auto-promote |
-| `auto_promote` | Request auto-promotion eligibility; PIM still applies initial and validation gates |
-
-Production callers should default to `candidate_only`. Demo, dry-run, smoke-test, and stubbed-side-effect runs should send metadata like:
-
-```json
-{
-  "rollup_policy": "candidate_only",
-  "run_kind": "demo",
-  "side_effect_mode": "stubbed",
-  "real_pr_created": false,
-  "stubbed_systems": ["github", "codegen"],
-  "verification_status": "passed",
-  "promotion_intent": "audit_only",
-  "learning_scope": "harness"
-}
-```
-
-`learning_scope` is optional and may be `product`, `harness`, or `org`. Product learnings start as pending candidates and can be promoted after matching merged-PR evidence passes validation. Harness/runtime learnings can promote from concrete runtime evidence such as spec drift, rollup failures, retry/close behavior, forbidden-file drift, or orchestration errors. Org-scoped learnings remain manual-only in v1.
-
-Real code-change runs can request `auto_promote` only when they include real side effects, a real context update, artifact evidence, a non-placeholder PR URL, and `promotion_intent: "durable_learning"`. PIM stores initial eligibility in `memory_candidates.evidence.promotion_gate` and second-stage validation in `memory_candidates.evidence.validation_gate`.
-
-### `@pim/mcp-server`
-
-MCP (Model Context Protocol) server that exposes PIM data to Claude.ai. When connected, Claude can render an interactive pod dashboard as an artifact in the side panel.
-
-**Tools:**
-
-| Tool | Input | Description |
-|------|-------|-------------|
-| `list_pods` | (none) | List all active pods with IDs, names, pressure, and conflict counts |
-| `render_pod_dashboard` | `pod_id` | Fetch all pod data and return a self-contained React component for rendering as a Claude.ai artifact |
-| `search_skills` | `source_id`, `query`, optional `tentative_name`, `target_namespace`, `limit` | Find existing skills worth reading before drafting; advisory only |
-| `check_skill_conflicts` | `source_id`, `base_commit_sha`, `candidates` | Check complete final skill Markdown for deterministic conflicts |
-| `view_skill_catalog` | `source_id`, optional `commit_sha`, `namespace`, `cursor`, `limit` | Browse the latest or commit-pinned skill catalog |
-
-The `render_pod_dashboard` tool fetches pod state, conflicts, context updates, the living doc, tunnels, and lint findings, then embeds them as inline JSON into a single-file React component with a dark Spectrum-inspired theme. The artifact has four tabs: Dashboard, Conflicts, Feed, and Live Doc.
-
-**Setup:**
-
-**Option A — npm global install (recommended, no clone needed):**
-
-1. Log in to Artifactory once (see Artifactory credentials above).
-
-2. Install globally:
-
-```bash
-npm install -g @pim/mcp-server
-```
-
-3. Add to your Claude Desktop `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "pim": {
-      "command": "node",
-      "args": ["/opt/homebrew/lib/node_modules/@pim/mcp-server/dist/index.js"],
-      "env": {
-        "PIM_API_URL": "https://d1ygncl0yqo6sv.cloudfront.net"
-      }
-    }
-  }
-}
-```
-
-> If your npm global root differs from `/opt/homebrew/lib`, run `npm root -g` to find the correct path.
-
-4. Restart Claude Desktop. It runs the installed binary directly — no registry hit on startup, so an expired Artifactory token won't break it. Only re-run `npm install -g @pim/mcp-server` when upgrading.
-
-**Option B — local build (contributors):**
-
-1. Build the package (or run `pnpm bootstrap` from the repo root):
-
-```bash
-pnpm --filter @pim/mcp-server build
-```
-
-2. Add to your Claude Desktop MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "pim": {
-      "command": "node",
-      "args": ["/absolute/path/to/pim/packages/mcp-server/dist/index.js"],
-      "env": {
-        "PIM_API_URL": "https://d1ygncl0yqo6sv.cloudfront.net",
-        "PIM_ORG_SLUG": "your-org-slug"
-      }
-    }
-  }
-}
-```
-
-Use `http://localhost:4000` for `PIM_API_URL` if pointing at a local dev server instead.
-
-3. Ask Claude: *"Show me pod Auth Revamp's dashboard"*
-
-The artifact renders a read-only snapshot — no network requests from the artifact itself. To refresh, ask Claude to show it again.
-
-**Authentication:**
-
-The MCP server detects the PIM server's auth mode from `/api/health` on first request and caches it for the process lifetime.
-
-- **Trust mode** (server default for local dev): no auth required. `PIM_ORG_SLUG` is optional and `~/.pim/credentials.json` is ignored — the server upserts `dev@local` in the `demo` org for every request.
-- **IMS mode**: the MCP reads `~/.pim/credentials.json` (written by `pim login`) and injects `Authorization: Bearer <token>` + `X-Pim-Org: <slug>` on every request. Tokens are refreshed automatically when within 60s of expiry. If the refresh token is missing or invalid, the MCP logs a hint to stderr and the request surfaces a 401 back to Claude.
-
-To use MCP in IMS mode:
-
-1. Run `pim login` on the host first to populate `~/.pim/credentials.json` (chmod 600).
-2. Set `PIM_ORG_SLUG` in the MCP server `env` block above — or run the MCP from a repo that has `orgSlug` set in its `.pim.json` (via `pim init`).
-
-**Environment variables:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PIM_API_URL` | `http://localhost:4000` | Base URL of the PIM Fastify server |
-| `PIM_ORG_SLUG` | (from `.pim.json` in cwd) | Org slug sent as `X-Pim-Org`. Required in IMS mode if no `.pim.json` is present. |
-
-### CLI (`ado-pim` npm package)
-
-Command-line interface for pod and project updates, per-repo setup (`init` / `leave`), session context, tunnels, and related commands. The published npm name is **`ado-pim`**; the workspace path is `packages/cli`.
-
-**Install options:**
-
-| Method | Command | When to use |
-|--------|---------|-------------|
-| **Artifactory** (recommended) | `npm install -g ado-pim --registry https://artifactory-uw2.adobeitc.com/artifactory/api/npm/npm-adobe-pim-release/` | No clone needed; gets the published release. Requires Artifactory auth (see **Setup** above). |
-| **From clone** | `pnpm bootstrap` at monorepo root | Contributors; builds from source and links `pim` globally via pnpm. |
-| **No global install** | `pnpm pim <args>` from monorepo root | Run only from this repo (e.g. `pnpm pim pod list`). |
-| **TypeScript (dev)** | `npx tsx packages/cli/src/index.ts` | Debug without building the bundle first. |
-
-Before deleting a clone you linked globally via pnpm, run **`pnpm unlink --global`** from `packages/cli` to remove the shim.
-
-**If `pim: command not found` after bootstrap:** the link step may have succeeded but your terminal may not put **`$(pnpm bin -g)`** on `PATH` (see the reminder printed at the end of **`pnpm bootstrap`**). Re-run bootstrap or add `export PATH="$(pnpm bin -g):$PATH"` to `~/.zshrc`, then `source ~/.zshrc` or open a new terminal. Confirm with **`ls "$(pnpm bin -g)/pim"`** and **`which pim`**. If you only have an old shim from a prior link, run **`pnpm bootstrap`** again to refresh the **`pim`** shim.
-
-**Repository setup (per clone):**
-
-`pim init` wires this git repo to the PIM server: writes `.pim.json`, optional git hooks, Claude Code sync command, and a Pod Agent Protocol addendum in `CLAUDE.md`. Use it after the pod exists on the server (create it via UI or `pim pod create`). From an interactive terminal, run `pim init` without `--pod` to use a guided wizard (pod list, optional project, optional scope, agent). In CI or non-interactive use, pass `--pod` explicitly.
-
-```bash
-pim init --pod pod-my-sprint-a1b2c3
-pim init --pod pod-my-sprint-a1b2c3 --project project-demo
-pim init --pod pod-my-sprint-a1b2c3 --scope frontend --agent my-agent
-```
-
-- `--pod` is required when stdin is not a TTY (e.g. CI); otherwise the wizard prompts for a pod. `--scope` must be an **id** from org config (`GET /api/org/config`, labels are for display only). `--project` is optional; the project must already exist (`GET /api/projects/:id`). If set, `projectId` is stored for long-lived context alongside the sprint pod.
-- Skip flags: `--skip-hooks`, `--skip-claude`, `--skip-claude-md` to avoid installing hooks or touching `.claude/` / `CLAUDE.md`.
-
-`pim leave` removes **pod** binding from this repo (clears `podId` in `.pim.json`, strips the protocol block from `CLAUDE.md`, neutralizes the Claude sync command). Hooks stay installed; `projectId` is left in place if present so you can still run project-scoped reports.
-
-```bash
-pim leave
-pim leave --skip-claude-md --skip-sync --skip-config   # only adjust .pim.json, etc.
-```
-
-**Pod management:**
-
-```bash
-pim pod create --name "My Sprint"        # Create a new pod
-pim pod list                              # List active pods
-pim pod status pod-my-sprint-a1b2c3       # Show pod details (ids include a short slug + suffix)
-pim pod archive pod-my-sprint-a1b2c3      # Archive a completed pod; polls extraction status
-```
-
-`query_knowledge.include_details` defaults to `false`, matching the REST API. Set it to `true` only when the caller needs full node details; detailed results increase `token_estimate` and may reduce the number of nodes that fit in `max_tokens`.
-
-**Context updates:**
-
-Submit exactly one of `--pod` or `--project` (not both). Pod mode runs the full PIM pipeline for the sprint; project mode records off-pod / between-sprint updates without a living doc or conflict flow.
-
-```bash
-pim report \
-  --pod pod-my-sprint-a1b2c3 \
-  --type progress \
-  --scope frontend \
-  --summary "Built the hero section" \
-  --details "Responsive layout with animated gradient." \
-  --status completed
-
-pim report \
-  --project project-demo \
-  --type progress \
-  --scope backend \
-  --summary "Refactored auth module" \
-  --status in_progress
-```
-
-**Pod agent protocol** (pull before substantive work, report after lock-in — see `docs/POD_AGENT_PROTOCOL.md`):
-
-```bash
-# Flags or env: PIM_POD_ID, PIM_AGENT_ID, PIM_SCOPE (and PIM_SERVER_URL), or `.pim.json` via `pim init`
-pim context --pod <podId> --agent <id> --scope frontend
-pim context --brief --diff --pod <podId> --agent <id> --scope frontend
-pim context --write .pim/last-context.md    # optional explicit path
-pim hooks install                                # optional: post-commit / post-rewrite → PIM API
-```
-
-Omit `--pod` / `--agent` / `--scope` when the same values are set in the environment.
-
-**Living doc and lint:**
-
-```bash
-pim doc pod-my-sprint-a1b2c3              # Print the living doc
-pim lint pod-my-sprint-a1b2c3             # Run a lint pass
-```
-
-**Tunnel management:**
-
-```bash
-pim tunnel start --pod pod-my-sprint-a1b2c3 --port 3000 --dev alice
-pim tunnel list --pod pod-my-sprint-a1b2c3
-pim tunnel stop --pod pod-my-sprint-a1b2c3 --tunnel <tunnelId>
-```
-
-All commands accept `--server <url>` to override the default `http://localhost:4000`, or set `PIM_SERVER_URL`.
-
-## What You'll See
-
-With the server and UI running, here's what each view shows:
-
-| View | URL | What to Look For |
-|------|-----|------------------|
-| **Org Dashboard** | `/org` | All pods with pressure gauges, conflict counts, and tunnel activity |
-| **Pod Dashboard** | `/pod/:id` | Health banner, milestone progress, area status grid, lint findings |
-| **Conflict Center** | `/pod/:id/conflicts` | Open vs. resolved conflicts, severity badges, jump to detail |
-| **Conflict Detail** | `/pod/:id/conflict/:cid` | Side-by-side positions, PIM orchestrator analysis, resolution buttons |
-| **Living Doc** | `/pod/:id/doc` | Auto-generated markdown with health, decisions, context stream |
-| **Context Feed** | `/pod/:id/feed` | Filterable stream of all updates + submission form at the top |
-| **Tunnel Dashboard** | `/pod/:id/tunnels` | Active tunnels with status lights, dev names, branches, URLs |
-
-Everything updates in real time via WebSocket. Submit a context update and watch the Living Doc regenerate instantly.
-
-## Scripts
-
-```bash
-pnpm dev           # Start all packages in dev mode (via Turbo)
-pnpm build         # Build all packages
-pnpm typecheck     # Type-check all packages
-
-# Per-package
+```sh
 pnpm --filter @pim/server dev
 pnpm --filter @pim/ui dev
-pnpm --filter @pim/server typecheck
-pnpm --filter @pim/ui typecheck
 ```
 
-## Environment Variables
+Open `http://localhost:5173`. The Vite server proxies `/api` and `/ws` to the Fastify server at
+`http://localhost:4000`.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `4000` | Server port |
-| `AWS_BEARER_TOKEN_BEDROCK` | (none) | Enables LLM features via Bedrock (Haiku for merges, Sonnet for conflicts) |
-| `AWS_REGION` | `us-west-2` | AWS region for Bedrock Converse endpoint |
-| `BEDROCK_MODEL_FAST` | `us.anthropic.claude-3-5-haiku-20241022-v1:0` | Bedrock model ID for fast/merge agent |
-| `BEDROCK_MODEL_SMART` | `us.anthropic.claude-3-5-sonnet-20241022-v2:0` | Bedrock model ID for smart/conflict agent |
-| `ESCALATION_INTERVAL_MS` | `300000` (5 min) | How often to check for conflict escalation |
-| `LINT_INTERVAL_MS` | `7200000` (2 hr) | How often to run the lint pass across all pods |
-| `PIM_API_URL` | `http://localhost:4000` | (MCP server) Base URL of the PIM server |
-| `PIM_ORG_SLUG` | (from `.pim.json`) | (MCP server + CLI) Org slug sent as `X-Pim-Org`. Required in IMS mode unless a `.pim.json` is present in cwd. |
-| `AUTH_MODE` | `trust` | (Server) `trust` upserts `dev@local` per request; `ims` verifies IMS JWTs via JWKS. |
-| `IMS_CLIENT_ID` | (none) | (Server, IMS mode) Adobe IMS client id for audience validation. Also advertised via `/api/health` so the CLI can auto-discover. |
-| `IMS_ENV` | `stg1` | (Server) `stg1` or `prod`. Selects the IMS JWKS and issuer. |
-| `IMS_EXPECTED_ISSUER` | *(IMS default)* | (Server) Override for the expected `iss` claim. Leave unset unless using a non-standard IMS deployment. |
-| `VITE_AUTH_MODE` | `trust` | (UI) Must match the server's `AUTH_MODE`. In `ims` the UI redirects to Adobe IMS; in `trust` it stubs a `dev@local` identity. |
-| `VITE_IMS_CLIENT_ID` | (none) | (UI, IMS mode) Adobe IMS client id (same value as `IMS_CLIENT_ID`). |
-| `VITE_IMS_ENV` | `stg1` | (UI) `stg1` or `prod`. |
+The default local authentication mode is `trust`, which creates a synthetic development identity.
+Use `AUTH_MODE=ims` only with the IMS values documented in `.env.example`.
 
-## Architecture
+## Repository layout
 
-### Context Update Flow
+| Path | Purpose |
+| --- | --- |
+| `packages/server` | Fastify API, SQLite schema and migrations, workers, orchestration, search, and memory |
+| `packages/ui` | React 19/Vite 6/Spectrum 2 single-page application |
+| `packages/shared` | Shared types plus generated Memory v1/v2 contracts |
+| `packages/sdk` | Strict TypeScript clients, including `PimMemoryV2Client` |
+| `packages/cli` | Published `ado-pim` package and `pim` executable |
+| `packages/mcp-server` | Interactive PIM MCP server and reusable restricted-memory MCP implementation |
+| `packages/infra` | Current EC2/SQLite AWS CDK stack and deployment tests |
+| `packages/eval` | Reproducible evaluation protocols, fixtures, runners, and reports |
+| `prompts` | Version-controlled LLM prompts |
+| `docs` | Current runbooks, feature guides, architecture, and historical design records |
 
-```
-Agent/Human submits update
-        |
-        v
-  POST /api/pods/:podId/context-updates
-        |
-        v
-  Ingestion (validation, secret scan, DB write, pod snapshot, WS broadcast)
-        |
-        v
-  PIM orchestrator (classify update)
-        |
-  additive ---------> Deterministic merge (no LLM, ~60% of traffic)
-  overlapping ------> LLM merge via Haiku (or deterministic fallback)
-  contradictory ----> Create conflict record (optional Sonnet analysis)
-        |
-        v
-  Regenerate living doc from DB state
-        |
-        v
-  Detect cross-pod overlaps
+See [docs/README.md](docs/README.md) for the documentation map and status of each design document.
+
+## Common commands
+
+```sh
+pnpm dev                 # Run package development tasks through Turbo
+pnpm typecheck           # Type-check every package
+pnpm test                # Run package test suites
+pnpm build               # Build every package
+pnpm docs:check          # Validate local Markdown links and documented pnpm scripts
+pnpm check:npmrc         # Verify that the repository npm config contains no credentials
 ```
 
-### Conflict Pressure
+Useful focused commands:
 
-A score from 0.0 to 1.0 that gates merge behavior:
+```sh
+pnpm --filter @pim/server test
+pnpm --filter @pim/sdk test
+pnpm --filter @pim/mcp-server test
+pnpm --filter @pim/infra test
+pnpm --filter @pim/shared contracts:check
+```
 
-| Range | Mode | Behavior |
-|-------|------|----------|
-| 0.0--0.3 | Normal | Auto-merge freely |
-| 0.3--0.6 | Cautious | Merge with disclaimers |
-| 0.6--0.8 | Degraded | Hold contested areas, no auto-merge |
-| 0.8--1.0 | Critical | Ingestion paused, urgent alerts |
+## CLI
 
-### Escalation Ladder
+The published CLI package is `ado-pim`; its executable is `pim`.
 
-Unresolved conflicts auto-escalate on a compressed timeline (designed for 5-day sprints):
+For a contributor checkout:
 
-- **>4h** -- Ping contributors
-- **>8h** -- Re-ping, flag for pod lead
-- **>16h** -- Escalate to pod lead
-- **>24h** -- Force pressure to 1.0 (critical)
+```sh
+pnpm bootstrap
+pim --help
+```
 
-### Tech Stack
+Without a global link, run the source CLI from the repository root:
 
-| Concern | Choice |
-|---------|--------|
-| Monorepo | Turborepo + pnpm workspaces |
-| Backend | Fastify 5 |
-| Database | SQLite (`node:sqlite` / `DatabaseSync`, WAL mode) |
-| AI/LLM | Anthropic Claude API (Haiku + Sonnet) |
-| Validation | Zod |
-| Frontend | React 19 + Vite 6 |
-| Components | Adobe Spectrum 2 (`@react-spectrum/s2`) |
-| Styling | Spectrum 2 `style()` macro via `unplugin-parcel-macros` |
-| State | Zustand |
-| Routing | React Router v7 |
-| Markdown | react-markdown + remark-gfm |
-| Real-time | WebSocket (native, via `@fastify/websocket`) |
-| Claude integration | MCP server (`@modelcontextprotocol/sdk`) |
-| TypeScript | Strict mode, ES2022 target |
+```sh
+pnpm pim pod list
+pnpm pim project list
+```
 
-## Not Yet Implemented
+Common workflows:
 
-- **Production FE tunneling** — The local tunnel prototype (CLI + server routes + WS proxying) exists, but the hosted “stable URL” deployment story (custom domains, edge, auth) is still a deployment milestone.
-- **Adobe IMS auth** -- Currently no authentication
-- **Slack integration** -- Conflict notifications and emoji-based resolution
-- **Notification system** -- In-app, email, Slack DM per-user preferences
+```sh
+pim login
+pim init
+pim context --brief
+pim report --project PROJECT_ID --type progress --scope backend \
+  --summary "Updated the memory adapter" --status completed
+pim project search PROJECT_ID "where is repository authorization enforced?"
+pim token list
+```
 
-See `SPEC.md` for the full specification and implementation milestones.
+The CLI defaults to the shared endpoint configured in `packages/cli/src/index.ts`. Override it with
+`--server <url>` or `PIM_SERVER_URL` for local and alternate deployments.
 
-## Hardening checklist (consolidated)
+For Artifactory installation and authentication, follow
+[docs/NPM_ARTIFACTORY.md](docs/NPM_ARTIFACTORY.md). For first-time user setup, follow
+[docs/ONBOARDING.md](docs/ONBOARDING.md).
 
-This is a lightweight “production readiness” checklist that used to live in `HARDENING.md`. Items marked **[DONE]** are already implemented; they’re kept as a quick map of what exists and where.
+## SDK and API
 
-### Tier 1 — Credibility **[DONE]**
+`@pim/sdk` contains clients for pods, projects, search, knowledge, and canonical memory. Memory v2
+clients authenticate with a service token whose server-side binding establishes the maximum
+organization, project, plane, operation, and exact repository or harness resource.
 
-- **Unit tests** — vitest set up in `packages/server` with broad coverage of core services. Run: `pnpm test`.
-- **Request validation** — Zod schemas + `validateBody()` middleware on POST routes (`packages/server/src/middleware/validation.ts`).
-- **Health check** — `GET /api/health` in `packages/server/src/index.ts` validates DB connectivity.
+```ts
+import { PimMemoryV2Client } from "@pim/sdk";
 
-### Tier 2 — Production readiness (local) **[DONE]**
+const memory = new PimMemoryV2Client({
+  baseUrl: "http://localhost:4000",
+  authToken: process.env.PIM_SERVICE_TOKEN!,
+});
 
-- **Global error handler** — `app.setErrorHandler` in `packages/server/src/index.ts` returns structured errors and avoids leaking stacks.
-- **Auth middleware skeleton** — `packages/server/src/middleware/auth.ts` (`AUTH_MODE=trust|ims`, IMS verification is TODO).
-- **CORS** — `@fastify/cors` in `packages/server/src/index.ts` (config via `CORS_ORIGIN`).
-- **Rate limiting** — `@fastify/rate-limit` in `packages/server/src/index.ts` plus route-level limits where needed.
+const capabilities = await memory.capabilities();
+const binding = await memory.binding();
+```
 
-### Tier 3 — Testing & demo polish **[DONE]**
+The current Memory v2 API supports:
 
-- **Expanded unit/integration tests** — Includes ingestion, pressure, classification, merge/conflict/summary agents, and Fastify `inject()` integration tests.
-- **SDK + CLI tests** — vitest coverage for client methods + command registration.
-- **CDK stack** — present in `packages/infra/lib/pim-stack.ts` (see note above about production deployment/ops).
+- capability and effective-binding discovery;
+- codebase and harness search;
+- immutable record, history, and retrieval-pack reads;
+- idempotent run receipts and codebase feedback;
+- candidate status and HTTP-only review decisions;
+- resource-scoped reverification readiness; and
+- a restricted stateless MCP companion at `/mcp/memory`.
+
+See [docs/MEMORY_API.md](docs/MEMORY_API.md) for the endpoint and MCP matrix. Generated schemas in
+`packages/shared/contracts` are the wire-contract source of truth.
+
+## MCP surfaces
+
+PIM intentionally has two different MCP surfaces:
+
+1. **Interactive PIM MCP (`@pim/mcp-server`)** — a local/stdio integration for pod, project,
+   context-search, knowledge, and skill-catalog workflows.
+2. **Restricted Memory v2 MCP (`POST /mcp/memory`)** — a private, stateless service-token data plane
+   with eight bounded tools and two non-enumerable resource templates. HTTP v2 remains canonical;
+   review, activation, credential administration, and runtime-attestation control are not exposed
+   through MCP.
+
+Do not configure `/mcp/memory` as though it were the interactive desktop server. Its protocol and
+authorization profile are documented in
+[docs/MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md](docs/MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md).
+
+## Architecture at a glance
+
+```text
+CLI / SDK / MCP / Browser
+          |
+          v
+  Fastify API + WebSocket
+          |
+          +-- pod and project orchestration
+          +-- context and skill search
+          +-- canonical Memory v1/v2
+          +-- background workers
+          |
+          v
+ SQLite (single writer) + local/S3 graph archives
+```
+
+The current hosted stack serves the UI from S3 through CloudFront and forwards API, MCP, WebSocket,
+and tunnel traffic through CloudFront to an ALB and one EC2-hosted server container. SQLite lives on
+an attached EBS data volume. S3 logical backups and AWS Backup EBS recovery points protect the
+stateful deployment.
+
+For details, read [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md),
+[docs/DEPLOY.md](docs/DEPLOY.md), and [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md).
+
+## Configuration
+
+Copy `.env.example` to `.env` for local development. The server loads the root file first and an
+optional `packages/server/.env` override second. Important groups include:
+
+- server, CORS, storage, and authentication;
+- Bedrock models and optional embeddings;
+- canonical-memory authority, service-token, worker, and reverification settings;
+- project-search and connector credentials;
+- skill-catalog workers; and
+- CLI/MCP endpoint selection.
+
+Never commit `.env`, access tokens, private keys, or populated user npm configuration. The tracked
+`.npmrc` contains only the package registry mapping.
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Architecture overview](docs/ARCHITECTURE_OVERVIEW.md)
+- [Onboarding](docs/ONBOARDING.md)
+- [Pod agent protocol](docs/POD_AGENT_PROTOCOL.md)
+- [Context search](docs/CONTEXT_SEARCH.md)
+- [Project-search connectors](docs/PROJECT_SEARCH_CONNECTORS.md)
+- [Skill catalog](docs/SKILL_CATALOG_USER_GUIDE.md)
+- [Memory API](docs/MEMORY_API.md)
+- [Memory operations](docs/MEMORY_OPERATIONS.md)
+- [Deployment](docs/DEPLOY.md)
+- [Backup and restore](docs/BACKUP_RESTORE.md)
+
+`SPEC.md` records the original product vision and remains useful design history, but implemented
+behavior is defined by the current code, generated contracts, tests, and the current documents
+listed above.

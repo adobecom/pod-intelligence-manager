@@ -1,5 +1,8 @@
 # Memory v2 Slice 1 canonical-writer inventory
 
+> **Historical release evidence.** File names and write paths were captured for Slice 1; current
+> authority rules are summarized in [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md).
+
 This is the Slice 1 exit artifact for the canonical stores that receive additive v2 resource,
 binding, facet, or quarantine companions. It inventories the surviving runtime write entry points;
 test fixtures and schema/migration DDL are not application writers.

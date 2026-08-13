@@ -1,126 +1,68 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
+## Project snapshot
 
-## Project Status
+PIM is an Adobe-internal coordination and governed-memory platform for AI-assisted engineering.
+The current implementation is a Node 24 pnpm monorepo with:
 
-Active implementation. Core backend (Fastify server, SQLite, WebSocket), PIM orchestrator, Committee agents (merge, conflict, summary, cross-pod, knowledge-extraction, lint), React + Spectrum 2 UI (all views), and SDK are implemented. **Hosted at `https://d1ygncl0yqo6sv.cloudfront.net/`** (CloudFront + EC2 via CDK). Local dev runs on `:4000` (server) and `:5173` (UI).
+- a Fastify API and WebSocket server;
+- a single-writer SQLite database with checksummed migrations;
+- a React/Vite/Spectrum 2 UI;
+- CLI, SDK, interactive MCP, and restricted Memory v2 MCP clients;
+- pod, project, context-search, skill-catalog, and evaluation workflows; and
+- an AWS CDK EC2/ALB/CloudFront deployment with EBS and S3 recovery layers.
 
-## What This Is
+Do not describe the current runtime as Lambda/DynamoDB. Those components belong to historical or
+target-architecture material, not the deployed MVP stack.
 
-**PIM** is an Adobe-internal orchestration layer for cross-functional AI+human "pods" (5-day sprints). It keeps every agent (AI or human) synchronized via a canonical read-only "living doc" — automatically, in real time. Three pillars:
+## Start here
 
-1. **FE Tunneling** — Expo-style localhost tunneling (one CLI command exposes a dev's local server to a stable URL for designers/PMs)
-2. **PIM (Brain)** — Context bus: agents submit structured updates → orchestrator routes to Committee agents → living `.md` is assembled from DynamoDB state and written to S3
-3. **PIM UI (Surface)** — React + Spectrum 2 SPA for pod health, conflicts, and the live doc
+- [README.md](README.md) — setup, package map, and common commands
+- [docs/README.md](docs/README.md) — current documentation and historical-design index
+- [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md) — implemented architecture
+- [docs/MEMORY_API.md](docs/MEMORY_API.md) — canonical Memory v1/v2 and MCP surfaces
+- [docs/DEPLOY.md](docs/DEPLOY.md) — deployment runbook
 
-## Knowledge Graph and canonical memory — load-bearing rules
+## Development commands
 
-The legacy graph remains the Pod-context read source, but it is read-only once legacy memory authority is frozen. Do not add another legacy graph writer.
-
-1. **Pod archival** — `POST /api/pods/:podId/archive` always runs `extractKnowledgeEnhanced()`. Under legacy authority it retains the existing `addLearningsToGraph()` path. Under frozen authority, selected learnings go through the in-process canonical v1 receipt service as internal `org` candidates pending validation and policy-owner review; the job/event says `memory_candidates_submitted`, never that memory is active.
-2. **Ad-hoc submission** — `POST /api/knowledge/nodes` (and the SDK/MCP methods that call it) retains legacy embedding/dedup before cutover. Under frozen authority it submits the same review-gated canonical candidates and returns `202 candidate_submitted`.
-3. **Agent run/session rollups** — under frozen authority they use the same canonical intake and never insert or auto-promote legacy `memory_candidates`.
-
-Scheduled graph synthesis and development graph seeding no-op under frozen authority. Project evidence may remain searchable, but legacy project/agent candidate creation and promotion are retired after the freeze.
-
-Agents query via `getRelevantLearnings(tokenBudget)` — never dump the full graph. Full details, confidence scoring, pruning, and storage layout in [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md#knowledge-graph-persistent-org-memory).
-
-## Where to look
-
-- **Full spec & design rationale:** [SPEC.md](SPEC.md)
-- **Architecture quick reference** (orchestrator, committee, living doc, tunneling, security, knowledge graph, AWS map, milestones, monorepo layout): [docs/ARCHITECTURE_OVERVIEW.md](docs/ARCHITECTURE_OVERVIEW.md)
-- **Pod agent protocol:** [docs/POD_AGENT_PROTOCOL.md](docs/POD_AGENT_PROTOCOL.md)
-- **Deployment:** [docs/DEPLOY.md](docs/DEPLOY.md), [docs/AGENT_MANUAL_DEPLOY.md](docs/AGENT_MANUAL_DEPLOY.md) (manual/hosted redeploy for agents)
-- **Context search:** [docs/CONTEXT_SEARCH.md](docs/CONTEXT_SEARCH.md)
-
-
-<!-- pim-pod-agent-begin -->
-
-## PIM — Pod Agent Protocol
-
-This project is connected to PIM pod `pod-emc-webhook-integration-84aa08`.
-PIM server: `https://d1ygncl0yqo6sv.cloudfront.net`
-
-### Automatic Reporting
-
-Context updates are automatically reported to PIM when you:
-- **Make a git commit** — via post-commit hook (captures subject, body, changed files)
-- **Create a pull request** — via Claude Code hook (captures PR URL and title)
-
-You do not need to manually report routine progress — it flows automatically.
-
-### PIM MCP Tools (Preferred)
-
-If the PIM MCP server is configured in Claude Code, **always use these tools
-instead of CLI commands** — they are faster and don't require a shell.
-
-**Context & Session**
-
-| Tool | When to use |
-|------|-------------|
-| `get_agent_session_context` | Pull pod state, living doc, conflicts, and token-budgeted org learnings in one call |
-| `context_search` | Search external sources (Slack archives, Jira, Confluence, GitHub, git) via PIM's aggregated search — no separate Slack/Jira MCPs needed |
-| `query_knowledge` | Search the org knowledge graph for historical precedents and resolved decisions |
-
-**Reporting**
-
-| Tool | When to use |
-|------|-------------|
-| `submit_context_update` | Report progress, blockers, decisions, spec changes, or questions |
-
-**Conflicts**
-
-| Tool | When to use |
-|------|-------------|
-| `get_conflict_details` | Inspect a specific open conflict and its suggested resolutions |
-| `resolve_conflict` | Mark a conflict as resolved with a chosen approach |
-
-**Observability**
-
-| Tool | When to use |
-|------|-------------|
-| `render_pod_dashboard` | Get a full interactive React artifact showing pod health, conflicts, feed, and live doc |
-| `list_pods` | See all active pods in the org |
-
-### Fallback: CLI Commands
-
-Use these only when the PIM MCP server is not configured.
-
-#### Getting Current Pod Context
-
-```bash
-pim context --pod pod-emc-webhook-integration-84aa08 --scope frontend
+```sh
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm docs:check
+pnpm --filter @pim/shared contracts:check
 ```
 
-Use `--brief` for a quick summary or `--diff` to see only what changed since
-your last pull. If conflict pressure is >= 0.6, check open conflicts before
-proceeding in contested areas.
+Use focused package checks while iterating, then run checks proportional to the final diff. Do not
+edit generated Memory contract files directly; update the generator/schema source and run
+`pnpm --filter @pim/shared contracts:generate`.
 
-#### Manual Reporting
+## Load-bearing memory rules
 
-Report blockers, decisions, spec changes, and questions manually:
+- Canonical SQL memory is the write and lifecycle authority after the terminal authority cutover.
+- The legacy organization knowledge graph may remain a bounded pod-context read source, but its
+  writers, curation, synthesis, pruning, and promotion paths must stay fenced once legacy writes are
+  frozen.
+- Memory v2 supports exactly the `codebase` and `harness` planes. Do not infer unavailable planes,
+  fuzzy resource matches, or cross-plane fallback.
+- A service token establishes the maximum org/project/plane/operation/resource authority. Request
+  fields may narrow that authority but must never widen it.
+- HTTP v2 is canonical. `/mcp/memory` delegates to the same domain services and must not grow a
+  separate store, ranker, authorization model, review path, or control plane.
+- Receipts and feedback are idempotent. Immutable packs and record versions must be reauthorized on
+  every read.
+- Candidate review and activation remain HTTP control-plane operations; the restricted MCP surface
+  does not expose them.
+- Startup migration, reconciliation, admission, or validation failure makes Memory v2 unavailable
+  without making the rest of PIM silently serve partial v2 state.
 
-```bash
-pim report --pod pod-emc-webhook-integration-84aa08 --type decision --scope frontend \
-  --summary "Chose Redis over Memcached for session cache" \
-  --details "Redis supports pub/sub which we need for real-time invalidation..."
-```
+## Repository hygiene
 
-Types: `progress` | `blocker` | `spec_change` | `question` | `decision`
-
-### Quality Guidelines
-
-- Summaries should be specific and actionable (avoid "made progress" or "working on it")
-- Include file paths, function names, or API endpoints when relevant
-- Declare blockers and input requests — this triggers PIM's escalation system
-- Artifacts (changed files) are automatically included with commit reports
-
-### Conflict Awareness
-
-- Check pod pressure with `pim context --pod pod-emc-webhook-integration-84aa08 --brief`
-- If pressure is >= 0.8, ingestion is halted — resolve conflicts first
-- When your work overlaps with another area, PIM will detect it automatically
-
-<!-- pim-pod-agent-end -->
+- Keep local state (`.env`, `.pim.json`, `.data`, build output, coverage, `.DS_Store`) untracked.
+- Preserve user changes in a dirty worktree and avoid broad formatting or generated-file churn.
+- Update current docs when behavior changes. Mark design plans and dated reviews as historical once
+  superseded; do not leave removed commands in active runbooks.
+- Run `pnpm docs:check` after changing Markdown or package scripts.

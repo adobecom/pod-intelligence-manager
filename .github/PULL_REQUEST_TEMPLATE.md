@@ -19,4 +19,5 @@
 - [ ] `pnpm typecheck` passes
 - [ ] `pnpm test` passes
 - [ ] `pnpm build` succeeds
+- [ ] `pnpm docs:check` passes when docs or package scripts changed
 - [ ] No secrets or internal URLs committed

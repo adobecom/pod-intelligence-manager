@@ -1,5 +1,8 @@
 # Confirmed findings remediation plan
 
+> **Historical implementation record (2026-08-05).** Do not use this plan as a current runbook.
+> Current architecture and operations are indexed in [README.md](./README.md).
+
 - **Status:** Proposed implementation plan
 - **Prepared:** 2026-08-05
 - **Scope:** Five confirmed code defects and one composite infrastructure rollout blocker

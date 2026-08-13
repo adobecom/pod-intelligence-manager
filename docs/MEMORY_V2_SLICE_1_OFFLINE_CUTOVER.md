@@ -1,5 +1,8 @@
 # Memory v2 Slice 1 production-copy rehearsal
 
+> **Historical release evidence.** This was the disposable Slice 1 rehearsal, not the current
+> production cutover runbook. Use [MEMORY_OFFLINE_CUTOVER.md](./MEMORY_OFFLINE_CUTOVER.md).
+
 This runbook covers the disposable production-copy rehearsal required by Slice 1
 of the Memory v2 simplification plan. It does not mutate production. The real
 stopped-writer backup, count manifest, migration, and deployment happen once in

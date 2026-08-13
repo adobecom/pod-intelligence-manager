@@ -25,7 +25,7 @@ graph TB
         ALB["Application Load Balancer"]
     end
 
-    subgraph API["Fastify API Server (EC2 / Node 22  :4000)"]
+    subgraph API["Fastify API Server (EC2 / Node 24  :4000)"]
         AUTH["Auth + Org Resolution<br/>(IMS / trust mode)"]
         HTTP["HTTP Routes<br/>(pods · projects · conflicts<br/>knowledge · search · tunnels)"]
         WSM["WebSocket Manager<br/>(pod + org events)"]
@@ -111,7 +111,7 @@ PIM currently has these user and agent entry points:
 | Surface | What users do there | Current implementation |
 |---|---|---|
 | Web app | Manage orgs, pods, projects, conflicts, living docs, tunnels, knowledge graph, context search, and member settings. | React 19 + Vite + Spectrum 2 SPA in `packages/ui`; hosted from static object storage behind a CDN in the AWS MVP. |
-| HTTP API | Create pods/projects, submit updates, resolve conflicts, query knowledge, search context, manage membership, and support UI/CLI/MCP. | Fastify server in `packages/server`, currently one Node 22 container. |
+| HTTP API | Create pods/projects, submit updates, resolve conflicts, query knowledge, search context, manage membership, and support UI/CLI/MCP. | Fastify server in `packages/server`, currently one Node 24 container. |
 | Realtime channel | Push pod changes, conflict changes, living doc updates, tunnel state, queue drains, knowledge updates, and quality score revisions. | Native WebSocket support in the Fastify server via `@fastify/websocket`; in-memory connection registry. |
 | CLI | Login, create/list/archive pods, bind a repo, submit reports, fetch context, manage tunnels, run search, and install git hooks. | `ado-pim` package in `packages/cli`; global install from Artifactory or local workspace. |
 | SDK | Let agents submit updates and pull compact session context programmatically. | `@pim/sdk` in `packages/sdk`. |
@@ -124,7 +124,7 @@ The current AWS MVP is optimized for speed of delivery, not high availability.
 
 | Concern | Current implementation |
 |---|---|
-| Server runtime | One Node 22 container on one EC2 instance managed by an Auto Scaling Group with desired/min/max set to 1. |
+| Server runtime | One Node 24 container on one EC2 instance managed by an Auto Scaling Group with desired/min/max set to 1. |
 | UI hosting | Static UI bundle in S3, served through CloudFront. |
 | API routing | CloudFront routes API/WebSocket traffic to an ALB, then to the EC2-hosted container on port 4000. |
 | Database | SQLite via Node's built-in `node:sqlite` `DatabaseSync`; WAL mode, foreign keys, and a 5-second busy timeout. DB file is mounted at `/data/pim.db`. |

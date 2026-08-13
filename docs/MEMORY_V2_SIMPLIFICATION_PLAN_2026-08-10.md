@@ -1,5 +1,11 @@
 # Memory v2 launch plan: finish a harness-neutral PIM, deploy it, then prove Fiesta influence
 
+> **Implementation/release record.** It explains the simplification decisions and retained Slice
+> 8/9 exits; it is not the current API or operations runbook. Use
+> [MEMORY_API.md](./MEMORY_API.md) and
+> [PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md](./PIM_TO_FIESTA_IMPLEMENTATION_HANDOFF.md) for current
+> integration behavior.
+
 **Date:** 2026-08-10 (revision 6; removes the standalone backup/baseline slice, folds a disposable production-copy rehearsal into Slice 1, and captures the authoritative backup manifest only after writers stop in Slice 7)
 **Branch:** `podFix` (working tree is not yet organized into reviewable commits)
 **Basis:** [Memory v2 full branch review](./MEMORY_V2_BRANCH_REVIEW_2026-08-10.md), direct verification against the working tree and production database, and the decisions recorded below
