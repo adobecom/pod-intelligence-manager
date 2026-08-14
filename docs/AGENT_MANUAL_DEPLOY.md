@@ -1,303 +1,105 @@
-# Manual deploy guide (for coding agents)
+# Manual deploy guide for coding agents
 
-This document is for **Cursor / Claude / other agents** that need to redeploy the hosted PIM sandbox when a human says “deploy my changes” or after merging to `main`. It captures operational lessons from repeated manual deploys; the full CDK runbook remains in [DEPLOY.md](./DEPLOY.md).
+**Status:** current handoff for the `PimEc2Stack` deployment
 
-## When to use this
+Use this guide only when the user explicitly asks to deploy. Repository changes alone do not
+authorize an external deployment.
 
-| Situation | Action |
-|-----------|--------|
-| User changed server/UI code and wants it live | Follow **Full redeploy** below |
-| User only changed UI | Skip Docker; run **UI only** |
-| User only changed SSM secrets | **Restart server** only (no build) |
-| First-time stack / infra change | Use [DEPLOY.md](./DEPLOY.md) (`cdk deploy`), not this doc |
-| Push to `main` should auto-deploy | Prefer GitHub Actions — see **CI status** |
+## Preferred path
 
-## Active environment (rkhan sandbox)
+Use the canonical GitHub Actions workflow:
 
-| Item | Value |
-|------|--------|
-| Public URL | `https://d1ygncl0yqo6sv.cloudfront.net` |
-| Region | `us-west-2` |
-| CloudFormation stack | `PimEc2Stack-rkhan` |
-| Account | resolved via `aws sts get-caller-identity` |
-
-Resolve dynamic IDs from stack outputs — do not hardcode instance IDs unless SSM lookup fails.
-
-```bash
-export AWS_REGION=us-west-2
-export STACK_NAME=PimEc2Stack-rkhan
-
-ECR=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`EcrRepoUri`].OutputValue' --output text)
-
-UI_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`UiBucketName`].OutputValue' --output text)
-
-DIST_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`DistributionId`].OutputValue' --output text)
-
-ASG=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`AutoScalingGroupName`].OutputValue' --output text)
-
-INSTANCE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG" --region "$AWS_REGION" \
-  --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId | [0]' --output text)
+```sh
+gh workflow run deploy-mvp.yml
+gh run list --workflow deploy-mvp.yml --limit 5
 ```
 
-## Prerequisites (agent checklist)
+If the change is merging to `main`, the push trigger runs the same workflow automatically. The
+workflow is safer than an ad-hoc restart because it:
 
-1. **Repo root** — all commands below assume monorepo root (`ai-council/`).
-2. **AWS credentials** — Klam-federated session on the target account:
-   ```bash
-   aws sts get-caller-identity --region us-west-2
-   ```
-   If you see `SignatureDoesNotMatch` or “Could not load credentials”, the session token expired — ask the human to refresh Klam and retry.
-3. **Docker** — required for server image builds. On macOS, Docker Desktop is often **not** on `PATH`:
-   ```bash
-   DOCKER="${DOCKER:-/Applications/Docker.app/Contents/Resources/bin/docker}"
-   "$DOCKER" version
-   ```
-4. **pnpm** — UI build: `pnpm --filter @pim/ui build` (needs `pnpm install` if deps missing).
-5. **Shell permissions** — agent terminal needs `network` / `all` for AWS, Docker, and ECR push.
+- builds and tags the exact Git commit;
+- resolves and deploys an immutable ECR digest;
+- carries the terminal `MemoryCutoverComplete` output forward;
+- verifies temporary host ECR push access is off;
+- replaces the systemd unit with the digest-pinned image;
+- waits for local health; and
+- publishes/invalidate the UI.
 
-## Full redeploy (server + UI)
+Do not substitute `docker push :latest` plus `systemctl restart`. Restarting a cached mutable tag can
+serve the wrong image and bypasses the fence checks.
 
-Typical user request: *“I made changes, redeploy.”* Deploy **both** server and UI unless the user scoped to one.
+## Before triggering a deploy
 
-### 1. Record what you are shipping
+1. Confirm the user authorized the target environment and exact change.
+2. Confirm the working tree/commit that will be deployed; CI deploys the selected Git ref, not
+   uncommitted local changes.
+3. Run checks proportional to the change, including `pnpm docs:check` for docs/script changes and
+   `pnpm --filter @pim/infra test` for deployment changes.
+4. Confirm the workflow's `STACK_NAME`, region, and OIDC role belong to the intended environment.
+5. Read the current stack outputs for `MemoryCutoverComplete` and `ServerImagePushAllowed`.
+6. Confirm a recent verified backup exists before schema, authority, or stateful changes.
 
-```bash
-git rev-parse --short HEAD
-git log -1 --oneline
-git status --short   # warn if large uncommitted diff vs what user expects
+## Watch and report
+
+Use `gh run watch <run-id>` or the Actions UI. A successful handoff records:
+
+- Git commit and workflow run URL;
+- immutable ECR digest;
+- stack and region;
+- preserved memory-cutover state;
+- final `ServerImagePushAllowed=false`;
+- health result and server `started_at`;
+- UI sync/CloudFront invalidation; and
+- any warnings or skipped verification.
+
+## Verification
+
+Resolve the URL from the stack output:
+
+```sh
+CF_URL="$(aws cloudformation describe-stacks \
+  --stack-name PimEc2Stack-rkhan \
+  --region us-west-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontUrl`].OutputValue' \
+  --output text)"
+curl -fsS "$CF_URL/api/health"
 ```
 
-Tag images with a traceable name (ECR also gets `:latest`):
+Check that:
 
-```bash
-SHA=$(git rev-parse --short HEAD)
-TAG="manual-$(date -u +%Y%m%dT%H%M%SZ)-${SHA}"
-```
+- database connectivity is healthy;
+- Memory v2 availability matches the release expectation;
+- the running unit uses the workflow's digest;
+- API/MCP authorization errors remain JSON and are not rewritten to the SPA;
+- the UI loads; and
+- the deployment did not change the terminal memory fence.
 
-### 2. Build and push server image
+## If CI cannot deploy
 
-```bash
-DOCKER="${DOCKER:-/Applications/Docker.app/Contents/Resources/bin/docker}"
+Stop and report the concrete blocker when the OIDC role, branch protection, AWS session, or target
+approval is missing. Do not silently broaden IAM or enable the host ECR push gate.
 
-# ECR + INSTANCE from "Active environment" block above
-aws ecr get-login-password --region "$AWS_REGION" | \
-  "$DOCKER" login --username AWS --password-stdin "${ECR%%/*}"
+The stack has a temporary `allowServerImagePush` context for an explicitly reviewed scoped-host
+build. Using it is a separate privileged operation: it must be raised through CDK, used only for the
+named image, and lowered in the immediate digest-pinning deploy. The final stack output must be
+`ServerImagePushAllowed=false`.
 
-"$DOCKER" build -f packages/server/Dockerfile \
-  -t "${ECR}:${TAG}" -t "${ECR}:latest" .
+## Configuration-only restart
 
-"$DOCKER" push "${ECR}:${TAG}"
-"$DOCKER" push "${ECR}:latest"
-```
-
-Note the pushed digest from the push output for the deploy summary.
-
-### 3. Pull on EC2 and restart (critical)
-
-**`systemctl restart pim-server` alone is not enough.** The instance caches the local `:latest` image; restart reuses the old digest until `docker pull`.
-
-```bash
-CMD_ID=$(aws ssm send-command --region "$AWS_REGION" \
-  --instance-ids "$INSTANCE" \
-  --document-name "AWS-RunShellScript" \
-  --parameters "commands=[
-    \"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR%%/*}\",
-    \"docker pull ${ECR}:latest\",
-    \"systemctl restart pim-server\",
-    \"sleep 3\",
-    \"systemctl is-active pim-server\"
-  ]" \
-  --query 'Command.CommandId' --output text)
-
-# Poll until Success or Failed (5s interval, ~60s timeout)
-aws ssm get-command-invocation --region "$AWS_REGION" \
-  --command-id "$CMD_ID" --instance-id "$INSTANCE" \
-  --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
-```
-
-Expect `active` and a pull line like `Status: Downloaded newer image`.
-
-### 4. Build and publish UI
-
-```bash
-pnpm --filter @pim/ui build
-
-aws s3 sync packages/ui/dist "s3://${UI_BUCKET}/" --delete --region "$AWS_REGION"
-
-aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
-```
-
-Tell the user to hard-refresh the browser; invalidation takes a few minutes.
-
-### 5. Verify
-
-```bash
-curl -sS "https://d1ygncl0yqo6sv.cloudfront.net/api/health"
-```
-
-Healthy response shape:
-
-```json
-{"status":"ok","started_at":"...","db":{"connected":true,"active_pods":N}}
-```
-
-Check `started_at` — it should be **after** your restart. If behavior still looks stale, compare running image on the box:
-
-```bash
-aws ssm send-command --region "$AWS_REGION" --instance-ids "$INSTANCE" \
-  --document-name AWS-RunShellScript \
-  --parameters 'commands=["docker images '"${ECR}"' --format \"{{.Tag}} {{.ID}} {{.CreatedSince}}\" | head -5"]'
-```
-
-## UI only
-
-```bash
-pnpm --filter @pim/ui build
-aws s3 sync packages/ui/dist "s3://${UI_BUCKET}/" --delete --region "$AWS_REGION"
-aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
-```
-
-## Server restart only (secrets / config)
-
-After SSM parameter updates under `/pim/*`:
-
-```bash
-aws ssm send-command --region "$AWS_REGION" --instance-ids "$INSTANCE" \
-  --document-name AWS-RunShellScript \
-  --parameters 'commands=["systemctl restart pim-server"]'
-```
-
-If env vars are baked into a **new image**, use the full redeploy path instead.
-
-## Pitfalls (read before debugging “deploy didn’t work”)
-
-### zsh and `$ECR:latest`
-
-In zsh, `$ECR:latest` is parsed as `$ECR` + `:latest` as a modifier — the tag breaks. Always use **`${ECR}:latest`**.
-
-### Restart ≠ pull
-
-Symptom: ECR shows a new digest but API behavior unchanged; health `started_at` updates but logic is old.  
-Fix: `docker pull ${ECR}:latest` on the instance, then `systemctl restart pim-server`.
-
-### Docker not on PATH (macOS agents)
-
-Use `DOCKER=/Applications/Docker.app/Contents/Resources/bin/docker` or export it once per session.
-
-### Expired AWS session
-
-`SignatureDoesNotMatch` on ECR/S3/SSM → refresh Klam credentials; do not retry blindly ten times.
-
-### Uncommitted local changes
-
-Deploy builds from the **working tree** (`docker build` copies the repo). If `git status` is dirty, the image matches the workspace, not necessarily `main`. Call this out in the summary.
-
-### GitHub Actions CI deploy
-
-Workflow: `.github/workflows/deploy-mvp.yml` (push to `main`, `workflow_dispatch`).
-
-As of manual-deploy practice, CI may fail with **OIDC / `AWS_DEPLOY_ROLE_ARN` not configured** (`Could not load credentials from any providers`). Until that secret exists, **manual deploy is the supported path** for this sandbox.
-
-### API testing against hosted KG
-
-Org-scoped routes often need:
-
-```bash
-curl -sS -H "X-Pim-Org: emc-sandbox" "https://d1ygncl0yqo6sv.cloudfront.net/api/..."
-```
-
-The knowledge graph on this host is EMC-seeded; PIM-specific queries may return unrelated nodes — that is data, not a failed deploy.
+An SSM parameter update still requires explicit deployment authorization. Restart the one systemd
+service so `fetch-secrets.sh` reloads `/pim/*`, then verify health and `started_at`. Do not restart
+during an offline cutover, restore, or retention/erasure operation.
 
 ## Rollback
 
-ECR retains recent tags. Redeploy a previous tag:
-
-```bash
-PREV_TAG=manual-20260603T233840Z-c9dde2b   # example
-
-aws ssm send-command --region "$AWS_REGION" --instance-ids "$INSTANCE" \
-  --document-name AWS-RunShellScript \
-  --parameters "commands=[
-    \"docker pull ${ECR}:${PREV_TAG}\",
-    \"docker tag ${ECR}:${PREV_TAG} ${ECR}:latest\",
-    \"systemctl restart pim-server\"
-  ]"
-```
-
-Or push an old digest as `:latest` from a machine that still has the image.
-
-## One-shot script (copy-paste)
-
-Adjust only if stack name or region changes. Run from monorepo root after `aws sts get-caller-identity` succeeds.
-
-```bash
-set -euo pipefail
-export AWS_REGION=us-west-2
-export STACK_NAME=PimEc2Stack-rkhan
-DOCKER="${DOCKER:-/Applications/Docker.app/Contents/Resources/bin/docker}"
-
-SHA=$(git rev-parse --short HEAD)
-TAG="manual-$(date -u +%Y%m%dT%H%M%SZ)-${SHA}"
-
-ECR=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`EcrRepoUri`].OutputValue' --output text)
-UI_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`UiBucketName`].OutputValue' --output text)
-DIST_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`DistributionId`].OutputValue' --output text)
-ASG=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs[?OutputKey==`AutoScalingGroupName`].OutputValue' --output text)
-INSTANCE=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$ASG" --region "$AWS_REGION" \
-  --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId | [0]' --output text)
-
-echo "Deploying ${TAG} to instance ${INSTANCE}"
-
-aws ecr get-login-password --region "$AWS_REGION" | \
-  "$DOCKER" login --username AWS --password-stdin "${ECR%%/*}"
-"$DOCKER" build -f packages/server/Dockerfile -t "${ECR}:${TAG}" -t "${ECR}:latest" .
-"$DOCKER" push "${ECR}:${TAG}"
-"$DOCKER" push "${ECR}:latest"
-
-CMD_ID=$(aws ssm send-command --region "$AWS_REGION" --instance-ids "$INSTANCE" \
-  --document-name AWS-RunShellScript \
-  --parameters "commands=[\"aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR%%/*}\",\"docker pull ${ECR}:latest\",\"systemctl restart pim-server\",\"sleep 3\",\"systemctl is-active pim-server\"]" \
-  --query Command.CommandId --output text)
-
-for _ in $(seq 1 12); do
-  STATUS=$(aws ssm get-command-invocation --region "$AWS_REGION" \
-    --command-id "$CMD_ID" --instance-id "$INSTANCE" --query Status --output text 2>/dev/null || true)
-  [[ "$STATUS" == "Success" || "$STATUS" == "Failed" ]] && break
-  sleep 5
-done
-aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$CMD_ID" \
-  --instance-id "$INSTANCE" --query '[Status,StandardOutputContent]' --output text
-
-pnpm --filter @pim/ui build
-aws s3 sync packages/ui/dist "s3://${UI_BUCKET}/" --delete --region "$AWS_REGION"
-aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths "/*"
-
-curl -sS "https://d1ygncl0yqo6sv.cloudfront.net/api/health"
-echo ""
-echo "Done: ${TAG}"
-```
-
-## Agent response template
-
-After a successful deploy, report briefly:
-
-- **Commit**: `<sha>` — `<subject>`
-- **Image tag**: `manual-...-<sha>` (and digest if available)
-- **Health**: `started_at`, `active_pods`
-- **UI**: S3 sync + CloudFront invalidation id
-- **Caveats**: dirty tree, CI still broken, invalidation in progress
+Use a previously reviewed immutable image digest and preserve the current terminal cutover state.
+Before deploying it, verify that the old image supports the current database migrations and
+canonical authority. Never lower `MemoryCutoverComplete`, serve a pre-cutover database, or delete
+audit rows to make an older image start.
 
 ## Related docs
 
-- [DEPLOY.md](./DEPLOY.md) — CDK first deploy, secrets, teardown, naming
-- [DEPLOYMENT_CHECKLIST.md](./DEPLOYMENT_CHECKLIST.md) — pre/post deploy checklist
-- [POD_AGENT_PROTOCOL.md](./POD_AGENT_PROTOCOL.md) — PIM context/reporting for pod work (not required to run deploy)
-- `.github/workflows/deploy-mvp.yml` — automated deploy definition
+- [DEPLOY.md](./DEPLOY.md) — architecture, first-time setup, invariants, and rollback
+- [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) — state protection and recovery verification
+- [MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md) — canonical-memory incident handling
+- `.github/workflows/deploy-mvp.yml` — executable deployment definition

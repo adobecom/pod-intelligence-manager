@@ -1,5 +1,8 @@
 # Context Search
 
+**Status:** current feature guide. Dated live-result counts below are retained as test evidence,
+not as a production availability guarantee.
+
 Cross-source search across Adobe-internal context (Slack, Fluffyjaws, Jira, Confluence, GitHub, local git), exposed through the PIM backend and callable from Claude Desktop, Claude Code, the PIM UI, the `pim` CLI, and pod agents mid-debug.
 
 ## What it is
@@ -26,7 +29,7 @@ The summary is a Haiku-generated markdown synthesis with inline citations; the r
 
 Four decisions shaped the design:
 
-1. **Server-side fan-out, not a client skill.** MCP tools cannot invoke other MCPs on the client, so the only way one tool call can return unified results in **both** Claude Desktop and Claude Code is for the fan-out to happen on the PIM backend. The same code path works for the eventual hosted deployment — only credentials swap (env tokens → AWS Secrets Manager / per-user OAuth via IMS).
+1. **Server-side fan-out, not a client skill.** MCP tools cannot invoke other MCPs on the client, so the only way one tool call can return unified results in **both** Claude Desktop and Claude Code is for the fan-out to happen on the PIM backend. Hosted deployments supply the same integration credentials through the server's managed configuration.
 2. **Both humans and agents invoke it.** One endpoint, three triggers: the CLI and UI for on-demand human queries, the `context_search` MCP tool for Claude Desktop / Code, and `get_agent_session_context` (the pod-agent protocol pull step) for agents at session start *and* mid-debug.
 3. **Synthesized markdown + raw hits.** The synthesis goes through Haiku (cheap, ~$0.001/query) and is cached to disk; the raw hits travel alongside so the caller can drill down without a second round-trip. Both formats survive the cache.
 4. **Pod-agnostic.** `pod_id` is optional and only used to bias local-git search and ranking. A query without a pod works fine — the MCP tool, CLI, and UI all support headless use outside a pod context.
@@ -209,7 +212,7 @@ await client.pullSessionContext({ externalQuery: "checkout" });
 
 ## Security
 
-Three checkpoints analogous to the ingestion Lambda's three-checkpoint secret model (SPEC §5.4):
+Three checkpoints mirror the repository's established fetch, process, and response secret controls:
 
 1. **Post-fetch redaction** — every hit's `title` and `snippet` passes through `redactSecrets()` in `packages/server/src/services/secret-scan.ts`. AWS keys, JWTs, connection strings, PEM keys, and `password|token|api_key = "…"` patterns are replaced with `[REDACTED:Name]`.
 2. **Synthesis prompt guardrail** — the Haiku system prompt explicitly instructs the model to summarize the presence of a secret without quoting the value.
@@ -219,7 +222,7 @@ Cache files on disk contain only redacted content.
 
 ## Caching
 
-- **Location:** `.data/context-search-cache/<sha256>.json` under the server's cwd (same pattern as knowledge-graph storage; one-line swap to S3 for hosted deployment).
+- **Location:** `.data/context-search-cache/<sha256>.json` under the server's working directory. On the hosted EC2 deployment, `.data` resolves onto the persistent `/data` EBS volume.
 - **Key:** `sha256(JSON.stringify({ query: lowercased/trimmed, sources: sorted, time_window_days, max_hits_per_source, synthesize, pod_id }))`.
 - **TTL:** `CONTEXT_SEARCH_CACHE_TTL_SEC` (default `3600` = 1 hour). Cache files older than TTL are ignored on read; the orchestrator overwrites them on the next fresh query.
 - **Bypass:** `use_cache: false` in the request body (CLI: `--no-cache`).

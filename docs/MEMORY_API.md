@@ -1,112 +1,171 @@
-# PIM memory API
+# PIM canonical memory API
 
-PIM exposes a strict, versioned memory surface at `/api/v1/memory`. The PIM-side
-implementation for Slices 0–6 and the lossless offline SQLite cutover path in
-Slice 7 is complete. Joint Fiesta rollout evidence and the production cutover
-execution remain separate operational gates.
+**Status:** current implemented surface as of 2026-08-13
 
-## Implemented surface
+PIM exposes a v1 compatibility API and a strict v2 API over one canonical SQLite memory estate.
+HTTP v2 is the source-of-truth transport for new consumers. The restricted MCP companion delegates
+to the same services and does not own separate storage, ranking, authorization, or lifecycle rules.
+
+Generated JSON Schemas in `packages/shared/contracts` and the parsers/types generated from them are
+the wire-contract source of truth.
+
+## Supported planes
+
+| Plane | Status | Exact resource |
+| --- | --- | --- |
+| `codebase` | available | canonical GitHub repository plus code applicability |
+| `harness` | available | canonical harness, principal, and configuration applicability |
+
+Content and organization planes are not implemented in v2. Unknown/unavailable planes fail closed
+and do not fall back to codebase, harness, v1, or the legacy graph.
+
+## V2 HTTP endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v2/memory/capabilities` | Contract revision, planes, operations, schemas, limits, and MCP surface |
+| `GET` | `/api/v2/memory/binding` | Non-secret effective binding for the authenticated service principal |
+| `GET` | `/api/v2/memory/readiness` | Bounded reverification/worker readiness for one authorized resource |
+| `POST` | `/api/v2/memory/search` | Codebase or harness search; creates/replays one immutable retrieval pack |
+| `GET` | `/api/v2/memory/records/:record_id?version=N` | One exact immutable record version |
+| `GET` | `/api/v2/memory/records/:record_id/history` | Authorized immutable lifecycle history |
+| `GET` | `/api/v2/memory/packs/:pack_id` | One exact immutable retrieval pack |
+| `PUT` | `/api/v2/memory/run-receipts/:producer_run_id` | Idempotent receipt and bounded candidate submission |
+| `POST` | `/api/v2/memory/feedback` | Idempotent codebase pack-bound feedback |
+| `GET` | `/api/v2/memory/candidates/:candidate_id` | Bound codebase or producer-bound harness candidate status |
+| `POST` | `/api/v2/memory/candidates/:candidate_id/decisions` | Authorized HTTP review/control-plane decision |
+
+Receipt and feedback writes require an `Idempotency-Key`. The same identity and canonical digest
+replay the stored result; changed content conflicts. Search request identities have the same
+immutable replay rule for packs.
+
+Private responses use `Cache-Control: private, no-store` and `Vary: Authorization` where relevant.
+Errors use the generated `pim.error.v2` envelope and avoid enumerating resources across an
+authorization boundary.
+
+## V1 compatibility endpoints
+
+The supported v1 surface remains available for migrated and existing callers:
 
 - `GET /api/v1/memory/capabilities`
 - `POST /api/v1/memory/search`
-- `GET /api/v1/memory/records/:record_id?version=:record_version`
+- `GET /api/v1/memory/records/:record_id`
+- `GET /api/v1/memory/records/:record_id/history`
 - `PUT /api/v1/memory/run-receipts/:producer_run_id`
 - `GET /api/v1/memory/candidates/:candidate_id`
 - `POST /api/v1/memory/attestations/github`
 - `POST /api/v1/memory/feedback`
 - `POST /api/v1/memory/candidates/:candidate_id/decisions`
-- `GET|PUT /api/v1/memory/projects/:project_id/prompt-policy`
-- `POST /api/v1/memory/projects/:project_id/release-gates/evaluate`
 - `POST /api/v1/memory/harness/search`
 
-Capabilities advertise the codebase and harness planes, `current` temporal mode, GitHub and immutable-HTTPS evidence resolution, and verified-merge and authorized-review activation. Organization search, `as_of`, CI attestation ingress, and harness record detail are not implemented.
+The former prompt-policy, release-gate, benchmark, canary, and kill-switch endpoints were removed
+during the Memory v2 simplification. Do not build new consumers against those deleted paths or
+retain them in operational runbooks.
 
-Codebase and harness retrieval are intentionally separate contracts. Harness results are permanent shadow data: they are never prompt eligible and always return `shadow_only: true`, `routing_influence: false`, and `evaluation_arm: "shadow"`.
+## Authorization model
 
-`PimMemoryClient` exposes strict wrappers for capabilities, codebase and harness search, immutable record detail, receipts, candidate status and decisions, feedback, prompt-policy reads and updates, and release-gate evaluation.
+Memory calls use a PIM service token. Server-side token rows bind the credential to an organization
+and optional project/pod, permitted scopes, and exact Memory v2 resources/operations.
 
-## Authorization boundary
+Common v2 scopes include:
 
-Organization and project are derived from the authenticated token. A request cannot widen either boundary.
+| Scope | Grants within the exact binding |
+| --- | --- |
+| `memory:search` | codebase search, detail/history, pack, and readiness |
+| `memory:receipt:write` | codebase receipt/candidate submission |
+| `memory:candidate:read` | codebase candidate status |
+| `memory:attest` | separately bounded codebase attestation ingress |
+| `memory:feedback:write` | codebase feedback |
+| `memory:review` | codebase review/activation decisions |
+| `memory:harness:search` | harness search, detail/history, pack, and readiness |
+| `memory:harness:receipt:write` | harness receipt/candidate submission |
+| `memory:harness:candidate:read` | harness candidate status |
+| `memory:harness:review` | harness review/activation decisions |
 
-| Scope | Binding and operation |
-|---|---|
-| `memory:search` | Exact project/repository-bound codebase search and immutable detail |
-| `memory:receipt:write` | Exact project/repository-bound codebase receipts |
-| `memory:candidate:read` | Bound candidate status lookup |
-| `memory:attest` | Separately credentialed, repository-bound GitHub attestations |
-| `memory:feedback:write` | Bound append-only feedback |
-| `memory:review` | Repository-bound codebase review |
-| `memory:admin` | Bound prompt-policy and release-gate administration |
-| `memory:harness:receipt:write` | Exact project/principal/harness-bound receipts |
-| `memory:harness:review` | Exact project/principal/harness-bound review |
-| `memory:harness:search` | Exact project/principal/harness-bound shadow retrieval |
+The token is the upper bound. Organization/project headers, request bodies, path IDs, repository
+names, harness IDs, and resource selectors are never accepted as independent authority.
 
-Codebase calls resolve only canonical `github.com/owner/repository` identities from immutable service-token bindings. Local paths, leaf names, raw remotes, fuzzy matches, and legacy unbound memory tokens fail closed. Harness bindings cannot substitute for repository bindings, or vice versa.
+Codebase resolution accepts exact canonical repository identities. Local paths, leaf names, branch
+names, fuzzy remotes, and unbound legacy tokens cannot substitute. Harness and codebase bindings
+cannot substitute for one another.
 
-## Lifecycle and exposure
+## Search and immutable packs
 
-Receipts, candidates, evidence, transitions, feedback, provider events, and outbox work are durable. Candidates remain outside canonical search. Codebase activation requires the shared structural validator plus independently resolved evidence; verified successors preserve both histories, and reverts remove records from current retrieval without deleting audit state.
+Search applies authorization, exact resource applicability, lifecycle, trust/reverification, and
+contract compatibility before ranking. Results include bounded match reasons, token counts,
+omission counts, and a `retrieval_pack_id`.
 
-GitHub automatic activation is fail closed unless `MEMORY_ACTIVATION_REPOSITORIES` explicitly includes the canonical repository. Provider workers recheck that allowlist at processing time.
+The pack is the immutable record of what was returned. Reading it later reauthorizes the caller;
+possessing a pack or record ID is not authority. Record and pack resources are non-enumerable.
 
-Harness code-change lessons also require `MEMORY_FIESTA_REPOSITORY_ID` to name
-the exact canonical Fiesta repository. Authorized review can activate one only
-when an independently resolved GitHub merge for that repository has the same
-manifest and authoritative final-diff digest.
+## Receipts, candidates, and review
 
-Codebase prompt exposure requires all of the following: `PIM_MEMORY_PROMPT_EXPOSURE_ENABLED=1`, an enabled project policy, kill switch off, a passing pre-canary gate, exact repository and kind allowlists, deterministic canary assignment, and item/token caps. Automatic verified-merge prompt eligibility additionally requires a passing expansion gate. Critical leakage, evidence-bypass, policy, or harm incidents disable automatic activation and trip the project kill switch.
+Producers submit a typed receipt with a stable producer run, scope snapshot, resource binding,
+artifacts/evidence, and bounded candidate proposals. PIM validates the entire receipt before any
+write and commits receipt/candidate/origin companions atomically.
 
-The release-gate contract records PIM-outage blocked-execution and lost-receipt measurements. End-to-end Fiesta outage injection and queued-receipt proof remain part of the joint F5/F6 rollout gate; this repository does not synthesize that external evidence.
+Candidates do not become active merely because a model proposed them. Codebase evidence is bound
+to the exact repository and provider facts. Harness evidence preserves root runtime origins,
+derivation, producer identity, run identity, and configuration scope. Authorized HTTP reviewers may
+approve/reject candidates when structural and evidence gates pass.
 
-## Storage and operations
+## Restricted MCP companion
 
-Migrations `001` through `011` are checksummed and immutable; the next schema
-change must be `012`. Canonical records, versions, packs, candidates, evidence,
-transitions, feedback, provider inbox, outbox state, legacy import ledger, and
-terminal authority state use the transactional SQLite model. Migration `008`
-preserves populated codebase rows while adding harness scope and verifies all
-foreign keys before commit. Migration `009` adds the lossless import/reconciliation
-ledger and monotonic authority transitions. Migration `010` adds append-only
-retention policies, legal holds, erasure audit events, and minimum tombstones.
-Migration `011` preserves the authoritative final-diff digest on independently
-verified GitHub attestations for Fiesta code-change lessons.
-Retention and tenant erasure are offline-only explicit plan/apply operations;
-follow [MEMORY_RETENTION_ERASURE.md](./MEMORY_RETENTION_ERASURE.md).
+`POST /mcp/memory` implements stateless MCP protocol version `2026-07-28`. It requires the private
+PIM service-token profile and modern protocol headers.
 
-To seed a codebase fixture after registering its project repository:
+Its complete tool set is:
+
+| Tool | Behavior |
+| --- | --- |
+| `pim_memory_capabilities` | Auth-filtered v2 capability discovery |
+| `pim_memory_binding` | Non-secret effective binding |
+| `pim_code_memory_search` | Exact codebase search |
+| `pim_harness_memory_search` | Exact harness search |
+| `pim_run_receipt_submit` | Codebase or harness receipt submission |
+| `pim_feedback_submit` | Supported pack-bound feedback |
+| `pim_candidate_status` | Bound candidate status |
+| `pim_memory_readiness` | Resource readiness |
+
+Resource templates:
+
+- `pim-memory://records/{record_id}/versions/{version}`
+- `pim-memory://packs/{pack_id}`
+
+There is no list operation for records or packs. Discovery is recomputed for the credential.
+Candidate review/activation, token/resource administration, and runtime-attestation control are
+excluded from MCP.
+
+See [MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md](./MCP_A_PRIVATE_PIM_SERVICE_TOKEN_PROFILE.md).
+Transport parity is enforced by the `memory-v2-code-*-parity`, `memory-mcp`, and
+`memory-v2-conformance-live` server test suites rather than a separately maintained report.
+
+## SDK
+
+`PimMemoryV2Client` in `@pim/sdk` strictly parses requests and responses and exposes:
+
+- `capabilities()` and `binding()`;
+- `readiness()`;
+- `searchCode()` and `searchHarness()`;
+- `getRecord()`, `getRecordHistory()`, and `getPack()`;
+- `putRunReceipt()` and `submitFeedback()`;
+- `getCandidate()` and `getHarnessCandidate()`; and
+- `decideCandidate()` for HTTP control-plane review.
+
+Contract changes must start at the shared schema/generator roots. Verify them with:
 
 ```sh
-PIM_MEMORY_SEED_ORG_ID=org-id \
-PIM_MEMORY_SEED_PROJECT_ID=project-id \
-PIM_MEMORY_SEED_REPOSITORY_ID=github.com/owner/repository \
-PIM_MEMORY_SEED_DISPLAY_SLUG=Owner/Repository \
-PIM_MEMORY_SEED_PROVIDER_REPOSITORY_ID=immutable-provider-id \
-pnpm --filter @pim/server seed-memory
+pnpm --filter @pim/shared contracts:check
+pnpm --filter @pim/sdk test
+pnpm --filter @pim/mcp-server test
 ```
 
-The Slice 7 inventory and cutover tools require explicit paths. Inventory is
-read-only:
+## Availability and compatibility
 
-```sh
-pnpm --filter @pim/server inventory-legacy-graphs -- \
-  --db /absolute/path/to/pim.db \
-  --graph-root /absolute/path/to/knowledge-graph
-```
+At startup, PIM runs v2 migrations, resource/facet reconciliation, reverification admission, and
+validation. If that chain fails, Memory v2 and `/mcp/memory` return a bounded retryable unavailable
+error while unrelated PIM routes remain available.
 
-The inventory opens a checkpointed SQLite database read-only/immutable, refuses a nonempty WAL, and reports hashes, divergent layouts, orphan references, and pointer classifications without initializing or mutating either authority.
-
-The offline cutover applies migration `009`, generates a quarantine-by-default
-resolution template, verifies every source hash, plans without writes, imports in
-one immediate transaction, reconciles the immutable ledger, and permanently
-freezes legacy writers. Follow [MEMORY_OFFLINE_CUTOVER.md](./MEMORY_OFFLINE_CUTOVER.md);
-do not invoke `apply` outside that stopped-service procedure.
-
-Legacy items that cannot activate safely are preserved as parked candidates with
-`legacy_reingestion_required`; they must re-enter through the normal typed
-receipt/evidence path and never receive an automatic migration outbox job.
-
-PostgreSQL/pgvector remains conditional on measured value justifying it; SQLite is
-the supported canonical store for this cutover. No destructive legacy retention or
-deletion runs as part of migration. Backup/restore policy and tested recovery are
-documented in [BACKUP_RESTORE.md](./BACKUP_RESTORE.md).
+V1 and v2 share canonical records; v2 is not a disconnected database. Safely representable v1
+records receive v2 facets. Ambiguous/unmapped legacy data remains preserved but cannot be guessed
+into the v2 serving set.

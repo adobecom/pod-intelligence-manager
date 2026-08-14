@@ -4,7 +4,7 @@ Get the CLI and MCP server running in under 10 minutes.
 
 ## Prerequisites
 
-- Node.js 18+ (Node 24+ if you clone and build this monorepo)
+- Node.js 24+
 - Access to Adobe Artifactory (`artifactory-uw2.adobeitc.com`)
 
 ## Step 1 — Authenticate with Artifactory
@@ -87,4 +87,4 @@ Follow the prompts to link the repo to a pod. This writes `.pim.json` (org slug,
 | `E404` on `npm install -g @pim/mcp-server` | Check `~/.npmrc` — `@pim:registry` must point to `npm-adobe-pim-release`, not `npm-adobe-release` |
 | `Cannot find module` on Claude Desktop start | The `args` path in `claude_desktop_config.json` is wrong — re-run `npm root -g` and fix the path |
 | Org-scoped MCP tools fail / 401 on org routes | Run `pim login`; set `PIM_ORG_SLUG` in Desktop `env`, run `pim init` in a repo, or use MCP `set_active_org` |
-| `pim` command not found after install | Add npm global bin to PATH: `export PATH="$(npm bin -g):$PATH"` |
+| `pim` command not found after install | Add npm's global bin directory to PATH: `export PATH="$(npm prefix -g)/bin:$PATH"` |

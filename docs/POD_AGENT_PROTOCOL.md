@@ -75,7 +75,7 @@ Enrichment is non-blocking — the HTTP response returns before it runs, and if 
 | `PIM_SERVER_URL` | PIM API base (hosted: `https://d1ygncl0yqo6sv.cloudfront.net`; local dev: `http://localhost:4000`) |
 | `PIM_POD_ID` | Pod id for CLI/hooks |
 | `PIM_AGENT_ID` | Stable id for this agent or developer |
-| `PIM_SCOPE` | One of `frontend`, `backend`, `design`, `qa`, `infra`, `pm` |
+| `PIM_SCOPE` | An org-defined scope id from `get_org_config` / `GET /api/org/config` |
 
 See `.env.example` in the repo root.
 

@@ -32,7 +32,9 @@ import {
 } from "../memory-v2-trust.js";
 
 const LAST_VERIFIED_AT = "2026-08-01T00:00:00.000Z";
-const ADMISSION_AT = "2026-08-12T00:00:00.000Z";
+// createMemoryTestContext seeds additional eligible trust rows at the real wall clock. Keep the
+// simulated admission after those rows instead of using a fixed date that eventually becomes past.
+const ADMISSION_AT = new Date(Date.now() + 86_400_000).toISOString();
 const EVIDENCE_DIGEST = canonicalJsonSha256({ fixture: "reverification-admission" });
 const POLICY_ENV_NAMES = [
   "MEMORY_V2_REVERIFICATION_ENABLED",

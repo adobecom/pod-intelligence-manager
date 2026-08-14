@@ -10,7 +10,8 @@
     "pim": "tsx packages/cli/src/index.ts",
     "bootstrap": "pnpm install && pnpm exec turbo build --filter=@pim/mcp-server --filter=ado-pim && cd packages/cli && pnpm link --global && node ../../scripts/bootstrap-reminder.mjs",
     "install-cli": "pnpm bootstrap",
-    "check:npmrc": "node scripts/ensure-npmrc-no-secrets.mjs"
+    "check:npmrc": "node scripts/ensure-npmrc-no-secrets.mjs",
+    "docs:check": "node scripts/check-docs.mjs"
   },
   "engines": {
     "node": ">=24"

@@ -7,8 +7,9 @@
  * SSM Parameter Store at /pim/*. Portable core backups mirror to S3 via a cron;
  * AWS Backup takes incremental recovery points of the complete /data volume.
  *
- * Not multi-AZ, not zero-downtime, not IMS-authed. Chosen to ship fast; see
- * pim-stack.ts for the eventual Lambda+DynamoDB design.
+ * Not multi-AZ or zero-downtime. The server supports trust and IMS auth modes;
+ * hosted auth configuration is supplied through SSM. See pim-stack.ts for the
+ * historical Lambda/DynamoDB target design.
  */
 
 import * as cdk from "aws-cdk-lib";
@@ -393,7 +394,7 @@ export class PimEc2Stack extends cdk.Stack {
 
     // Pin the server image by digest for deterministic rolls/rollback when provided
     // (`-c serverImageDigest=sha256:...`); otherwise track :latest. Build+push
-    // first, capture the digest, then deploy pinned. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+    // first, capture the digest, then deploy pinned. See docs/DEPLOY.md.
     const serverImageDigest = this.node.tryGetContext("serverImageDigest") as
       | string
       | undefined;
@@ -560,7 +561,7 @@ export class PimEc2Stack extends cdk.Stack {
       // MachineImage.lookup, which re-resolves the newest match at synth time and is
       // nondeterministic). Bump deliberately after validating a newer IF release.
       // Only us-west-2 is mapped; add the prod region's shared AMI id before
-      // deploying the production stack there. See docs/EDR_SPLUNK_MIGRATION_PLAN.md.
+      // deploying the production stack there. See docs/EDR_INSTALL_RUNBOOK.md.
       machineImage: ec2.MachineImage.genericLinux({
         "us-west-2": "ami-06afdfc08e9b14b7e", // IF_Amazon-Linux-2023_aws_2.0.0, Falcon 7.23
       }),

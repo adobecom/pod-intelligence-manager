@@ -1,127 +1,186 @@
-# Architecture Overview
+# Architecture overview
 
-> Repository-bound durable memory uses the strict v1 surface documented in [MEMORY_API.md](./MEMORY_API.md). The legacy organization knowledge graph is not a repository- or plane-authorized substitute for that API.
+**Status:** current implementation as of 2026-08-13
 
-A quick reference for the PIM system. For full design rationale and resolved decisions, see [../SPEC.md](../SPEC.md).
+PIM is a modular monolith: one Fastify process owns the HTTP/WebSocket surfaces, orchestration,
+search, and background workers, while SQLite is the transactional source of truth. The React UI,
+CLI, SDK, and MCP adapters are clients of that server.
 
-## Intended Monorepo Layout
+## Runtime shape
 
-```
-pim/
-├── packages/
-│   ├── shared/        # Schemas, types, constants — single source of truth
-│   ├── sdk/           # @pim/sdk (agent-facing client)
-│   ├── cli/           # npx pim (tunnel + pod management)
-│   ├── ui/            # React Vite SPA + Adobe Spectrum 2
-│   └── infra/         # AWS CDK stack
-├── lambdas/
-│   ├── ingestion/     # Context intake + secret scanning
-│   ├── master/        # PIM orchestrator router
-│   ├── agents/
-│   │   ├── merge/
-│   │   ├── conflict/
-│   │   ├── summary/
-│   │   ├── cross-pod/
-│   │   └── knowledge-extraction/
-│   ├── tunnel-broker/
-│   ├── notifications/
-│   └── escalation/
-├── prompts/           # Version-controlled Bedrock/Claude system prompts
-├── turbo.json
-└── pnpm-workspace.yaml
+```text
+Browser / CLI / SDK / interactive MCP / restricted Memory MCP
+                              |
+                              v
+                    Fastify API (:4000)
+                    + HTTP + WebSocket
+                    + auth and org context
+                    + pod/project workflows
+                    + search and skill catalog
+                    + canonical memory
+                    + background workers
+                              |
+                    +---------+----------+
+                    |                    |
+                    v                    v
+             SQLite /data          external sources
+             (single writer)       Bedrock, GitHub,
+                                   Jira, Confluence,
+                                   Slack, S3
 ```
 
-## Key Architectural Decisions
+Local development uses `.data/pim.db` and `.data/knowledge-graph`. The hosted MVP uses an attached
+EBS volume mounted at `/data`.
 
-### PIM orchestrator
-- Lightweight Lambda orchestrator — deterministic routing only, no large context window
-- Does NOT do feature work; delegates reasoning to Committee agents
-- Enforces role-based permissions for spec changes and conflict resolutions
+## Monorepo responsibilities
 
-### Committee Agents (Claude API — Anthropic SDK)
-- **Merge Agent** — Haiku model; handles additive, non-overlapping updates without LLM when possible
-- **Conflict Agent** — Sonnet model; detects contradictions, creates conflict records; queries knowledge graph for historical precedents
-- **Summary Agent** — Renders living doc `.md` from DB state; runs periodic lint pass every 2 hours; includes "Knowledge Context" section from org memory
-- **Cross-Pod Agent** — Inter-pod advisory (read-only, non-blocking); enriches advisories with historical learnings from the knowledge graph
-- **Knowledge Extraction Agent** — Distills learnings when a pod is archived; deterministic base (substantive decisions and resolved conflicts only — blockers are not extracted, and decisions with `details < 30 chars` are skipped) + optional LLM-enhanced extraction (Sonnet) with cross-graph dedup. Domains come from the source row's authoritative `scope`, not keyword inference. Outputs `EnhancedPodLearning[]` with confidence levels and domain tags.
+| Package | Responsibility |
+| --- | --- |
+| `@pim/server` | Fastify routes, middleware, SQLite, orchestration, workers, search, memory, and connectors |
+| `@pim/ui` | React/Vite/Spectrum 2 SPA |
+| `@pim/shared` | Shared domain types and generated Memory v1/v2 contracts |
+| `@pim/sdk` | Strict client libraries for PIM consumers |
+| `ado-pim` | `pim` CLI and repository/agent integration |
+| `@pim/mcp-server` | Interactive MCP server plus restricted-memory MCP library |
+| `@pim/infra` | AWS CDK stacks and infrastructure tests |
+| `@pim/eval` | Evaluation protocols, runners, fixtures, and audit tooling |
 
-### Living Doc
-- **Read-only output** assembled from DynamoDB state — never edited directly
-- Humans/agents influence it by submitting context updates to PIM
-- Conflict Pressure score (0.0–1.0) gates merge behavior:
-  - 0.0–0.3: Auto-merge freely
-  - 0.3–0.6: Merge with disclaimers
-  - 0.6–0.8: Hold contested areas
-  - 0.8–1.0: Intake queued (validation + secret scan still run; PIM orchestration paused until conflicts resolve; backlog alerts fire via Slack at threshold)
+## Request boundary
 
-### Context Update Schema
-Every agent contribution must include: `agent_id`, `timestamp`, `pod_id`, `type` (progress|blocker|spec_change|question|decision), `scope` (frontend|backend|design|qa|infra|pm), `summary`, `details`, `artifacts`, `status`, `blocks`, `blocked_by`, `needs_input_from`.
+Requests pass through global error handling, rate limiting, authentication, organization context,
+and route-specific authorization.
 
-### Tunneling
-- Outbound WebSocket from CLI to API Gateway (NAT-friendly, no port forwarding)
-- Tunnel health: heartbeat every 60s; idle after 20min of no traffic (yellow in UI); only disconnected on heartbeat failure — do NOT auto-disconnect idle tunnels
-- Stable URLs: `{pod}-{dev}.pim.{org}.com` via Route 53 wildcard + ACM cert
+- `AUTH_MODE=trust` is the local default and creates a synthetic development identity.
+- `AUTH_MODE=ims` verifies Adobe IMS JWTs and applies organization membership/role checks.
+- Service tokens use the `pim_svc_...` format and carry bounded org/project/pod scopes plus exact
+  Memory v2 resource bindings where applicable.
+- Memory v2 derives its effective principal and resource authority from the token. Caller-provided
+  selectors can narrow the request but cannot widen the binding.
+- `/mcp` and `/mcp/memory` perform stricter service-token authentication than ordinary user routes.
 
-### Security (Three Checkpoints)
-1. Ingestion Lambda: deterministic pattern scan for secrets (AWS keys, JWTs, connection strings)
-2. LLM system prompts: explicit instruction to never output secrets
-3. Summary Agent: pattern scan before every S3 write
+The UI and CLI discover server authentication configuration through `/api/health` and
+`/api/cli-config`.
 
-### Knowledge Graph and Canonical Memory
-- **Purpose:** The legacy knowledge graph remains the token-budgeted read source for Pod session context. Once legacy authority is frozen it is read-only; new durable learnings enter canonical memory as review-gated candidates instead of mutating the graph.
-- **Storage:** S3 for full graph snapshots (versioned JSON) + DynamoDB for indexed queries. Local dev uses filesystem at `.data/knowledge-graph/`. The storage interface is 3 functions — swapping to S3 is a single-file change.
-- **Graph structure:** Nodes (decision, pattern, anti_pattern, resolved_conflict, scope_insight) + Edges (relates_to, supersedes, contradicts, builds_on, resolved_by) + Communities (label propagation clustering) + Hubs (high-degree nodes).
-- **Confidence levels:** `extracted` (deterministic from DB) vs `inferred` (LLM-generated, score 0.4–0.85). Deterministic patterns are scored by a Haiku **durability classifier** at archival (high/medium/low/junk → 0.85/0.7/0.5/0.3); resolved conflicts keep 0.9. Offline fallback: 0.7. Ad-hoc submissions default to 0.7. A per-pod ceiling of 20 learnings (sorted by `confidence_score` DESC) caps pathological pods. Inspired by graphify's approach.
-- **Token-budgeted queries:** Agents call `getRelevantLearnings(2000)` — server filters by domain, ranks by relevance, truncates to budget. Never dumps the full graph.
-- **Authority-aware producer paths:**
-  1. **Pod archival** — `POST /api/pods/:podId/archive` persists the archive and runs `extractKnowledgeEnhanced()` in the background. Under legacy authority the existing graph ingestion remains unchanged. Under frozen authority, selected learnings are submitted through the in-process canonical v1 receipt service as internal `org` candidates. `/archive/status` reports additive selected/dropped counters and the `memory_candidates_submitted` event means pending validation/review, not active memory.
-  2. **Ad-hoc submission** — `POST /api/knowledge/nodes` (including SDK/MCP callers) uses legacy embedding/dedup only before cutover. Under frozen authority it returns `202 candidate_submitted` with the canonical receipt/candidate and selection counters.
-  3. **Agent run/session rollups** — use the same canonical intake after freeze and do not create or auto-promote rows in the legacy `memory_candidates` table.
-  4. **Project evidence** — searchable project evidence remains available, while legacy project candidate creation and project/agent promotion are retired under frozen authority.
-  5. **Scheduled synthesis and development seeding** — explicitly no-op under frozen authority. Legacy graph maintenance, curation, telemetry persistence, and pruning are likewise fenced/no-op.
-- **Canonical intake:** `packages/server/src/services/canonical-legacy-intake.ts` maps frozen producer output deterministically, preserves source material in bounded candidate extensions, uses generic immutable `pim://memory-source/...` evidence, and submits one candidate per canonical v1 receipt. A real project is used when present; otherwise one stable reserved system project is created lazily per organization. Internal `org` candidates remain pending policy-owner validation/review and cannot auto-activate. Public v2 remains codebase/harness only.
-- **Legacy auto-pruning:** Before cutover, `pruneStaleNodes` rescored/tiered old graph nodes. It is disabled after the freeze along with all graph mutation.
-- **Storage hygiene:** Local `graph-v*.json` capped to the most recent 10 snapshots; S3 noncurrent versions expire after 30 days.
-- **Human curation:** UI graph curation applies only while legacy authority is writable; canonical candidates use the canonical validation/review lifecycle.
-- **Key files:** `packages/server/src/services/canonical-legacy-intake.ts` (frozen-producer intake), `knowledge-graph.ts` (legacy graph core/read path), `memory-receipts.ts` and `memory-candidates.ts` (canonical v1 receipt/candidate lifecycle), `graph-storage.ts` (legacy snapshot storage), and `packages/shared/src/types/graph.ts` (source learning types).
+## Pod and project model
 
-### Cost Optimization
-- Additive updates (~60%) → deterministic merge, no LLM call
-- Routine merges (~30%) → Haiku
-- Conflict analysis (~10%) → Sonnet
-- Knowledge extraction → once per pod lifecycle (Sonnet + Haiku for edges), ~$0.05–0.15
-- Target: ~$5–8 per 5-day pod with 5 agents
+Pods are short-lived coordination units. A context update is validated, scanned for secrets,
+persisted, broadcast over WebSocket, classified, merged or converted into a conflict, and reflected
+in the generated living document. Deterministic processing is preferred; Bedrock augments merge,
+conflict, extraction, and synthesis paths when configured.
 
-## AWS Service Map
+Projects are long-lived context boundaries. They own source configuration and resource bindings,
+can span multiple pods, and support indexed plus separately gated live search over GitHub, Jira,
+Confluence, Slack, local Git, project updates, pod updates, and knowledge-graph evidence.
 
-| Concern | Service |
-|---------|---------|
-| Agent/Human API | API Gateway (REST + WebSocket) |
-| Event routing | EventBridge |
-| Compute | Lambda |
-| AI reasoning | Bedrock (Claude) or Claude API |
-| Living doc storage | S3 (versioned) |
-| Knowledge graph snapshots | S3 (versioned JSON) |
-| Knowledge graph queries | DynamoDB (GSIs on domain, type, confidence) |
-| State & metadata | DynamoDB |
-| Auth | Adobe IMS |
-| DNS | Route 53 |
-| CDN / UI hosting | CloudFront + S3 |
-| Notifications | SNS + SQS |
-| Slack integration | Lambda + Secrets Manager |
-| Infra-as-code | CDK |
-| Observability | CloudWatch + X-Ray |
+The skill catalog is another project/org-scoped subsystem. It synchronizes configured Git sources,
+builds deterministic catalog entries, optionally embeds them, and supports advisory search and
+conflict checks.
 
-## V1 Out of Scope
-- Tunnel preview embedded in PIM UI
-- Auto-recorded visual diffs
-- Side-by-side tunnel comparison
-- State injection into tunneled apps
-- Annotation layer on live preview (interesting, flagged for post-v1)
+## Storage and migrations
 
-## Implementation Milestones (from SPEC.md)
-1. **Days 1–2:** Monorepo scaffold, shared types, CDK, DynamoDB schema, ingestion Lambda, secret scan, PIM orchestrator v0, SDK v0, CLI pod create, IMS auth
-2. **Days 3–4:** Merge/Conflict/Summary agents + Bedrock prompts, lint pass, conflict pressure
-3. **Days 4–6:** React Vite app, Pod Dashboard, Conflict Center, Live Doc View, WebSocket real-time
-4. **Days 6–8:** Slack integration, escalation ladder, Org Dashboard, Cross-Pod Agent, Knowledge Extraction, pod archival
-5. **Days 8–10:** Dogfooding, stress testing, prompt tuning, cost validation
+SQLite uses Node's built-in `node:sqlite` driver. Migrations are ordered and checksummed in
+`packages/server/src/db/migrations.ts`; committed migration SQL is immutable. The current sequence
+runs through migration `018`.
+
+The database contains:
+
+- pod, project, context, conflict, archive, membership, and tunnel state;
+- source evidence and project-search indexes;
+- agent session/run/event/checkpoint state;
+- service-token hashes and bindings;
+- canonical memory records, versions, candidates, receipts, evidence, transitions, feedback,
+  retrieval packs, retention/erasure ledgers, resource facets, runtime origins, and reverification
+  state; and
+- terminal memory-authority transitions and immutable legacy-import ledgers.
+
+SQLite is intentionally single-writer. Do not run multiple server instances against independent
+copies or share one database file across multiple active hosts.
+
+## Canonical memory
+
+The canonical SQL model is the only write and lifecycle authority after the terminal cutover.
+Memory v1 remains a compatibility surface for supported migrated codebase/harness records. Memory
+v2 adds strict generated contracts, exact resource facets, immutable retrieval packs, source-aware
+ledgers, harness-native evidence, and resource readiness.
+
+V2 supports exactly two planes:
+
+| Plane | Resource boundary | Main behavior |
+| --- | --- | --- |
+| `codebase` | exact canonical repository and code revision | search, detail/history, packs, receipts, feedback, candidates, review, reverification |
+| `harness` | exact harness/principal/configuration binding | search, detail/history, packs, receipts with runtime origins, candidates, review, reverification |
+
+There is no fuzzy repository match, unavailable-plane fallback, or implicit cross-plane retrieval.
+Search filters authorization, lifecycle, trust, compatibility, and applicability before ranking.
+Every successful search stores an immutable pack; replaying the same request identity with changed
+content is rejected.
+
+### Memory transports
+
+- **HTTP v2** at `/api/v2/memory/*` is canonical.
+- **Restricted MCP** at `POST /mcp/memory` exposes the same domain behavior through eight bounded
+  tools and two non-enumerable immutable resources.
+- MCP does not expose candidate review/activation, token administration, runtime-attestation
+  adjudication, or record lifecycle administration.
+
+See [MEMORY_API.md](./MEMORY_API.md) for the exact surface.
+
+### Startup and background work
+
+Server startup runs the v2 migration, resource/facet reconciliation, reverification admission, and
+startup validation chain. A failure marks Memory v2 unavailable and makes v2/MCP memory calls
+return a bounded retryable error; unrelated PIM features remain available.
+
+Background memory work includes provider inbox/outbox processing, reconciliation, operational
+metrics, and optional v2 reverification. Reverification is disabled unless
+`MEMORY_V2_REVERIFICATION_ENABLED=1`; enabling it admits validated policies and periodically checks
+GitHub or runtime evidence before records remain influence-eligible.
+
+## Legacy knowledge graph
+
+The JSON organization graph remains useful for bounded pod-context reads and historical recovery.
+Once `memory_authority_transitions.legacy_writes_frozen` is true:
+
+- graph mutation, curation, synthesis, pruning, development seeding, and legacy candidate promotion
+  stay disabled;
+- pod archives, ad-hoc submissions, and agent rollups route selected lessons into canonical
+  review-gated candidates; and
+- SQL triggers plus application guards prevent legacy candidate writers from reactivating.
+
+The graph is not a repository- or harness-authorized substitute for canonical Memory v2.
+
+## WebSocket and tunnels
+
+`/ws` publishes pod events used by the UI. `/ws/tunnel` and `/tunnel/*` implement the development
+preview proxy. The CLI opens an outbound WebSocket to PIM, so a developer does not need inbound
+port forwarding.
+
+## Hosted AWS MVP
+
+`PimEc2Stack` is the current deployment:
+
+- CloudFront serves the S3-hosted SPA and forwards `/api/*`, `/mcp*`, `/ws*`, and `/tunnel/*`;
+- an internet-facing ALB targets an Auto Scaling Group constrained to one active EC2 instance;
+- the server runs as a Docker container under systemd;
+- a dedicated EBS volume stores `/data`;
+- S3 stores portable logical backups and versioned legacy graph objects;
+- AWS Backup protects the full data volume;
+- ECR stores server images, SSM Parameter Store supplies runtime secrets, and CloudWatch/SNS carry
+  logs, metrics, alarms, and backup failures.
+
+This is not a multi-writer, multi-AZ, or zero-downtime architecture.
+
+## Recovery and authority safety
+
+Deployments pin reviewed server images by digest when provided. Once the memory cutover flag is
+raised, infrastructure mounts the legacy graph read-only and requires terminal canonical authority
+at startup. Restoring a pre-cutover database directly into service is forbidden; it must be
+re-cut over in isolation first.
+
+Portable S3 dumps omit rebuildable project-search indexes. A restore validates checksum, gzip,
+SQLite integrity, foreign keys, and non-empty organizations before atomically publishing the
+database, then requests project-search reconstruction. Full EBS recovery points retain the exact
+index.
+
+See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) and
+[MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md).

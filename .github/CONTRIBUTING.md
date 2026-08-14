@@ -4,13 +4,14 @@ Thank you for taking the time to contribute.
 
 ## Before you start
 
-- Check [open issues](../../issues) and [pull requests](../../pulls) to avoid duplicate work.
+- Check [open issues](https://github.com/adobecom/pod-intelligence-manager/issues) and
+  [pull requests](https://github.com/adobecom/pod-intelligence-manager/pulls) to avoid duplicate work.
 - For significant changes, open an issue first to discuss the approach.
 
 ## Development setup
 
 ```bash
-# Prerequisites: Node 24+, pnpm 9+
+# Prerequisites: Node 24+, pnpm 10.33.x
 pnpm install
 ```
 
@@ -20,6 +21,7 @@ pnpm install
 | `pnpm typecheck` | TypeScript check across all packages |
 | `pnpm test` | Run the full test suite |
 | `pnpm build` | Production build |
+| `pnpm docs:check` | Validate Markdown links and documented pnpm scripts |
 
 ## Submitting a pull request
 
@@ -57,11 +59,11 @@ docs: update architecture overview
 
 ## Reporting bugs
 
-Open a [bug report issue](../../issues/new?template=bug_report.md) with steps to reproduce, expected vs. actual behavior, and your environment (OS, Node version).
+Open a [bug report issue](https://github.com/adobecom/pod-intelligence-manager/issues/new?template=bug_report.md) with steps to reproduce, expected vs. actual behavior, and your environment (OS, Node version).
 
 ## Proposing features
 
-Open a [feature request issue](../../issues/new?template=feature_request.md) describing the problem you're solving and your proposed solution.
+Open a [feature request issue](https://github.com/adobecom/pod-intelligence-manager/issues/new?template=feature_request.md) describing the problem you're solving and your proposed solution.
 
 ## License
 
