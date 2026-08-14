@@ -469,7 +469,11 @@ const PROJECT_SEARCH_REFRESH_WINDOW_DAYS = parseInt(process.env.PROJECT_SEARCH_R
 const PROJECT_SEARCH_REFRESH_ENABLED = process.env.PROJECT_SEARCH_REFRESH_ENABLED !== "0";
 function positiveIntervalMs(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  // Node clamps larger delays to 1ms, which would turn a bad deployment value
+  // into a hot loop rather than a slow worker.
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : fallback;
 }
 /** How often to reconcile every enabled skill-catalog source's configured ref. */
 const SKILL_CATALOG_POLL_INTERVAL_MS = positiveIntervalMs(
