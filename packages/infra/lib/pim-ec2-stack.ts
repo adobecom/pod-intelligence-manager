@@ -714,6 +714,10 @@ export class PimEc2Stack extends cdk.Stack {
     const albOrigin = new origins.LoadBalancerV2Origin(alb, {
       protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
       httpPort: 80,
+      // Keep the edge timeout above the hosted MCP route's 45-second
+      // loopback timeout so PIM can return an actionable MCP error instead of
+      // CloudFront terminating the request first.
+      readTimeout: cdk.Duration.seconds(60),
     });
 
     const apiBehavior: cloudfront.BehaviorOptions = {

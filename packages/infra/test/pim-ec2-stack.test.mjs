@@ -158,3 +158,18 @@ test("private memory MCP subpaths use the same API behavior as /mcp", () => {
   const { PathPattern: _subpathPattern, ...subpathBehavior } = subpaths;
   assert.deepEqual(subpathBehavior, exactBehavior);
 });
+
+test("CloudFront allows the hosted MCP timeout to return first", () => {
+  const app = new cdk.App();
+  const stack = new PimEc2Stack(app, "PimEc2Stack-mcp-timeout", {
+    owner: "test",
+    env: { account: "111122223333", region: "us-west-2" },
+  });
+  const template = Template.fromStack(stack);
+  const distributions = template.findResources("AWS::CloudFront::Distribution");
+  const origins = Object.values(distributions)[0].Properties.DistributionConfig.Origins;
+  const albOrigin = origins.find((origin) => origin.CustomOriginConfig);
+
+  assert.ok(albOrigin);
+  assert.equal(albOrigin.CustomOriginConfig.OriginReadTimeout, 60);
+});
