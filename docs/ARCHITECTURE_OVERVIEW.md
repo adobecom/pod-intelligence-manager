@@ -168,8 +168,7 @@ port forwarding.
 - ECR stores server images, SSM Parameter Store supplies runtime secrets, and CloudWatch/SNS carry
   logs, metrics, alarms, and backup failures.
 
-This is not a multi-writer, multi-AZ, or zero-downtime architecture. Future Fargate/Aurora and
-capability-oriented designs are documented separately and must not be presented as current state.
+This is not a multi-writer, multi-AZ, or zero-downtime architecture.
 
 ## Recovery and authority safety
 
@@ -183,5 +182,5 @@ SQLite integrity, foreign keys, and non-empty organizations before atomically pu
 database, then requests project-search reconstruction. Full EBS recovery points retain the exact
 index.
 
-See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md), [MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md), and
-[MEMORY_OFFLINE_CUTOVER.md](./MEMORY_OFFLINE_CUTOVER.md).
+See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) and
+[MEMORY_OPERATIONS.md](./MEMORY_OPERATIONS.md).

@@ -118,6 +118,5 @@ shared key would destroy other tenants' recovery data and violate the no-data-lo
 requirement. True tenant cryptographic erasure requires tenant envelope keys and
 encrypted backup payloads; this implementation does not claim that capability.
 
-The lossless offline cutover remains separate and never invokes these controls.
-See [MEMORY_OFFLINE_CUTOVER.md](./MEMORY_OFFLINE_CUTOVER.md) and
-[BACKUP_RESTORE.md](./BACKUP_RESTORE.md).
+An authority migration remains separate and never invokes these controls. See
+[BACKUP_RESTORE.md](./BACKUP_RESTORE.md) for recovery safeguards.

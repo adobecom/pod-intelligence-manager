@@ -144,7 +144,9 @@ When true, the stack mounts the legacy graph read-only, removes graph-bucket wri
 `PIM_MEMORY_REQUIRE_CANONICAL_AUTHORITY=1`. Lowering the flag or serving a pre-cutover database can
 reactivate forbidden writers and is not a rollback strategy.
 
-Follow [MEMORY_OFFLINE_CUTOVER.md](./MEMORY_OFFLINE_CUTOVER.md) for the one-time transition.
+Treat the one-time authority transition as a separate, reviewed stopped-service change. Require a
+verified backup, a rehearsal against a production copy, successful canonical migration and
+reconciliation, and an approved rollback decision before raising the terminal fence.
 
 ## Temporary host ECR push gate
 

@@ -130,4 +130,3 @@ and recovery time. Never attach a drill volume to the live writer.
 - [Memory API and authorization](./MEMORY_API.md)
 - [Backup and restore](./BACKUP_RESTORE.md)
 - [Retention and erasure](./MEMORY_RETENTION_ERASURE.md)
-- [One-time offline authority cutover](./MEMORY_OFFLINE_CUTOVER.md)

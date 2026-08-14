@@ -222,6 +222,6 @@ Never commit `.env`, access tokens, private keys, or populated user npm configur
 - [Deployment](docs/DEPLOY.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 
-`SPEC.md` records the original product vision and remains useful design history, but implemented
-behavior is defined by the current code, generated contracts, tests, and the current documents
-listed above.
+Implemented behavior is defined by the current code, generated contracts, tests, and the maintained
+documents listed above. Planning and research notes are intentionally kept outside the tracked
+repository.

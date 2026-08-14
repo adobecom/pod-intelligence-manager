@@ -88,10 +88,9 @@ Use a reviewed, planned-downtime stop-and-restore procedure:
 7. Require fail-closed restore, compare the restored manifest, and only then return traffic.
 8. Re-run the EDR and Splunk checks above.
 
-See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) for current backup mechanics and the historical
-[EDR/Splunk migration plan](./EDR_SPLUNK_MIGRATION_PLAN.md) for the reasoning behind the
-single-writer cutover. Any new replacement must use current stack outputs and scripts, not copied
-resource identifiers or status statements from that dated plan.
+See [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) for current backup mechanics. Any new replacement must
+use current stack outputs and scripts, not copied resource identifiers or status statements from a
+past rollout.
 
 ## Patching policy
 
