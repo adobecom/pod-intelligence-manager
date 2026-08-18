@@ -64,6 +64,50 @@ export class PimEc2Stack extends cdk.Stack {
       ],
     });
 
+    // Emissary trust for Security Splunk. The IF base image bakes in a Splunk
+    // Universal Forwarder that ships host syslog to Adobe's INTERNET ingest
+    // endpoint (ds2/hf2.splunk.adobe.net:443), which only accepts an allow-listed
+    // static IP. Emissary grants that trust when the host presents an Elastic IP
+    // and its VPC, subnet, ENI, and EIP all carry the case-sensitive
+    // `emissary=trusted` tag. Without it the forwarder handshakes but is never
+    // trusted, so no logs reach Splunk (the "syslog forwarding not configured"
+    // audit finding). Tagging the VPC construct propagates to its subnets; the
+    // EIP is tagged below and the launch-time ENI is tagged in user data.
+    // See docs/EDR_INSTALL_RUNBOOK.md.
+    cdk.Tags.of(vpc).add("emissary", "trusted");
+
+    // Emissary-trusted Elastic IP the writer associates at boot and every ASG
+    // replacement re-associates, so egress always presents the same trusted IP.
+    // Pinned per stack (like the AMI pin below) to a deliberately reviewed,
+    // already-allocated + already-tagged EIP: this keeps the trusted IP stable
+    // across host replacements and avoids orphaning an idle EIP. Override with
+    // `-c emissaryEipAllocationId=eipalloc-...`. When neither a pin nor an
+    // override exists (e.g. a fresh region), a self-contained tagged EIP is
+    // allocated instead — allocate + tag it first per docs/EDR_INSTALL_RUNBOOK.md.
+    const emissaryEipPins: Record<string, string> = {
+      rkhan: "eipalloc-077c5e8dd06199b3d", // 35.160.153.12 in us-west-2
+    };
+    const emissaryEipAllocationId =
+      (this.node.tryGetContext("emissaryEipAllocationId") as string | undefined) ??
+      emissaryEipPins[owner];
+    if (
+      emissaryEipAllocationId !== undefined &&
+      !/^eipalloc-[0-9a-f]+$/.test(emissaryEipAllocationId)
+    ) {
+      throw new Error(
+        "emissaryEipAllocationId must be an existing EIP allocation id (eipalloc-...)",
+      );
+    }
+    const resolvedEmissaryEipAllocationId =
+      emissaryEipAllocationId ??
+      new ec2.CfnEIP(this, "EmissaryEip", {
+        domain: "vpc",
+        tags: [
+          { key: "Name", value: `pim-${owner}-emissary-eip` },
+          { key: "emissary", value: "trusted" },
+        ],
+      }).attrAllocationId;
+
     // ──────────────────────────────────────
     // S3 buckets
     // ──────────────────────────────────────
@@ -388,6 +432,37 @@ export class PimEc2Stack extends cdk.Stack {
       }),
     );
 
+    // Emissary trust (see VPC block): the writer associates the pre-allocated EIP
+    // and tags its launch-time ENI so Adobe's internet Splunk ingest allow-lists
+    // this host. AssociateAddress/DescribeNetworkInterfaces cannot be
+    // resource-scoped; CreateTags is constrained to the emissary key on the ENI.
+    ec2Role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "ec2:AssociateAddress",
+          "ec2:DescribeAddresses",
+          "ec2:DescribeNetworkInterfaces",
+        ],
+        resources: ["*"],
+      }),
+    );
+    ec2Role.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ec2:CreateTags"],
+        resources: [
+          `arn:${this.partition}:ec2:${this.region}:${this.account}:network-interface/*`,
+        ],
+        conditions: {
+          StringEquals: {
+            "aws:RequestTag/emissary": "trusted",
+          },
+          "ForAllValues:StringEquals": {
+            "aws:TagKeys": ["emissary"],
+          },
+        },
+      }),
+    );
+
     // ──────────────────────────────────────
     // User data: install Docker, mount EBS, run container as systemd unit
     // ──────────────────────────────────────
@@ -487,6 +562,16 @@ export class PimEc2Stack extends cdk.Stack {
       "done",
       '[ -n "$DATA_VOLUME_ID" ] || { echo "Unable to resolve /dev/sdb EBS volume ID" >&2; exit 1; }',
       `aws ec2 create-tags --region ${this.region} --resources "$DATA_VOLUME_ID" --tags Key=${dataVolumeBackupTagKey},Value=${dataVolumeBackupTagValue}`,
+
+      // Emissary trust for the baked-in Splunk UF (see VPC block). Associate the
+      // pre-allocated Elastic IP and tag this instance's ENI emissary=trusted so
+      // Adobe's internet Splunk ingest allow-lists this host. Best-effort: a
+      // hiccup here must not crash the single writer, so failures warn instead of
+      // aborting bootstrap. The 30-min UF phone-home then picks up forwarding.
+      'echo "[pim-bootstrap] stage=emissary-splunk-trust"',
+      `aws ec2 associate-address --region ${this.region} --instance-id "$INSTANCE_ID" --allocation-id ${resolvedEmissaryEipAllocationId} --allow-reassociation || echo "[pim-bootstrap] WARN emissary EIP association failed; Splunk forwarding may stay untrusted"`,
+      `EMISSARY_ENI=$(aws ec2 describe-network-interfaces --region ${this.region} --filters "Name=attachment.instance-id,Values=$INSTANCE_ID" --query 'NetworkInterfaces[0].NetworkInterfaceId' --output text 2>/dev/null || true)`,
+      `case "$EMISSARY_ENI" in eni-*) aws ec2 create-tags --region ${this.region} --resources "$EMISSARY_ENI" --tags Key=emissary,Value=trusted || echo "[pim-bootstrap] WARN emissary ENI tag failed" ;; *) echo "[pim-bootstrap] WARN could not resolve ENI for emissary tag" ;; esac`,
 
       // ECR login
       'echo "[pim-bootstrap] stage=image-pull"',
@@ -774,6 +859,10 @@ function handler(event) {
       description: "Public URL for the PIM UI + API",
     });
     new cdk.CfnOutput(this, "AlbDnsName", { value: alb.loadBalancerDnsName });
+    new cdk.CfnOutput(this, "EmissaryEipAllocationId", {
+      value: resolvedEmissaryEipAllocationId,
+      description: "Emissary-trusted EIP allocation the host associates at boot for Splunk ingest",
+    });
     new cdk.CfnOutput(this, "UiBucketName", { value: uiBucket.bucketName });
     new cdk.CfnOutput(this, "KnowledgeGraphBucketName", { value: kgBucket.bucketName });
     new cdk.CfnOutput(this, "BackupsBucketName", { value: backupsBucket.bucketName });
