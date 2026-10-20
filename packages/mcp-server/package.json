@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.3.0",
     "@pim/shared": "workspace:*",
     "zod": "^3.23.0"
   },
