@@ -33,7 +33,7 @@
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@modelcontextprotocol/server": "^2.0.0",
     "@pim/shared": "workspace:*",
-    "zod": "^3.23.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
